@@ -11,15 +11,16 @@ import {
   mockPinnedApps,
   mockSettings,
 } from "./mocks/launcher-data";
+import { githubEventsMockData, githubEventsMockMeta } from "./mocks/github-events.generated";
 
 type SectionId = (typeof launcherSections)[number]["id"];
 type NonSettingsSectionId = Exclude<SectionId, "settings">;
 type EventLine = { id: number; text: string };
 type ActivePrompt = InteractionPrompt & { instanceId: number; selectedOption?: string };
 
-const MAX_EVENT_LINES = 12;
+const MAX_EVENT_LINES = 40;
+const MAX_INITIAL_MOCK_EVENTS = 40;
 const MAX_PROMPT_CARDS = 3;
-const EVENT_INTERVAL_MS = 1600;
 const PROMPT_INTERVAL_MS = 3400;
 
 const clockFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -30,6 +31,59 @@ const clockFormatter = new Intl.DateTimeFormat("en-GB", {
 });
 
 const createClockTag = () => clockFormatter.format(new Date());
+
+const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+const formatDateTime = (value: string): string => {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return "unknown";
+  }
+
+  return dateTimeFormatter.format(new Date(parsed));
+};
+
+const buildInitialEventLines = (): EventLine[] => {
+  const maxHistoryLines = Math.max(Math.min(MAX_INITIAL_MOCK_EVENTS, MAX_EVENT_LINES - 1), 0);
+  const initialLines: EventLine[] = [];
+
+  if (githubEventsMockData.length === 0) {
+    initialLines.push({ id: 0, text: "Launcher booted in local mock mode." });
+    const localMockLines = mockEvents.slice(0, maxHistoryLines).map((message, index) => ({
+      id: index + 1,
+      text: `EVENT | ${message}`,
+    }));
+    return [...initialLines, ...localMockLines];
+  }
+
+  const selectedEvents = githubEventsMockData.slice(0, maxHistoryLines).reverse();
+  const fetchedAtLabel = formatDateTime(githubEventsMockMeta.fetchedAt);
+
+  initialLines.push({
+    id: 0,
+    text: `Loaded ${selectedEvents.length}/${githubEventsMockData.length} GitHub mock events from ${githubEventsMockMeta.username} (fetched at ${fetchedAtLabel}).`,
+  });
+
+  const historyLines = selectedEvents.map((event, index) => {
+    const kindLabel = event.kind === "notification" ? "NOTIFY" : "EVENT";
+    const eventTimeTag = formatDateTime(event.createdAt);
+    return {
+      id: index + 1,
+      text: `[${eventTimeTag}] ${kindLabel} | ${event.message}`,
+    };
+  });
+
+  return [...initialLines, ...historyLines];
+};
+
+const initialEventLines = buildInitialEventLines();
 
 const sectionHeading: Record<SectionId, string> = {
   status: "Status Board",
@@ -47,15 +101,12 @@ export default function HomePage() {
   const [wallpaperSaveState, setWallpaperSaveState] = useState<
     "idle" | "uploading" | "saving" | "saved" | "error"
   >("idle");
-  const [eventLines, setEventLines] = useState<EventLine[]>([
-    { id: 0, text: `[${createClockTag()}] Launcher booted in local mock mode.` },
-  ]);
+  const [eventLines, setEventLines] = useState<EventLine[]>(initialEventLines);
   const [promptCards, setPromptCards] = useState<ActivePrompt[]>([
     { ...mockInteractionPrompts[0], instanceId: 0 },
   ]);
 
-  const eventCursorRef = useRef(0);
-  const eventIdRef = useRef(1);
+  const eventIdRef = useRef(Math.max(initialEventLines.length, 1));
   const promptCursorRef = useRef(1);
   const promptIdRef = useRef(1);
   const contentPaneRef = useRef<HTMLDivElement | null>(null);
@@ -227,16 +278,6 @@ export default function HomePage() {
 
   useEffect(() => {
     const timerId = window.setInterval(() => {
-      const nextEvent = mockEvents[eventCursorRef.current % mockEvents.length];
-      eventCursorRef.current += 1;
-      pushEventLine(nextEvent);
-    }, EVENT_INTERVAL_MS);
-
-    return () => window.clearInterval(timerId);
-  }, [pushEventLine]);
-
-  useEffect(() => {
-    const timerId = window.setInterval(() => {
       const nextPrompt =
         mockInteractionPrompts[promptCursorRef.current % mockInteractionPrompts.length];
       promptCursorRef.current += 1;
@@ -388,7 +429,7 @@ export default function HomePage() {
         <section className="event-pane">
           <div className="pane-head">
             <h2>Event Stream</h2>
-            <p>A single rolling div where new event lines continuously appear.</p>
+            <p>Loaded from mock snapshot once. New lines are appended only after interactions.</p>
           </div>
 
           <div className="event-stream" aria-live="polite">

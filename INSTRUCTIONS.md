@@ -18,6 +18,7 @@ entry for "The Earth Online".
 - Primary RPG systems in scope:
   - Quest system
   - Achievement system
+- Earth Online systems should evolve as modular RPG components that can be enabled independently.
 - Initial phase goal:
   - Deliver a focused MVP with clear progression feedback.
 
@@ -25,4 +26,5 @@ entry for "The Earth Online".
 
 - Prefer simple architecture over early abstraction.
 - Keep implementation compatible with App Router conventions.
+- Keep game domain behavior inside module folders (for example `lib/github-module`) and keep API routes as thin wrappers.
 - Add tests and stricter quality gates after core scaffolding is stable.

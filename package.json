@@ -10,7 +10,10 @@
     "start": "next start",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "mock:github-events": "node --no-warnings scripts/generate-github-events-mock.ts",
+    "sync:github-events": "node --no-warnings scripts/sync-github-events-sqlite.ts",
+    "sync:github-events:watch": "node --no-warnings scripts/sync-github-events-sqlite.ts --watch"
   },
   "dependencies": {
     "next": "^16.0.0",
