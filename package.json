@@ -2,12 +2,13 @@
   "name": "earth-online-launcher",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.16.1",
   "description": "Graphical RPG-style browser homepage launcher for Earth Online.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -29,4 +30,3 @@
     "node": ">=20.0.0"
   }
 }
-

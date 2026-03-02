@@ -1,5 +1,6 @@
 # dependencies
 /node_modules
+.pnpm-store
 
 # next.js build output
 /.next
@@ -33,4 +34,3 @@ Thumbs.db
 
 # misc
 *.pem
-

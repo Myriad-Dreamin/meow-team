@@ -11,6 +11,7 @@ entry for "The Earth Online".
 - Only internationalization resources may contain non-English language text.
 - Keep the stack full TypeScript with pure Next.js.
 - Use ESLint for linting and Prettier for source formatting.
+- Use `pnpm` for dependency and script management.
 
 ## Product Direction (Current)
 
@@ -25,4 +26,3 @@ entry for "The Earth Online".
 - Prefer simple architecture over early abstraction.
 - Keep implementation compatible with App Router conventions.
 - Add tests and stricter quality gates after core scaffolding is stable.
-

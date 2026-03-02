@@ -34,22 +34,21 @@ intended for internationalization content.
 ## Quick Start
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Open `http://localhost:3000` after the dev server starts.
 
 ## Scripts
 
-- `npm run dev` - start development server
-- `npm run build` - build for production
-- `npm run start` - start production server
-- `npm run lint` - run ESLint
-- `npm run format` - format files with Prettier
-- `npm run format:check` - check formatting with Prettier
+- `pnpm dev` - start development server
+- `pnpm build` - build for production
+- `pnpm start` - start production server
+- `pnpm lint` - run ESLint
+- `pnpm format` - format files with Prettier
+- `pnpm format:check` - check formatting with Prettier
 
 ## Status
 
 Project initialization in progress.
-
