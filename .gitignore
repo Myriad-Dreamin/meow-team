@@ -34,3 +34,10 @@ Thumbs.db
 
 # misc
 *.pem
+
+# local runtime data
+/data/*.json
+/data/wallpapers/*
+
+# TypeScript build cache
+*.tsbuildinfo
