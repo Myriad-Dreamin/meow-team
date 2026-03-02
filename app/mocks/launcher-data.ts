@@ -1,8 +1,8 @@
 export const launcherSections = [
-  { id: "my-apps", label: "My Apps", symbol: "[A]" },
-  { id: "quests", label: "Quest System", symbol: "[Q]" },
-  { id: "achievements", label: "Achievement System", symbol: "[C]" },
-  { id: "settings", label: "Settings", symbol: "[S]" },
+  { id: "status", label: "Status", symbol: "T" },
+  { id: "my-apps", label: "My Apps", symbol: "A" },
+  { id: "achievements", label: "Achievements", symbol: "C" },
+  { id: "settings", label: "Settings", symbol: "S" },
 ] as const;
 
 export const mockStatus = {
