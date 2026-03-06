@@ -20,6 +20,7 @@ export const createTempGitRepo = async (
   execSync('git init -b main', { cwd: repoPath, stdio: 'ignore' });
   execSync('git config user.email "e2e@paseo.test"', { cwd: repoPath, stdio: 'ignore' });
   execSync('git config user.name "Paseo E2E"', { cwd: repoPath, stdio: 'ignore' });
+  execSync('git config commit.gpgsign false', { cwd: repoPath, stdio: 'ignore' });
   await writeFile(path.join(repoPath, 'README.md'), '# Temp Repo\n');
   execSync('git add README.md', { cwd: repoPath, stdio: 'ignore' });
   execSync('git commit -m "Initial commit"', { cwd: repoPath, stdio: 'ignore' });

@@ -576,8 +576,18 @@ function WorkspaceScreenContent({
         tabs: uiTabs,
         tabOrder,
         focusedTabId,
+        preferredTarget:
+          openIntent?.kind === "agent"
+            ? { kind: "agent", agentId: openIntent.agentId }
+            : openIntent?.kind === "terminal"
+              ? { kind: "terminal", terminalId: openIntent.terminalId }
+              : openIntent?.kind === "draft"
+                ? { kind: "draft", draftId: openIntent.draftId }
+                : openIntent?.kind === "file"
+                  ? { kind: "file", path: openIntent.path }
+                  : null,
       }),
-    [focusedTabId, tabOrder, terminals, uiTabs, workspaceAgents]
+    [focusedTabId, openIntent, tabOrder, terminals, uiTabs, workspaceAgents]
   );
   const activeTabId = tabModel.activeTabId;
 

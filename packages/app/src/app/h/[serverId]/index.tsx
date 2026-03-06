@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { useLocalSearchParams, usePathname, useRouter } from "expo-router";
-import { Platform } from "react-native";
 import { useSessionStore } from "@/stores/session-store";
 import { useFormPreferences } from "@/hooks/use-form-preferences";
 import {
@@ -13,11 +12,7 @@ const HOST_ROOT_REDIRECT_DELAY_MS = 300;
 
 export default function HostIndexRoute() {
   const router = useRouter();
-  const routerPathname = usePathname();
-  const pathname =
-    Platform.OS === "web" && typeof window !== "undefined"
-      ? window.location.pathname
-      : routerPathname;
+  const pathname = usePathname();
   const params = useLocalSearchParams<{ serverId?: string }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
   const { preferences, isLoading: preferencesLoading } = useFormPreferences();
@@ -37,11 +32,8 @@ export default function HostIndexRoute() {
       return;
     }
     const timer = setTimeout(() => {
-      if (Platform.OS === "web" && typeof window !== "undefined") {
-        const currentPathname = window.location.pathname;
-        if (currentPathname !== rootRoute && currentPathname !== `${rootRoute}/`) {
-          return;
-        }
+      if (pathname !== rootRoute && pathname !== `${rootRoute}/`) {
+        return;
       }
 
       const visibleAgents = sessionAgents

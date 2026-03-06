@@ -151,6 +151,23 @@ describe("deriveWorkspaceTabModel", () => {
     ).toBe("agent_agent-b");
   });
 
+  it("prefers the route-selected target over stale focused tab state", () => {
+    const model = deriveWorkspaceTabModel({
+      workspaceAgents: [makeAgent({ id: "agent-a" }), makeAgent({ id: "agent-b" })],
+      terminals: [],
+      tabs: [
+        { tabId: "agent_agent-a", target: { kind: "agent", agentId: "agent-a" }, createdAt: 1 },
+        { tabId: "agent_agent-b", target: { kind: "agent", agentId: "agent-b" }, createdAt: 2 },
+      ],
+      tabOrder: ["agent_agent-a", "agent_agent-b"],
+      focusedTabId: "agent_agent-a",
+      preferredTarget: { kind: "agent", agentId: "agent-b" },
+    });
+
+    expect(model.activeTabId).toBe("agent_agent-b");
+    expect(model.activeTab?.target).toEqual({ kind: "agent", agentId: "agent-b" });
+  });
+
   it("re-resolves active content for a new workspace when prior focused tab is not available", () => {
     const model = deriveWorkspaceTabModel({
       workspaceAgents: [makeAgent({ id: "workspace-b-agent", title: "B" })],
@@ -236,5 +253,25 @@ describe("deriveWorkspaceTabModel", () => {
       expect(upgradedDescriptor.titleState).toBe("ready");
       expect(upgradedDescriptor.label).toBe("Ready title");
     }
+  });
+
+  it("prefers a retargeted tab when the route selects its upgraded agent target", () => {
+    const model = deriveWorkspaceTabModel({
+      workspaceAgents: [makeAgent({ id: "agent-1", title: "Ready title" })],
+      terminals: [],
+      tabs: [
+        {
+          tabId: "draft_abc",
+          target: { kind: "agent", agentId: "agent-1" },
+          createdAt: 1,
+        },
+      ],
+      tabOrder: ["draft_abc"],
+      focusedTabId: "some_other_tab",
+      preferredTarget: { kind: "agent", agentId: "agent-1" },
+    });
+
+    expect(model.activeTabId).toBe("draft_abc");
+    expect(model.activeTab?.descriptor.tabId).toBe("draft_abc");
   });
 });

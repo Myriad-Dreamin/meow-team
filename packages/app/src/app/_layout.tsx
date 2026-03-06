@@ -1,6 +1,6 @@
 import "@/styles/unistyles";
 import { polyfillCrypto } from "@/polyfills/crypto";
-import { Stack, usePathname, useRouter } from "expo-router";
+import { Stack, useGlobalSearchParams, usePathname, useRouter } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { GestureHandlerRootView, Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -47,7 +47,7 @@ import { buildNotificationRoute } from "@/utils/notification-routing";
 import {
   buildHostRootRoute,
   parseHostAgentRouteFromPathname,
-  parseHostWorkspaceOpenIntentFromPathname,
+  parseWorkspaceOpenIntent,
 } from "@/utils/host-routes";
 import { getTauri } from "@/utils/tauri";
 import { PerfDiagnosticsProvider } from "@/runtime/perf-diagnostics";
@@ -376,6 +376,7 @@ function OfferLinkListener({
 
 function AppWithSidebar({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const params = useGlobalSearchParams<{ open?: string | string[] }>();
   useFaviconStatus();
 
   // Parse selectedAgentKey directly from pathname
@@ -383,7 +384,8 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
   const selectedAgentKey = useMemo(() => {
     const workspaceMatch = pathname.match(/^\/h\/([^/]+)\/workspace\/[^/]+(?:\/|$)/);
     const workspaceServerId = workspaceMatch?.[1]?.trim() ?? "";
-    const openIntent = parseHostWorkspaceOpenIntentFromPathname(pathname);
+    const openValue = Array.isArray(params.open) ? params.open[0] : params.open;
+    const openIntent = parseWorkspaceOpenIntent(openValue);
     if (workspaceServerId && openIntent?.kind === "agent") {
       const agentId = openIntent.agentId.trim();
       return agentId ? `${workspaceServerId}:${agentId}` : undefined;
@@ -391,7 +393,7 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
 
     const match = parseHostAgentRouteFromPathname(pathname);
     return match ? `${match.serverId}:${match.agentId}` : undefined;
-  }, [pathname]);
+  }, [params.open, pathname]);
 
   return (
     <AppContainer selectedAgentId={selectedAgentKey}>{children}</AppContainer>

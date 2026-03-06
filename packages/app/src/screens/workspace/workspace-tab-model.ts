@@ -26,6 +26,25 @@ function trimNonEmpty(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function tabTargetsEqual(left: WorkspaceTabTarget, right: WorkspaceTabTarget): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  if (left.kind === "draft" && right.kind === "draft") {
+    return left.draftId === right.draftId;
+  }
+  if (left.kind === "agent" && right.kind === "agent") {
+    return left.agentId === right.agentId;
+  }
+  if (left.kind === "terminal" && right.kind === "terminal") {
+    return left.terminalId === right.terminalId;
+  }
+  if (left.kind === "file" && right.kind === "file") {
+    return left.path === right.path;
+  }
+  return false;
+}
+
 function formatProviderLabel(provider: Agent["provider"]): string {
   if (provider === "claude") {
     return "Claude";
@@ -130,6 +149,7 @@ export function deriveWorkspaceTabModel(input: {
   tabs: WorkspaceTab[];
   tabOrder: string[];
   focusedTabId?: string | null;
+  preferredTarget?: WorkspaceTabTarget | null;
 }): WorkspaceTabModel {
   const tabsById = new Map<string, WorkspaceDerivedTab>();
   const agentsById = new Map(input.workspaceAgents.map((agent) => [agent.id, agent]));
@@ -234,9 +254,20 @@ export function deriveWorkspaceTabModel(input: {
 
   const openTabIds = new Set(tabs.map((tab) => tab.descriptor.tabId));
   const focusedTabId = trimNonEmpty(input.focusedTabId);
+  const preferredTarget = input.preferredTarget ?? null;
+  const preferredTabId = (() => {
+    if (!preferredTarget) {
+      return null;
+    }
+    const matchingTab =
+      tabs.find((tab) => tabTargetsEqual(tab.target, preferredTarget)) ?? null;
+    return matchingTab?.descriptor.tabId ?? buildWorkspaceTabId(preferredTarget);
+  })();
 
   const activeTabId =
-    focusedTabId && openTabIds.has(focusedTabId)
+    preferredTabId && openTabIds.has(preferredTabId)
+      ? preferredTabId
+      : focusedTabId && openTabIds.has(focusedTabId)
       ? focusedTabId
       : tabs[0]?.descriptor.tabId ?? null;
 

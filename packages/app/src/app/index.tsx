@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { ActivityIndicator, Platform, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { useLocalSearchParams, usePathname, useRouter } from "expo-router";
 import { useUnistyles } from "react-native-unistyles";
 import { DraftAgentScreen } from "@/screens/agent/draft-agent-screen";
@@ -9,11 +9,7 @@ import { buildHostRootRoute } from "@/utils/host-routes";
 
 export default function Index() {
   const router = useRouter();
-  const routerPathname = usePathname();
-  const pathname =
-    Platform.OS === "web" && typeof window !== "undefined"
-      ? window.location.pathname
-      : routerPathname;
+  const pathname = usePathname();
   const params = useLocalSearchParams<{ serverId?: string }>();
   const { theme } = useUnistyles();
   const { daemons, isLoading: registryLoading } = useDaemonRegistry();
