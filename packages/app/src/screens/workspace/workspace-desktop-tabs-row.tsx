@@ -39,7 +39,9 @@ type WorkspaceDesktopTabsRowProps = {
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
+  onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
+  onCloseOtherTabs: (tabId: string) => Promise<void> | void;
   onSelectNewTabOption: (optionId: NewTabOptionId) => void;
   newTabAgentOptionId: NewTabOptionId;
   newTabTerminalOptionId: NewTabOptionId;
@@ -64,7 +66,9 @@ export function WorkspaceDesktopTabsRow({
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
+  onCloseTabsToLeft,
   onCloseTabsToRight,
+  onCloseOtherTabs,
   onSelectNewTabOption,
   newTabAgentOptionId,
   newTabTerminalOptionId,
@@ -129,7 +133,10 @@ export function WorkspaceDesktopTabsRow({
         horizontal
         scrollEnabled={layout.requiresHorizontalScrollFallback}
         testID="workspace-tabs-scroll"
-        style={styles.tabsScroll}
+        style={[
+          styles.tabsScroll,
+          layout.requiresHorizontalScrollFallback ? styles.tabsScrollOverflow : styles.tabsScrollFitContent,
+        ]}
         contentContainerStyle={styles.tabsContent}
         showsHorizontalScrollIndicator={false}
       >
@@ -161,6 +168,9 @@ export function WorkspaceDesktopTabsRow({
             const presentation = deriveWorkspaceTabPresentation({ tab, agent: tabAgent });
 
             const contextMenuTestId = `workspace-tab-context-${tab.key}`;
+            const isFirstTab = index === 0;
+            const isLastTab = index === tabs.length - 1;
+            const isOnlyTab = tabs.length <= 1;
 
             return (
               <ContextMenu key={tab.key}>
@@ -291,13 +301,31 @@ export function WorkspaceDesktopTabsRow({
                   <ContextMenuSeparator />
 
                   <ContextMenuItem
+                    testID={`${contextMenuTestId}-close-left`}
+                    disabled={isFirstTab}
+                    onSelect={() => {
+                      void onCloseTabsToLeft(tab.tabId);
+                    }}
+                  >
+                    Close to the left
+                  </ContextMenuItem>
+                  <ContextMenuItem
                     testID={`${contextMenuTestId}-close-right`}
-                    disabled={tabs.findIndex((t) => t.key === tab.key) === tabs.length - 1}
+                    disabled={isLastTab}
                     onSelect={() => {
                       void onCloseTabsToRight(tab.tabId);
                     }}
                   >
                     Close to the right
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    testID={`${contextMenuTestId}-close-others`}
+                    disabled={isOnlyTab}
+                    onSelect={() => {
+                      void onCloseOtherTabs(tab.tabId);
+                    }}
+                  >
+                    Close other tabs
                   </ContextMenuItem>
                   <ContextMenuItem
                     testID={`${contextMenuTestId}-close`}
@@ -375,8 +403,14 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
   },
   tabsScroll: {
-    flex: 1,
     minWidth: 0,
+  },
+  tabsScrollFitContent: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  tabsScrollOverflow: {
+    flex: 1,
   },
   tabsContent: {
     flexDirection: "row",

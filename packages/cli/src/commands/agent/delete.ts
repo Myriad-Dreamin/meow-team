@@ -2,39 +2,35 @@ import type { Command } from 'commander'
 import { connectToDaemon, getDaemonHost } from '../../utils/client.js'
 import type { CommandOptions, SingleResult, OutputSchema, CommandError } from '../../output/index.js'
 
-/** Result type for agent stop command */
-export interface StopResult {
-  stoppedCount: number
+export interface DeleteResult {
+  deletedCount: number
   agentIds: string[]
 }
 
-/** Schema for stop command output */
-export const stopSchema: OutputSchema<StopResult> = {
-  // For quiet mode, output the stopped agent IDs (one per line)
+export const deleteSchema: OutputSchema<DeleteResult> = {
   idField: (item) => item.agentIds.join('\n'),
-  columns: [{ header: 'INTERRUPTED', field: 'stoppedCount' }],
+  columns: [{ header: 'DELETED', field: 'deletedCount' }],
 }
 
-export interface AgentStopOptions extends CommandOptions {
+export interface AgentDeleteOptions extends CommandOptions {
   all?: boolean
   cwd?: string
 }
 
-export type AgentStopResult = SingleResult<StopResult>
+export type AgentDeleteResult = SingleResult<DeleteResult>
 
-export async function runStopCommand(
+export async function runDeleteCommand(
   id: string | undefined,
-  options: AgentStopOptions,
+  options: AgentDeleteOptions,
   _command: Command
-): Promise<AgentStopResult> {
+): Promise<AgentDeleteResult> {
   const host = getDaemonHost({ host: options.host as string | undefined })
 
-  // Validate arguments - need either an id, --all, or --cwd
   if (!id && !options.all && !options.cwd) {
     const error: CommandError = {
       code: 'MISSING_ARGUMENT',
       message: 'Agent ID required unless --all or --cwd is specified',
-      details: 'Usage: paseo agent stop <id> | --all | --cwd <path>',
+      details: 'Usage: paseo agent delete <id> | --all | --cwd <path>',
     }
     throw error
   }
@@ -55,13 +51,11 @@ export async function runStopCommand(
   try {
     const fetchPayload = await client.fetchAgents({ filter: { includeArchived: true } })
     let agents = fetchPayload.entries.map((entry) => entry.agent)
-    const stoppedIds: string[] = []
+    const deletedIds: string[] = []
 
     if (options.all) {
-      // Stop all agents (not archived)
       agents = agents.filter((a) => !a.archivedAt)
     } else if (options.cwd) {
-      // Stop agents in directory
       const filterCwd = options.cwd
       agents = agents.filter((a) => {
         if (a.archivedAt) return false
@@ -70,7 +64,6 @@ export async function runStopCommand(
         return agentCwd === targetCwd || agentCwd.startsWith(targetCwd + '/')
       })
     } else if (id) {
-      // Stop specific agent
       const fetchResult = await client.fetchAgent(id)
       if (!fetchResult) {
         const error: CommandError = {
@@ -83,17 +76,16 @@ export async function runStopCommand(
       agents = [fetchResult.agent]
     }
 
-    // Interrupt each running agent. Idle agents are a no-op.
     for (const agent of agents) {
       try {
         if (agent.status === 'running') {
           await client.cancelAgent(agent.id)
-          stoppedIds.push(agent.id)
         }
+        await client.deleteAgent(agent.id)
+        deletedIds.push(agent.id)
       } catch (err) {
-        // Continue interrupting other agents even if one fails
         const message = err instanceof Error ? err.message : String(err)
-        console.error(`Warning: Failed to stop agent ${agent.id.slice(0, 7)}: ${message}`)
+        console.error(`Warning: Failed to delete agent ${agent.id.slice(0, 7)}: ${message}`)
       }
     }
 
@@ -102,21 +94,20 @@ export async function runStopCommand(
     return {
       type: 'single',
       data: {
-        stoppedCount: stoppedIds.length,
-        agentIds: stoppedIds,
+        deletedCount: deletedIds.length,
+        agentIds: deletedIds,
       },
-      schema: stopSchema,
+      schema: deleteSchema,
     }
   } catch (err) {
     await client.close().catch(() => {})
-    // Re-throw if it's already a CommandError
     if (err && typeof err === 'object' && 'code' in err) {
       throw err
     }
     const message = err instanceof Error ? err.message : String(err)
     const error: CommandError = {
-      code: 'STOP_AGENT_FAILED',
-      message: `Failed to stop agent(s): ${message}`,
+      code: 'DELETE_AGENT_FAILED',
+      message: `Failed to delete agent(s): ${message}`,
     }
     throw error
   }

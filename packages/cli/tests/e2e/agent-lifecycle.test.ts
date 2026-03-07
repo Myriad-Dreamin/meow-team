@@ -12,8 +12,9 @@
  * 3. List agents with `paseo ls`
  * 4. Wait for agent with `paseo wait <id>`
  * 5. Inspect agent with `paseo inspect <id>`
- * 6. Stop agent with `paseo stop <id>`
- * 7. Cleanup: stop daemon, remove temp dirs
+ * 6. Stop agent with `paseo stop <id>` and verify it remains inspectable
+ * 7. Delete agent with `paseo delete <id>`
+ * 8. Cleanup: stop daemon, remove temp dirs
  *
  * CRITICAL RULES:
  * - NEVER use port 6767 (user's running daemon)
@@ -197,17 +198,28 @@ async function test_agent_stop(agentId: string): Promise<void> {
 
   assert.strictEqual(result.exitCode, 0, 'agent stop should succeed')
 
-  // Verify agent is no longer in running list
-  const psResult = await ctx.paseo(['ls', '--json'])
-  const agents = JSON.parse(psResult.stdout.trim()) as Array<{ id: string; status?: string }>
+  const inspectResult = await ctx.paseo(['inspect', agentId])
+  assert.strictEqual(inspectResult.exitCode, 0, 'agent should remain inspectable after stop')
+  assert(!inspectResult.stdout.toLowerCase().includes('running'), 'Agent should not be running after stop')
 
-  // Agent might still be in list but should not be running
-  const ourAgent = agents.find((a) => agentId.startsWith(a.id) || a.id.startsWith(agentId.slice(0, 7)))
-  if (ourAgent) {
-    assert(ourAgent.status !== 'running', 'Agent should not be running after stop')
-  }
+  console.log('PASS: agent stop interrupted without deleting the agent')
+}
 
-  console.log('PASS: agent stop completed successfully')
+async function test_agent_delete(agentId: string): Promise<void> {
+  console.log('\n--- Test: agent delete ---')
+
+  const result = await ctx.paseo(['delete', agentId])
+
+  console.log('Exit code:', result.exitCode)
+  console.log('Stdout:', result.stdout)
+  if (result.stderr) console.log('Stderr:', result.stderr)
+
+  assert.strictEqual(result.exitCode, 0, 'agent delete should succeed')
+
+  const inspectResult = await ctx.paseo(['inspect', agentId])
+  assert.notStrictEqual(inspectResult.exitCode, 0, 'deleted agent should not be inspectable')
+
+  console.log('PASS: agent delete removed the agent')
 }
 
 async function main(): Promise<void> {
@@ -232,6 +244,7 @@ async function main(): Promise<void> {
     await test_agent_logs(agentId)
 
     await test_agent_stop(agentId)
+    await test_agent_delete(agentId)
 
     console.log('\n=== All E2E tests passed! ===')
   } catch (err) {

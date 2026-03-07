@@ -102,6 +102,39 @@ test("workspace new-tab buttons stay on-screen during horizontal scroll", async 
   }
 });
 
+test("workspace new-tab buttons sit immediately after tabs before overflow", async ({ page }) => {
+  const repo = await createTempGitRepo("paseo-e2e-workspace-new-tab-adjacent-");
+
+  try {
+    await openWorkspaceWithAgent(page, repo.path);
+
+    const agentButton = page.getByTestId("workspace-new-agent-tab").first();
+    const workspaceTabs = page.locator(
+      '[data-testid^="workspace-tab-"]:not([data-testid^="workspace-tab-context-"])'
+    );
+
+    await expect(agentButton).toBeVisible({ timeout: 30000 });
+    await expect(workspaceTabs).toHaveCount(1, { timeout: 30000 });
+
+    const lastTabBounds = await workspaceTabs.last().boundingBox();
+    const agentBounds = await agentButton.boundingBox();
+
+    expect(lastTabBounds).not.toBeNull();
+    expect(agentBounds).not.toBeNull();
+
+    if (!lastTabBounds || !agentBounds) {
+      return;
+    }
+
+    const horizontalGap = agentBounds.x - (lastTabBounds.x + lastTabBounds.width);
+
+    expect(horizontalGap).toBeGreaterThanOrEqual(0);
+    expect(horizontalGap).toBeLessThanOrEqual(24);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("workspace explorer toggle opens and closes explorer", async ({ page }) => {
   const repo = await createTempGitRepo("paseo-e2e-workspace-explorer-toggle-");
 

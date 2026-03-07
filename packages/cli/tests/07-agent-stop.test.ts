@@ -3,7 +3,7 @@
 /**
  * Phase 6: Stop Command Tests
  *
- * Tests the stop command - stopping agents (cancel if running, then terminate) (top-level command).
+ * Tests the stop command - interrupting agents (no-op if idle) (top-level command).
  * Since daemon may not be running, we test both:
  * - Help and argument parsing
  * - Graceful error handling when daemon not running

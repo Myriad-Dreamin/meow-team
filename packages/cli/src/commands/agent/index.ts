@@ -1,6 +1,7 @@
 import { Command } from 'commander'
 import { runModeCommand } from './mode.js'
 import { runArchiveCommand } from './archive.js'
+import { runDeleteCommand } from './delete.js'
 import { runLsCommand } from './ls.js'
 import { runRunCommand } from './run.js'
 import { runLogsCommand } from './logs.js'
@@ -68,13 +69,23 @@ export function createAgentCommand(): Command {
 
   agent
     .command('stop')
-    .description('Stop an agent (cancel if running, then terminate)')
+    .description('Interrupt an agent if it is running (no-op for idle agents)')
     .argument('[id]', 'Agent ID (or prefix) - optional if --all or --cwd specified')
     .option('--all', 'Stop all agents')
     .option('--cwd <path>', 'Stop all agents in directory')
     .option('--json', 'Output in JSON format')
     .option('--host <host>', 'Daemon host:port (default: localhost:6767)')
     .action(withOutput(runStopCommand))
+
+  agent
+    .command('delete')
+    .description('Delete an agent (interrupt if running, then hard-delete)')
+    .argument('[id]', 'Agent ID (or prefix) - optional if --all or --cwd specified')
+    .option('--all', 'Delete all agents')
+    .option('--cwd <path>', 'Delete all agents in directory')
+    .option('--json', 'Output in JSON format')
+    .option('--host <host>', 'Daemon host:port (default: localhost:6767)')
+    .action(withOutput(runDeleteCommand))
 
   agent
     .command('send')

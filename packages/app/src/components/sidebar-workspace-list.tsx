@@ -49,6 +49,7 @@ import {
   ContextMenuTrigger,
   useContextMenu,
 } from '@/components/ui/context-menu'
+import { SyncedLoader } from '@/components/synced-loader'
 import { useToast } from '@/contexts/toast-context'
 import { useCheckoutGitActionsStore } from '@/stores/checkout-git-actions-store'
 import { buildSidebarShortcutModel } from '@/utils/sidebar-shortcuts'
@@ -56,6 +57,7 @@ import { hasVisibleOrderChanged, mergeWithRemainder } from '@/utils/sidebar-reor
 import { decideLongPressMove } from '@/utils/sidebar-gesture-arbitration'
 import { confirmDialog } from '@/utils/confirm-dialog'
 import { projectIconPlaceholderLabelFromDisplayName } from '@/utils/project-display-name'
+import { shouldRenderSyncedStatusLoader } from '@/utils/status-loader'
 
 const PASEO_WORKTREE_PATH_MARKER = '/.paseo/worktrees'
 
@@ -144,11 +146,14 @@ function WorkspaceStatusIndicator({
 }) {
   const { theme } = useUnistyles()
   const color = resolveStatusDotColor({ theme, bucket })
+  const shouldShowSyncedLoader = shouldRenderSyncedStatusLoader({ bucket })
 
   return (
     <View style={styles.workspaceStatusDot}>
       {loading ? (
         <ActivityIndicator size={8} color={theme.colors.foregroundMuted} />
+      ) : shouldShowSyncedLoader ? (
+        <SyncedLoader size={11} color={theme.colors.palette.amber[500]} />
       ) : (
         <View style={[styles.workspaceStatusDotFill, { backgroundColor: color }]} />
       )}
@@ -1340,17 +1345,16 @@ const styles = StyleSheet.create((theme) => ({
     position: 'relative',
   },
   workspaceStatusDot: {
-    width: 8,
-    height: 8,
+    width: 16,
+    height: 16,
     borderRadius: theme.borderRadius.full,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
   workspaceStatusDotFill: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: theme.borderRadius.full,
   },
   workspaceArchivingOverlay: {
@@ -1371,6 +1375,7 @@ const styles = StyleSheet.create((theme) => ({
   workspaceBranchText: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
+    lineHeight: 20,
     opacity: 0.76,
     flex: 1,
     minWidth: 0,

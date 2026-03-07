@@ -157,18 +157,18 @@ async function test_verify_logs(agentId: string): Promise<void> {
   console.log('PASS: Agent logs show activity from both tasks')
 }
 
-async function test_agent_stop(agentId: string): Promise<void> {
-  console.log('\n--- Test: Stop agent ---')
+async function test_agent_delete(agentId: string): Promise<void> {
+  console.log('\n--- Test: Delete agent ---')
 
-  const result = await ctx.paseo(['stop', agentId])
+  const result = await ctx.paseo(['delete', agentId])
 
   console.log('Exit code:', result.exitCode)
   console.log('Stdout:', result.stdout)
   if (result.stderr) console.log('Stderr:', result.stderr)
 
-  assert.strictEqual(result.exitCode, 0, 'agent stop should succeed')
+  assert.strictEqual(result.exitCode, 0, 'agent delete should succeed')
 
-  console.log('PASS: Agent stopped successfully')
+  console.log('PASS: Agent deleted successfully')
 }
 
 async function main(): Promise<void> {
@@ -190,7 +190,7 @@ async function main(): Promise<void> {
     await test_verify_logs(agentId)
 
     // Cleanup agent
-    await test_agent_stop(agentId)
+    await test_agent_delete(agentId)
 
     console.log('\n=== All agent-send E2E tests passed! ===')
   } catch (err) {

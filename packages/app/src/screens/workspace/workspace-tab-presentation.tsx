@@ -4,6 +4,7 @@ import { Bot, Check, FileText, Pencil, Terminal } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { ClaudeIcon } from "@/components/icons/claude-icon";
 import { CodexIcon } from "@/components/icons/codex-icon";
+import { SyncedLoader } from "@/components/synced-loader";
 import type { Agent } from "@/stores/session-store";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import {
@@ -11,6 +12,7 @@ import {
   type SidebarStateBucket,
 } from "@/utils/sidebar-agent-state";
 import { getStatusDotColor } from "@/utils/status-dot-color";
+import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 
 export type WorkspaceTabPresentation = {
   key: string;
@@ -69,8 +71,19 @@ export function WorkspaceTabIcon({
           bucket: presentation.statusBucket,
           showDoneAsInactive: false,
         });
+  const shouldShowLoader = shouldRenderSyncedStatusLoader({
+    bucket: presentation.statusBucket,
+  });
 
   if (presentation.kind === "agent") {
+    if (shouldShowLoader) {
+      return (
+        <View style={[styles.agentIconWrapper, { width: size, height: size }]}>
+          <SyncedLoader size={size - 1} color={theme.colors.palette.amber[500]} />
+        </View>
+      );
+    }
+
     return (
       <View style={[styles.agentIconWrapper, { width: size, height: size }]}>
         {presentation.provider === "claude" ? (

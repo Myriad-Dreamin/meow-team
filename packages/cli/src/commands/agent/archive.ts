@@ -85,7 +85,7 @@ export async function runArchiveCommand(
         code: 'AGENT_RUNNING',
         message: `Agent ${agentId.slice(0, 7)} is currently running`,
         details:
-          'Use --force to archive a running agent (it will interrupt the active run), or stop it first with: paseo agent stop',
+          'Use --force to archive a running agent (it will interrupt the active run), or stop it first with: paseo agent stop. Use paseo agent delete to hard-delete it.',
       }
       throw error
     }

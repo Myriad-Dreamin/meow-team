@@ -83,6 +83,10 @@ import {
 import {
   deriveWorkspaceTabModel,
 } from "@/screens/workspace/workspace-tab-model";
+import {
+  buildBulkCloseConfirmationMessage,
+  classifyBulkClosableTabs,
+} from "@/screens/workspace/workspace-bulk-close";
 
 const TERMINALS_QUERY_STALE_TIME = 5_000;
 const NEW_TAB_AGENT_OPTION_ID = "__new_tab_agent__";
@@ -954,46 +958,17 @@ function WorkspaceScreenContent({
     [sessionAgents, toast]
   );
 
-  const handleCloseTabsToRight = useCallback(
-    async (tabKey: string) => {
-      const startIndex = tabs.findIndex((tab) => tab.tabId === tabKey);
-      if (startIndex < 0) {
-        return;
-      }
-      const toClose = tabs.slice(startIndex + 1);
-      if (toClose.length === 0) {
+  const handleBulkCloseTabs = useCallback(
+    async (input: { tabsToClose: WorkspaceTabDescriptor[]; title: string; logLabel: string }) => {
+      const { tabsToClose, title, logLabel } = input;
+      if (tabsToClose.length === 0) {
         return;
       }
 
-      const agentTabs: Array<{ tabId: string; agentId: string }> = [];
-      const terminalTabs: Array<{ tabId: string; terminalId: string }> = [];
-      const otherTabs: Array<{ tabId: string }> = [];
-      for (const tab of toClose) {
-        if (tab.kind === "agent") {
-          agentTabs.push({ tabId: tab.tabId, agentId: tab.agentId });
-        } else if (tab.kind === "terminal") {
-          terminalTabs.push({ tabId: tab.tabId, terminalId: tab.terminalId });
-        } else {
-          otherTabs.push({ tabId: tab.tabId });
-        }
-      }
-
+      const groups = classifyBulkClosableTabs(tabsToClose);
       const confirmed = await confirmDialog({
-        title: "Close tabs to the right?",
-        message:
-          agentTabs.length > 0 && terminalTabs.length > 0 && otherTabs.length > 0
-            ? `This will archive ${agentTabs.length} agent(s), close ${terminalTabs.length} terminal(s), and close ${otherTabs.length} tab(s). Any running process in a closed terminal will be stopped immediately.`
-            : agentTabs.length > 0 && terminalTabs.length > 0
-              ? `This will archive ${agentTabs.length} agent(s) and close ${terminalTabs.length} terminal(s). Any running process in a closed terminal will be stopped immediately.`
-              : terminalTabs.length > 0 && otherTabs.length > 0
-                ? `This will close ${terminalTabs.length} terminal(s) and close ${otherTabs.length} tab(s). Any running process in a closed terminal will be stopped immediately.`
-                : agentTabs.length > 0 && otherTabs.length > 0
-                  ? `This will archive ${agentTabs.length} agent(s) and close ${otherTabs.length} tab(s).`
-                  : terminalTabs.length > 0
-                    ? `This will close ${terminalTabs.length} terminal(s). Any running process in a closed terminal will be stopped immediately.`
-                    : otherTabs.length > 0
-                      ? `This will close ${otherTabs.length} tab(s).`
-                      : `This will archive ${agentTabs.length} agent(s).`,
+        title,
+        message: buildBulkCloseConfirmationMessage(groups),
         confirmLabel: "Close",
         cancelLabel: "Cancel",
         destructive: true,
@@ -1002,7 +977,7 @@ function WorkspaceScreenContent({
         return;
       }
 
-      for (const { tabId, terminalId } of terminalTabs) {
+      for (const { tabId, terminalId } of groups.terminalTabs) {
         try {
           await killTerminalMutation.mutateAsync(terminalId);
           queryClient.setQueryData<ListTerminalsPayload>(terminalsQueryKey, (current) => {
@@ -1020,11 +995,11 @@ function WorkspaceScreenContent({
             tabId,
           });
         } catch (error) {
-          console.warn("[WorkspaceScreen] Failed to close terminal tab to the right", { terminalId, error });
+          console.warn(`[WorkspaceScreen] Failed to close terminal tab ${logLabel}`, { terminalId, error });
         }
       }
 
-      for (const { tabId, agentId } of agentTabs) {
+      for (const { tabId, agentId } of groups.agentTabs) {
         if (!normalizedServerId) {
           continue;
         }
@@ -1036,11 +1011,11 @@ function WorkspaceScreenContent({
             tabId,
           });
         } catch (error) {
-          console.warn("[WorkspaceScreen] Failed to archive agent tab to the right", { agentId, error });
+          console.warn(`[WorkspaceScreen] Failed to archive agent tab ${logLabel}`, { agentId, error });
         }
       }
 
-      for (const { tabId } of otherTabs) {
+      for (const { tabId } of groups.otherTabs) {
         closeWorkspaceTab({
           serverId: normalizedServerId,
           workspaceId: normalizedWorkspaceId,
@@ -1048,7 +1023,7 @@ function WorkspaceScreenContent({
         });
       }
 
-      const closedKeys = new Set(toClose.map((tab) => tab.key));
+      const closedKeys = new Set(tabsToClose.map((tab) => tab.key));
       setHoveredTabKey((current) => (current && closedKeys.has(current) ? null : current));
       setHoveredCloseTabKey((current) => (current && closedKeys.has(current) ? null : current));
     },
@@ -1059,9 +1034,50 @@ function WorkspaceScreenContent({
       normalizedServerId,
       normalizedWorkspaceId,
       queryClient,
-      tabs,
       terminalsQueryKey,
     ]
+  );
+
+  const handleCloseTabsToLeft = useCallback(
+    async (tabId: string) => {
+      const index = tabs.findIndex((tab) => tab.tabId === tabId);
+      if (index < 0) {
+        return;
+      }
+      await handleBulkCloseTabs({
+        tabsToClose: tabs.slice(0, index),
+        title: "Close tabs to the left?",
+        logLabel: "to the left",
+      });
+    },
+    [handleBulkCloseTabs, tabs]
+  );
+
+  const handleCloseTabsToRight = useCallback(
+    async (tabId: string) => {
+      const index = tabs.findIndex((tab) => tab.tabId === tabId);
+      if (index < 0) {
+        return;
+      }
+      await handleBulkCloseTabs({
+        tabsToClose: tabs.slice(index + 1),
+        title: "Close tabs to the right?",
+        logLabel: "to the right",
+      });
+    },
+    [handleBulkCloseTabs, tabs]
+  );
+
+  const handleCloseOtherTabs = useCallback(
+    async (tabId: string) => {
+      const tabsToClose = tabs.filter((tab) => tab.tabId !== tabId);
+      await handleBulkCloseTabs({
+        tabsToClose,
+        title: "Close other tabs?",
+        logLabel: "from close other tabs",
+      });
+    },
+    [handleBulkCloseTabs, tabs]
   );
 
   useEffect(() => {
@@ -1444,7 +1460,9 @@ function WorkspaceScreenContent({
               onCloseTab={handleCloseTabById}
               onCopyResumeCommand={handleCopyResumeCommand}
               onCopyAgentId={handleCopyAgentId}
+              onCloseTabsToLeft={handleCloseTabsToLeft}
               onCloseTabsToRight={handleCloseTabsToRight}
+              onCloseOtherTabs={handleCloseOtherTabs}
               onSelectNewTabOption={handleSelectNewTabOption}
               newTabAgentOptionId={NEW_TAB_AGENT_OPTION_ID}
               newTabTerminalOptionId={NEW_TAB_TERMINAL_OPTION_ID}
