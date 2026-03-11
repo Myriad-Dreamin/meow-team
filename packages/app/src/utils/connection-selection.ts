@@ -15,6 +15,14 @@ export type SelectBestConnectionInput = {
   probeByConnectionId: Map<string, ConnectionProbeState>;
 };
 
+function getAvailableLatency(input: {
+  connectionId: string;
+  probeByConnectionId: Map<string, ConnectionProbeState>;
+}): number | null {
+  const probe = input.probeByConnectionId.get(input.connectionId);
+  return probe?.status === "available" ? probe.latencyMs : null;
+}
+
 export function selectBestConnection(
   input: SelectBestConnectionInput
 ): string | null {
@@ -23,37 +31,22 @@ export function selectBestConnection(
     return null;
   }
 
-  const available = candidates
-    .map((candidate, index) => ({ candidate, index }))
-    .filter(({ candidate }) => {
-      const probe = probeByConnectionId.get(candidate.connectionId);
-      return probe?.status === "available";
+  let bestConnectionId: string | null = null;
+  let bestLatency: number | null = null;
+
+  for (const candidate of candidates) {
+    const latencyMs = getAvailableLatency({
+      connectionId: candidate.connectionId,
+      probeByConnectionId,
     });
-
-  const byLatency = (left: { candidate: ConnectionCandidate; index: number }, right: { candidate: ConnectionCandidate; index: number }) => {
-      const leftProbe = probeByConnectionId.get(left.candidate.connectionId);
-      const rightProbe = probeByConnectionId.get(right.candidate.connectionId);
-
-      const leftLatency =
-        leftProbe && leftProbe.status === "available"
-          ? leftProbe.latencyMs
-          : Number.POSITIVE_INFINITY;
-      const rightLatency =
-        rightProbe && rightProbe.status === "available"
-          ? rightProbe.latencyMs
-          : Number.POSITIVE_INFINITY;
-
-      if (leftLatency === rightLatency) {
-        return left.index - right.index;
-      }
-
-      return leftLatency - rightLatency;
-    };
-
-  if (available.length === 0) {
-    return null;
+    if (latencyMs === null) {
+      continue;
+    }
+    if (bestLatency === null || latencyMs < bestLatency) {
+      bestConnectionId = candidate.connectionId;
+      bestLatency = latencyMs;
+    }
   }
 
-  const sorted = available.sort(byLatency);
-  return sorted[0]!.candidate.connectionId;
+  return bestConnectionId;
 }
