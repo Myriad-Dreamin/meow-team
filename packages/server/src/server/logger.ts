@@ -234,6 +234,7 @@ export function createRootLogger(
     path: path.dirname(config.file.path),
     size: toRotatingFileStreamSize(config.file.rotate.maxSize),
     maxFiles: config.file.rotate.maxFiles,
+    initialRotation: true,
   });
 
   return pino(

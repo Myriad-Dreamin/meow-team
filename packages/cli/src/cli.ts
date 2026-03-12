@@ -9,7 +9,6 @@ import { createWorktreeCommand } from './commands/worktree/index.js'
 import { startCommand as daemonStartCommand } from './commands/daemon/start.js'
 import { runStatusCommand as runDaemonStatusCommand } from './commands/daemon/status.js'
 import { runRestartCommand as runDaemonRestartCommand } from './commands/daemon/restart.js'
-import { runDaemonUpdateCommandOrExit } from './commands/daemon/update.js'
 import { runLsCommand } from './commands/agent/ls.js'
 import { runRunCommand } from './commands/agent/run.js'
 import { runLogsCommand } from './commands/agent/logs.js'
@@ -157,15 +156,6 @@ export function createCli(): Command {
   // Top-level local daemon shortcuts
   program.addCommand(onboardCommand())
   program.addCommand(daemonStartCommand())
-
-  program
-    .command('update')
-    .description('Update local daemon package (alias for "paseo daemon update")')
-    .option('--home <path>', 'Paseo home directory (default: ~/.paseo)')
-    .option('-y, --yes', 'Restart automatically after update')
-    .action(async (options: { home?: string; yes?: boolean }) => {
-      await runDaemonUpdateCommandOrExit(options)
-    })
 
   addJsonOption(
     program
