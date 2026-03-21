@@ -1052,7 +1052,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                 accessibilityRole="button"
                 accessibilityLabel="Diff mode"
               >
-                <Text style={styles.diffStatusText}>
+                <Text style={styles.diffStatusText} numberOfLines={1}>
                   {diffMode === "uncommitted" ? "Uncommitted" : "Committed"}
                 </Text>
                 <ChevronDown size={12} color={theme.colors.foregroundMuted} />
@@ -1193,13 +1193,18 @@ const styles = StyleSheet.create((theme) => ({
   diffModeTrigger: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: theme.spacing[1],
     // Align text with header branch icon (at spacing[3] from edge, minus our horizontal padding)
     marginLeft: theme.spacing[3] - theme.spacing[1],
-    marginVertical: theme.spacing[2],
     paddingHorizontal: theme.spacing[1],
-    paddingVertical: theme.spacing[1],
+    height: {
+      xs: 28,
+      sm: 28,
+      md: 24,
+    },
     borderRadius: theme.borderRadius.base,
+    flexShrink: 0,
   },
   diffModeTriggerHovered: {
     backgroundColor: theme.colors.surface2,
@@ -1212,6 +1217,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   diffStatusText: {
     fontSize: theme.fontSize.xs,
+    lineHeight: theme.fontSize.xs * 1.25,
     color: theme.colors.foregroundMuted,
   },
   diffStatusIconHidden: {
@@ -1229,19 +1235,25 @@ const styles = StyleSheet.create((theme) => ({
   expandAllButton: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: theme.spacing[1],
-    marginVertical: theme.spacing[2],
+    minWidth: {
+      xs: 32,
+      sm: 32,
+      md: 24,
+    },
+    height: {
+      xs: 32,
+      sm: 32,
+      md: 24,
+    },
     paddingHorizontal: {
       xs: theme.spacing[2],
       sm: theme.spacing[2],
       md: theme.spacing[1],
     },
-    paddingVertical: {
-      xs: theme.spacing[2],
-      sm: theme.spacing[2],
-      md: theme.spacing[1],
-    },
     borderRadius: theme.borderRadius.base,
+    flexShrink: 0,
   },
   actionErrorText: {
     paddingHorizontal: theme.spacing[3],
