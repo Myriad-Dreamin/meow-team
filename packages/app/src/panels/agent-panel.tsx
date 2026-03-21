@@ -6,6 +6,7 @@ import { Bot } from "lucide-react-native";
 import invariant from "tiny-invariant";
 import { AgentStreamView, type AgentStreamViewHandle } from "@/components/agent-stream-view";
 import { AgentInputArea } from "@/components/agent-input-area";
+import { ArchivedAgentCallout } from "@/components/archived-agent-callout";
 import { FileDropZone } from "@/components/file-drop-zone";
 import type { ImageAttachment } from "@/components/message-input";
 import { ToastViewport, useToastHost } from "@/components/toast-host";
@@ -825,6 +826,8 @@ function AgentPanelBody({
                 streamViewRef.current?.scrollToBottom("message-sent");
               }}
             />
+          ) : agentId && agent?.archivedAt ? (
+            <ArchivedAgentCallout serverId={serverId} agentId={agentId} />
           ) : null}
 
           {viewState.tag === "ready" &&
