@@ -5,7 +5,7 @@
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "scripts": {
-    "build": "EXPO_NONINTERACTIVE=1 expo-module build",
+    "build": "node ./scripts/expo-module-build.cjs",
     "clean": "expo-module clean",
     "dev": "expo-module build",
     "lint": "expo-module lint",
