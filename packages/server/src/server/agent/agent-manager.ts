@@ -790,6 +790,7 @@ export class AgentManager {
     if (agent.runtimeInfo) {
       agent.runtimeInfo = { ...agent.runtimeInfo, modeId };
     }
+    this.touchUpdatedAt(agent);
     this.emitState(agent);
   }
 
@@ -806,6 +807,7 @@ export class AgentManager {
     if (agent.runtimeInfo) {
       agent.runtimeInfo = { ...agent.runtimeInfo, model: normalizedModelId };
     }
+    this.touchUpdatedAt(agent);
     this.emitState(agent);
   }
 
@@ -821,6 +823,7 @@ export class AgentManager {
     }
 
     agent.config.thinkingOptionId = normalizedThinkingOptionId ?? undefined;
+    this.touchUpdatedAt(agent);
     this.emitState(agent);
   }
 
@@ -839,6 +842,7 @@ export class AgentManager {
     const agent = this.requireAgent(agentId);
     agent.labels = { ...agent.labels, ...labels };
     await this.persistSnapshot(agent);
+    this.touchUpdatedAt(agent);
     this.emitState(agent);
   }
 
@@ -1054,6 +1058,7 @@ export class AgentManager {
         "streamAgent.finalize: applying terminal state",
       );
       if (!shouldHoldBusyForReplacement) {
+        this.touchUpdatedAt(mutableAgent);
         this.emitState(mutableAgent);
         this.flushLiveEventBacklog(mutableAgent);
       }
@@ -1150,6 +1155,7 @@ export class AgentManager {
           const lifecycle = (latestActive as { lifecycle: AgentLifecycleStatus }).lifecycle;
           if (!hasForegroundRun && lifecycle === "running") {
             latestActive.lifecycle = "idle";
+            self.touchUpdatedAt(latestActive);
             self.emitState(latestActive);
             self.flushLiveEventBacklog(latestActive);
           }
@@ -1307,6 +1313,7 @@ export class AgentManager {
         });
       }
       agent.pendingPermissions.clear();
+      this.touchUpdatedAt(agent);
       this.emitState(agent);
     }
 
