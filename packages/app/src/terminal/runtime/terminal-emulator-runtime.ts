@@ -211,6 +211,12 @@ export class TerminalEmulatorRuntime {
 
     terminal.loadAddon(new ImageAddon());
 
+    // Suppress terminal query responses — the server-side headless xterm handles these.
+    // Without this, xterm.js generates DA/CPR responses via onData that feed back
+    // to the PTY as visible text.
+    terminal.parser.registerCsiHandler({ final: "c" }, () => true);
+    terminal.parser.registerCsiHandler({ final: "R" }, () => true);
+
     const restoreDocumentStyles = this.applyDocumentBoundsStyles({
       root: input.root,
     });
