@@ -3,6 +3,8 @@ import websitePackage from "../package.json";
 
 export const desktopVersion = websitePackage.version;
 export const releaseBase = `https://github.com/getpaseo/paseo/releases/download/v${desktopVersion}`;
+export const macAppleSiliconDownloadUrl = `${releaseBase}/Paseo-${desktopVersion}-arm64.dmg`;
+export const macIntelDownloadUrl = `${releaseBase}/Paseo-${desktopVersion}-x64.dmg`;
 
 export const appStoreUrl = "https://apps.apple.com/app/paseo-pocket-engineer/id6758887924";
 export const playStoreUrl = "https://play.google.com/store/apps/details?id=sh.paseo";
@@ -21,13 +23,13 @@ export const downloadOptions: DownloadOption[] = [
   {
     platform: "mac-silicon",
     label: "Mac",
-    href: `${releaseBase}/Paseo-${desktopVersion}-arm64.dmg`,
+    href: macAppleSiliconDownloadUrl,
     icon: AppleIcon,
   },
   {
     platform: "mac-intel",
     label: "Mac Intel",
-    href: `${releaseBase}/Paseo-${desktopVersion}.dmg`,
+    href: macIntelDownloadUrl,
     icon: AppleIcon,
   },
   {

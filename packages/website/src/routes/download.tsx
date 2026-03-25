@@ -3,6 +3,8 @@ import { pageMeta } from "~/meta";
 import {
   desktopVersion,
   releaseBase,
+  macAppleSiliconDownloadUrl,
+  macIntelDownloadUrl,
   appStoreUrl,
   playStoreUrl,
   webAppUrl,
@@ -105,14 +107,8 @@ function Download() {
                 <span className="font-medium">macOS</span>
               </div>
               <div className="flex flex-wrap gap-2">
-                <DownloadPill
-                  href={`${releaseBase}/Paseo-${desktopVersion}-arm64.dmg`}
-                  label="Apple Silicon"
-                />
-                <DownloadPill
-                  href={`${releaseBase}/Paseo-${desktopVersion}.dmg`}
-                  label="Intel"
-                />
+                <DownloadPill href={macAppleSiliconDownloadUrl} label="Apple Silicon" />
+                <DownloadPill href={macIntelDownloadUrl} label="Intel" />
               </div>
             </div>
 
