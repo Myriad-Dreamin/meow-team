@@ -37,6 +37,8 @@ type ReplRequestBody = {
 
 const DEFAULT_GITHUB_EVENTS_USERNAME = "Myriad-Dreamin";
 const DEFAULT_GITHUB_EVENTS_READ_LIMIT = 240;
+const DEFAULT_GITHUB_EVENTS_PAGE_SIZE = 10;
+const MAX_GITHUB_EVENTS_PAGE_SIZE = 100;
 const DEFAULT_GITHUB_EVENTS_SYNC_INTERVAL_MINUTES = 15;
 const DEFAULT_GITHUB_EVENTS_SYNC_PER_PAGE = 100;
 const DEFAULT_GITHUB_EVENTS_SYNC_MAX_PAGES = 10;
@@ -122,9 +124,17 @@ export async function handleGitHubStateGet() {
   }
 }
 
-export async function handleGitHubEventsGet() {
+export async function handleGitHubEventsGet(request: Request) {
   try {
     const config = resolveGitHubEventsConfig();
+    const requestUrl = new URL(request.url);
+    const page = parsePositiveInteger(requestUrl.searchParams.get("page") ?? undefined, 1);
+    const requestedLimit = parsePositiveInteger(
+      requestUrl.searchParams.get("limit") ?? undefined,
+      DEFAULT_GITHUB_EVENTS_PAGE_SIZE,
+    );
+    const limit = Math.min(Math.max(requestedLimit, 1), Math.min(MAX_GITHUB_EVENTS_PAGE_SIZE, config.readLimit));
+    const offset = Math.max((page - 1) * limit, 0);
 
     let sync: SyncGitHubEventsToSqliteResult | null = null;
     let syncError: string | null = null;
@@ -143,15 +153,23 @@ export async function handleGitHubEventsGet() {
       }
     }
 
-    const events = await readGitHubEventsFromSqlite({
+    const eventsWithProbe = await readGitHubEventsFromSqlite({
       username: config.username,
-      limit: config.readLimit,
+      limit: limit + 1,
+      offset,
     });
+    const hasMore = eventsWithProbe.length > limit;
+    const events = hasMore ? eventsWithProbe.slice(0, limit) : eventsWithProbe;
 
     return NextResponse.json({
       source: "sqlite",
       username: config.username,
       events,
+      pagination: {
+        page,
+        limit,
+        hasMore,
+      },
       sync,
       syncError,
     });

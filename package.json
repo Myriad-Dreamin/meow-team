@@ -12,6 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "mock:github-events": "node --no-warnings scripts/generate-github-events-mock.ts",
+    "mock:github-subscriptions": "node --no-warnings scripts/generate-github-subscriptions-mock.ts",
     "sync:github-events": "node --no-warnings scripts/sync-github-events-sqlite.ts",
     "sync:github-events:watch": "node --no-warnings scripts/sync-github-events-sqlite.ts --watch"
   },

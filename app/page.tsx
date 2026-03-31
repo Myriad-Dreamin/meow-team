@@ -1,12 +1,12 @@
 "use client";
 
-import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { GitHubEvent, GitHubEventKind } from "@/lib/github-module/types";
 import { isWallpaperMode, type WallpaperMode, type WallpaperSettings } from "@/lib/wallpaper/types";
 import {
   type InteractionPrompt,
   launcherSections,
   mockAchievements,
-  mockEvents,
   mockInteractionPrompts,
   mockPinnedApps,
   mockSettings,
@@ -15,22 +15,31 @@ import { githubEventsMockData, githubEventsMockMeta } from "./mocks/github-event
 
 type SectionId = (typeof launcherSections)[number]["id"];
 type NonSettingsSectionId = Exclude<SectionId, "settings">;
-type EventLine = { id: number; text: string };
+type EventLineSource = "github" | "launcher";
+type EventLine = {
+  id: string;
+  message: string;
+  kind: GitHubEventKind;
+  createdAt: string;
+  source: EventLineSource;
+};
 type ActivePrompt = InteractionPrompt & { instanceId: number; selectedOption?: string };
+type EventStreamSource = "api" | "mock";
 
-const MAX_EVENT_LINES = 40;
-const MAX_INITIAL_MOCK_EVENTS = 40;
+type GitHubEventsApiResponse = {
+  username?: unknown;
+  events?: unknown;
+  pagination?: {
+    hasMore?: unknown;
+  };
+  syncError?: unknown;
+};
+
+const EVENT_PAGE_SIZE = 10;
+const EVENT_TOP_FETCH_THRESHOLD_PX = 20;
+const MAX_LOCAL_EVENT_LINES = 40;
 const MAX_PROMPT_CARDS = 3;
 const PROMPT_INTERVAL_MS = 3400;
-
-const clockFormatter = new Intl.DateTimeFormat("en-GB", {
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-});
-
-const createClockTag = () => clockFormatter.format(new Date());
 
 const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
   year: "numeric",
@@ -50,40 +59,55 @@ const formatDateTime = (value: string): string => {
   return dateTimeFormatter.format(new Date(parsed));
 };
 
-const buildInitialEventLines = (): EventLine[] => {
-  const maxHistoryLines = Math.max(Math.min(MAX_INITIAL_MOCK_EVENTS, MAX_EVENT_LINES - 1), 0);
-  const initialLines: EventLine[] = [];
-
-  if (githubEventsMockData.length === 0) {
-    initialLines.push({ id: 0, text: "Launcher booted in local mock mode." });
-    const localMockLines = mockEvents.slice(0, maxHistoryLines).map((message, index) => ({
-      id: index + 1,
-      text: `EVENT | ${message}`,
-    }));
-    return [...initialLines, ...localMockLines];
-  }
-
-  const selectedEvents = githubEventsMockData.slice(0, maxHistoryLines).reverse();
-  const fetchedAtLabel = formatDateTime(githubEventsMockMeta.fetchedAt);
-
-  initialLines.push({
-    id: 0,
-    text: `Loaded ${selectedEvents.length}/${githubEventsMockData.length} GitHub mock events from ${githubEventsMockMeta.username} (fetched at ${fetchedAtLabel}).`,
-  });
-
-  const historyLines = selectedEvents.map((event, index) => {
-    const kindLabel = event.kind === "notification" ? "NOTIFY" : "EVENT";
-    const eventTimeTag = formatDateTime(event.createdAt);
-    return {
-      id: index + 1,
-      text: `[${eventTimeTag}] ${kindLabel} | ${event.message}`,
-    };
-  });
-
-  return [...initialLines, ...historyLines];
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null;
 };
 
-const initialEventLines = buildInitialEventLines();
+const isGitHubEventKindValue = (value: unknown): value is GitHubEventKind => {
+  return value === "standard" || value === "notification";
+};
+
+const isGitHubEventValue = (value: unknown): value is GitHubEvent => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.message === "string" &&
+    isGitHubEventKindValue(value.kind) &&
+    typeof value.createdAt === "string" &&
+    Number.isFinite(Date.parse(value.createdAt))
+  );
+};
+
+const toEventLineFromGitHubEvent = (event: GitHubEvent): EventLine => {
+  return {
+    id: event.id,
+    message: event.message,
+    kind: event.kind,
+    createdAt: event.createdAt,
+    source: "github",
+  };
+};
+
+const buildMockEventPage = (
+  page: number,
+): {
+  events: EventLine[];
+  hasMore: boolean;
+  username: string;
+} => {
+  const start = (page - 1) * EVENT_PAGE_SIZE;
+  const end = start + EVENT_PAGE_SIZE;
+  const pageEvents = githubEventsMockData.slice(start, end).reverse().map(toEventLineFromGitHubEvent);
+
+  return {
+    events: pageEvents,
+    hasMore: end < githubEventsMockData.length,
+    username: githubEventsMockMeta.username,
+  };
+};
 
 const sectionHeading: Record<SectionId, string> = {
   status: "Status Board",
@@ -101,20 +125,95 @@ export default function HomePage() {
   const [wallpaperSaveState, setWallpaperSaveState] = useState<
     "idle" | "uploading" | "saving" | "saved" | "error"
   >("idle");
-  const [eventLines, setEventLines] = useState<EventLine[]>(initialEventLines);
+  const [githubEventLines, setGithubEventLines] = useState<EventLine[]>([]);
+  const [localEventLines, setLocalEventLines] = useState<EventLine[]>([]);
+  const [eventStreamStatus, setEventStreamStatus] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [eventStreamSource, setEventStreamSource] = useState<EventStreamSource>("api");
+  const [eventStreamUsername, setEventStreamUsername] = useState<string | null>(null);
+  const [eventStreamErrorMessage, setEventStreamErrorMessage] = useState<string | null>(null);
+  const [eventStreamSyncError, setEventStreamSyncError] = useState<string | null>(null);
+  const [loadedEventPage, setLoadedEventPage] = useState(1);
+  const [hasOlderEventPage, setHasOlderEventPage] = useState(false);
+  const [isLoadingOlderEvents, setIsLoadingOlderEvents] = useState(false);
   const [promptCards, setPromptCards] = useState<ActivePrompt[]>([
     { ...mockInteractionPrompts[0], instanceId: 0 },
   ]);
 
-  const eventIdRef = useRef(Math.max(initialEventLines.length, 1));
+  const eventIdRef = useRef(1);
   const promptCursorRef = useRef(1);
   const promptIdRef = useRef(1);
   const contentPaneRef = useRef<HTMLDivElement | null>(null);
   const settingsPaneRef = useRef<HTMLDivElement | null>(null);
+  const eventStreamRef = useRef<HTMLDivElement | null>(null);
+  const shouldScrollToEventBottomRef = useRef(false);
+  const prependScrollPositionRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const isLoadingOlderEventsRef = useRef(false);
 
   const currentWallpaperImageUrl = wallpaperImageFileName
     ? `/api/wallpaper/image?file=${encodeURIComponent(wallpaperImageFileName)}`
     : null;
+
+  const eventLines = useMemo(() => {
+    return [...githubEventLines, ...localEventLines].sort(
+      (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt),
+    );
+  }, [githubEventLines, localEventLines]);
+
+  const fetchGitHubEventsPage = useCallback(
+    async (
+      page: number,
+    ): Promise<{
+      events: EventLine[];
+      hasMore: boolean;
+      username: string | null;
+      syncError: string | null;
+    }> => {
+      const response = await fetch(`/api/github/events?page=${page}&limit=${EVENT_PAGE_SIZE}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to load GitHub events.");
+      }
+
+      const payload = (await response.json()) as GitHubEventsApiResponse;
+      const events = Array.isArray(payload.events) ? payload.events.filter(isGitHubEventValue) : [];
+      const hasMore =
+        isRecord(payload.pagination) && typeof payload.pagination.hasMore === "boolean"
+          ? payload.pagination.hasMore
+          : events.length === EVENT_PAGE_SIZE;
+
+      return {
+        events: events.map(toEventLineFromGitHubEvent).reverse(),
+        hasMore,
+        username: typeof payload.username === "string" ? payload.username : null,
+        syncError: typeof payload.syncError === "string" ? payload.syncError : null,
+      };
+    },
+    [],
+  );
+
+  const loadMockEventPage = useCallback(
+    (
+      page: number,
+    ): {
+      events: EventLine[];
+      hasMore: boolean;
+      username: string;
+      syncError: string | null;
+    } => {
+      const pageResult = buildMockEventPage(page);
+
+      return {
+        events: pageResult.events,
+        hasMore: pageResult.hasMore,
+        username: pageResult.username,
+        syncError: null,
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     const loadWallpaperSettings = async () => {
@@ -163,14 +262,178 @@ export default function HomePage() {
     };
   }, []);
 
+  useEffect(() => {
+    let isDisposed = false;
+
+    const loadInitialEventPage = async () => {
+      setEventStreamStatus("loading");
+      setEventStreamErrorMessage(null);
+      setEventStreamSyncError(null);
+
+      try {
+        const pageResult = await fetchGitHubEventsPage(1);
+        if (isDisposed) {
+          return;
+        }
+
+        if (pageResult.events.length === 0 && githubEventsMockData.length > 0) {
+          const mockPageResult = loadMockEventPage(1);
+          shouldScrollToEventBottomRef.current = true;
+          setEventStreamSource("mock");
+          setEventStreamUsername(mockPageResult.username);
+          setGithubEventLines(mockPageResult.events);
+          setLoadedEventPage(1);
+          setHasOlderEventPage(mockPageResult.hasMore);
+          setEventStreamErrorMessage("GitHub storage is empty. Displaying local mock snapshot.");
+          setEventStreamStatus("ready");
+          return;
+        }
+
+        shouldScrollToEventBottomRef.current = true;
+        setEventStreamSource("api");
+        setEventStreamUsername(pageResult.username);
+        setGithubEventLines(pageResult.events);
+        setLoadedEventPage(1);
+        setHasOlderEventPage(pageResult.hasMore);
+        setEventStreamSyncError(pageResult.syncError);
+        setEventStreamStatus("ready");
+      } catch {
+        if (isDisposed) {
+          return;
+        }
+
+        if (githubEventsMockData.length > 0) {
+          const mockPageResult = loadMockEventPage(1);
+          shouldScrollToEventBottomRef.current = true;
+          setEventStreamSource("mock");
+          setEventStreamUsername(mockPageResult.username);
+          setGithubEventLines(mockPageResult.events);
+          setLoadedEventPage(1);
+          setHasOlderEventPage(mockPageResult.hasMore);
+          setEventStreamErrorMessage("Failed to load GitHub events. Displaying local mock snapshot.");
+          setEventStreamStatus("ready");
+          return;
+        }
+
+        setEventStreamStatus("error");
+        setEventStreamErrorMessage("Failed to load event stream.");
+      }
+    };
+
+    void loadInitialEventPage();
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [fetchGitHubEventsPage, loadMockEventPage]);
+
+  useEffect(() => {
+    const container = eventStreamRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (shouldScrollToEventBottomRef.current) {
+      container.scrollTop = container.scrollHeight;
+      shouldScrollToEventBottomRef.current = false;
+      return;
+    }
+
+    const restorePosition = prependScrollPositionRef.current;
+    if (!restorePosition) {
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight - restorePosition.scrollHeight + restorePosition.scrollTop;
+    prependScrollPositionRef.current = null;
+  }, [eventLines]);
+
   const pushEventLine = useCallback((message: string) => {
     const nextLine: EventLine = {
-      id: eventIdRef.current,
-      text: `[${createClockTag()}] ${message}`,
+      id: `local-${eventIdRef.current}`,
+      message,
+      kind: "standard",
+      createdAt: new Date().toISOString(),
+      source: "launcher",
     };
     eventIdRef.current += 1;
-    setEventLines((previous) => [...previous, nextLine].slice(-MAX_EVENT_LINES));
+    shouldScrollToEventBottomRef.current = true;
+    setLocalEventLines((previous) => [...previous, nextLine].slice(-MAX_LOCAL_EVENT_LINES));
   }, []);
+
+  const loadOlderEventPage = useCallback(async () => {
+    if (isLoadingOlderEventsRef.current || !hasOlderEventPage) {
+      return;
+    }
+
+    const container = eventStreamRef.current;
+    if (!container) {
+      return;
+    }
+
+    isLoadingOlderEventsRef.current = true;
+    setIsLoadingOlderEvents(true);
+    setEventStreamErrorMessage(null);
+
+    const nextPage = loadedEventPage + 1;
+    const previousScrollHeight = container.scrollHeight;
+    const previousScrollTop = container.scrollTop;
+
+    try {
+      const pageResult =
+        eventStreamSource === "mock" ? loadMockEventPage(nextPage) : await fetchGitHubEventsPage(nextPage);
+
+      if (eventStreamSource === "api") {
+        setEventStreamSyncError(pageResult.syncError);
+        if (pageResult.username) {
+          setEventStreamUsername(pageResult.username);
+        }
+      }
+
+      if (pageResult.events.length > 0) {
+        prependScrollPositionRef.current = {
+          scrollHeight: previousScrollHeight,
+          scrollTop: previousScrollTop,
+        };
+        setGithubEventLines((previous) => {
+          const existingIds = new Set(previous.map((line) => line.id));
+          const uniqueOlderEvents = pageResult.events.filter((line) => !existingIds.has(line.id));
+          return uniqueOlderEvents.length > 0 ? [...uniqueOlderEvents, ...previous] : previous;
+        });
+      }
+
+      setLoadedEventPage(nextPage);
+      setHasOlderEventPage(pageResult.hasMore);
+    } catch {
+      setEventStreamErrorMessage("Failed to load previous event page.");
+    } finally {
+      isLoadingOlderEventsRef.current = false;
+      setIsLoadingOlderEvents(false);
+    }
+  }, [
+    eventStreamSource,
+    fetchGitHubEventsPage,
+    hasOlderEventPage,
+    loadMockEventPage,
+    loadedEventPage,
+  ]);
+
+  const handleEventStreamScroll = useCallback(() => {
+    const container = eventStreamRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (container.scrollTop > EVENT_TOP_FETCH_THRESHOLD_PX) {
+      return;
+    }
+
+    if (eventStreamStatus !== "ready" || isLoadingOlderEvents || !hasOlderEventPage) {
+      return;
+    }
+
+    void loadOlderEventPage();
+  }, [eventStreamStatus, hasOlderEventPage, isLoadingOlderEvents, loadOlderEventPage]);
 
   const switchSection = useCallback(
     (nextSection: SectionId, source: "nav" | "prompt" = "nav") => {
@@ -404,6 +667,22 @@ export default function HomePage() {
     return null;
   };
 
+  const eventPaneDescription =
+    eventStreamStatus === "loading"
+      ? "Loading event pages..."
+      : eventStreamStatus === "error"
+        ? "Event stream failed to initialize."
+        : `Source: ${eventStreamSource === "api" ? "GitHub SQLite" : "Local snapshot"}${eventStreamUsername ? ` / ${eventStreamUsername}` : ""}. Page size: ${EVENT_PAGE_SIZE}. Pull to top to load previous page.`;
+
+  const eventTopHint =
+    eventStreamStatus === "loading"
+      ? "Loading..."
+      : isLoadingOlderEvents
+        ? "Loading previous page..."
+        : hasOlderEventPage
+          ? "Pull to top to load previous page."
+          : "Reached the beginning of the stream.";
+
   return (
     <main className="launcher-shell">
       <section className="launcher-left-column">
@@ -429,15 +708,43 @@ export default function HomePage() {
         <section className="event-pane">
           <div className="pane-head">
             <h2>Event Stream</h2>
-            <p>Loaded from mock snapshot once. New lines are appended only after interactions.</p>
+            <p>{eventPaneDescription}</p>
           </div>
 
-          <div className="event-stream" aria-live="polite">
-            {eventLines.map((line) => (
-              <p key={line.id} className="event-line">
-                {line.text}
-              </p>
-            ))}
+          <div
+            ref={eventStreamRef}
+            className="event-stream"
+            aria-live="polite"
+            onScroll={handleEventStreamScroll}
+          >
+            <p className="event-stream-state">{eventTopHint}</p>
+            {eventStreamErrorMessage ? <p className="event-stream-error">{eventStreamErrorMessage}</p> : null}
+            {eventStreamSyncError ? <p className="event-stream-warning">{eventStreamSyncError}</p> : null}
+
+            <div className="event-waterfall">
+              {eventLines.map((line) => (
+                <article
+                  key={line.id}
+                  className={`event-card ${line.kind === "notification" ? "is-notification" : "is-standard"} ${line.source === "launcher" ? "is-launcher" : "is-github"}`}
+                >
+                  <div className="event-card-head">
+                    <span className="event-kind">
+                      {line.kind === "notification"
+                        ? "Notify"
+                        : line.source === "launcher"
+                          ? "Launcher"
+                          : "Event"}
+                    </span>
+                    <time dateTime={line.createdAt}>{formatDateTime(line.createdAt)}</time>
+                  </div>
+                  <p className="event-card-message">{line.message}</p>
+                </article>
+              ))}
+
+              {eventStreamStatus !== "loading" && eventLines.length === 0 ? (
+                <p className="event-stream-empty">No events available.</p>
+              ) : null}
+            </div>
           </div>
         </section>
       </section>

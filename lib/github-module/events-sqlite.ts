@@ -13,6 +13,7 @@ const DEFAULT_SYNC_PER_PAGE = 100;
 const DEFAULT_SYNC_MAX_PAGES = 10;
 const DEFAULT_EVENT_READ_LIMIT = 240;
 const MAX_EVENT_READ_LIMIT = 1000;
+const MAX_EVENT_READ_OFFSET = 1_000_000;
 
 type EventsSourceModule = typeof import("./events-source");
 type GitHubEventsDbGlobal = typeof globalThis & {
@@ -49,6 +50,7 @@ export type SyncGitHubEventsToSqliteResult = {
 export type ReadGitHubEventsFromSqliteInput = {
   username: string;
   limit?: number;
+  offset?: number;
 };
 
 let cachedEventsSourceModule: EventsSourceModule | null = null;
@@ -462,6 +464,7 @@ export const readGitHubEventsFromSqlite = async (
 ): Promise<GitHubEvent[]> => {
   const username = assertNonEmpty(input.username, "GitHub username");
   const limit = clampInteger(input.limit, DEFAULT_EVENT_READ_LIMIT, 1, MAX_EVENT_READ_LIMIT);
+  const offset = clampInteger(input.offset, 0, 0, MAX_EVENT_READ_OFFSET);
   const database = await getDatabase();
 
   const rows = database
@@ -470,9 +473,10 @@ export const readGitHubEventsFromSqlite = async (
        FROM github_user_events
        WHERE actor_login = ?
        ORDER BY created_at DESC
-       LIMIT ?`,
+       LIMIT ?
+       OFFSET ?`,
     )
-    .all(username, limit) as unknown[];
+    .all(username, limit, offset) as unknown[];
 
   return rows.map(parseSqliteEventRow).filter((event): event is GitHubEvent => event !== null);
 };
