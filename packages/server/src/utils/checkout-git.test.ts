@@ -13,10 +13,12 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   __resetGhPathCacheForTests,
+  __resetCheckoutShortstatCacheForTests,
   __resetPullRequestStatusCacheForTests,
   __setGhPathForTests,
   __setPullRequestStatusCacheTtlForTests,
   commitAll,
+  getCachedCheckoutShortstat,
   getCheckoutDiff,
   getCheckoutShortstat,
   getPullRequestStatus,
@@ -33,6 +35,7 @@ import {
   parseWorktreeList,
   isPaseoWorktreePath,
   isDescendantPath,
+  warmCheckoutShortstatInBackground,
 } from "./checkout-git.js";
 import { createWorktree } from "./worktree.js";
 import { getPaseoWorktreeMetadataPath } from "./worktree-metadata.js";
@@ -65,11 +68,13 @@ describe("checkout git utilities", () => {
     repoDir = setup.repoDir;
     paseoHome = join(tempDir, "paseo-home");
     __resetGhPathCacheForTests();
+    __resetCheckoutShortstatCacheForTests();
     __resetPullRequestStatusCacheForTests();
   });
 
   afterEach(() => {
     __resetGhPathCacheForTests();
+    __resetCheckoutShortstatCacheForTests();
     __resetPullRequestStatusCacheForTests();
     rmSync(tempDir, { recursive: true, force: true });
   });
@@ -236,6 +241,24 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
     expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+  });
+
+  it("warms shortstat cache in the background without blocking listing callers", async () => {
+    expect(getCachedCheckoutShortstat(repoDir)).toBeUndefined();
+
+    warmCheckoutShortstatInBackground(repoDir);
+
+    // A repo with no origin/main computes to null, but null should still be cached.
+    for (let attempts = 0; attempts < 20; attempts += 1) {
+      const cached = getCachedCheckoutShortstat(repoDir);
+      if (cached !== undefined) {
+        expect(cached).toBeNull();
+        return;
+      }
+      await sleep(25);
+    }
+
+    throw new Error("shortstat background warm did not populate cache in time");
   });
 
   it("commits messages with quotes safely", async () => {

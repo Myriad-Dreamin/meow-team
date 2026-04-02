@@ -130,7 +130,7 @@ import { runAsyncWorktreeBootstrap } from "./worktree-bootstrap.js";
 import type { ServiceRouteStore } from "./service-proxy.js";
 import {
   getCheckoutDiff,
-  getCheckoutShortstat,
+  getCachedCheckoutShortstat,
   getCheckoutStatus,
   getCheckoutStatusLite,
   listBranchSuggestions,
@@ -140,6 +140,7 @@ import {
   pushCurrentBranch,
   createPullRequest,
   getPullRequestStatus,
+  warmCheckoutShortstatInBackground,
 } from "../utils/checkout-git.js";
 import { getProjectIcon } from "../utils/project-icon.js";
 import { expandTilde } from "../utils/path.js";
@@ -5176,10 +5177,11 @@ export class Session {
       projectRecord ?? (await this.projectRegistry.get(workspace.projectId));
 
     let diffStat: { additions: number; deletions: number } | null = null;
-    try {
-      diffStat = await getCheckoutShortstat(workspace.directory);
-    } catch {
-      // Non-critical — leave null on failure.
+    const cachedShortstat = getCachedCheckoutShortstat(workspace.directory);
+    if (cachedShortstat !== undefined) {
+      diffStat = cachedShortstat;
+    } else {
+      warmCheckoutShortstatInBackground(workspace.directory);
     }
 
     return {

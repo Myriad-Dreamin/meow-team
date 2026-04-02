@@ -20,11 +20,16 @@ const READ_ONLY_GIT_ENV: NodeJS.ProcessEnv = {
 const SMALL_OUTPUT_MAX_BUFFER = 20 * 1024 * 1024; // 20MB
 const DEFAULT_PULL_REQUEST_STATUS_CACHE_TTL_MS = 30_000;
 const PULL_REQUEST_STATUS_CACHE_MAX = 1_000;
+const DEFAULT_SHORTSTAT_CACHE_TTL_MS = 15_000;
+const SHORTSTAT_CACHE_MAX = 1_000;
 
 let pullRequestStatusCacheTtlMs = DEFAULT_PULL_REQUEST_STATUS_CACHE_TTL_MS;
 let pullRequestStatusCache = createPullRequestStatusCache(pullRequestStatusCacheTtlMs);
 const pullRequestStatusInFlight = new Map<string, Promise<PullRequestStatusResult>>();
 let cachedGhPath: string | null | undefined = undefined;
+let shortstatCacheTtlMs = DEFAULT_SHORTSTAT_CACHE_TTL_MS;
+let shortstatCache = createShortstatCache(shortstatCacheTtlMs);
+const shortstatInFlight = new Map<string, Promise<CheckoutShortstat | null>>();
 
 function createPullRequestStatusCache(ttlMs: number) {
   return new TTLCache<string, PullRequestStatusResult>({
@@ -34,7 +39,19 @@ function createPullRequestStatusCache(ttlMs: number) {
   });
 }
 
+function createShortstatCache(ttlMs: number) {
+  return new TTLCache<string, CheckoutShortstat | null>({
+    ttl: ttlMs,
+    max: SHORTSTAT_CACHE_MAX,
+    checkAgeOnGet: true,
+  });
+}
+
 function getPullRequestStatusCacheKey(cwd: string): string {
+  return resolve(cwd);
+}
+
+function getShortstatCacheKey(cwd: string): string {
   return resolve(cwd);
 }
 
@@ -60,6 +77,22 @@ export function __resetGhPathCacheForTests(): void {
 
 export function __setGhPathForTests(path: string | null): void {
   cachedGhPath = path;
+}
+
+export function __resetCheckoutShortstatCacheForTests(): void {
+  shortstatCache.clear();
+  shortstatCache.cancelTimer();
+  shortstatCacheTtlMs = DEFAULT_SHORTSTAT_CACHE_TTL_MS;
+  shortstatCache = createShortstatCache(shortstatCacheTtlMs);
+  shortstatInFlight.clear();
+}
+
+export function __setCheckoutShortstatCacheTtlForTests(ttlMs: number): void {
+  shortstatCache.clear();
+  shortstatCache.cancelTimer();
+  shortstatCacheTtlMs = ttlMs;
+  shortstatCache = createShortstatCache(ttlMs);
+  shortstatInFlight.clear();
 }
 
 async function execGit(
@@ -1194,7 +1227,7 @@ export interface CheckoutShortstat {
   deletions: number;
 }
 
-export async function getCheckoutShortstat(
+async function getCheckoutShortstatUncached(
   cwd: string,
   context?: CheckoutContext,
 ): Promise<CheckoutShortstat | null> {
@@ -1271,6 +1304,56 @@ export async function getCheckoutShortstat(
   } catch {
     return null;
   }
+}
+
+function getOrLoadCheckoutShortstat(
+  cwd: string,
+  context?: CheckoutContext,
+): Promise<CheckoutShortstat | null> {
+  const cacheKey = getShortstatCacheKey(cwd);
+  const cached = shortstatCache.get(cacheKey);
+  if (cached !== undefined) {
+    return Promise.resolve(cached);
+  }
+
+  const existing = shortstatInFlight.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const load = getCheckoutShortstatUncached(cwd, context)
+    .then((shortstat) => {
+      shortstatCache.set(cacheKey, shortstat);
+      return shortstat;
+    })
+    .finally(() => {
+      shortstatInFlight.delete(cacheKey);
+    });
+
+  shortstatInFlight.set(cacheKey, load);
+  return load;
+}
+
+export async function getCheckoutShortstat(
+  cwd: string,
+  context?: CheckoutContext,
+): Promise<CheckoutShortstat | null> {
+  return getOrLoadCheckoutShortstat(cwd, context);
+}
+
+export function getCachedCheckoutShortstat(cwd: string): CheckoutShortstat | null | undefined {
+  return shortstatCache.get(getShortstatCacheKey(cwd));
+}
+
+export function warmCheckoutShortstatInBackground(cwd: string, context?: CheckoutContext): void {
+  const cacheKey = getShortstatCacheKey(cwd);
+  if (shortstatCache.get(cacheKey) !== undefined || shortstatInFlight.has(cacheKey)) {
+    return;
+  }
+
+  void getOrLoadCheckoutShortstat(cwd, context).catch(() => {
+    // Non-critical: keep listing path resilient even if git commands fail.
+  });
 }
 
 export async function getCheckoutDiff(
