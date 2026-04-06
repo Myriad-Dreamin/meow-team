@@ -15,7 +15,6 @@ import {
 } from "lucide-react-native";
 import { getProviderIcon } from "@/components/provider-icons";
 import { CombinedModelSelector } from "@/components/combined-model-selector";
-import { useQuery } from "@tanstack/react-query";
 import { useSessionStore } from "@/stores/session-store";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import {
@@ -52,7 +51,6 @@ import {
   getStatusSelectorHint,
   resolveAgentModelSelection,
 } from "@/components/agent-status-bar.utils";
-import { isProviderModelsQueryLoading } from "@/components/agent-status-bar.model-loading";
 
 type StatusOption = {
   id: string;
@@ -876,59 +874,39 @@ export function AgentStatusBar({ agentId, serverId, onDropdownClose }: AgentStat
     entries: snapshotEntries,
     isLoading: snapshotIsLoading,
     isFetching: snapshotIsFetching,
-    supportsSnapshot,
   } = useProvidersSnapshot(serverId);
 
-  // COMPAT(providersSnapshot): legacy fallback for daemons without snapshot support
-  const legacyModelsQuery = useQuery({
-    queryKey: ["providerModels", serverId, agent?.provider ?? "__missing_provider__"],
-    enabled: Boolean(!supportsSnapshot && client && agent?.provider),
-    staleTime: 5 * 60 * 1000,
-    queryFn: async () => {
-      if (!client || !agent) {
-        throw new Error("Daemon client unavailable");
-      }
-      const payload = await client.listProviderModels(agent.provider, { cwd: agent.cwd });
-      if (payload.error) {
-        throw new Error(payload.error);
-      }
-      return payload.models ?? [];
-    },
-  });
-
   const snapshotModels = useMemo(() => {
-    if (!supportsSnapshot || !snapshotEntries || !agent?.provider) {
+    if (!snapshotEntries || !agent?.provider) {
       return null;
     }
     const entry = snapshotEntries.find((e) => e.provider === agent.provider);
     return entry?.models ?? null;
-  }, [supportsSnapshot, snapshotEntries, agent?.provider]);
+  }, [snapshotEntries, agent?.provider]);
 
-  const models = supportsSnapshot ? snapshotModels : (legacyModelsQuery.data ?? null);
+  const models = snapshotModels;
 
   const agentProviderDefinitions = useMemo(() => {
-    if (supportsSnapshot && snapshotEntries) {
+    if (snapshotEntries) {
       return AGENT_PROVIDER_DEFINITIONS.filter((d) =>
         snapshotEntries.some((e) => e.provider === d.id),
       );
     }
     const definition = AGENT_PROVIDER_DEFINITIONS.find((d) => d.id === agent?.provider);
     return definition ? [definition] : [];
-  }, [agent?.provider, supportsSnapshot, snapshotEntries]);
+  }, [agent?.provider, snapshotEntries]);
 
   const agentProviderModels = useMemo(() => {
     const map = new Map<string, AgentModelDefinition[]>();
-    if (supportsSnapshot && snapshotEntries) {
+    if (snapshotEntries) {
       for (const entry of snapshotEntries) {
         if (entry.models) {
           map.set(entry.provider, entry.models);
         }
       }
-    } else if (agent?.provider && legacyModelsQuery.data) {
-      map.set(agent.provider, legacyModelsQuery.data);
     }
     return map;
-  }, [supportsSnapshot, snapshotEntries, agent?.provider, legacyModelsQuery.data]);
+  }, [snapshotEntries]);
 
   const displayMode =
     availableModes.find((mode) => mode.id === agent?.currentModeId)?.label ||
@@ -1048,7 +1026,7 @@ export function AgentStatusBar({ agentId, serverId, onDropdownClose }: AgentStat
           console.warn("[AgentStatusBar] setAgentFeature failed", error);
         });
       }}
-      isModelLoading={supportsSnapshot ? (snapshotIsLoading || snapshotIsFetching) : isProviderModelsQueryLoading(legacyModelsQuery)}
+      isModelLoading={snapshotIsLoading || snapshotIsFetching}
       onDropdownClose={onDropdownClose}
       disabled={!client}
     />
