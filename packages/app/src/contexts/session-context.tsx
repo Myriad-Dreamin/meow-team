@@ -68,6 +68,22 @@ export type {
 const HISTORY_STALE_AFTER_MS = 60_000;
 const AUTHORITATIVE_REVALIDATION_DEBOUNCE_MS = 300;
 
+function hasAgentUsageChanged(
+  incomingUsage: Agent["lastUsage"] | undefined,
+  currentUsage: Agent["lastUsage"] | undefined,
+): boolean {
+  const keys: Array<keyof NonNullable<Agent["lastUsage"]>> = [
+    "inputTokens",
+    "outputTokens",
+    "cachedInputTokens",
+    "totalCostUsd",
+    "contextWindowMaxTokens",
+    "contextWindowUsedTokens",
+  ];
+
+  return keys.some((key) => incomingUsage?.[key] !== currentUsage?.[key]);
+}
+
 type AudioOutputPayload = Extract<SessionOutboundMessage, { type: "audio_output" }>["payload"];
 
 interface BufferedAudioChunk {
@@ -350,6 +366,15 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       setAgents(serverId, (prev) => {
         const current = prev.get(agent.id);
         if (current && agent.updatedAt.getTime() < current.updatedAt.getTime()) {
+          const hasUsageUpdate = hasAgentUsageChanged(agent.lastUsage, current.lastUsage);
+          if (hasUsageUpdate) {
+            const next = new Map(prev);
+            next.set(agent.id, {
+              ...current,
+              lastUsage: agent.lastUsage,
+            });
+            return next;
+          }
           return prev;
         }
         const next = new Map(prev);
