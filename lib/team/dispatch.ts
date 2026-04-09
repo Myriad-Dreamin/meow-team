@@ -4,7 +4,15 @@ import { createAgent, createNetwork, createState, createTool } from "@inngest/ag
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import { createSaveHandoffTool, summarizeHandoffs, type TeamRoleState } from "@/lib/team/agent-helpers";
-import { buildLaneBranchName, buildLaneWorktreePath, detectBranchConflict, ensureLaneWorktree, resolveRepositoryBaseBranch } from "@/lib/team/git";
+import {
+  buildCanonicalBranchName,
+  buildLaneBranchName,
+  buildLaneWorktreePath,
+  detectBranchConflict,
+  ensureLaneWorktree,
+  resolveRepositoryBaseBranch,
+  resolveWorktreeRoot,
+} from "@/lib/team/git";
 import {
   getTeamThreadRecord,
   listPendingDispatchAssignments,
@@ -12,10 +20,16 @@ import {
   updateTeamThreadRecord,
 } from "@/lib/team/history";
 import { createTeamModel, ensureOpenAiApiKey } from "@/lib/team/model";
+import {
+  buildProposalChangeName,
+  buildProposalPath,
+  materializeAssignmentProposals,
+} from "@/lib/team/openspec";
 import { loadRolePrompt, type RolePrompt } from "@/lib/team/prompts";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type {
   TeamDispatchAssignment,
+  TeamHumanFeedbackScope,
   TeamPlannerNote,
   TeamPullRequestRecord,
   TeamRoleHandoff,
@@ -73,6 +87,26 @@ const createLaneEvent = (
 const createPlannerNote = (message: string, createdAt: string): TeamPlannerNote => {
   return {
     id: crypto.randomUUID(),
+    message,
+    createdAt,
+  };
+};
+
+const createHumanFeedback = ({
+  scope,
+  laneId,
+  message,
+  createdAt,
+}: {
+  scope: TeamHumanFeedbackScope;
+  laneId: string | null;
+  message: string;
+  createdAt: string;
+}) => {
+  return {
+    id: crypto.randomUUID(),
+    scope,
+    laneId,
     message,
     createdAt,
   };
@@ -141,7 +175,12 @@ const buildLaneInitialState = ({
     planDeliverable: assignment.plannerDeliverable ?? "No planner deliverable provided.",
     branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
     baseBranch: lane.baseBranch ?? teamConfig.dispatch.baseBranch,
-    worktreePath: lane.worktreePath ?? teamConfig.dispatch.worktreeRoot,
+    worktreePath:
+      lane.worktreePath ??
+      resolveWorktreeRoot({
+        repositoryPath: repository.path,
+        worktreeRoot: teamConfig.dispatch.worktreeRoot,
+      }),
     conflictNote:
       lane.requeueReason === "planner_detected_conflict"
         ? "Planner detected a pull request conflict. Resolve the branch and prepare it for review again."
@@ -184,7 +223,7 @@ const createLaneSystemPrompt = (role: RolePrompt) => {
       `- Operate only on this lane's branch and worktree.`,
       `- Always call save_handoff exactly once before finishing.`,
       role.id === "reviewer"
-        ? `- If the branch is ready, call publish_pull_request before save_handoff and set decision to approved.`
+        ? `- If the branch is ready, call publish_pull_request before save_handoff and set decision to approved to mark machine review complete.`
         : `- As coder, always set decision to continue and hand off cleanly to the reviewer.`,
     ]
       .filter(Boolean)
@@ -196,7 +235,7 @@ const createPublishPullRequestTool = () => {
   return createTool({
     name: "publish_pull_request",
     description:
-      "Create or refresh the lane's CI pull request once the branch is ready for human approval.",
+      "Create or refresh the lane's CI pull request once the approved proposal is ready to finish machine review.",
     parameters: z.object({
       title: z.string().trim().min(1),
       summary: z.string().trim().min(1),
@@ -275,29 +314,30 @@ const createPullRequestRecord = ({
     title: draft.title,
     branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
     baseBranch: lane.baseBranch ?? teamConfig.dispatch.baseBranch,
-    status: "awaiting_human_approval",
+    status: "approved",
     requestedAt: now,
-    humanApprovalRequestedAt: now,
+    humanApprovalRequestedAt: null,
     humanApprovedAt: null,
+    machineReviewedAt: now,
     updatedAt: now,
     url: null,
   };
 };
 
-const createQueuedLane = ({
+const createProposalLane = ({
   laneIndex,
   task,
   branchPrefix,
   assignmentNumber,
   baseBranch,
-  threadId,
+  worktreeRoot,
 }: {
   laneIndex: number;
   task?: DispatchTask;
   branchPrefix: string;
   assignmentNumber: number;
   baseBranch: string;
-  threadId: string;
+  worktreeRoot: string;
 }): TeamWorkerLaneRecord => {
   const laneId = `lane-${laneIndex}`;
   const now = new Date().toISOString();
@@ -309,6 +349,8 @@ const createQueuedLane = ({
       status: "idle",
       taskTitle: null,
       taskObjective: null,
+      proposalChangeName: null,
+      proposalPath: null,
       branchName: null,
       baseBranch: null,
       worktreePath: null,
@@ -316,6 +358,9 @@ const createQueuedLane = ({
       latestCoderSummary: null,
       latestReviewerSummary: null,
       latestActivity: "Idle and waiting for planner work.",
+      approvalRequestedAt: null,
+      approvalGrantedAt: null,
+      queuedAt: null,
       runCount: 0,
       revisionCount: 0,
       requeueReason: null,
@@ -333,32 +378,40 @@ const createQueuedLane = ({
     assignmentNumber,
     laneIndex,
   });
+  const proposalChangeName = buildProposalChangeName({
+    branchPrefix,
+    assignmentNumber,
+    laneIndex,
+    taskTitle: task.title,
+  });
 
   return {
     laneId,
     laneIndex,
-    status: "queued",
+    status: "awaiting_human_approval",
     taskTitle: task.title,
     taskObjective: task.objective,
+    proposalChangeName,
+    proposalPath: buildProposalPath(proposalChangeName),
     branchName,
     baseBranch,
     worktreePath: buildLaneWorktreePath({
-      worktreeRoot: teamConfig.dispatch.worktreeRoot,
-      teamId: teamConfig.id,
-      threadId,
-      assignmentNumber,
+      worktreeRoot,
       laneIndex,
     }),
     latestDecision: null,
     latestCoderSummary: null,
     latestReviewerSummary: null,
-    latestActivity: "Queued for coder dispatch.",
+    latestActivity: "Proposal is waiting for human approval before coding and review begin.",
+    approvalRequestedAt: now,
+    approvalGrantedAt: null,
+    queuedAt: null,
     runCount: 0,
     revisionCount: 0,
     requeueReason: null,
     lastError: null,
     pullRequest: null,
-    events: [createLaneEvent("planner", `Planner dispatched task: ${task.title}`, now)],
+    events: [createLaneEvent("planner", `Planner proposed: ${task.title}`, now)],
     startedAt: null,
     finishedAt: null,
     updatedAt: now,
@@ -391,6 +444,15 @@ export const createPlannerDispatchAssignment = async ({
     repository.path,
     teamConfig.dispatch.baseBranch,
   );
+  const resolvedWorktreeRoot = resolveWorktreeRoot({
+    repositoryPath: repository.path,
+    worktreeRoot: teamConfig.dispatch.worktreeRoot,
+  });
+  const canonicalBranchName = buildCanonicalBranchName({
+    branchPrefix,
+    assignmentNumber,
+  });
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
 
   const assignment: TeamDispatchAssignment = synchronizeDispatchAssignment(
     {
@@ -404,27 +466,42 @@ export const createPlannerDispatchAssignment = async ({
       plannerSummary,
       plannerDeliverable,
       branchPrefix,
+      canonicalBranchName,
       baseBranch: resolvedBaseBranch,
       workerCount: teamConfig.dispatch.workerCount,
       lanes: Array.from({ length: teamConfig.dispatch.workerCount }, (_, index) =>
-        createQueuedLane({
+        createProposalLane({
           laneIndex: index + 1,
           task: tasks[index],
           branchPrefix,
           assignmentNumber,
           baseBranch: resolvedBaseBranch,
-          threadId,
+          worktreeRoot: resolvedWorktreeRoot,
         }),
       ),
       plannerNotes: [
         createPlannerNote(
-          `Planner dispatched ${tasks.length} work item${tasks.length === 1 ? "" : "s"} across ${teamConfig.dispatch.workerCount} configured lane${teamConfig.dispatch.workerCount === 1 ? "" : "s"}.`,
+          `Planner created ${tasks.length} proposal${tasks.length === 1 ? "" : "s"} and is waiting for human approval before the coding-review queue starts.`,
           now,
         ),
       ],
+      humanFeedback: [],
+      supersededAt: null,
+      supersededReason: null,
     },
     now,
   );
+
+  await materializeAssignmentProposals({
+    repositoryPath: repository.path,
+    baseBranch: resolvedBaseBranch,
+    canonicalBranchName,
+    plannerSummary,
+    plannerDeliverable,
+    requestInput: thread?.data.latestInput ?? thread?.userMessages[0]?.content ?? null,
+    worktreeRoot: resolvedWorktreeRoot,
+    lanes: assignment.lanes,
+  });
 
   await updateTeamThreadRecord({
     threadFile: teamConfig.storage.threadFile,
@@ -439,81 +516,7 @@ export const createPlannerDispatchAssignment = async ({
     },
   });
 
-  void ensurePendingDispatchWork({ threadId });
   return assignment;
-};
-
-const refreshAwaitingApprovalConflict = async ({
-  threadId,
-  assignmentNumber,
-  laneId,
-}: {
-  threadId: string;
-  assignmentNumber: number;
-  laneId: string;
-}): Promise<void> => {
-  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
-  if (!thread) {
-    return;
-  }
-
-  const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
-  const lane = findLane(assignment, laneId);
-
-  if (
-    lane.status !== "awaiting_human_approval" ||
-    lane.pullRequest?.status !== "awaiting_human_approval" ||
-    !assignment.repository ||
-    !lane.branchName ||
-    !lane.baseBranch
-  ) {
-    return;
-  }
-
-  const hasConflict = await detectBranchConflict({
-    repositoryPath: assignment.repository.path,
-    baseBranch: lane.baseBranch,
-    branchName: lane.branchName,
-  });
-
-  if (!hasConflict) {
-    return;
-  }
-
-  await updateTeamThreadRecord({
-    threadFile: teamConfig.storage.threadFile,
-    threadId,
-    updater: (mutableThread, now) => {
-      const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
-      const mutableLane = findLane(mutableAssignment, laneId);
-      mutableLane.status = "queued";
-      mutableLane.requeueReason = "planner_detected_conflict";
-      mutableLane.revisionCount += 1;
-      mutableLane.latestActivity = "Planner detected a pull request conflict and requeued the lane.";
-      mutableLane.finishedAt = null;
-      mutableLane.updatedAt = now;
-      mutableLane.pullRequest = mutableLane.pullRequest
-        ? {
-            ...mutableLane.pullRequest,
-            status: "conflict",
-            updatedAt: now,
-            humanApprovalRequestedAt: null,
-          }
-        : null;
-      appendLaneEvent(
-        mutableLane,
-        "planner",
-        "Planner detected a branch conflict and requested the coder to resolve it.",
-        now,
-      );
-      appendPlannerNote(
-        mutableAssignment,
-        `Conflict detected for lane ${mutableLane.laneIndex}; the coder was requeued for conflict resolution.`,
-        now,
-      );
-      synchronizeDispatchAssignment(mutableAssignment, now);
-    },
-  });
 };
 
 const runLaneCycle = async ({
@@ -556,7 +559,7 @@ const runLaneCycle = async ({
             ? "Coder is resolving a planner-detected pull request conflict."
             : mutableLane.requeueReason === "reviewer_requested_changes"
               ? "Coder is addressing reviewer-requested changes."
-              : "Coder is working in the dedicated worktree.";
+              : "Coder is implementing the approved proposal in the dedicated worktree.";
         mutableLane.updatedAt = now;
         appendLaneEvent(mutableLane, "coder", mutableLane.latestActivity, now);
         synchronizeDispatchAssignment(mutableAssignment, now);
@@ -565,9 +568,13 @@ const runLaneCycle = async ({
 
     await ensureLaneWorktree({
       repositoryPath: assignment.repository.path,
+      worktreeRoot: resolveWorktreeRoot({
+        repositoryPath: assignment.repository.path,
+        worktreeRoot: teamConfig.dispatch.worktreeRoot,
+      }),
       worktreePath: lane.worktreePath,
       branchName: lane.branchName,
-      baseBranch: lane.baseBranch,
+      startPoint: assignment.canonicalBranchName ?? lane.baseBranch,
     });
 
     const coderRole = await loadRolePrompt("coder");
@@ -642,9 +649,11 @@ const runLaneCycle = async ({
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestReviewerSummary = reviewerHandoff.summary;
-          mutableLane.latestActivity = "Reviewer requested changes and sent the lane back to the coder.";
+          mutableLane.latestActivity =
+            "Reviewer requested changes and returned the proposal to the coding-review queue.";
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
+          mutableLane.queuedAt = now;
           mutableLane.requeueReason = "reviewer_requested_changes";
           mutableLane.updatedAt = now;
           mutableLane.finishedAt = null;
@@ -693,24 +702,27 @@ const runLaneCycle = async ({
           mutableLane.latestActivity = "Planner detected a pull request conflict and requeued the lane.";
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
+          mutableLane.queuedAt = mutableNow;
           mutableLane.requeueReason = "planner_detected_conflict";
           mutableLane.pullRequest = {
             ...pullRequest,
             status: "conflict",
             updatedAt: mutableNow,
             humanApprovalRequestedAt: null,
+            humanApprovedAt: null,
+            machineReviewedAt: null,
           };
           mutableLane.updatedAt = mutableNow;
           mutableLane.finishedAt = null;
           appendLaneEvent(
             mutableLane,
             "reviewer",
-            `Reviewer approved the lane, but the planner detected a conflict: ${reviewerHandoff.summary}`,
+            `Reviewer approved the proposal, but the planner detected a conflict: ${reviewerHandoff.summary}`,
             mutableNow,
           );
           appendPlannerNote(
             mutableAssignment,
-            `Conflict detected for lane ${mutableLane.laneIndex}; the coder was requeued before human approval.`,
+            `Conflict detected for proposal ${mutableLane.laneIndex}; the coder was requeued before machine review could complete.`,
             mutableNow,
           );
           synchronizeDispatchAssignment(mutableAssignment, mutableNow);
@@ -726,24 +738,35 @@ const runLaneCycle = async ({
       updater: (mutableThread, mutableNow) => {
         const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
         const mutableLane = findLane(mutableAssignment, laneId);
-        mutableLane.status = "awaiting_human_approval";
+        mutableLane.status = "approved";
         mutableLane.latestDecision = reviewerHandoff.decision;
         mutableLane.latestCoderSummary = coderHandoff.summary;
         mutableLane.latestReviewerSummary = reviewerHandoff.summary;
-        mutableLane.latestActivity = "Reviewer opened a CI pull request and requested human approval.";
+        mutableLane.latestActivity = "Reviewer completed machine review for the approved proposal.";
         mutableLane.runCount += 1;
         mutableLane.requeueReason = null;
         mutableLane.pullRequest = {
           ...pullRequest,
           updatedAt: mutableNow,
+          machineReviewedAt: mutableNow,
         };
         mutableLane.updatedAt = mutableNow;
-        mutableLane.finishedAt = null;
-        appendLaneEvent(mutableLane, "reviewer", `Reviewer approved: ${reviewerHandoff.summary}`, mutableNow);
+        mutableLane.finishedAt = mutableNow;
+        appendLaneEvent(
+          mutableLane,
+          "reviewer",
+          `Reviewer completed machine review: ${reviewerHandoff.summary}`,
+          mutableNow,
+        );
         appendLaneEvent(
           mutableLane,
           "system",
-          "CI pull request is ready and waiting for human approval.",
+          "Machine review completed. Human feedback can now refine this proposal or the full request group.",
+          mutableNow,
+        );
+        appendPlannerNote(
+          mutableAssignment,
+          `Proposal ${mutableLane.laneIndex} completed coding and machine review.`,
           mutableNow,
         );
         synchronizeDispatchAssignment(mutableAssignment, mutableNow);
@@ -810,26 +833,12 @@ export const ensurePendingDispatchWork = async ({
 }: {
   threadId?: string;
 } = {}): Promise<void> => {
-  const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile, threadId);
-
-  for (const pending of pendingAssignments) {
-    for (const lane of pending.assignment.lanes) {
-      if (lane.status === "awaiting_human_approval") {
-        await refreshAwaitingApprovalConflict({
-          threadId: pending.threadId,
-          assignmentNumber: pending.assignment.assignmentNumber,
-          laneId: lane.laneId,
-        });
-      }
-    }
-  }
-
-  const refreshedPendingAssignments = await listPendingDispatchAssignments(
+  const pendingAssignments = await listPendingDispatchAssignments(
     teamConfig.storage.threadFile,
     threadId,
   );
 
-  for (const pending of refreshedPendingAssignments) {
+  for (const pending of pendingAssignments) {
     for (const lane of pending.assignment.lanes) {
       if (lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing") {
         ensureLaneRun({
@@ -842,7 +851,7 @@ export const ensurePendingDispatchWork = async ({
   }
 };
 
-export const approveLanePullRequest = async ({
+export const approveLaneProposal = async ({
   threadId,
   assignmentNumber,
   laneId,
@@ -857,27 +866,182 @@ export const approveLanePullRequest = async ({
     updater: (thread, now) => {
       const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
       const lane = findLane(assignment, laneId);
-      if (lane.status !== "awaiting_human_approval" || !lane.pullRequest) {
-        throw new Error("This lane is not waiting for human approval.");
+      if (lane.status !== "awaiting_human_approval") {
+        throw new Error("This proposal is not waiting for human approval.");
       }
 
-      lane.status = "approved";
-      lane.latestActivity = "Human approval recorded.";
+      lane.status = "queued";
+      lane.latestActivity = "Human approved the proposal and added it to the coding-review queue.";
+      lane.approvalGrantedAt = now;
+      lane.queuedAt = now;
       lane.updatedAt = now;
-      lane.finishedAt = now;
-      lane.pullRequest = {
-        ...lane.pullRequest,
-        status: "approved",
-        humanApprovedAt: now,
-        updatedAt: now,
-      };
-      appendLaneEvent(lane, "human", "Human approval granted for the CI pull request.", now);
+      lane.finishedAt = null;
+      appendLaneEvent(
+        lane,
+        "human",
+        "Human approved the proposal and sent it to the coding-review queue.",
+        now,
+      );
       appendPlannerNote(
         assignment,
-        `Human approval recorded for lane ${lane.laneIndex}.`,
+        `Human approved proposal ${lane.laneIndex}; coding and machine review were queued.`,
         now,
       );
       synchronizeDispatchAssignment(assignment, now);
     },
   });
+
+  void ensurePendingDispatchWork({ threadId });
+};
+
+export const approveLanePullRequest = approveLaneProposal;
+
+const buildProposalSnapshot = (assignment: TeamDispatchAssignment): string => {
+  return assignment.lanes
+    .filter((lane) => lane.taskTitle || lane.taskObjective)
+    .map((lane) => {
+      return [
+        `Proposal ${lane.laneIndex}: ${lane.taskTitle ?? "Untitled proposal"}`,
+        `Objective: ${lane.taskObjective ?? "No objective recorded."}`,
+        `Status: ${lane.status}`,
+        lane.latestCoderSummary ? `Latest coding summary: ${lane.latestCoderSummary}` : null,
+        lane.latestReviewerSummary ? `Latest machine review: ${lane.latestReviewerSummary}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+};
+
+const buildFeedbackReplanInput = ({
+  originalRequest,
+  assignment,
+  scope,
+  lane,
+  suggestion,
+}: {
+  originalRequest: string;
+  assignment: TeamDispatchAssignment;
+  scope: TeamHumanFeedbackScope;
+  lane: TeamWorkerLaneRecord | null;
+  suggestion: string;
+}): string => {
+  return [
+    `Original request:\n${originalRequest}`,
+    assignment.plannerSummary ? `Latest planner summary:\n${assignment.plannerSummary}` : null,
+    assignment.canonicalBranchName
+      ? `Canonical branch namespace:\n${assignment.canonicalBranchName}`
+      : null,
+    `Current proposal set:\n${buildProposalSnapshot(assignment) || "No proposals recorded yet."}`,
+    scope === "proposal" && lane
+      ? [
+          `Human feedback for proposal ${lane.laneIndex} (${lane.taskTitle ?? "Untitled proposal"}):`,
+          suggestion,
+          "Regenerate the proposal set with this proposal adjusted first while keeping the request group coherent.",
+        ].join("\n")
+      : [
+          "Human feedback for the full request group:",
+          suggestion,
+          "Regenerate the proposal set so the next planning pass reflects this updated direction.",
+        ].join("\n"),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+export const prepareAssignmentReplan = async ({
+  threadId,
+  assignmentNumber,
+  scope,
+  laneId,
+  suggestion,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  scope: TeamHumanFeedbackScope;
+  laneId?: string;
+  suggestion: string;
+}): Promise<{
+  input: string;
+  repositoryId: string | undefined;
+}> => {
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  if (!thread) {
+    throw new Error(`Thread ${threadId} was not found.`);
+  }
+
+  const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
+  if (assignment.supersededAt) {
+    throw new Error("This request group has already been superseded by newer feedback.");
+  }
+
+  const hasActiveQueue = assignment.lanes.some(
+    (lane) => lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing",
+  );
+  if (hasActiveQueue) {
+    throw new Error(
+      "Wait for the active coding-review queue to finish before restarting planning with human feedback.",
+    );
+  }
+
+  const targetLane = scope === "proposal" ? findLane(assignment, laneId ?? "") : null;
+  const originalRequest = thread.userMessages[0]?.content ?? thread.data.latestInput;
+  if (!originalRequest) {
+    throw new Error("The original request could not be recovered for replanning.");
+  }
+
+  await updateTeamThreadRecord({
+    threadFile: teamConfig.storage.threadFile,
+    threadId,
+    updater: (mutableThread, now) => {
+      const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+      mutableAssignment.humanFeedback = [
+        ...mutableAssignment.humanFeedback,
+        createHumanFeedback({
+          scope,
+          laneId: targetLane?.laneId ?? null,
+          message: suggestion,
+          createdAt: now,
+        }),
+      ];
+      mutableAssignment.supersededAt = now;
+      mutableAssignment.supersededReason =
+        scope === "proposal"
+          ? `Human requested proposal-specific changes for ${targetLane?.taskTitle ?? targetLane?.laneId ?? "the selected proposal"}.`
+          : "Human requested request-group changes.";
+
+      if (targetLane) {
+        const mutableLane = findLane(mutableAssignment, targetLane.laneId);
+        mutableLane.latestActivity =
+          "Human requested proposal-specific changes and sent this request group back to planning.";
+        mutableLane.updatedAt = now;
+        appendLaneEvent(
+          mutableLane,
+          "human",
+          `Human feedback requested replanning: ${suggestion}`,
+          now,
+        );
+      }
+
+      appendPlannerNote(
+        mutableAssignment,
+        scope === "proposal"
+          ? `Human requested new planning guidance for proposal ${targetLane?.laneIndex}.`
+          : "Human requested new planning guidance for the full request group.",
+        now,
+      );
+      synchronizeDispatchAssignment(mutableAssignment, now);
+    },
+  });
+
+  return {
+    input: buildFeedbackReplanInput({
+      originalRequest,
+      assignment,
+      scope,
+      lane: targetLane,
+      suggestion,
+    }),
+    repositoryId: thread.data.selectedRepository?.id,
+  };
 };

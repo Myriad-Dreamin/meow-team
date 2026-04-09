@@ -26,7 +26,7 @@ export const teamConfig = defineTeamConfig({
     workerCount: 3,
     branchPrefix: "team-dispatch",
     baseBranch: "main",
-    worktreeRoot: "/tmp/meow-team-worktrees",
+    worktreeRoot: ".meow-team-worktrees",
   },
   repositories: {
     roots: [

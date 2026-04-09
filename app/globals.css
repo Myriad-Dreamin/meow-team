@@ -596,6 +596,19 @@ main {
   font-size: 0.88rem;
 }
 
+.feedback-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-field {
+  gap: 10px;
+}
+
+.thread-feedback {
+  margin-top: 18px;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

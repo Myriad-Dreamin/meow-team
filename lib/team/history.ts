@@ -6,6 +6,7 @@ import type { TeamRunState } from "@/lib/team/network";
 import type {
   TeamDispatchAssignment,
   TeamDispatchAssignmentStatus,
+  TeamHumanFeedbackRecord,
   TeamPlannerNote,
   TeamRoleDecision,
   TeamRoleHandoff,
@@ -88,10 +89,12 @@ export type TeamThreadSummary = {
   latestAssignmentStatus: TeamDispatchAssignmentStatus | null;
   latestPlanSummary: string | null;
   latestBranchPrefix: string | null;
+  latestCanonicalBranchName: string | null;
   dispatchWorkerCount: number;
   workerCounts: TeamWorkerLaneCounts;
   workerLanes: TeamWorkerLaneRecord[];
   plannerNotes: TeamPlannerNote[];
+  humanFeedback: TeamHumanFeedbackRecord[];
 };
 
 export type PendingDispatchAssignment = {
@@ -169,10 +172,42 @@ const deserializeResult = (result: StoredAgentResult): AgentResult => {
   );
 };
 
+const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord => {
+  return {
+    ...lane,
+    proposalChangeName: lane.proposalChangeName ?? null,
+    proposalPath: lane.proposalPath ?? null,
+    approvalRequestedAt: lane.approvalRequestedAt ?? null,
+    approvalGrantedAt: lane.approvalGrantedAt ?? null,
+    queuedAt: lane.queuedAt ?? null,
+    pullRequest: lane.pullRequest
+      ? {
+          ...lane.pullRequest,
+          machineReviewedAt: lane.pullRequest.machineReviewedAt ?? null,
+        }
+      : null,
+    events: lane.events ?? [],
+  };
+};
+
+const normalizeDispatchAssignment = (
+  assignment: TeamDispatchAssignment,
+): TeamDispatchAssignment => {
+  return {
+    ...assignment,
+    canonicalBranchName: assignment.canonicalBranchName ?? null,
+    lanes: assignment.lanes.map(normalizeWorkerLane),
+    plannerNotes: assignment.plannerNotes ?? [],
+    humanFeedback: assignment.humanFeedback ?? [],
+    supersededAt: assignment.supersededAt ?? null,
+    supersededReason: assignment.supersededReason ?? null,
+  };
+};
+
 const normalizeStoredThread = (thread: StoredThread): TeamThreadRecord => {
   return {
     ...thread,
-    dispatchAssignments: thread.dispatchAssignments ?? [],
+    dispatchAssignments: (thread.dispatchAssignments ?? []).map(normalizeDispatchAssignment),
   };
 };
 
@@ -259,6 +294,10 @@ const hasAssignedTask = (lane: TeamWorkerLaneRecord): boolean => {
 const deriveDispatchAssignmentStatus = (
   assignment: TeamDispatchAssignment,
 ): TeamDispatchAssignmentStatus => {
+  if (assignment.supersededAt) {
+    return "superseded";
+  }
+
   const assignedLanes = assignment.lanes.filter(hasAssignedTask);
 
   if (assignedLanes.some((lane) => lane.status === "failed")) {
@@ -286,7 +325,12 @@ const deriveDispatchAssignmentStatus = (
 };
 
 const isTerminalDispatchAssignmentStatus = (status: TeamDispatchAssignmentStatus): boolean => {
-  return status === "approved" || status === "completed" || status === "failed";
+  return (
+    status === "approved" ||
+    status === "completed" ||
+    status === "superseded" ||
+    status === "failed"
+  );
 };
 
 export const isTerminalThreadStatus = (status: TeamThreadStatus): boolean => {
@@ -334,12 +378,18 @@ const deriveDispatchThreadStatus = (thread: TeamThreadRecord): TeamThreadStatus 
       return "approved";
     case "completed":
       return "completed";
+    case "superseded":
+      return "needs_revision";
     case "failed":
       return "failed";
   }
 };
 
 const deriveThreadStatus = (thread: TeamThreadRecord): TeamThreadStatus => {
+  if (thread.run?.status === "failed") {
+    return "failed";
+  }
+
   return deriveDispatchThreadStatus(thread) ?? thread.run?.status ?? deriveLegacyThreadStatus(thread);
 };
 
@@ -347,6 +397,7 @@ const deriveThreadLastError = (thread: TeamThreadRecord): string | null => {
   const latestAssignment = getLatestDispatchAssignment(thread);
   const laneError =
     latestAssignment?.lanes.find((lane) => lane.lastError)?.lastError ??
+    latestAssignment?.humanFeedback.at(-1)?.message ??
     latestAssignment?.plannerNotes.at(-1)?.message ??
     null;
 
@@ -429,10 +480,12 @@ const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
     latestAssignmentStatus: latestAssignment?.status ?? null,
     latestPlanSummary: latestAssignment?.plannerSummary ?? null,
     latestBranchPrefix: latestAssignment?.branchPrefix ?? null,
+    latestCanonicalBranchName: latestAssignment?.canonicalBranchName ?? null,
     dispatchWorkerCount: latestAssignment?.workerCount ?? 0,
     workerCounts: countWorkerLanes(workerLanes),
     workerLanes,
     plannerNotes: latestAssignment?.plannerNotes ?? [],
+    humanFeedback: latestAssignment?.humanFeedback ?? [],
   };
 };
 

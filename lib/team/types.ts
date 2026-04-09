@@ -44,6 +44,16 @@ export type TeamPlannerNote = {
   createdAt: string;
 };
 
+export type TeamHumanFeedbackScope = "assignment" | "proposal";
+
+export type TeamHumanFeedbackRecord = {
+  id: string;
+  scope: TeamHumanFeedbackScope;
+  laneId: string | null;
+  message: string;
+  createdAt: string;
+};
+
 export type TeamWorkerEventActor = "planner" | "coder" | "reviewer" | "system" | "human";
 
 export type TeamWorkerEvent = {
@@ -63,6 +73,7 @@ export type TeamPullRequestRecord = {
   requestedAt: string;
   humanApprovalRequestedAt: string | null;
   humanApprovedAt: string | null;
+  machineReviewedAt: string | null;
   updatedAt: string;
   url: string | null;
 };
@@ -73,6 +84,8 @@ export type TeamWorkerLaneRecord = {
   status: TeamWorkerLaneStatus;
   taskTitle: string | null;
   taskObjective: string | null;
+  proposalChangeName: string | null;
+  proposalPath: string | null;
   branchName: string | null;
   baseBranch: string | null;
   worktreePath: string | null;
@@ -80,6 +93,9 @@ export type TeamWorkerLaneRecord = {
   latestCoderSummary: string | null;
   latestReviewerSummary: string | null;
   latestActivity: string | null;
+  approvalRequestedAt: string | null;
+  approvalGrantedAt: string | null;
+  queuedAt: string | null;
   runCount: number;
   revisionCount: number;
   requeueReason: "reviewer_requested_changes" | "planner_detected_conflict" | null;
@@ -97,6 +113,7 @@ export type TeamDispatchAssignmentStatus =
   | "awaiting_human_approval"
   | "approved"
   | "completed"
+  | "superseded"
   | "failed";
 
 export type TeamDispatchAssignment = {
@@ -110,10 +127,14 @@ export type TeamDispatchAssignment = {
   plannerSummary: string | null;
   plannerDeliverable: string | null;
   branchPrefix: string | null;
+  canonicalBranchName: string | null;
   baseBranch: string | null;
   workerCount: number;
   lanes: TeamWorkerLaneRecord[];
   plannerNotes: TeamPlannerNote[];
+  humanFeedback: TeamHumanFeedbackRecord[];
+  supersededAt: string | null;
+  supersededReason: string | null;
 };
 
 export type TeamWorkerLaneCounts = {

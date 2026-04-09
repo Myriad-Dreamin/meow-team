@@ -160,7 +160,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
           result: runState.result,
         });
         setNotice(
-          `Planner dispatch started on thread ${payload.threadId}. Follow the live status board below while ${workerCount} background coder/reviewer lane${workerCount === 1 ? "" : "s"} keep working.`,
+          `Planner proposal generation started on thread ${payload.threadId}. Follow the live status board below, approve the proposals you want, and the coding-review queue will pick them up from there.`,
         );
         return;
       }
@@ -203,12 +203,13 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
         <h2>Continuous Assignment Console</h2>
         <p className="section-copy">
           Reuse the same thread ID to keep the planning conversation continuous. The planner
-          dispatches up to {workerCount} dedicated coder/reviewer lanes, each with its own branch,
-          worktree, and pull request lifecycle.
+          creates up to {workerCount} proposals for the current request group. Human approval then
+          feeds the coding-review queue, with each approved proposal using its own branch and
+          reusable worktree.
         </p>
         {hasRepositories ? (
           <p className="field-hint">
-            Select a repository before dispatching work. Only repositories discovered from
+            Select a repository before planning proposals. Only repositories discovered from
             directories configured in `team.config.ts` can be selected here.
           </p>
         ) : null}
@@ -222,7 +223,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
             rows={8}
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Ship a new onboarding flow, clean up the implementation, and have the reviewer call out risk."
+            placeholder="Plan multiple proposals for a new onboarding flow, wait for human approval, then queue coding and machine review for the approved proposals."
             disabled={disabled || isRunning}
           />
         </label>
@@ -285,7 +286,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
         ) : null}
 
         <button className="primary-button" type="submit" disabled={disabled || isRunning}>
-          {isRunning ? "Planning and dispatching lanes..." : "Plan and Dispatch"}
+          {isRunning ? "Planning proposals..." : "Plan Proposals"}
         </button>
       </form>
 

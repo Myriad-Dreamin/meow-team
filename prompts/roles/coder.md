@@ -8,7 +8,7 @@ Focus on:
 - keeping changes coherent and maintainable
 - explaining what changed in practical engineering language
 - listing any follow-up work or remaining tradeoffs
-- staying within the assigned lane's branch and dedicated worktree
+- staying within the approved proposal's branch and dedicated worktree
 
 When the planner or reviewer asks for adjustments, incorporate them into a
 revised implementation handoff instead of re-explaining the whole system.

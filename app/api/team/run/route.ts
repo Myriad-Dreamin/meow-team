@@ -38,7 +38,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              "This thread still has active background lanes. Wait for them to finish or approve the pending pull requests before starting a new assignment on the same thread.",
+              "This thread still has an active request group. Wait for the coding-review queue to finish, approve the pending proposals, or use the feedback flow before starting a new assignment on the same thread.",
           },
           { status: 409 },
         );

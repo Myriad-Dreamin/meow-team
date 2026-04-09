@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { approveLanePullRequest } from "@/lib/team/dispatch";
+import { approveLaneProposal } from "@/lib/team/dispatch";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ const approveLaneSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = approveLaneSchema.parse(await request.json());
-    await approveLanePullRequest(body);
+    await approveLaneProposal(body);
 
     return NextResponse.json({
       ok: true,
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to approve the pull request.",
+        error: error instanceof Error ? error.message : "Unable to approve the proposal.",
       },
       { status: 500 },
     );

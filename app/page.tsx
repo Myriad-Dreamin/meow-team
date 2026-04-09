@@ -41,7 +41,7 @@ export default async function HomePage() {
           <article>
             <span className="metric-label">Workflow</span>
             <strong>{`planner -> ${teamConfig.dispatch.workerCount}x(coder + reviewer)`}</strong>
-            <p>Planner dispatches background coder/reviewer lanes with dedicated branches and worktrees.</p>
+            <p>Planner creates proposal lanes first, then approved proposals flow into background coding and machine review.</p>
           </article>
           <article>
             <span className="metric-label">Codex Backend</span>
@@ -63,7 +63,7 @@ export default async function HomePage() {
           <article>
             <span className="metric-label">Parallel Lanes</span>
             <strong>{teamConfig.dispatch.workerCount}</strong>
-            <p>Idle until the planner dispatches work, then tracked live through coding, review, and approval.</p>
+            <p>Idle until a human approves a proposal, then tracked live through coding, review, and replanning feedback.</p>
           </article>
         </div>
       </section>
@@ -88,7 +88,7 @@ export default async function HomePage() {
             <h2>Owned Team Settings</h2>
             <p className="section-copy">
               Everything that defines the active team lives in one file: owner, workflow, storage,
-              model settings, dispatch lanes, and allowed local repository directories.
+              model settings, proposal lanes, reusable worktree roots, and allowed local repository directories.
             </p>
           </div>
 
@@ -111,7 +111,7 @@ defineTeamConfig({
             <p className="section-copy">
               Each role comes from a Markdown prompt file. To add a new role, create a new prompt
               and add its role ID to the workflow in `team.config.ts`. The planner remains the
-              dispatch coordinator while coder and reviewer prompts are reused inside each worker lane.
+              proposal coordinator while coder and reviewer prompts are reused inside each approved proposal lane.
             </p>
           </div>
 
@@ -132,7 +132,7 @@ defineTeamConfig({
 
       <TeamConsole
         disabled={!hasApiKey}
-        initialPrompt="Dispatch parallel coder and reviewer lanes for a new onboarding flow, keep branches isolated per lane, and request human approval once each pull request is ready."
+        initialPrompt="Create multiple implementation proposals for a new onboarding flow, wait for human approval, and then queue coding plus machine review for the approved proposals."
         repositories={availableRepositories}
         workerCount={teamConfig.dispatch.workerCount}
       />
@@ -188,9 +188,9 @@ defineTeamConfig({
           </div>
           <p className="section-copy">
             The planner stores its AgentKit thread history in local JSON, while background worker
-            lanes persist branch, worktree, pull request, and approval state alongside the thread.
-            Reusing a thread ID keeps the same planning conversation alive after the current lane
-            set finishes.
+            lanes persist proposal, branch, worktree, queue, pull request, and feedback state
+            alongside the thread. Reusing a thread ID keeps the same planning conversation alive
+            after the current request-group cycle finishes.
           </p>
         </section>
       </section>

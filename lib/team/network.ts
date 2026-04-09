@@ -5,6 +5,7 @@ import { createSaveHandoffTool, formatTextMessage, summarizeHandoffs } from "@/l
 import { createPlannerDispatchAssignment, ensurePendingDispatchWork } from "@/lib/team/dispatch";
 import { createTeamHistory } from "@/lib/team/history";
 import { createTeamModel, ensureOpenAiApiKey } from "@/lib/team/model";
+import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
@@ -61,7 +62,7 @@ const createPlannerDispatchTool = () => {
   return createTool({
     name: "dispatch_parallel_work",
     description:
-      "Submit the planner's implementation plan to the backend so dedicated coder and reviewer lanes start running in the background.",
+      "Register multiple planner proposals for the current request. Human approval is required before any coding-review lane starts.",
     parameters: z.object({
       planSummary: z.string().trim().min(1),
       plannerDeliverable: z.string().trim().min(1),
@@ -119,15 +120,20 @@ const createPlannerSystemPrompt = (prompt: string) => {
       `Configured workflow: ${state.workflow.join(" -> ")}`,
       `Current assignment number: ${state.assignmentNumber}.`,
       `Configured background lanes: ${teamConfig.dispatch.workerCount} coder+reviewer pairs.`,
-      `Each active lane gets its own branch, its own worktree, its own reviewer, and its own pull request lifecycle.`,
+      `Each proposal gets its own canonical branch namespace, dedicated worktree path, and coding-review lifecycle once a human approves it.`,
+      `OpenSpec context:`,
+      describeLocalOpenSpecSkills(),
+      buildOpenSpecSkillReference(),
       `Your role prompt is below:`,
       prompt.trim(),
       `Current handoffs for this assignment:`,
       summarizeHandoffs(state),
       `Rules:`,
-      `- Create a practical engineering plan and split it into at most ${teamConfig.dispatch.workerCount} independently executable work items.`,
-      `- When the request should trigger implementation, call dispatch_parallel_work exactly once.`,
-      `- Use branchPrefix as a short, git-friendly theme for the assignment. The backend creates per-lane branch names and worktrees.`,
+      `- Create a practical engineering plan and split it into between 1 and ${teamConfig.dispatch.workerCount} concrete proposals for the request group.`,
+      `- Call dispatch_parallel_work exactly once to persist those proposals, then stop. Do not assume coding starts before a human approves a proposal.`,
+      `- Align each proposal with the local OpenSpec flow so the backend can materialize a real OpenSpec change for it.`,
+      `- Each proposal title should be concise and stable enough to become part of an OpenSpec change name.`,
+      `- Use branchPrefix as a short, git-friendly theme for the request group. The backend creates a canonical branch namespace plus per-proposal branch names and reusable worktrees.`,
       `- Always call save_handoff exactly once when you are done planning.`,
       `- If no repository is selected, explain that dispatch is blocked and do not invent repository operations.`,
     ].join("\n\n");
