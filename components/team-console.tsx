@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useState, type FormEvent } from "react";
+import { startTransition, useEffect, useRef, useState, type FormEvent } from "react";
 import type { TeamRunSummary } from "@/lib/team/network";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
@@ -231,6 +231,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
   const [activeLogStartedAt, setActiveLogStartedAt] = useState<string | null>(null);
   const [logEntries, setLogEntries] = useState<TeamCodexLogEntry[]>([]);
   const [logError, setLogError] = useState<string | null>(null);
+  const stderrScrollRef = useRef<HTMLPreElement | null>(null);
 
   const isRunning = runState.status === "running";
   const hasRepositories = repositories.length > 0;
@@ -291,6 +292,15 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
       window.clearInterval(intervalId);
     };
   }, [activeThreadId]);
+
+  useEffect(() => {
+    const stderrElement = stderrScrollRef.current;
+    if (!stderrElement) {
+      return;
+    }
+
+    stderrElement.scrollTop = stderrElement.scrollHeight;
+  }, [stderrOutput]);
 
   const handleSubmit = async (formData: FormData) => {
     const nextPrompt = String(formData.get("prompt") ?? "").trim();
@@ -581,7 +591,9 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
                   {stderrEntries.length} message{stderrEntries.length === 1 ? "" : "s"}
                 </span>
               </div>
-              <pre className="codex-log-message codex-stderr-message">{stderrOutput}</pre>
+              <pre ref={stderrScrollRef} className="codex-log-message codex-stderr-message">
+                {stderrOutput}
+              </pre>
             </article>
           ) : null}
 
