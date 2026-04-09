@@ -62,15 +62,45 @@ the environment provides a model override.
 ## Project Layout
 
 - [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts):
-  single source of truth for the team owner, workflow, storage, and model.
+  single source of truth for the team owner, workflow, storage, model, and
+  allowed local repository directories.
 - [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles):
   Markdown system prompts for each role.
 - [`lib/team/network.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/network.ts):
   AgentKit network creation, routing, and state.
 - [`lib/team/history.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/history.ts):
   persistent thread storage for continuous runs.
+- [`lib/team/repositories.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/repositories.ts):
+  safe server-side repository discovery limited to configured directories.
 - [`app/api/team/run/route.ts`](/home/kamiyoru/work/ts/meow-team/app/api/team/run/route.ts):
   API endpoint that runs the team for a prompt and returns the handoffs.
+
+## Scoped Local Repositories
+
+You can expose local repositories to the UI by listing allowed directories in
+[`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts):
+
+```ts
+import path from "node:path";
+
+defineTeamConfig({
+  // ...
+  repositories: {
+    roots: [
+      {
+        id: "local-workspace",
+        label: "Local Workspace",
+        directory: path.resolve(process.cwd(), ".."),
+      },
+    ],
+  },
+});
+```
+
+The app scans each configured directory itself plus its direct child
+directories for a `.git` entry. Only repositories discovered inside those
+configured directories appear in the selector, and the API revalidates the
+selection on every run.
 
 ## Adding a Role
 

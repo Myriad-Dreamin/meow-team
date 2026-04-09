@@ -11,6 +11,8 @@ import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import { createTeamHistory } from "@/lib/team/history";
 import { loadWorkflowRolePrompts, type RolePrompt } from "@/lib/team/prompts";
+import { findConfiguredRepository } from "@/lib/team/repositories";
+import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
 
 export type TeamRoleDecision = "continue" | "approved" | "needs_revision";
@@ -31,6 +33,7 @@ export type TeamRunState = {
   teamName: string;
   ownerName: string;
   objective: string;
+  selectedRepository: TeamRepositoryOption | null;
   workflow: string[];
   handoffs: Partial<Record<string, TeamRoleHandoff>>;
   handoffCounter: number;
@@ -43,6 +46,7 @@ export type TeamRunSummary = {
   threadId: string | null;
   assignmentNumber: number;
   approved: boolean;
+  repository: TeamRepositoryOption | null;
   workflow: string[];
   handoffs: TeamRoleHandoff[];
   steps: Array<{
@@ -73,12 +77,16 @@ const createTeamModel = () => {
   }) as unknown as ReturnType<typeof agentKitOpenAi>;
 };
 
-const buildInitialState = (forceReset: boolean): TeamRunState => {
+const buildInitialState = (
+  forceReset: boolean,
+  selectedRepository: TeamRepositoryOption | null,
+): TeamRunState => {
   return {
     teamId: teamConfig.id,
     teamName: teamConfig.name,
     ownerName: teamConfig.owner.name,
     objective: teamConfig.owner.objective,
+    selectedRepository,
     workflow: teamConfig.workflow,
     handoffs: {},
     handoffCounter: 0,
@@ -175,12 +183,16 @@ const createSaveHandoffTool = (role: RolePrompt) => {
 
 const createRoleSystemPrompt = (role: RolePrompt) => {
   return async ({ network }: { network?: { state: { data: TeamRunState } } }) => {
-    const state = network?.state.data ?? buildInitialState(false);
+    const state = network?.state.data ?? buildInitialState(false, null);
+    const repositoryContext = state.selectedRepository
+      ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
+      : "Selected repository: none.";
 
     return [
       `You are ${role.name}, a role inside the ${state.teamName} engineering harness.`,
       `Owner: ${state.ownerName}.`,
       `Shared objective: ${state.objective}`,
+      repositoryContext,
       `Workflow order: ${state.workflow.join(" -> ")}`,
       `Current assignment number: ${state.assignmentNumber}.`,
       `Your role prompt is below:`,
@@ -289,14 +301,24 @@ export const getTeamRuntime = async () => {
 export const runTeam = async ({
   input,
   threadId,
+  repositoryId,
   reset,
 }: {
   input: string;
   threadId?: string;
+  repositoryId?: string;
   reset?: boolean;
 }): Promise<TeamRunSummary> => {
   const runtime = await getTeamRuntime();
-  const state = createState(buildInitialState(Boolean(reset)), {
+  const selectedRepository = await findConfiguredRepository(teamConfig, repositoryId);
+
+  if (repositoryId && !selectedRepository) {
+    throw new Error(
+      "Selected repository is not available. Only repositories discovered from directories listed in team.config.ts can be used.",
+    );
+  }
+
+  const state = createState(buildInitialState(Boolean(reset), selectedRepository), {
     threadId,
   });
   const run = await runtime.network.run(input, { state });
@@ -317,6 +339,7 @@ export const runTeam = async ({
     threadId: run.state.threadId ?? null,
     assignmentNumber: run.state.data.assignmentNumber,
     approved: handoffs.at(-1)?.decision === "approved",
+    repository: run.state.data.selectedRepository,
     workflow: runtime.config.workflow,
     handoffs,
     steps,

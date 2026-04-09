@@ -124,7 +124,10 @@ export const createTeamHistory = (threadFile: string): HistoryConfig<TeamRunStat
       }
 
       const storedData = thread.data;
-      const shouldResetAssignment = state.data.forceReset || storedData.latestInput !== input;
+      const shouldResetAssignment =
+        state.data.forceReset ||
+        storedData.latestInput !== input ||
+        (storedData.selectedRepository?.id ?? null) !== (state.data.selectedRepository?.id ?? null);
       const assignmentNumber = shouldResetAssignment
         ? (storedData.assignmentNumber ?? 0) + 1
         : storedData.assignmentNumber;

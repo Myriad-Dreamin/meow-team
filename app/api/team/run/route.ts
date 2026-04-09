@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 const runTeamSchema = z.object({
   input: z.string().trim().min(1, "A prompt is required."),
   threadId: z.string().trim().min(1).optional(),
+  repositoryId: z.string().trim().min(1).optional(),
   reset: z.boolean().optional(),
 });
 

@@ -2,10 +2,12 @@
 
 import { startTransition, useState } from "react";
 import type { TeamRunSummary } from "@/lib/team/network";
+import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 
 type TeamConsoleProps = {
   disabled: boolean;
   initialPrompt: string;
+  repositories: TeamRepositoryOption[];
 };
 
 type RunState =
@@ -36,17 +38,20 @@ const initialRunState: RunState = {
   result: null,
 };
 
-export function TeamConsole({ disabled, initialPrompt }: TeamConsoleProps) {
+export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConsoleProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [threadId, setThreadId] = useState("");
+  const [repositoryId, setRepositoryId] = useState("");
   const [reset, setReset] = useState(false);
   const [runState, setRunState] = useState<RunState>(initialRunState);
 
   const isRunning = runState.status === "running";
+  const hasRepositories = repositories.length > 0;
 
   const handleSubmit = async (formData: FormData) => {
     const nextPrompt = String(formData.get("prompt") ?? "").trim();
     const nextThreadId = String(formData.get("threadId") ?? "").trim();
+    const nextRepositoryId = String(formData.get("repositoryId") ?? "").trim();
     const shouldReset = formData.get("reset") === "on";
 
     if (!nextPrompt) {
@@ -60,6 +65,7 @@ export function TeamConsole({ disabled, initialPrompt }: TeamConsoleProps) {
 
     setPrompt(nextPrompt);
     setThreadId(nextThreadId);
+    setRepositoryId(nextRepositoryId);
     setReset(shouldReset);
     setRunState({
       status: "running",
@@ -76,6 +82,7 @@ export function TeamConsole({ disabled, initialPrompt }: TeamConsoleProps) {
         body: JSON.stringify({
           input: nextPrompt,
           threadId: nextThreadId || undefined,
+          repositoryId: nextRepositoryId || undefined,
           reset: shouldReset,
         }),
       });
@@ -110,6 +117,12 @@ export function TeamConsole({ disabled, initialPrompt }: TeamConsoleProps) {
           Reuse the same thread ID to keep the team continuous. Enable reset to start a fresh
           planner-to-reviewer cycle on the same thread.
         </p>
+        {hasRepositories ? (
+          <p className="field-hint">
+            Only repositories discovered from directories configured in `team.config.ts` can be
+            selected here.
+          </p>
+        ) : null}
       </div>
 
       <form
@@ -144,6 +157,39 @@ export function TeamConsole({ disabled, initialPrompt }: TeamConsoleProps) {
             />
           </label>
 
+          {hasRepositories ? (
+            <label className="field">
+              <span>Repository</span>
+              <select
+                name="repositoryId"
+                value={repositoryId}
+                onChange={(event) => setRepositoryId(event.target.value)}
+                disabled={disabled || isRunning}
+              >
+                <option value="">No repository selected</option>
+                {repositories.map((repository) => (
+                  <option key={repository.id} value={repository.id}>
+                    {repository.rootLabel} /{" "}
+                    {repository.relativePath === "." ? repository.name : repository.relativePath}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="checkbox-field">
+              <input
+                name="reset"
+                type="checkbox"
+                checked={reset}
+                onChange={(event) => setReset(event.target.checked)}
+                disabled={disabled || isRunning}
+              />
+              <span>Start a fresh assignment cycle</span>
+            </label>
+          )}
+        </div>
+
+        {hasRepositories ? (
           <label className="checkbox-field">
             <input
               name="reset"
@@ -154,7 +200,7 @@ export function TeamConsole({ disabled, initialPrompt }: TeamConsoleProps) {
             />
             <span>Start a fresh assignment cycle</span>
           </label>
-        </div>
+        ) : null}
 
         <button className="primary-button" type="submit" disabled={disabled || isRunning}>
           {isRunning ? "Running planner, coder, reviewer..." : "Run Team"}
@@ -177,6 +223,13 @@ export function TeamConsole({ disabled, initialPrompt }: TeamConsoleProps) {
             <div>
               <span className="meta-label">Review</span>
               <p>{runState.result.approved ? "Approved" : "Needs attention"}</p>
+            </div>
+            <div>
+              <span className="meta-label">Repository</span>
+              <p>{runState.result.repository?.name ?? "None selected"}</p>
+              {runState.result.repository ? (
+                <p className="meta-detail">{runState.result.repository.path}</p>
+              ) : null}
             </div>
           </div>
 

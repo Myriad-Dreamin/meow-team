@@ -6,6 +6,21 @@ const roleIdSchema = z
   .min(1)
   .regex(/^[a-z0-9-]+$/, "Role IDs must use lowercase letters, numbers, and dashes only.");
 
+const repositoryRootIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(
+    /^[a-z0-9-]+$/,
+    "Repository root IDs must use lowercase letters, numbers, and dashes only.",
+  );
+
+const repositoryRootSchema = z.object({
+  id: repositoryRootIdSchema,
+  label: z.string().trim().min(1),
+  directory: z.string().trim().min(1),
+});
+
 export const teamConfigSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
@@ -25,6 +40,17 @@ export const teamConfigSchema = z.object({
   storage: z.object({
     threadFile: z.string().trim().min(1),
   }),
+  repositories: z
+    .object({
+      roots: z
+        .array(repositoryRootSchema)
+        .min(1)
+        .refine(
+          (roots) => new Set(roots.map((root) => root.id)).size === roots.length,
+          "Repository root IDs must be unique.",
+        ),
+    })
+    .optional(),
 });
 
 export type TeamConfig = z.infer<typeof teamConfigSchema>;

@@ -56,6 +56,7 @@ a {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -273,11 +274,12 @@ main {
 }
 
 .field-row {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
 }
 
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -290,9 +292,19 @@ main {
 }
 
 .field input:focus,
+.field select:focus,
 .field textarea:focus {
   border-color: var(--line-strong);
   box-shadow: 0 0 0 4px rgba(125, 242, 198, 0.08);
+}
+
+.field-hint,
+.meta-detail,
+.repository-root-path {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .checkbox-field {
@@ -301,6 +313,7 @@ main {
   gap: 10px;
   min-height: 52px;
   padding: 0 12px;
+  justify-self: start;
   border-radius: 16px;
   border: 1px solid var(--line);
   background: rgba(6, 16, 30, 0.72);
@@ -340,7 +353,7 @@ main {
 
 .result-meta {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   padding: 16px;
   border-radius: 22px;
@@ -412,6 +425,22 @@ main {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.repository-root-list {
+  display: grid;
+  gap: 12px;
+}
+
+.repository-root-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.repository-root-card code {
+  word-break: break-word;
 }
 
 .library-pill {

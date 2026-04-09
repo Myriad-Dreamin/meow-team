@@ -1,14 +1,17 @@
 import { TeamConsole } from "@/components/team-console";
 import { teamConfig } from "@/team.config";
 import { listAvailableRolePrompts, loadWorkflowRolePrompts } from "@/lib/team/prompts";
+import { listConfiguredRepositories, resolveConfiguredRepositoryRoots } from "@/lib/team/repositories";
 import { codexUserConfigDisplayPaths, teamRuntimeConfig } from "@/lib/team/runtime-config";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [workflowRoles, availableRoles] = await Promise.all([
+  const configuredRepositoryRoots = resolveConfiguredRepositoryRoots(teamConfig);
+  const [workflowRoles, availableRoles, availableRepositories] = await Promise.all([
     loadWorkflowRolePrompts(teamConfig),
     listAvailableRolePrompts(),
+    listConfiguredRepositories(teamConfig),
   ]);
 
   const hasApiKey = teamRuntimeConfig.hasApiKey;
@@ -42,6 +45,18 @@ export default async function HomePage() {
             <strong>{teamConfig.model.model}</strong>
             <p>OpenAI Responses API through the Inngest AI adapter.</p>
           </article>
+          <article>
+            <span className="metric-label">Repositories</span>
+            <strong>
+              {configuredRepositoryRoots.length > 0
+                ? `${availableRepositories.length} available`
+                : "Not configured"}
+            </strong>
+            <p>
+              Only repositories found inside directories listed in `team.config.ts` appear in the
+              selector.
+            </p>
+          </article>
         </div>
       </section>
 
@@ -65,7 +80,7 @@ export default async function HomePage() {
             <h2>Owned Team Settings</h2>
             <p className="section-copy">
               Everything that defines the active team lives in one file: owner, workflow, storage,
-              and model settings.
+              model settings, and allowed local repository directories.
             </p>
           </div>
 
@@ -75,6 +90,7 @@ defineTeamConfig({
   owner: { name: "${teamConfig.owner.name}" },
   workflow: ${JSON.stringify(teamConfig.workflow)},
   model: { model: "${teamConfig.model.model}" },
+  repositories: { roots: ${configuredRepositoryRoots.length} },
   maxIterations: ${teamConfig.maxIterations},
 });`}</pre>
         </section>
@@ -107,6 +123,7 @@ defineTeamConfig({
       <TeamConsole
         disabled={!hasApiKey}
         initialPrompt="Design a new role prompt for a researcher, add it to the workflow, and make the reviewer call out any missing validation."
+        repositories={availableRepositories}
       />
 
       <section className="footer-grid">
@@ -122,6 +139,33 @@ defineTeamConfig({
               </span>
             ))}
           </div>
+        </section>
+
+        <section className="info-panel">
+          <div className="section-header compact">
+            <p className="eyebrow">Repositories</p>
+            <h2>Scoped Local Access</h2>
+          </div>
+          <p className="section-copy">
+            The repository selector only lists repositories discovered inside these configured
+            directories.
+          </p>
+          {configuredRepositoryRoots.length > 0 ? (
+            <div className="repository-root-list">
+              {configuredRepositoryRoots.map((root) => (
+                <article className="repository-root-card" key={root.id}>
+                  <p className="timeline-title">{root.label}</p>
+                  <p className="repository-root-path">
+                    <code>{root.directory}</code>
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="section-copy">
+              Add `repositories.roots` in `team.config.ts` to enable local repository selection.
+            </p>
+          )}
         </section>
 
         <section className="info-panel">

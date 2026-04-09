@@ -1,3 +1,4 @@
+import path from "node:path";
 import { defineTeamConfig } from "@/lib/team/config";
 import { teamRuntimeConfig } from "@/lib/team/runtime-config";
 
@@ -20,5 +21,14 @@ export const teamConfig = defineTeamConfig({
   maxIterations: 10,
   storage: {
     threadFile: "data/team-threads.json",
+  },
+  repositories: {
+    roots: [
+      {
+        id: "local-workspace",
+        label: "Local Workspace",
+        directory: path.resolve(process.cwd(), ".."),
+      },
+    ],
   },
 });
