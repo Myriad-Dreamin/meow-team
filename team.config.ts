@@ -22,6 +22,12 @@ export const teamConfig = defineTeamConfig({
   storage: {
     threadFile: "data/team-threads.json",
   },
+  dispatch: {
+    workerCount: 3,
+    branchPrefix: "team-dispatch",
+    baseBranch: "main",
+    worktreeRoot: "/tmp/meow-team-worktrees",
+  },
   repositories: {
     roots: [
       {

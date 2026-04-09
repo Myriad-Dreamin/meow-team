@@ -21,6 +21,13 @@ const repositoryRootSchema = z.object({
   directory: z.string().trim().min(1),
 });
 
+const dispatchConfigSchema = z.object({
+  workerCount: z.number().int().positive(),
+  branchPrefix: z.string().trim().min(1),
+  baseBranch: z.string().trim().min(1),
+  worktreeRoot: z.string().trim().min(1),
+});
+
 export const teamConfigSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
@@ -40,6 +47,7 @@ export const teamConfigSchema = z.object({
   storage: z.object({
     threadFile: z.string().trim().min(1),
   }),
+  dispatch: dispatchConfigSchema,
   repositories: z
     .object({
       roots: z

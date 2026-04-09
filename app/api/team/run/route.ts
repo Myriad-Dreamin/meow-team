@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
-import { markTeamThreadFailed } from "@/lib/team/history";
+import { markTeamThreadFailed, threadHasActiveDispatchAssignment } from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
 import { runTeam } from "@/lib/team/network";
@@ -26,6 +26,23 @@ export async function POST(request: Request) {
         },
         { status: 500 },
       );
+    }
+
+    if (body.threadId) {
+      const hasActiveDispatch = await threadHasActiveDispatchAssignment(
+        teamConfig.storage.threadFile,
+        body.threadId,
+      );
+
+      if (hasActiveDispatch) {
+        return NextResponse.json(
+          {
+            error:
+              "This thread still has active background lanes. Wait for them to finish or approve the pending pull requests before starting a new assignment on the same thread.",
+          },
+          { status: 409 },
+        );
+      }
     }
 
     const selectedRepository = await findConfiguredRepository(teamConfig, body.repositoryId);

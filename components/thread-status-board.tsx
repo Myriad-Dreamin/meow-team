@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { TeamThreadStatus, TeamThreadSummary } from "@/lib/team/history";
+import { startTransition, useEffect, useState } from "react";
+import type { TeamThreadSummary } from "@/lib/team/history";
+import type { TeamPullRequestStatus, TeamThreadStatus, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 type ThreadStatusBoardProps = {
   initialThreads: TeamThreadSummary[];
@@ -13,11 +14,21 @@ type TeamThreadsResponse = {
 
 const POLL_INTERVAL_MS = 5000;
 
-const statusLabels: Record<TeamThreadStatus, string> = {
+const threadStatusLabels: Record<TeamThreadStatus, string> = {
+  planning: "Planning",
   running: "Running",
+  awaiting_human_approval: "Awaiting Approval",
   completed: "Completed",
   approved: "Approved",
   needs_revision: "Needs Revision",
+  failed: "Failed",
+};
+
+const pullRequestStatusLabels: Record<TeamPullRequestStatus, string> = {
+  draft: "Draft PR",
+  awaiting_human_approval: "Awaiting Approval",
+  approved: "Approved",
+  conflict: "Conflict",
   failed: "Failed",
 };
 
@@ -37,6 +48,20 @@ const isThreadsResponse = (value: unknown): value is TeamThreadsResponse => {
   return isRecord(value) && Array.isArray(value.threads);
 };
 
+const fetchThreads = async (): Promise<TeamThreadSummary[]> => {
+  const response = await fetch("/api/team/threads", {
+    cache: "no-store",
+  });
+  const rawPayload = await response.text();
+  const payload = tryParseJson(rawPayload);
+
+  if (!response.ok || !isThreadsResponse(payload)) {
+    throw new Error("Unable to refresh live thread status.");
+  }
+
+  return payload.threads;
+};
+
 const formatTimestamp = (value: string | null): string => {
   if (!value) {
     return "Not recorded";
@@ -54,47 +79,97 @@ const formatThreadId = (threadId: string): string => {
   return threadId.slice(0, 8);
 };
 
-const describeProgress = (thread: TeamThreadSummary): string => {
-  if (thread.status === "failed" && thread.lastError) {
-    return "Last run failed before completion.";
+const describeThreadProgress = (thread: TeamThreadSummary): string => {
+  if (thread.lastError) {
+    return thread.lastError;
   }
 
-  if (thread.status === "running") {
-    if (thread.nextRoleId) {
-      return thread.handoffCount > 0 ? `Next role: ${thread.nextRoleId}` : `Waiting for ${thread.nextRoleId}`;
-    }
-
-    return "Run is still in progress.";
+  if (thread.latestPlanSummary) {
+    return thread.latestPlanSummary;
   }
 
-  if (thread.latestRoleId) {
-    return `Latest role: ${thread.latestRoleId}`;
+  if (thread.latestInput) {
+    return thread.latestInput;
   }
 
-  return "No role handoffs recorded yet.";
+  return "No planner summary recorded yet.";
+};
+
+const describeLane = (lane: TeamWorkerLaneRecord): string => {
+  if (lane.status === "idle") {
+    return "Idle and waiting for planner work.";
+  }
+
+  if (lane.pullRequest?.status === "conflict") {
+    return "Planner detected a pull request conflict and requeued this lane.";
+  }
+
+  if (lane.requeueReason === "reviewer_requested_changes") {
+    return "Reviewer requested changes; the lane is queued for another coding pass.";
+  }
+
+  if (lane.requeueReason === "planner_detected_conflict") {
+    return "Planner detected a conflict; the lane is queued for conflict resolution.";
+  }
+
+  return lane.latestActivity ?? "Lane is active.";
+};
+
+const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
+  switch (lane.status) {
+    case "idle":
+      return "Idle";
+    case "queued":
+      return lane.pullRequest?.status === "conflict" ? "Queued for Conflict Fix" : "Queued";
+    case "coding":
+      return "Coding";
+    case "reviewing":
+      return "Reviewing";
+    case "awaiting_human_approval":
+      return "Awaiting Approval";
+    case "approved":
+      return "Approved";
+    case "failed":
+      return "Failed";
+  }
+};
+
+const getLaneStatusClassName = (lane: TeamWorkerLaneRecord): string => {
+  if (lane.status === "queued" && lane.pullRequest?.status === "conflict") {
+    return "status-conflict";
+  }
+
+  switch (lane.status) {
+    case "idle":
+      return "status-idle";
+    case "queued":
+      return "status-queued";
+    case "coding":
+      return "status-coding";
+    case "reviewing":
+      return "status-reviewing";
+    case "awaiting_human_approval":
+      return "status-awaiting_human_approval";
+    case "approved":
+      return "status-approved";
+    case "failed":
+      return "status-failed";
+  }
 };
 
 export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
   const [threads, setThreads] = useState(initialThreads);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [approvalKey, setApprovalKey] = useState<string | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
 
-    const refreshThreads = async () => {
+    const load = async () => {
       try {
-        const response = await fetch("/api/team/threads", {
-          cache: "no-store",
-        });
-        const rawPayload = await response.text();
-        const payload = tryParseJson(rawPayload);
-
-        if (!response.ok || !isThreadsResponse(payload)) {
-          throw new Error("Unable to refresh live thread status.");
-        }
-
+        const nextThreads = await fetchThreads();
         if (!isCancelled) {
-          setThreads(payload.threads);
+          setThreads(nextThreads);
           setRefreshError(null);
         }
       } catch (error) {
@@ -106,9 +181,11 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
       }
     };
 
-    void refreshThreads();
+    void load();
     const intervalId = window.setInterval(() => {
-      void refreshThreads();
+      if (!isCancelled) {
+        void load();
+      }
     }, POLL_INTERVAL_MS);
 
     return () => {
@@ -117,14 +194,56 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
     };
   }, []);
 
+  const handleApprove = (threadId: string, assignmentNumber: number, laneId: string) => {
+    const nextApprovalKey = `${threadId}:${assignmentNumber}:${laneId}`;
+    startTransition(() => {
+      setApprovalKey(nextApprovalKey);
+      void (async () => {
+        try {
+          const response = await fetch("/api/team/approval", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              threadId,
+              assignmentNumber,
+              laneId,
+            }),
+          });
+
+          const rawPayload = await response.text();
+          const payload = tryParseJson(rawPayload);
+
+          if (!response.ok) {
+            const message =
+              isRecord(payload) && typeof payload.error === "string"
+                ? payload.error
+                : "Unable to approve this pull request.";
+            throw new Error(message);
+          }
+
+          setThreads(await fetchThreads());
+          setRefreshError(null);
+        } catch (error) {
+          setRefreshError(
+            error instanceof Error ? error.message : "Unable to approve this pull request.",
+          );
+        } finally {
+          setApprovalKey((current) => (current === nextApprovalKey ? null : current));
+        }
+      })();
+    });
+  };
+
   return (
     <section className="info-panel">
       <div className="section-header">
         <p className="eyebrow">Living Threads</p>
-        <h2>Live Thread Status</h2>
+        <h2>Live Dispatch Status</h2>
         <p className="section-copy">
-          This board polls the local thread store so long-running assignments stay visible while
-          the backend continues working.
+          This board polls the local thread store so long-running planner dispatches, worker lanes,
+          pull requests, conflicts, and approvals stay visible while the backend keeps running.
         </p>
       </div>
 
@@ -137,9 +256,11 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
               <div className="thread-card-head">
                 <div>
                   <p className="timeline-title">Thread {formatThreadId(thread.threadId)}</p>
-                  <p className="thread-card-subtitle">{describeProgress(thread)}</p>
+                  <p className="thread-card-subtitle">{describeThreadProgress(thread)}</p>
                 </div>
-                <span className={`status-pill status-${thread.status}`}>{statusLabels[thread.status]}</span>
+                <span className={`status-pill status-${thread.status}`}>
+                  {threadStatusLabels[thread.status]}
+                </span>
               </div>
 
               <p className="thread-request">{thread.latestInput ?? "No request recorded yet."}</p>
@@ -154,8 +275,8 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                   <p>{thread.repository?.name ?? "None selected"}</p>
                 </div>
                 <div>
-                  <span className="meta-label">Latest Step</span>
-                  <p>{thread.latestRoleName ?? thread.latestRoleId ?? "Not started"}</p>
+                  <span className="meta-label">Workers</span>
+                  <p>{thread.dispatchWorkerCount || 0} configured</p>
                 </div>
                 <div>
                   <span className="meta-label">Updated</span>
@@ -164,10 +285,95 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
               </div>
 
               <div className="thread-meta-strip">
-                <span>{thread.stepCount} steps</span>
-                <span>{thread.userMessageCount} requests</span>
-                <span>{thread.handoffCount} handoffs</span>
+                <span>{thread.workerCounts.coding} coding</span>
+                <span>{thread.workerCounts.reviewing} reviewing</span>
+                <span>{thread.workerCounts.awaitingHumanApproval} awaiting approval</span>
+                <span>{thread.workerCounts.idle} idle</span>
               </div>
+
+              {thread.latestBranchPrefix ? (
+                <p className="thread-branch">Branch prefix: {thread.latestBranchPrefix}</p>
+              ) : null}
+
+              {thread.plannerNotes.length > 0 ? (
+                <div className="planner-note-list">
+                  {thread.plannerNotes.map((note) => (
+                    <p className="planner-note" key={note.id}>
+                      {note.message}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+
+              {thread.workerLanes.length > 0 ? (
+                <div className="lane-grid">
+                  {thread.workerLanes.map((lane) => {
+                    const currentApprovalKey = `${thread.threadId}:${thread.assignmentNumber}:${lane.laneId}`;
+                    const isApproving = approvalKey === currentApprovalKey;
+                    const canApprove =
+                      lane.status === "awaiting_human_approval" &&
+                      lane.pullRequest?.status === "awaiting_human_approval";
+
+                    return (
+                      <article className="lane-card" key={`${thread.threadId}-${lane.laneId}`}>
+                        <div className="lane-card-head">
+                          <div>
+                            <p className="timeline-title">Lane {lane.laneIndex}</p>
+                            <p className="lane-task-title">{lane.taskTitle ?? "Idle"}</p>
+                          </div>
+                          <span className={`status-pill ${getLaneStatusClassName(lane)}`}>
+                            {getLaneStatusLabel(lane)}
+                          </span>
+                        </div>
+
+                        <p className="lane-copy">{describeLane(lane)}</p>
+
+                        <div className="lane-meta-grid">
+                          <div>
+                            <span className="meta-label">Branch</span>
+                            <p>{lane.branchName ?? "Not allocated"}</p>
+                          </div>
+                          <div>
+                            <span className="meta-label">Worktree</span>
+                            <p>{lane.worktreePath ?? "Not allocated"}</p>
+                          </div>
+                          <div>
+                            <span className="meta-label">Runs</span>
+                            <p>{lane.runCount}</p>
+                          </div>
+                          <div>
+                            <span className="meta-label">Revisions</span>
+                            <p>{lane.revisionCount}</p>
+                          </div>
+                        </div>
+
+                        {lane.pullRequest ? (
+                          <div className="lane-pr-strip">
+                            <span>{pullRequestStatusLabels[lane.pullRequest.status]}</span>
+                            <span>{lane.pullRequest.title}</span>
+                            <span>{formatTimestamp(lane.pullRequest.updatedAt)}</span>
+                          </div>
+                        ) : null}
+
+                        {canApprove ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={isApproving}
+                            onClick={() =>
+                              handleApprove(thread.threadId, thread.assignmentNumber, lane.laneId)
+                            }
+                          >
+                            {isApproving ? "Recording approval..." : "Approve PR"}
+                          </button>
+                        ) : null}
+
+                        {lane.lastError ? <p className="error-callout">{lane.lastError}</p> : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : null}
 
               {thread.lastError ? <p className="error-callout">{thread.lastError}</p> : null}
             </article>

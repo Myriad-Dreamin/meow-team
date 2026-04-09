@@ -336,6 +336,23 @@ main {
   opacity: 0.65;
 }
 
+.secondary-button {
+  width: fit-content;
+  min-width: 168px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 12px 18px;
+  color: var(--text);
+  background: rgba(125, 242, 198, 0.12);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .error-callout {
   margin: 16px 0 0;
   padding: 12px 14px;
@@ -507,6 +524,78 @@ main {
   font-size: 0.9rem;
 }
 
+.thread-branch,
+.planner-note,
+.lane-copy,
+.lane-task-title {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.thread-branch {
+  margin-top: 14px;
+}
+
+.planner-note-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.planner-note {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(125, 242, 198, 0.2);
+  background: rgba(125, 242, 198, 0.08);
+}
+
+.lane-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 18px;
+}
+
+.lane-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(8, 20, 35, 0.82);
+}
+
+.lane-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lane-task-title {
+  margin-top: 8px;
+}
+
+.lane-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lane-meta-grid p {
+  margin: 10px 0 0;
+  word-break: break-word;
+}
+
+.lane-pr-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -518,10 +607,33 @@ main {
   letter-spacing: 0.09em;
 }
 
+.status-planning,
+.status-idle {
+  background: rgba(123, 169, 212, 0.12);
+  color: #9bc8ff;
+}
+
 .status-running,
-.status-completed {
+.status-completed,
+.status-queued {
   background: rgba(125, 242, 198, 0.12);
   color: var(--accent);
+}
+
+.status-coding {
+  background: rgba(111, 184, 255, 0.16);
+  color: #a8d4ff;
+}
+
+.status-reviewing,
+.status-awaiting_human_approval {
+  background: rgba(255, 201, 110, 0.14);
+  color: var(--warning);
+}
+
+.status-conflict {
+  background: rgba(255, 171, 110, 0.18);
+  color: #ffbb7d;
 }
 
 .status-approved {
@@ -544,7 +656,8 @@ main {
   .content-grid,
   .footer-grid,
   .field-row,
-  .result-meta {
+  .result-meta,
+  .lane-meta-grid {
     grid-template-columns: 1fr;
   }
 

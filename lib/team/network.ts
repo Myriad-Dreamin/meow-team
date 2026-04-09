@@ -1,31 +1,14 @@
-import {
-  createAgent,
-  createNetwork,
-  createState,
-  createTool,
-  openai,
-  type Message,
-} from "@inngest/agent-kit";
+import { createAgent, createNetwork, createState, createTool } from "@inngest/agent-kit";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
+import { createSaveHandoffTool, formatTextMessage, summarizeHandoffs } from "@/lib/team/agent-helpers";
+import { createPlannerDispatchAssignment, ensurePendingDispatchWork } from "@/lib/team/dispatch";
 import { createTeamHistory } from "@/lib/team/history";
-import { loadWorkflowRolePrompts, type RolePrompt } from "@/lib/team/prompts";
+import { createTeamModel, ensureOpenAiApiKey } from "@/lib/team/model";
+import { loadRolePrompt } from "@/lib/team/prompts";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
-import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
-
-export type TeamRoleDecision = "continue" | "approved" | "needs_revision";
-
-export type TeamRoleHandoff = {
-  roleId: string;
-  roleName: string;
-  summary: string;
-  deliverable: string;
-  decision: TeamRoleDecision;
-  sequence: number;
-  assignmentNumber: number;
-  updatedAt: string;
-};
+import type { TeamRoleHandoff } from "@/lib/team/types";
 
 export type TeamRunState = {
   teamId: string;
@@ -55,21 +38,6 @@ export type TeamRunSummary = {
   }>;
 };
 
-const createTeamModel = () => {
-  // AgentKit 0.13.2 does not understand the newer "openai-responses" adapter
-  // format yet, so use the compatible OpenAI chat adapter until upstream
-  // support lands.
-  return openai({
-    model: teamConfig.model.model,
-    apiKey: teamRuntimeConfig.apiKey ?? undefined,
-    baseUrl: teamRuntimeConfig.baseUrl,
-    defaultParameters: {
-      store: false,
-      max_completion_tokens: teamConfig.model.maxOutputTokens,
-    },
-  });
-};
-
 const buildInitialState = (
   forceReset: boolean,
   selectedRepository: TeamRepositoryOption | null,
@@ -89,204 +57,111 @@ const buildInitialState = (
   };
 };
 
-const formatTextMessage = (message: Message): string => {
-  if (message.type !== "text") {
-    return "";
-  }
-
-  if (typeof message.content === "string") {
-    return message.content;
-  }
-
-  return message.content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n");
-};
-
-const summarizeHandoffs = (state: TeamRunState): string => {
-  const orderedHandoffs = state.workflow
-    .map((roleId) => state.handoffs[roleId])
-    .filter((handoff): handoff is TeamRoleHandoff => Boolean(handoff));
-
-  if (orderedHandoffs.length === 0) {
-    return "No previous role handoffs exist for this assignment yet.";
-  }
-
-  return orderedHandoffs
-    .map((handoff) => {
-      return [
-        `${handoff.roleName} (${handoff.roleId})`,
-        `Decision: ${handoff.decision}`,
-        `Summary: ${handoff.summary}`,
-        `Deliverable: ${handoff.deliverable}`,
-      ].join("\n");
-    })
-    .join("\n\n");
-};
-
-const normalizeDecision = (
-  roleId: string,
-  proposedDecision: TeamRoleDecision,
-): TeamRoleDecision => {
-  if (roleId === "reviewer") {
-    return proposedDecision === "continue" ? "approved" : proposedDecision;
-  }
-  return "continue";
-};
-
-const createSaveHandoffTool = (role: RolePrompt) => {
+const createPlannerDispatchTool = () => {
   return createTool({
-    name: "save_handoff",
-    description: "Persist this role's handoff for the next step in the engineering workflow.",
+    name: "dispatch_parallel_work",
+    description:
+      "Submit the planner's implementation plan to the backend so dedicated coder and reviewer lanes start running in the background.",
     parameters: z.object({
-      summary: z.string().trim().min(1),
-      deliverable: z.string().trim().min(1),
-      decision: z.enum(["continue", "approved", "needs_revision"]).default("continue"),
+      planSummary: z.string().trim().min(1),
+      plannerDeliverable: z.string().trim().min(1),
+      branchPrefix: z.string().trim().min(1),
+      tasks: z
+        .array(
+          z.object({
+            title: z.string().trim().min(1),
+            objective: z.string().trim().min(1),
+          }),
+        )
+        .min(1)
+        .max(teamConfig.dispatch.workerCount),
     }),
-    handler: async ({ summary, deliverable, decision }, { network }) => {
+    handler: async ({ planSummary, plannerDeliverable, branchPrefix, tasks }, { network }) => {
       const state = network.state.data;
-      const sequence = state.handoffCounter + 1;
-      const normalizedDecision = normalizeDecision(role.id, decision);
+      const threadId = network.state.threadId;
 
-      state.handoffCounter = sequence;
-      state.handoffs = {
-        ...state.handoffs,
-        [role.id]: {
-          roleId: role.id,
-          roleName: role.name,
-          summary,
-          deliverable,
-          decision: normalizedDecision,
-          sequence,
-          assignmentNumber: state.assignmentNumber,
-          updatedAt: new Date().toISOString(),
-        },
-      };
+      if (!threadId) {
+        throw new Error("Planner dispatch requires a thread ID.");
+      }
+
+      const assignment = await createPlannerDispatchAssignment({
+        threadId,
+        assignmentNumber: state.assignmentNumber,
+        repository: state.selectedRepository,
+        plannerSummary: planSummary,
+        plannerDeliverable,
+        branchPrefix,
+        tasks,
+      });
 
       return {
         ok: true,
-        roleId: role.id,
-        decision: normalizedDecision,
-        sequence,
+        assignmentNumber: assignment.assignmentNumber,
+        workerCount: assignment.workerCount,
+        taskCount: tasks.length,
       };
     },
   });
 };
 
-const createRoleSystemPrompt = (role: RolePrompt) => {
+const createPlannerSystemPrompt = (prompt: string) => {
   return async ({ network }: { network?: { state: { data: TeamRunState } } }) => {
     const state = network?.state.data ?? buildInitialState(false, null);
     const repositoryContext = state.selectedRepository
       ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
-      : "Selected repository: none.";
+      : "Selected repository: none. Parallel dispatch requires a selected repository.";
 
     return [
-      `You are ${role.name}, a role inside the ${state.teamName} engineering harness.`,
+      `You are Planner, the dispatch coordinator inside the ${state.teamName} engineering harness.`,
       `Owner: ${state.ownerName}.`,
       `Shared objective: ${state.objective}`,
       repositoryContext,
-      `Workflow order: ${state.workflow.join(" -> ")}`,
+      `Configured workflow: ${state.workflow.join(" -> ")}`,
       `Current assignment number: ${state.assignmentNumber}.`,
+      `Configured background lanes: ${teamConfig.dispatch.workerCount} coder+reviewer pairs.`,
+      `Each active lane gets its own branch, its own worktree, its own reviewer, and its own pull request lifecycle.`,
       `Your role prompt is below:`,
-      role.prompt.trim(),
+      prompt.trim(),
       `Current handoffs for this assignment:`,
       summarizeHandoffs(state),
       `Rules:`,
-      `- Focus only on your role.`,
-      `- Read previous handoffs before acting.`,
-      `- Always call save_handoff exactly once when you are ready to hand off.`,
-      `- Put the concise executive summary in summary and the substantive output in deliverable.`,
-      role.id === "reviewer"
-        ? `- As reviewer, set decision to approved when the work is ready, or needs_revision when the coder should revise it.`
-        : `- As ${role.id}, always leave decision as continue.`,
+      `- Create a practical engineering plan and split it into at most ${teamConfig.dispatch.workerCount} independently executable work items.`,
+      `- When the request should trigger implementation, call dispatch_parallel_work exactly once.`,
+      `- Use branchPrefix as a short, git-friendly theme for the assignment. The backend creates per-lane branch names and worktrees.`,
+      `- Always call save_handoff exactly once when you are done planning.`,
+      `- If no repository is selected, explain that dispatch is blocked and do not invent repository operations.`,
     ].join("\n\n");
   };
-};
-
-const resolveNextRoleId = (state: TeamRunState): string | undefined => {
-  for (let index = 0; index < state.workflow.length; index += 1) {
-    const roleId = state.workflow[index];
-    const current = state.handoffs[roleId];
-
-    if (index === 0) {
-      if (!current) {
-        return roleId;
-      }
-      continue;
-    }
-
-    const previousRoleId = state.workflow[index - 1];
-    const previous = state.handoffs[previousRoleId];
-
-    if (!previous) {
-      return previousRoleId;
-    }
-
-    if (!current || current.sequence < previous.sequence) {
-      return roleId;
-    }
-  }
-
-  const finalRoleId = state.workflow.at(-1);
-  if (!finalRoleId) {
-    return undefined;
-  }
-
-  const finalHandoff = state.handoffs[finalRoleId];
-  if (!finalHandoff) {
-    return undefined;
-  }
-
-  if (finalHandoff.decision === "needs_revision" && state.workflow.length > 1) {
-    const revisionRoleId = state.workflow[state.workflow.length - 2];
-    const revisionHandoff = state.handoffs[revisionRoleId];
-
-    if (!revisionHandoff || revisionHandoff.sequence <= finalHandoff.sequence) {
-      return revisionRoleId;
-    }
-  }
-
-  return undefined;
-};
-
-const ensureOpenAiApiKey = (): void => {
-  if (!teamRuntimeConfig.apiKey) {
-    throw new Error(missingOpenAiConfigMessage);
-  }
 };
 
 export const getTeamRuntime = async () => {
   ensureOpenAiApiKey();
   const teamModel = createTeamModel();
-
-  const roles = await loadWorkflowRolePrompts(teamConfig);
-  const agents = roles.map((role) => {
-    return createAgent<TeamRunState>({
-      name: role.id,
-      description: role.summary,
-      system: createRoleSystemPrompt(role),
-      tools: [createSaveHandoffTool(role)],
-      model: teamModel,
-    });
+  const plannerRole = await loadRolePrompt("planner");
+  const plannerAgent = createAgent<TeamRunState>({
+    name: plannerRole.id,
+    description: plannerRole.summary,
+    system: createPlannerSystemPrompt(plannerRole.prompt),
+    tools: [createPlannerDispatchTool(), createSaveHandoffTool<TeamRunState>(plannerRole)],
+    model: teamModel,
   });
 
   const network = createNetwork<TeamRunState>({
     name: teamConfig.name,
-    description: teamConfig.owner.objective,
-    agents,
+    description: `${teamConfig.owner.objective} Dispatch planning happens here; coder and reviewer lanes continue in the background.`,
+    agents: [plannerAgent],
     defaultModel: teamModel,
-    maxIter: teamConfig.maxIterations,
+    maxIter: 2,
     history: createTeamHistory(teamConfig.storage.threadFile),
-    router: async ({ network }) => {
-      const nextRoleId = resolveNextRoleId(network.state.data);
-      return nextRoleId ? network.agents.get(nextRoleId) : undefined;
+    router: async ({ network: currentNetwork }) => {
+      return currentNetwork.state.results.length === 0
+        ? currentNetwork.agents.get(plannerRole.id)
+        : undefined;
     },
   });
 
   return {
     config: teamConfig,
-    roles,
     network,
   };
 };
@@ -316,6 +191,10 @@ export const runTeam = async ({
   });
   const run = await runtime.network.run(input, { state });
 
+  void ensurePendingDispatchWork({
+    threadId: run.state.threadId ?? undefined,
+  });
+
   const handoffs = runtime.config.workflow
     .map((roleId) => run.state.data.handoffs[roleId])
     .filter((handoff): handoff is TeamRoleHandoff => Boolean(handoff));
@@ -331,7 +210,7 @@ export const runTeam = async ({
   return {
     threadId: run.state.threadId ?? null,
     assignmentNumber: run.state.data.assignmentNumber,
-    approved: handoffs.at(-1)?.decision === "approved",
+    approved: false,
     repository: run.state.data.selectedRepository,
     workflow: runtime.config.workflow,
     handoffs,

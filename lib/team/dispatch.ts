@@ -1,0 +1,883 @@
+import "server-only";
+
+import { createAgent, createNetwork, createState, createTool } from "@inngest/agent-kit";
+import { z } from "zod";
+import { teamConfig } from "@/team.config";
+import { createSaveHandoffTool, summarizeHandoffs, type TeamRoleState } from "@/lib/team/agent-helpers";
+import { buildLaneBranchName, buildLaneWorktreePath, detectBranchConflict, ensureLaneWorktree, resolveRepositoryBaseBranch } from "@/lib/team/git";
+import {
+  getTeamThreadRecord,
+  listPendingDispatchAssignments,
+  synchronizeDispatchAssignment,
+  updateTeamThreadRecord,
+} from "@/lib/team/history";
+import { createTeamModel, ensureOpenAiApiKey } from "@/lib/team/model";
+import { loadRolePrompt, type RolePrompt } from "@/lib/team/prompts";
+import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type {
+  TeamDispatchAssignment,
+  TeamPlannerNote,
+  TeamPullRequestRecord,
+  TeamRoleHandoff,
+  TeamWorkerEventActor,
+  TeamWorkerLaneRecord,
+} from "@/lib/team/types";
+
+type DispatchTask = {
+  title: string;
+  objective: string;
+};
+
+type LanePullRequestDraft = {
+  title: string;
+  summary: string;
+};
+
+type LaneRunState = TeamRoleState & {
+  teamName: string;
+  ownerName: string;
+  objective: string;
+  repository: TeamRepositoryOption;
+  laneId: string;
+  laneIndex: number;
+  taskTitle: string;
+  taskObjective: string;
+  planSummary: string;
+  planDeliverable: string;
+  branchName: string;
+  baseBranch: string;
+  worktreePath: string;
+  conflictNote: string | null;
+  pullRequestDraft: LanePullRequestDraft | null;
+};
+
+const activeLaneRuns = new Map<string, Promise<void>>();
+
+const laneRunKey = (threadId: string, assignmentNumber: number, laneId: string): string => {
+  return `${threadId}:${assignmentNumber}:${laneId}`;
+};
+
+const createLaneEvent = (
+  actor: TeamWorkerEventActor,
+  message: string,
+  createdAt: string,
+) => {
+  return {
+    id: crypto.randomUUID(),
+    actor,
+    message,
+    createdAt,
+  };
+};
+
+const createPlannerNote = (message: string, createdAt: string): TeamPlannerNote => {
+  return {
+    id: crypto.randomUUID(),
+    message,
+    createdAt,
+  };
+};
+
+const findAssignment = (
+  dispatchAssignments: TeamDispatchAssignment[],
+  assignmentNumber: number,
+): TeamDispatchAssignment => {
+  const assignment = dispatchAssignments.find(
+    (candidate) => candidate.assignmentNumber === assignmentNumber,
+  );
+
+  if (!assignment) {
+    throw new Error(`Assignment #${assignmentNumber} was not found.`);
+  }
+
+  return assignment;
+};
+
+const findLane = (assignment: TeamDispatchAssignment, laneId: string): TeamWorkerLaneRecord => {
+  const lane = assignment.lanes.find((candidate) => candidate.laneId === laneId);
+  if (!lane) {
+    throw new Error(`Lane ${laneId} was not found in assignment #${assignment.assignmentNumber}.`);
+  }
+
+  return lane;
+};
+
+const appendPlannerNote = (assignment: TeamDispatchAssignment, message: string, now: string): void => {
+  assignment.plannerNotes = [...assignment.plannerNotes, createPlannerNote(message, now)];
+};
+
+const appendLaneEvent = (
+  lane: TeamWorkerLaneRecord,
+  actor: TeamWorkerEventActor,
+  message: string,
+  now: string,
+): void => {
+  lane.events = [...lane.events, createLaneEvent(actor, message, now)];
+};
+
+const buildLaneInitialState = ({
+  repository,
+  lane,
+  assignment,
+  workflow,
+  handoffs,
+}: {
+  repository: TeamRepositoryOption;
+  lane: TeamWorkerLaneRecord;
+  assignment: TeamDispatchAssignment;
+  workflow: string[];
+  handoffs: Partial<Record<string, TeamRoleHandoff>>;
+}): LaneRunState => {
+  return {
+    teamName: teamConfig.name,
+    ownerName: teamConfig.owner.name,
+    objective: teamConfig.owner.objective,
+    repository,
+    laneId: lane.laneId,
+    laneIndex: lane.laneIndex,
+    taskTitle: lane.taskTitle ?? `Lane ${lane.laneIndex} task`,
+    taskObjective: lane.taskObjective ?? assignment.plannerSummary ?? "Implement the assigned task.",
+    planSummary: assignment.plannerSummary ?? "No planner summary provided.",
+    planDeliverable: assignment.plannerDeliverable ?? "No planner deliverable provided.",
+    branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
+    baseBranch: lane.baseBranch ?? teamConfig.dispatch.baseBranch,
+    worktreePath: lane.worktreePath ?? teamConfig.dispatch.worktreeRoot,
+    conflictNote:
+      lane.requeueReason === "planner_detected_conflict"
+        ? "Planner detected a pull request conflict. Resolve the branch and prepare it for review again."
+        : null,
+    workflow,
+    handoffs,
+    handoffCounter: Object.keys(handoffs).length,
+    assignmentNumber: assignment.assignmentNumber,
+    pullRequestDraft: null,
+  };
+};
+
+const createLaneSystemPrompt = (role: RolePrompt) => {
+  return async ({ network }: { network?: { state: { data: LaneRunState } } }) => {
+    const state = network?.state.data;
+    if (!state) {
+      return role.prompt.trim();
+    }
+
+    return [
+      `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
+      `Owner: ${state.ownerName}.`,
+      `Shared objective: ${state.objective}`,
+      `Repository: ${state.repository.name} at ${state.repository.path}.`,
+      `Dedicated branch: ${state.branchName}.`,
+      `Base branch: ${state.baseBranch}.`,
+      `Dedicated worktree: ${state.worktreePath}.`,
+      `Lane index: ${state.laneIndex}.`,
+      `Task title: ${state.taskTitle}.`,
+      `Task objective: ${state.taskObjective}`,
+      `Planner summary: ${state.planSummary}`,
+      `Planner deliverable: ${state.planDeliverable}`,
+      state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
+      `Workflow context: ${state.workflow.join(" -> ")}`,
+      `Current handoffs:`,
+      summarizeHandoffs(state),
+      `Your role prompt is below:`,
+      role.prompt.trim(),
+      `Rules:`,
+      `- Operate only on this lane's branch and worktree.`,
+      `- Always call save_handoff exactly once before finishing.`,
+      role.id === "reviewer"
+        ? `- If the branch is ready, call publish_pull_request before save_handoff and set decision to approved.`
+        : `- As coder, always set decision to continue and hand off cleanly to the reviewer.`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  };
+};
+
+const createPublishPullRequestTool = () => {
+  return createTool({
+    name: "publish_pull_request",
+    description:
+      "Create or refresh the lane's CI pull request once the branch is ready for human approval.",
+    parameters: z.object({
+      title: z.string().trim().min(1),
+      summary: z.string().trim().min(1),
+    }),
+    handler: async ({ title, summary }, { network }) => {
+      const state = network.state.data as LaneRunState;
+      state.pullRequestDraft = {
+        title,
+        summary,
+      };
+
+      return {
+        ok: true,
+        branchName: state.branchName,
+        baseBranch: state.baseBranch,
+      };
+    },
+  });
+};
+
+const runRoleNetwork = async ({
+  role,
+  state,
+  input,
+  tools = [],
+}: {
+  role: RolePrompt;
+  state: LaneRunState;
+  input: string;
+  tools?: ReturnType<typeof createTool>[];
+}): Promise<LaneRunState> => {
+  ensureOpenAiApiKey();
+  const teamModel = createTeamModel();
+  const agent = createAgent<LaneRunState>({
+    name: role.id,
+    description: role.summary,
+    system: createLaneSystemPrompt(role),
+    tools: [createSaveHandoffTool<LaneRunState>(role), ...tools],
+    model: teamModel,
+  });
+
+  const network = createNetwork<LaneRunState>({
+    name: `${teamConfig.name} ${role.id} lane`,
+    description: `Single-role execution for ${role.id} in a background lane.`,
+    agents: [agent],
+    defaultModel: teamModel,
+    maxIter: 2,
+    router: async ({ network: currentNetwork }) => {
+      return currentNetwork.state.results.length === 0 ? currentNetwork.agents.get(role.id) : undefined;
+    },
+  });
+
+  const run = await network.run(input, {
+    state: createState(state),
+  });
+
+  return run.state.data;
+};
+
+const createPullRequestRecord = ({
+  threadId,
+  assignmentNumber,
+  lane,
+  draft,
+  now,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  lane: TeamWorkerLaneRecord;
+  draft: LanePullRequestDraft;
+  now: string;
+}): TeamPullRequestRecord => {
+  return {
+    id: `pr-${threadId.slice(0, 8)}-a${assignmentNumber}-lane-${lane.laneIndex}`,
+    provider: "local-ci",
+    title: draft.title,
+    branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
+    baseBranch: lane.baseBranch ?? teamConfig.dispatch.baseBranch,
+    status: "awaiting_human_approval",
+    requestedAt: now,
+    humanApprovalRequestedAt: now,
+    humanApprovedAt: null,
+    updatedAt: now,
+    url: null,
+  };
+};
+
+const createQueuedLane = ({
+  laneIndex,
+  task,
+  branchPrefix,
+  assignmentNumber,
+  baseBranch,
+  threadId,
+}: {
+  laneIndex: number;
+  task?: DispatchTask;
+  branchPrefix: string;
+  assignmentNumber: number;
+  baseBranch: string;
+  threadId: string;
+}): TeamWorkerLaneRecord => {
+  const laneId = `lane-${laneIndex}`;
+  const now = new Date().toISOString();
+
+  if (!task) {
+    return {
+      laneId,
+      laneIndex,
+      status: "idle",
+      taskTitle: null,
+      taskObjective: null,
+      branchName: null,
+      baseBranch: null,
+      worktreePath: null,
+      latestDecision: null,
+      latestCoderSummary: null,
+      latestReviewerSummary: null,
+      latestActivity: "Idle and waiting for planner work.",
+      runCount: 0,
+      revisionCount: 0,
+      requeueReason: null,
+      lastError: null,
+      pullRequest: null,
+      events: [],
+      startedAt: null,
+      finishedAt: null,
+      updatedAt: now,
+    };
+  }
+
+  const branchName = buildLaneBranchName({
+    branchPrefix,
+    assignmentNumber,
+    laneIndex,
+  });
+
+  return {
+    laneId,
+    laneIndex,
+    status: "queued",
+    taskTitle: task.title,
+    taskObjective: task.objective,
+    branchName,
+    baseBranch,
+    worktreePath: buildLaneWorktreePath({
+      worktreeRoot: teamConfig.dispatch.worktreeRoot,
+      teamId: teamConfig.id,
+      threadId,
+      assignmentNumber,
+      laneIndex,
+    }),
+    latestDecision: null,
+    latestCoderSummary: null,
+    latestReviewerSummary: null,
+    latestActivity: "Queued for coder dispatch.",
+    runCount: 0,
+    revisionCount: 0,
+    requeueReason: null,
+    lastError: null,
+    pullRequest: null,
+    events: [createLaneEvent("planner", `Planner dispatched task: ${task.title}`, now)],
+    startedAt: null,
+    finishedAt: null,
+    updatedAt: now,
+  };
+};
+
+export const createPlannerDispatchAssignment = async ({
+  threadId,
+  assignmentNumber,
+  repository,
+  plannerSummary,
+  plannerDeliverable,
+  branchPrefix,
+  tasks,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  repository: TeamRepositoryOption | null;
+  plannerSummary: string;
+  plannerDeliverable: string;
+  branchPrefix: string;
+  tasks: DispatchTask[];
+}): Promise<TeamDispatchAssignment> => {
+  if (!repository) {
+    throw new Error("Dispatching coder and reviewer lanes requires a selected repository.");
+  }
+
+  const now = new Date().toISOString();
+  const resolvedBaseBranch = await resolveRepositoryBaseBranch(
+    repository.path,
+    teamConfig.dispatch.baseBranch,
+  );
+
+  const assignment: TeamDispatchAssignment = synchronizeDispatchAssignment(
+    {
+      assignmentNumber,
+      status: "planning",
+      repository,
+      requestedAt: now,
+      startedAt: now,
+      finishedAt: null,
+      updatedAt: now,
+      plannerSummary,
+      plannerDeliverable,
+      branchPrefix,
+      baseBranch: resolvedBaseBranch,
+      workerCount: teamConfig.dispatch.workerCount,
+      lanes: Array.from({ length: teamConfig.dispatch.workerCount }, (_, index) =>
+        createQueuedLane({
+          laneIndex: index + 1,
+          task: tasks[index],
+          branchPrefix,
+          assignmentNumber,
+          baseBranch: resolvedBaseBranch,
+          threadId,
+        }),
+      ),
+      plannerNotes: [
+        createPlannerNote(
+          `Planner dispatched ${tasks.length} work item${tasks.length === 1 ? "" : "s"} across ${teamConfig.dispatch.workerCount} configured lane${teamConfig.dispatch.workerCount === 1 ? "" : "s"}.`,
+          now,
+        ),
+      ],
+    },
+    now,
+  );
+
+  await updateTeamThreadRecord({
+    threadFile: teamConfig.storage.threadFile,
+    threadId,
+    updater: (thread) => {
+      thread.dispatchAssignments = [
+        ...thread.dispatchAssignments.filter(
+          (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
+        ),
+        assignment,
+      ].sort((left, right) => left.assignmentNumber - right.assignmentNumber);
+    },
+  });
+
+  void ensurePendingDispatchWork({ threadId });
+  return assignment;
+};
+
+const refreshAwaitingApprovalConflict = async ({
+  threadId,
+  assignmentNumber,
+  laneId,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+}): Promise<void> => {
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  if (!thread) {
+    return;
+  }
+
+  const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
+  const lane = findLane(assignment, laneId);
+
+  if (
+    lane.status !== "awaiting_human_approval" ||
+    lane.pullRequest?.status !== "awaiting_human_approval" ||
+    !assignment.repository ||
+    !lane.branchName ||
+    !lane.baseBranch
+  ) {
+    return;
+  }
+
+  const hasConflict = await detectBranchConflict({
+    repositoryPath: assignment.repository.path,
+    baseBranch: lane.baseBranch,
+    branchName: lane.branchName,
+  });
+
+  if (!hasConflict) {
+    return;
+  }
+
+  await updateTeamThreadRecord({
+    threadFile: teamConfig.storage.threadFile,
+    threadId,
+    updater: (mutableThread, now) => {
+      const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+      const mutableLane = findLane(mutableAssignment, laneId);
+      mutableLane.status = "queued";
+      mutableLane.requeueReason = "planner_detected_conflict";
+      mutableLane.revisionCount += 1;
+      mutableLane.latestActivity = "Planner detected a pull request conflict and requeued the lane.";
+      mutableLane.finishedAt = null;
+      mutableLane.updatedAt = now;
+      mutableLane.pullRequest = mutableLane.pullRequest
+        ? {
+            ...mutableLane.pullRequest,
+            status: "conflict",
+            updatedAt: now,
+            humanApprovalRequestedAt: null,
+          }
+        : null;
+      appendLaneEvent(
+        mutableLane,
+        "planner",
+        "Planner detected a branch conflict and requested the coder to resolve it.",
+        now,
+      );
+      appendPlannerNote(
+        mutableAssignment,
+        `Conflict detected for lane ${mutableLane.laneIndex}; the coder was requeued for conflict resolution.`,
+        now,
+      );
+      synchronizeDispatchAssignment(mutableAssignment, now);
+    },
+  });
+};
+
+const runLaneCycle = async ({
+  threadId,
+  assignmentNumber,
+  laneId,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+}): Promise<void> => {
+  while (true) {
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+    if (!thread) {
+      return;
+    }
+
+    const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
+    const lane = findLane(assignment, laneId);
+    if (lane.status !== "queued" && lane.status !== "coding" && lane.status !== "reviewing") {
+      return;
+    }
+
+    if (!assignment.repository || !lane.worktreePath || !lane.branchName || !lane.baseBranch) {
+      throw new Error("Lane is missing repository, branch, or worktree metadata.");
+    }
+
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (mutableThread, now) => {
+        const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+        const mutableLane = findLane(mutableAssignment, laneId);
+        mutableLane.status = "coding";
+        mutableLane.lastError = null;
+        mutableLane.startedAt = mutableLane.startedAt ?? now;
+        mutableLane.finishedAt = null;
+        mutableLane.latestActivity =
+          mutableLane.requeueReason === "planner_detected_conflict"
+            ? "Coder is resolving a planner-detected pull request conflict."
+            : mutableLane.requeueReason === "reviewer_requested_changes"
+              ? "Coder is addressing reviewer-requested changes."
+              : "Coder is working in the dedicated worktree.";
+        mutableLane.updatedAt = now;
+        appendLaneEvent(mutableLane, "coder", mutableLane.latestActivity, now);
+        synchronizeDispatchAssignment(mutableAssignment, now);
+      },
+    });
+
+    await ensureLaneWorktree({
+      repositoryPath: assignment.repository.path,
+      worktreePath: lane.worktreePath,
+      branchName: lane.branchName,
+      baseBranch: lane.baseBranch,
+    });
+
+    const coderRole = await loadRolePrompt("coder");
+    const reviewerRole = await loadRolePrompt("reviewer");
+    const coderState = await runRoleNetwork({
+      role: coderRole,
+      state: buildLaneInitialState({
+        repository: assignment.repository,
+        lane,
+        assignment,
+        workflow: ["coder"],
+        handoffs: {},
+      }),
+      input: lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
+    });
+
+    const coderHandoff = coderState.handoffs.coder;
+    if (!coderHandoff) {
+      throw new Error(`Coder lane ${lane.laneIndex} completed without saving a handoff.`);
+    }
+
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (mutableThread, now) => {
+        const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+        const mutableLane = findLane(mutableAssignment, laneId);
+        mutableLane.status = "reviewing";
+        mutableLane.latestCoderSummary = coderHandoff.summary;
+        mutableLane.latestDecision = coderHandoff.decision;
+        mutableLane.latestActivity = "Reviewer is evaluating the branch output.";
+        mutableLane.updatedAt = now;
+        appendLaneEvent(
+          mutableLane,
+          "coder",
+          `Coder handoff: ${coderHandoff.summary}`,
+          now,
+        );
+        appendLaneEvent(mutableLane, "reviewer", mutableLane.latestActivity, now);
+        synchronizeDispatchAssignment(mutableAssignment, now);
+      },
+    });
+
+    const reviewerState = await runRoleNetwork({
+      role: reviewerRole,
+      state: buildLaneInitialState({
+        repository: assignment.repository,
+        lane,
+        assignment,
+        workflow: ["coder", "reviewer"],
+        handoffs: {
+          coder: coderHandoff,
+        },
+      }),
+      input: lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Review the lane output.",
+      tools: [createPublishPullRequestTool()],
+    });
+
+    const reviewerHandoff = reviewerState.handoffs.reviewer;
+    if (!reviewerHandoff) {
+      throw new Error(`Reviewer lane ${lane.laneIndex} completed without saving a handoff.`);
+    }
+
+    if (reviewerHandoff.decision === "needs_revision") {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (mutableThread, now) => {
+          const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+          const mutableLane = findLane(mutableAssignment, laneId);
+          mutableLane.status = "queued";
+          mutableLane.latestDecision = reviewerHandoff.decision;
+          mutableLane.latestCoderSummary = coderHandoff.summary;
+          mutableLane.latestReviewerSummary = reviewerHandoff.summary;
+          mutableLane.latestActivity = "Reviewer requested changes and sent the lane back to the coder.";
+          mutableLane.runCount += 1;
+          mutableLane.revisionCount += 1;
+          mutableLane.requeueReason = "reviewer_requested_changes";
+          mutableLane.updatedAt = now;
+          mutableLane.finishedAt = null;
+          appendLaneEvent(
+            mutableLane,
+            "reviewer",
+            `Reviewer requested changes: ${reviewerHandoff.summary}`,
+            now,
+          );
+          synchronizeDispatchAssignment(mutableAssignment, now);
+        },
+      });
+
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    const pullRequest = createPullRequestRecord({
+      threadId,
+      assignmentNumber,
+      lane,
+      draft: reviewerState.pullRequestDraft ?? {
+        title: `Lane ${lane.laneIndex}: ${lane.taskTitle ?? "Ready for review"}`,
+        summary: reviewerHandoff.summary,
+      },
+      now,
+    });
+
+    const hasConflict = await detectBranchConflict({
+      repositoryPath: assignment.repository.path,
+      baseBranch: lane.baseBranch,
+      branchName: lane.branchName,
+    });
+
+    if (hasConflict) {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (mutableThread, mutableNow) => {
+          const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+          const mutableLane = findLane(mutableAssignment, laneId);
+          mutableLane.status = "queued";
+          mutableLane.latestDecision = reviewerHandoff.decision;
+          mutableLane.latestCoderSummary = coderHandoff.summary;
+          mutableLane.latestReviewerSummary = reviewerHandoff.summary;
+          mutableLane.latestActivity = "Planner detected a pull request conflict and requeued the lane.";
+          mutableLane.runCount += 1;
+          mutableLane.revisionCount += 1;
+          mutableLane.requeueReason = "planner_detected_conflict";
+          mutableLane.pullRequest = {
+            ...pullRequest,
+            status: "conflict",
+            updatedAt: mutableNow,
+            humanApprovalRequestedAt: null,
+          };
+          mutableLane.updatedAt = mutableNow;
+          mutableLane.finishedAt = null;
+          appendLaneEvent(
+            mutableLane,
+            "reviewer",
+            `Reviewer approved the lane, but the planner detected a conflict: ${reviewerHandoff.summary}`,
+            mutableNow,
+          );
+          appendPlannerNote(
+            mutableAssignment,
+            `Conflict detected for lane ${mutableLane.laneIndex}; the coder was requeued before human approval.`,
+            mutableNow,
+          );
+          synchronizeDispatchAssignment(mutableAssignment, mutableNow);
+        },
+      });
+
+      continue;
+    }
+
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (mutableThread, mutableNow) => {
+        const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+        const mutableLane = findLane(mutableAssignment, laneId);
+        mutableLane.status = "awaiting_human_approval";
+        mutableLane.latestDecision = reviewerHandoff.decision;
+        mutableLane.latestCoderSummary = coderHandoff.summary;
+        mutableLane.latestReviewerSummary = reviewerHandoff.summary;
+        mutableLane.latestActivity = "Reviewer opened a CI pull request and requested human approval.";
+        mutableLane.runCount += 1;
+        mutableLane.requeueReason = null;
+        mutableLane.pullRequest = {
+          ...pullRequest,
+          updatedAt: mutableNow,
+        };
+        mutableLane.updatedAt = mutableNow;
+        mutableLane.finishedAt = null;
+        appendLaneEvent(mutableLane, "reviewer", `Reviewer approved: ${reviewerHandoff.summary}`, mutableNow);
+        appendLaneEvent(
+          mutableLane,
+          "system",
+          "CI pull request is ready and waiting for human approval.",
+          mutableNow,
+        );
+        synchronizeDispatchAssignment(mutableAssignment, mutableNow);
+      },
+    });
+
+    return;
+  }
+};
+
+const ensureLaneRun = ({
+  threadId,
+  assignmentNumber,
+  laneId,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+}): void => {
+  const key = laneRunKey(threadId, assignmentNumber, laneId);
+  if (activeLaneRuns.has(key)) {
+    return;
+  }
+
+  const runPromise = (async () => {
+    try {
+      await runLaneCycle({
+        threadId,
+        assignmentNumber,
+        laneId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Background lane execution failed.";
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (thread, now) => {
+          const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
+          const lane = findLane(assignment, laneId);
+          lane.status = "failed";
+          lane.lastError = message;
+          lane.latestActivity = "Background lane execution failed.";
+          lane.updatedAt = now;
+          lane.finishedAt = now;
+          appendLaneEvent(lane, "system", message, now);
+          appendPlannerNote(
+            assignment,
+            `Lane ${lane.laneIndex} failed and needs attention: ${message}`,
+            now,
+          );
+          synchronizeDispatchAssignment(assignment, now);
+        },
+      });
+    } finally {
+      activeLaneRuns.delete(key);
+    }
+  })();
+
+  activeLaneRuns.set(key, runPromise);
+};
+
+export const ensurePendingDispatchWork = async ({
+  threadId,
+}: {
+  threadId?: string;
+} = {}): Promise<void> => {
+  const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile, threadId);
+
+  for (const pending of pendingAssignments) {
+    for (const lane of pending.assignment.lanes) {
+      if (lane.status === "awaiting_human_approval") {
+        await refreshAwaitingApprovalConflict({
+          threadId: pending.threadId,
+          assignmentNumber: pending.assignment.assignmentNumber,
+          laneId: lane.laneId,
+        });
+      }
+    }
+  }
+
+  const refreshedPendingAssignments = await listPendingDispatchAssignments(
+    teamConfig.storage.threadFile,
+    threadId,
+  );
+
+  for (const pending of refreshedPendingAssignments) {
+    for (const lane of pending.assignment.lanes) {
+      if (lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing") {
+        ensureLaneRun({
+          threadId: pending.threadId,
+          assignmentNumber: pending.assignment.assignmentNumber,
+          laneId: lane.laneId,
+        });
+      }
+    }
+  }
+};
+
+export const approveLanePullRequest = async ({
+  threadId,
+  assignmentNumber,
+  laneId,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+}): Promise<void> => {
+  await updateTeamThreadRecord({
+    threadFile: teamConfig.storage.threadFile,
+    threadId,
+    updater: (thread, now) => {
+      const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
+      const lane = findLane(assignment, laneId);
+      if (lane.status !== "awaiting_human_approval" || !lane.pullRequest) {
+        throw new Error("This lane is not waiting for human approval.");
+      }
+
+      lane.status = "approved";
+      lane.latestActivity = "Human approval recorded.";
+      lane.updatedAt = now;
+      lane.finishedAt = now;
+      lane.pullRequest = {
+        ...lane.pullRequest,
+        status: "approved",
+        humanApprovedAt: now,
+        updatedAt: now,
+      };
+      appendLaneEvent(lane, "human", "Human approval granted for the CI pull request.", now);
+      appendPlannerNote(
+        assignment,
+        `Human approval recorded for lane ${lane.laneIndex}.`,
+        now,
+      );
+      synchronizeDispatchAssignment(assignment, now);
+    },
+  });
+};

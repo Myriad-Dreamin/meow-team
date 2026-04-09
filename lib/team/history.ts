@@ -2,9 +2,19 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { AgentResult, type HistoryConfig, type Message, type ToolResultMessage } from "@inngest/agent-kit";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
-import type { TeamRoleDecision, TeamRoleHandoff, TeamRunState } from "@/lib/team/network";
+import type { TeamRunState } from "@/lib/team/network";
+import type {
+  TeamDispatchAssignment,
+  TeamDispatchAssignmentStatus,
+  TeamPlannerNote,
+  TeamRoleDecision,
+  TeamRoleHandoff,
+  TeamThreadStatus,
+  TeamWorkerLaneCounts,
+  TeamWorkerLaneRecord,
+} from "@/lib/team/types";
 
-export type TeamThreadStatus = "running" | "completed" | "approved" | "needs_revision" | "failed";
+export type { TeamThreadStatus } from "@/lib/team/types";
 
 type StoredRun = {
   status: TeamThreadStatus;
@@ -36,6 +46,18 @@ type StoredThread = {
   data: TeamRunState;
   results: StoredAgentResult[];
   userMessages: StoredUserMessage[];
+  dispatchAssignments?: TeamDispatchAssignment[];
+  run?: StoredRun;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TeamThreadRecord = {
+  threadId: string;
+  data: TeamRunState;
+  results: StoredAgentResult[];
+  userMessages: StoredUserMessage[];
+  dispatchAssignments: TeamDispatchAssignment[];
   run?: StoredRun;
   createdAt: string;
   updatedAt: string;
@@ -63,7 +85,21 @@ export type TeamThreadSummary = {
   finishedAt: string | null;
   updatedAt: string;
   lastError: string | null;
+  latestAssignmentStatus: TeamDispatchAssignmentStatus | null;
+  latestPlanSummary: string | null;
+  latestBranchPrefix: string | null;
+  dispatchWorkerCount: number;
+  workerCounts: TeamWorkerLaneCounts;
+  workerLanes: TeamWorkerLaneRecord[];
+  plannerNotes: TeamPlannerNote[];
 };
+
+export type PendingDispatchAssignment = {
+  threadId: string;
+  assignment: TeamDispatchAssignment;
+};
+
+const mutationQueues = new Map<string, Promise<unknown>>();
 
 const emptyStore = (): ThreadStore => ({ threads: {} });
 
@@ -94,6 +130,19 @@ const writeThreadStore = async (storePath: string, store: ThreadStore): Promise<
   await fs.writeFile(storePath, JSON.stringify(store, null, 2), "utf8");
 };
 
+const queueStoreMutation = async <T>(storePath: string, task: () => Promise<T>): Promise<T> => {
+  const previous = mutationQueues.get(storePath) ?? Promise.resolve();
+  const mutation = previous.catch(() => undefined).then(task);
+  const tracked = mutation.finally(() => {
+    if (mutationQueues.get(storePath) === tracked) {
+      mutationQueues.delete(storePath);
+    }
+  });
+
+  mutationQueues.set(storePath, tracked);
+  return mutation;
+};
+
 const serializeResult = (result: AgentResult): StoredAgentResult => {
   return {
     agentName: result.agentName,
@@ -118,6 +167,13 @@ const deserializeResult = (result: StoredAgentResult): AgentResult => {
     result.raw,
     result.id,
   );
+};
+
+const normalizeStoredThread = (thread: StoredThread): TeamThreadRecord => {
+  return {
+    ...thread,
+    dispatchAssignments: thread.dispatchAssignments ?? [],
+  };
 };
 
 const filterHandoffsForWorkflow = (state: TeamRunState): TeamRunState["handoffs"] => {
@@ -147,7 +203,7 @@ const deriveCompletedStatus = (state: TeamRunState): TeamThreadStatus => {
   return "completed";
 };
 
-const deriveLegacyThreadStatus = (thread: StoredThread): TeamThreadStatus => {
+const deriveLegacyThreadStatus = (thread: TeamThreadRecord): TeamThreadStatus => {
   if (thread.results.length === 0 && thread.userMessages.length > 0) {
     return "running";
   }
@@ -155,8 +211,169 @@ const deriveLegacyThreadStatus = (thread: StoredThread): TeamThreadStatus => {
   return deriveCompletedStatus(thread.data);
 };
 
-const deriveThreadStatus = (thread: StoredThread): TeamThreadStatus => {
-  return thread.run?.status ?? deriveLegacyThreadStatus(thread);
+const countWorkerLanes = (lanes: TeamWorkerLaneRecord[]): TeamWorkerLaneCounts => {
+  return lanes.reduce<TeamWorkerLaneCounts>(
+    (counts, lane) => {
+      switch (lane.status) {
+        case "idle":
+          counts.idle += 1;
+          break;
+        case "queued":
+          counts.queued += 1;
+          break;
+        case "coding":
+          counts.coding += 1;
+          break;
+        case "reviewing":
+          counts.reviewing += 1;
+          break;
+        case "awaiting_human_approval":
+          counts.awaitingHumanApproval += 1;
+          break;
+        case "approved":
+          counts.approved += 1;
+          break;
+        case "failed":
+          counts.failed += 1;
+          break;
+      }
+
+      return counts;
+    },
+    {
+      idle: 0,
+      queued: 0,
+      coding: 0,
+      reviewing: 0,
+      awaitingHumanApproval: 0,
+      approved: 0,
+      failed: 0,
+    },
+  );
+};
+
+const hasAssignedTask = (lane: TeamWorkerLaneRecord): boolean => {
+  return Boolean(lane.taskTitle || lane.taskObjective);
+};
+
+const deriveDispatchAssignmentStatus = (
+  assignment: TeamDispatchAssignment,
+): TeamDispatchAssignmentStatus => {
+  const assignedLanes = assignment.lanes.filter(hasAssignedTask);
+
+  if (assignedLanes.some((lane) => lane.status === "failed")) {
+    return "failed";
+  }
+
+  if (assignedLanes.length === 0) {
+    return "completed";
+  }
+
+  if (assignedLanes.every((lane) => lane.status === "approved")) {
+    return "approved";
+  }
+
+  if (
+    assignedLanes.every(
+      (lane) => lane.status === "approved" || lane.status === "awaiting_human_approval",
+    ) &&
+    assignedLanes.some((lane) => lane.status === "awaiting_human_approval")
+  ) {
+    return "awaiting_human_approval";
+  }
+
+  return "running";
+};
+
+const isTerminalDispatchAssignmentStatus = (status: TeamDispatchAssignmentStatus): boolean => {
+  return status === "approved" || status === "completed" || status === "failed";
+};
+
+export const isTerminalThreadStatus = (status: TeamThreadStatus): boolean => {
+  return status === "completed" || status === "approved" || status === "needs_revision" || status === "failed";
+};
+
+export const synchronizeDispatchAssignment = (
+  assignment: TeamDispatchAssignment,
+  now = new Date().toISOString(),
+): TeamDispatchAssignment => {
+  const derivedStatus = deriveDispatchAssignmentStatus(assignment);
+  assignment.status = derivedStatus;
+  assignment.updatedAt = now;
+  assignment.finishedAt = isTerminalDispatchAssignmentStatus(derivedStatus)
+    ? (assignment.finishedAt ?? now)
+    : null;
+
+  return assignment;
+};
+
+const getLatestDispatchAssignment = (thread: TeamThreadRecord): TeamDispatchAssignment | null => {
+  if (thread.dispatchAssignments.length === 0) {
+    return null;
+  }
+
+  return [...thread.dispatchAssignments].sort((left, right) => left.assignmentNumber - right.assignmentNumber).at(-1) ?? null;
+};
+
+const deriveDispatchThreadStatus = (thread: TeamThreadRecord): TeamThreadStatus | null => {
+  const latestAssignment = getLatestDispatchAssignment(thread);
+  if (!latestAssignment) {
+    return null;
+  }
+
+  const assignmentStatus = deriveDispatchAssignmentStatus(latestAssignment);
+
+  switch (assignmentStatus) {
+    case "planning":
+      return "planning";
+    case "running":
+      return "running";
+    case "awaiting_human_approval":
+      return "awaiting_human_approval";
+    case "approved":
+      return "approved";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+  }
+};
+
+const deriveThreadStatus = (thread: TeamThreadRecord): TeamThreadStatus => {
+  return deriveDispatchThreadStatus(thread) ?? thread.run?.status ?? deriveLegacyThreadStatus(thread);
+};
+
+const deriveThreadLastError = (thread: TeamThreadRecord): string | null => {
+  const latestAssignment = getLatestDispatchAssignment(thread);
+  const laneError =
+    latestAssignment?.lanes.find((lane) => lane.lastError)?.lastError ??
+    latestAssignment?.plannerNotes.at(-1)?.message ??
+    null;
+
+  if (deriveDispatchThreadStatus(thread) === "failed" && laneError) {
+    return laneError;
+  }
+
+  return thread.run?.lastError ?? null;
+};
+
+export const synchronizeTeamThreadRun = (
+  thread: TeamThreadRecord,
+  now = new Date().toISOString(),
+): TeamThreadRecord => {
+  thread.dispatchAssignments = thread.dispatchAssignments.map((assignment) =>
+    synchronizeDispatchAssignment(assignment, assignment.updatedAt || now),
+  );
+
+  const status = deriveThreadStatus(thread);
+  thread.run = {
+    status,
+    startedAt: thread.run?.startedAt ?? thread.createdAt,
+    finishedAt: isTerminalThreadStatus(status) ? (thread.run?.finishedAt ?? now) : null,
+    lastError: deriveThreadLastError(thread),
+  };
+
+  return thread;
 };
 
 const deriveNextRoleId = (state: TeamRunState, status: TeamThreadStatus): string | null => {
@@ -182,10 +399,13 @@ const deriveNextRoleId = (state: TeamRunState, status: TeamThreadStatus): string
   return state.workflow[currentIndex + 1] ?? null;
 };
 
-const summarizeThread = (thread: StoredThread): TeamThreadSummary => {
+const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
+  const thread = synchronizeTeamThreadRun(normalizeStoredThread(storedThread), storedThread.updatedAt);
   const orderedHandoffs = getOrderedHandoffs(thread.data);
   const latestHandoff = orderedHandoffs.at(-1);
   const status = deriveThreadStatus(thread);
+  const latestAssignment = getLatestDispatchAssignment(thread);
+  const workerLanes = latestAssignment?.lanes ?? [];
 
   return {
     threadId: thread.threadId,
@@ -206,6 +426,13 @@ const summarizeThread = (thread: StoredThread): TeamThreadSummary => {
     finishedAt: thread.run?.finishedAt ?? null,
     updatedAt: thread.updatedAt,
     lastError: thread.run?.lastError ?? null,
+    latestAssignmentStatus: latestAssignment?.status ?? null,
+    latestPlanSummary: latestAssignment?.plannerSummary ?? null,
+    latestBranchPrefix: latestAssignment?.branchPrefix ?? null,
+    dispatchWorkerCount: latestAssignment?.workerCount ?? 0,
+    workerCounts: countWorkerLanes(workerLanes),
+    workerLanes,
+    plannerNotes: latestAssignment?.plannerNotes ?? [],
   };
 };
 
@@ -222,6 +449,88 @@ export const listTeamThreadSummaries = async (
     .slice(0, limit);
 };
 
+export const getTeamThreadRecord = async (
+  threadFile: string,
+  threadId: string,
+): Promise<TeamThreadRecord | null> => {
+  const storePath = resolveStorePath(threadFile);
+  const store = await readThreadStore(storePath);
+  const thread = store.threads[threadId];
+
+  return thread ? synchronizeTeamThreadRun(normalizeStoredThread(thread), thread.updatedAt) : null;
+};
+
+export const updateTeamThreadRecord = async <T>({
+  threadFile,
+  threadId,
+  updater,
+}: {
+  threadFile: string;
+  threadId: string;
+  updater: (thread: TeamThreadRecord, now: string) => Promise<T> | T;
+}): Promise<T> => {
+  const storePath = resolveStorePath(threadFile);
+
+  return queueStoreMutation(storePath, async () => {
+    const store = await readThreadStore(storePath);
+    const currentThread = store.threads[threadId];
+    if (!currentThread) {
+      throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
+    }
+
+    const now = new Date().toISOString();
+    const thread = normalizeStoredThread(currentThread);
+    const value = await updater(thread, now);
+    thread.updatedAt = now;
+    synchronizeTeamThreadRun(thread, now);
+    store.threads[threadId] = thread;
+    await writeThreadStore(storePath, store);
+
+    return value;
+  });
+};
+
+export const listPendingDispatchAssignments = async (
+  threadFile: string,
+  threadId?: string,
+): Promise<PendingDispatchAssignment[]> => {
+  const storePath = resolveStorePath(threadFile);
+  const store = await readThreadStore(storePath);
+  const threads = threadId
+    ? Object.values(store.threads).filter((thread) => thread.threadId === threadId)
+    : Object.values(store.threads);
+
+  return threads
+    .flatMap((storedThread) => {
+      const thread = synchronizeTeamThreadRun(normalizeStoredThread(storedThread), storedThread.updatedAt);
+      return thread.dispatchAssignments
+        .filter((assignment) => !isTerminalDispatchAssignmentStatus(assignment.status))
+        .map((assignment) => ({
+          threadId: thread.threadId,
+          assignment,
+        }));
+    })
+    .sort((left, right) => {
+      if (left.threadId !== right.threadId) {
+        return left.threadId.localeCompare(right.threadId);
+      }
+
+      return left.assignment.assignmentNumber - right.assignment.assignmentNumber;
+    });
+};
+
+export const threadHasActiveDispatchAssignment = async (
+  threadFile: string,
+  threadId: string,
+): Promise<boolean> => {
+  const thread = await getTeamThreadRecord(threadFile, threadId);
+  if (!thread) {
+    return false;
+  }
+
+  return thread.dispatchAssignments.some((assignment) => !isTerminalDispatchAssignmentStatus(assignment.status));
+};
+
 export const markTeamThreadFailed = async ({
   threadFile,
   threadId,
@@ -231,26 +540,18 @@ export const markTeamThreadFailed = async ({
   threadId: string;
   error: string;
 }): Promise<void> => {
-  const storePath = resolveStorePath(threadFile);
-  const store = await readThreadStore(storePath);
-  const currentThread = store.threads[threadId];
-  if (!currentThread) {
-    return;
-  }
-
-  const now = new Date().toISOString();
-  store.threads[threadId] = {
-    ...currentThread,
-    run: {
-      status: "failed",
-      startedAt: currentThread.run?.startedAt ?? currentThread.createdAt,
-      finishedAt: now,
-      lastError: error,
+  await updateTeamThreadRecord({
+    threadFile,
+    threadId,
+    updater: (thread, now) => {
+      thread.run = {
+        status: "failed",
+        startedAt: thread.run?.startedAt ?? thread.createdAt,
+        finishedAt: now,
+        lastError: error,
+      };
     },
-    updatedAt: now,
-  };
-
-  await writeThreadStore(storePath, store);
+  });
 };
 
 export const createTeamHistory = (threadFile: string): HistoryConfig<TeamRunState> => {
@@ -281,7 +582,8 @@ export const createTeamHistory = (threadFile: string): HistoryConfig<TeamRunStat
         return [];
       }
 
-      const storedData = thread.data;
+      const normalizedThread = normalizeStoredThread(thread);
+      const storedData = normalizedThread.data;
       const shouldResetAssignment =
         state.data.forceReset ||
         storedData.latestInput !== input ||
@@ -299,75 +601,68 @@ export const createTeamHistory = (threadFile: string): HistoryConfig<TeamRunStat
         forceReset: false,
       };
 
-      return thread.results.map(deserializeResult);
+      return normalizedThread.results.map(deserializeResult);
     },
     appendUserMessage: async ({ threadId, state, userMessage }) => {
       if (!threadId) {
         return;
       }
 
-      const store = await readThreadStore(storePath);
-      const currentThread = store.threads[threadId];
-      const now = new Date().toISOString();
-      const userMessages = currentThread?.userMessages ?? [];
+      await queueStoreMutation(storePath, async () => {
+        const store = await readThreadStore(storePath);
+        const currentThread = store.threads[threadId];
+        const now = new Date().toISOString();
+        const userMessages = currentThread?.userMessages ?? [];
+        const existingDispatchAssignments = currentThread?.dispatchAssignments ?? [];
 
-      store.threads[threadId] = {
-        threadId,
-        data: {
-          ...state.data,
-          latestInput: userMessage.content,
-        },
-        results: currentThread?.results ?? [],
-        userMessages: [
-          ...userMessages,
-          {
-            id: userMessage.id,
-            role: "user",
-            content: userMessage.content,
-            timestamp: userMessage.timestamp.toISOString(),
+        const thread: TeamThreadRecord = {
+          threadId,
+          data: {
+            ...state.data,
+            latestInput: userMessage.content,
           },
-        ],
-        run: {
-          status: "running",
-          startedAt: now,
-          finishedAt: null,
-          lastError: null,
-        },
-        createdAt: currentThread?.createdAt ?? now,
-        updatedAt: now,
-      };
+          results: currentThread ? normalizeStoredThread(currentThread).results : [],
+          userMessages: [
+            ...userMessages,
+            {
+              id: userMessage.id,
+              role: "user",
+              content: userMessage.content,
+              timestamp: userMessage.timestamp.toISOString(),
+            },
+          ],
+          dispatchAssignments: existingDispatchAssignments,
+          run: {
+            status: "running",
+            startedAt: currentThread?.run?.startedAt ?? now,
+            finishedAt: null,
+            lastError: null,
+          },
+          createdAt: currentThread?.createdAt ?? now,
+          updatedAt: now,
+        };
 
-      await writeThreadStore(storePath, store);
+        synchronizeTeamThreadRun(thread, now);
+        store.threads[threadId] = thread;
+        await writeThreadStore(storePath, store);
+      });
     },
     appendResults: async ({ threadId, state, newResults }) => {
       if (!threadId) {
         return;
       }
 
-      const store = await readThreadStore(storePath);
-      const currentThread = store.threads[threadId];
-      const now = new Date().toISOString();
-      const serializedNewResults = newResults.map(serializeResult);
-
-      store.threads[threadId] = {
+      await updateTeamThreadRecord({
+        threadFile,
         threadId,
-        data: {
-          ...state.data,
-          handoffs: filterHandoffsForWorkflow(state.data),
+        updater: (thread) => {
+          thread.data = {
+            ...state.data,
+            handoffs: filterHandoffsForWorkflow(state.data),
+          };
+          thread.results = [...thread.results, ...newResults.map(serializeResult)];
         },
-        results: [...(currentThread?.results ?? []), ...serializedNewResults],
-        userMessages: currentThread?.userMessages ?? [],
-        run: {
-          status: deriveCompletedStatus(state.data),
-          startedAt: currentThread?.run?.startedAt ?? currentThread?.createdAt ?? now,
-          finishedAt: now,
-          lastError: null,
-        },
-        createdAt: currentThread?.createdAt ?? now,
-        updatedAt: now,
-      };
-
-      await writeThreadStore(storePath, store);
+      });
     },
   };
 };

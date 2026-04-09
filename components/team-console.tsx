@@ -8,6 +8,7 @@ type TeamConsoleProps = {
   disabled: boolean;
   initialPrompt: string;
   repositories: TeamRepositoryOption[];
+  workerCount: number;
 };
 
 type RunState =
@@ -92,7 +93,7 @@ const buildUnexpectedResponseMessage = (response: Response, body: string): strin
   return `Team run failed with HTTP ${response.status}. The server returned an unexpected response body.`;
 };
 
-export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConsoleProps) {
+export function TeamConsole({ disabled, initialPrompt, repositories, workerCount }: TeamConsoleProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [threadId, setThreadId] = useState("");
   const [repositoryId, setRepositoryId] = useState("");
@@ -159,7 +160,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
           result: runState.result,
         });
         setNotice(
-          `Team run started on thread ${payload.threadId}. Follow the live status board below while planner, coder, and reviewer keep working.`,
+          `Planner dispatch started on thread ${payload.threadId}. Follow the live status board below while ${workerCount} background coder/reviewer lane${workerCount === 1 ? "" : "s"} keep working.`,
         );
         return;
       }
@@ -201,13 +202,14 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         <p className="eyebrow">Run Team</p>
         <h2>Continuous Assignment Console</h2>
         <p className="section-copy">
-          Reuse the same thread ID to keep the team continuous. Enable reset to start a fresh
-          planner-to-reviewer cycle on the same thread.
+          Reuse the same thread ID to keep the planning conversation continuous. The planner
+          dispatches up to {workerCount} dedicated coder/reviewer lanes, each with its own branch,
+          worktree, and pull request lifecycle.
         </p>
         {hasRepositories ? (
           <p className="field-hint">
-            Only repositories discovered from directories configured in `team.config.ts` can be
-            selected here.
+            Select a repository before dispatching work. Only repositories discovered from
+            directories configured in `team.config.ts` can be selected here.
           </p>
         ) : null}
       </div>
@@ -283,7 +285,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         ) : null}
 
         <button className="primary-button" type="submit" disabled={disabled || isRunning}>
-          {isRunning ? "Running planner, coder, reviewer..." : "Run Team"}
+          {isRunning ? "Planning and dispatching lanes..." : "Plan and Dispatch"}
         </button>
       </form>
 

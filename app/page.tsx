@@ -40,8 +40,8 @@ export default async function HomePage() {
           </article>
           <article>
             <span className="metric-label">Workflow</span>
-            <strong>{teamConfig.workflow.join(" -> ")}</strong>
-            <p>Planner, coder, reviewer by default, extensible through Markdown files.</p>
+            <strong>{`planner -> ${teamConfig.dispatch.workerCount}x(coder + reviewer)`}</strong>
+            <p>Planner dispatches background coder/reviewer lanes with dedicated branches and worktrees.</p>
           </article>
           <article>
             <span className="metric-label">Codex Backend</span>
@@ -59,6 +59,11 @@ export default async function HomePage() {
               Only repositories found inside directories listed in `team.config.ts` appear in the
               selector.
             </p>
+          </article>
+          <article>
+            <span className="metric-label">Parallel Lanes</span>
+            <strong>{teamConfig.dispatch.workerCount}</strong>
+            <p>Idle until the planner dispatches work, then tracked live through coding, review, and approval.</p>
           </article>
         </div>
       </section>
@@ -83,7 +88,7 @@ export default async function HomePage() {
             <h2>Owned Team Settings</h2>
             <p className="section-copy">
               Everything that defines the active team lives in one file: owner, workflow, storage,
-              model settings, and allowed local repository directories.
+              model settings, dispatch lanes, and allowed local repository directories.
             </p>
           </div>
 
@@ -93,6 +98,7 @@ defineTeamConfig({
   owner: { name: "${teamConfig.owner.name}" },
   workflow: ${JSON.stringify(teamConfig.workflow)},
   model: { model: "${teamConfig.model.model}" },
+  dispatch: { workerCount: ${teamConfig.dispatch.workerCount} },
   repositories: { roots: ${configuredRepositoryRoots.length} },
   maxIterations: ${teamConfig.maxIterations},
 });`}</pre>
@@ -104,7 +110,8 @@ defineTeamConfig({
             <h2>Workflow Prompts</h2>
             <p className="section-copy">
               Each role comes from a Markdown prompt file. To add a new role, create a new prompt
-              and add its role ID to the workflow in `team.config.ts`.
+              and add its role ID to the workflow in `team.config.ts`. The planner remains the
+              dispatch coordinator while coder and reviewer prompts are reused inside each worker lane.
             </p>
           </div>
 
@@ -125,8 +132,9 @@ defineTeamConfig({
 
       <TeamConsole
         disabled={!hasApiKey}
-        initialPrompt="Design a new role prompt for a researcher, add it to the workflow, and make the reviewer call out any missing validation."
+        initialPrompt="Dispatch parallel coder and reviewer lanes for a new onboarding flow, keep branches isolated per lane, and request human approval once each pull request is ready."
         repositories={availableRepositories}
+        workerCount={teamConfig.dispatch.workerCount}
       />
 
       <ThreadStatusBoard initialThreads={threadSummaries} />
@@ -179,9 +187,10 @@ defineTeamConfig({
             <h2>How persistence works</h2>
           </div>
           <p className="section-copy">
-            The team stores AgentKit thread history in local JSON. Reusing a thread ID keeps the
-            same team conversation alive, while a new input or an explicit reset starts a fresh
-            planner-to-reviewer assignment cycle.
+            The planner stores its AgentKit thread history in local JSON, while background worker
+            lanes persist branch, worktree, pull request, and approval state alongside the thread.
+            Reusing a thread ID keeps the same planning conversation alive after the current lane
+            set finishes.
           </p>
         </section>
       </section>
