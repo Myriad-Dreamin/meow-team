@@ -197,6 +197,8 @@ const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord =
     proposalPath: lane.proposalPath ?? null,
     workerSlot: lane.workerSlot ?? null,
     latestImplementationCommit: lane.latestImplementationCommit ?? null,
+    latestCoderHandoff: lane.latestCoderHandoff ?? null,
+    latestReviewerHandoff: lane.latestReviewerHandoff ?? null,
     approvalRequestedAt: lane.approvalRequestedAt ?? null,
     approvalGrantedAt: lane.approvalGrantedAt ?? null,
     queuedAt: lane.queuedAt ?? null,

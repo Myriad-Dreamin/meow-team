@@ -113,6 +113,8 @@ export type TeamWorkerLaneRecord = {
   baseBranch: string | null;
   worktreePath: string | null;
   latestImplementationCommit: string | null;
+  latestCoderHandoff: TeamRoleHandoff | null;
+  latestReviewerHandoff: TeamRoleHandoff | null;
   latestDecision: TeamRoleDecision | null;
   latestCoderSummary: string | null;
   latestReviewerSummary: string | null;

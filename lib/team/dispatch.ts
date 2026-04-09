@@ -160,6 +160,105 @@ const appendLaneEvent = (
   lane.events = [...lane.events, createLaneEvent(actor, message, now)];
 };
 
+const getLaneWorkflow = (): string[] => {
+  return teamConfig.workflow.filter((roleId) => roleId === "coder" || roleId === "reviewer");
+};
+
+const getHighestHandoffSequence = (
+  handoffs: Partial<Record<string, TeamRoleHandoff>>,
+): number => {
+  return Object.values(handoffs).reduce((highestSequence, handoff) => {
+    return handoff ? Math.max(highestSequence, handoff.sequence) : highestSequence;
+  }, 0);
+};
+
+const inferReviewerDecisionFromLane = (
+  lane: Pick<
+    TeamWorkerLaneRecord,
+    "latestDecision" | "latestReviewerSummary" | "requeueReason" | "status" | "updatedAt"
+  >,
+): TeamRoleHandoff["decision"] | null => {
+  if (!lane.latestReviewerSummary) {
+    return null;
+  }
+
+  if (lane.requeueReason === "reviewer_requested_changes") {
+    return "needs_revision";
+  }
+
+  if (lane.requeueReason === "planner_detected_conflict" || lane.status === "approved") {
+    return "approved";
+  }
+
+  if (lane.latestDecision === "approved" || lane.latestDecision === "needs_revision") {
+    return lane.latestDecision;
+  }
+
+  return null;
+};
+
+const buildSyntheticReviewerHandoff = (
+  lane: Pick<
+    TeamWorkerLaneRecord,
+    | "latestDecision"
+    | "latestReviewerSummary"
+    | "requeueReason"
+    | "status"
+    | "updatedAt"
+    | "finishedAt"
+  >,
+  assignmentNumber: number,
+  sequence: number,
+): TeamRoleHandoff | null => {
+  if (!lane.latestReviewerSummary) {
+    return null;
+  }
+
+  const decision = inferReviewerDecisionFromLane(lane);
+  if (!decision) {
+    return null;
+  }
+
+  return {
+    roleId: "reviewer",
+    roleName: "Reviewer",
+    summary: lane.latestReviewerSummary,
+    deliverable: lane.latestReviewerSummary,
+    decision,
+    sequence,
+    assignmentNumber,
+    updatedAt: lane.finishedAt ?? lane.updatedAt,
+  };
+};
+
+const buildLanePersistedHandoffs = ({
+  lane,
+  assignmentNumber,
+}: {
+  lane: TeamWorkerLaneRecord;
+  assignmentNumber: number;
+}): Partial<Record<string, TeamRoleHandoff>> => {
+  const handoffs: Partial<Record<string, TeamRoleHandoff>> = {};
+
+  if (lane.latestCoderHandoff) {
+    handoffs.coder = lane.latestCoderHandoff;
+  }
+
+  const reviewerHandoff =
+    lane.latestReviewerHandoff ??
+    buildSyntheticReviewerHandoff(
+      lane,
+      assignmentNumber,
+      Math.max((lane.latestCoderHandoff?.sequence ?? 0) + 1, 1),
+    );
+
+  if (reviewerHandoff) {
+    handoffs.reviewer = reviewerHandoff;
+  }
+
+  return handoffs;
+};
+
 const buildLaneInitialState = ({
   repository,
   lane,
@@ -200,7 +299,7 @@ const buildLaneInitialState = ({
         : null,
     workflow,
     handoffs,
-    handoffCounter: Object.keys(handoffs).length,
+    handoffCounter: getHighestHandoffSequence(handoffs),
     assignmentNumber: assignment.assignmentNumber,
     pullRequestDraft: null,
   };
@@ -404,6 +503,8 @@ const createProposalLane = ({
     baseBranch,
     worktreePath: null,
     latestImplementationCommit: null,
+    latestCoderHandoff: null,
+    latestReviewerHandoff: null,
     latestDecision: null,
     latestCoderSummary: null,
     latestReviewerSummary: null,
@@ -674,8 +775,11 @@ const runLaneCycle = async ({
         repository: assignment.repository,
         lane,
         assignment,
-        workflow: ["coder"],
-        handoffs: {},
+        workflow: getLaneWorkflow(),
+        handoffs: buildLanePersistedHandoffs({
+          lane,
+          assignmentNumber,
+        }),
       }),
       input:
         lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
@@ -722,6 +826,7 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "failed";
           mutableLane.latestImplementationCommit = null;
+          mutableLane.latestCoderHandoff = coderHandoff;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestDecision = coderHandoff.decision;
           mutableLane.latestActivity = "Coder finished without producing branch output.";
@@ -770,6 +875,7 @@ const runLaneCycle = async ({
         const reviewCommit = shortenCommit(branchHeadAfterCoding);
         mutableLane.status = "reviewing";
         mutableLane.latestImplementationCommit = branchHeadAfterCoding;
+        mutableLane.latestCoderHandoff = coderHandoff;
         mutableLane.latestCoderSummary = coderHandoff.summary;
         mutableLane.latestDecision = coderHandoff.decision;
         mutableLane.latestActivity = `Reviewer is evaluating implementation commit ${reviewCommit}.`;
@@ -785,14 +891,27 @@ const runLaneCycle = async ({
       },
     });
 
+    const reviewerLane: TeamWorkerLaneRecord = {
+      ...lane,
+      status: "reviewing",
+      latestImplementationCommit: branchHeadAfterCoding,
+      latestCoderHandoff: coderHandoff,
+      latestCoderSummary: coderHandoff.summary,
+      latestDecision: coderHandoff.decision,
+    };
+
     const reviewerState = await runRoleWithCodexCli({
       role: reviewerRole,
       state: buildLaneInitialState({
         repository: assignment.repository,
-        lane,
+        lane: reviewerLane,
         assignment,
-        workflow: ["coder", "reviewer"],
+        workflow: getLaneWorkflow(),
         handoffs: {
+          ...buildLanePersistedHandoffs({
+            lane: reviewerLane,
+            assignmentNumber,
+          }),
           coder: coderHandoff,
         },
       }),
@@ -830,6 +949,8 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
           mutableLane.latestDecision = reviewerHandoff.decision;
+          mutableLane.latestCoderHandoff = coderHandoff;
+          mutableLane.latestReviewerHandoff = reviewerHandoff;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestReviewerSummary = reviewerHandoff.summary;
           mutableLane.latestActivity =
@@ -885,6 +1006,8 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
           mutableLane.latestDecision = reviewerHandoff.decision;
+          mutableLane.latestCoderHandoff = coderHandoff;
+          mutableLane.latestReviewerHandoff = reviewerHandoff;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestReviewerSummary = reviewerHandoff.summary;
           mutableLane.latestActivity =
@@ -934,6 +1057,8 @@ const runLaneCycle = async ({
         const mutableLane = findLane(mutableAssignment, laneId);
         mutableLane.status = "approved";
         mutableLane.latestDecision = reviewerHandoff.decision;
+        mutableLane.latestCoderHandoff = coderHandoff;
+        mutableLane.latestReviewerHandoff = reviewerHandoff;
         mutableLane.latestCoderSummary = coderHandoff.summary;
         mutableLane.latestReviewerSummary = reviewerHandoff.summary;
         mutableLane.latestActivity = "Reviewer completed machine review for the approved proposal.";
