@@ -26,6 +26,10 @@ const runOpenSpec = async (
   try {
     const result = await execFileAsync("openspec", args, {
       cwd: workingDirectory,
+      env: {
+        ...process.env,
+        OPENSPEC_TELEMETRY: "0",
+      },
       maxBuffer: 1024 * 1024 * 4,
     });
 

@@ -325,6 +325,7 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
           ...process.env,
           CODEX_HOME: codexHome,
           OPENAI_API_KEY: teamRuntimeConfig.apiKey ?? process.env.OPENAI_API_KEY ?? "",
+          OPENSPEC_TELEMETRY: "0",
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
