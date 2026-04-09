@@ -11,6 +11,7 @@ import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import { createTeamHistory } from "@/lib/team/history";
 import { loadWorkflowRolePrompts, type RolePrompt } from "@/lib/team/prompts";
+import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
 
 export type TeamRoleDecision = "continue" | "approved" | "needs_revision";
 
@@ -51,24 +52,26 @@ export type TeamRunSummary = {
   }>;
 };
 
-const teamModel = openaiResponses({
-  model: teamConfig.model.model,
-  apiKey: process.env.OPENAI_API_KEY,
-  baseUrl: process.env.OPENAI_BASE_URL || undefined,
-  defaultParameters: {
-    store: false,
-    parallel_tool_calls: false,
-    max_output_tokens: teamConfig.model.maxOutputTokens,
-    reasoning: {
-      effort: teamConfig.model.reasoningEffort,
+const createTeamModel = () => {
+  return openaiResponses({
+    model: teamConfig.model.model,
+    apiKey: teamRuntimeConfig.apiKey ?? undefined,
+    baseUrl: teamRuntimeConfig.baseUrl,
+    defaultParameters: {
+      store: false,
+      parallel_tool_calls: false,
+      max_output_tokens: teamConfig.model.maxOutputTokens,
+      reasoning: {
+        effort: teamConfig.model.reasoningEffort,
+      },
+      text: {
+        verbosity: teamConfig.model.textVerbosity,
+      },
     },
-    text: {
-      verbosity: teamConfig.model.textVerbosity,
-    },
-  },
-  // AgentKit 0.13.2 still types models against @inngest/ai 0.1.6,
-  // while the Responses adapter lives in @inngest/ai 0.1.7.
-}) as unknown as ReturnType<typeof agentKitOpenAi>;
+    // AgentKit 0.13.2 still types models against @inngest/ai 0.1.6,
+    // while the Responses adapter lives in @inngest/ai 0.1.7.
+  }) as unknown as ReturnType<typeof agentKitOpenAi>;
+};
 
 const buildInitialState = (forceReset: boolean): TeamRunState => {
   return {
@@ -243,13 +246,14 @@ const resolveNextRoleId = (state: TeamRunState): string | undefined => {
 };
 
 const ensureOpenAiApiKey = (): void => {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required to run the AgentKit network.");
+  if (!teamRuntimeConfig.apiKey) {
+    throw new Error(missingOpenAiConfigMessage);
   }
 };
 
 export const getTeamRuntime = async () => {
   ensureOpenAiApiKey();
+  const teamModel = createTeamModel();
 
   const roles = await loadWorkflowRolePrompts(teamConfig);
   const agents = roles.map((role) => {

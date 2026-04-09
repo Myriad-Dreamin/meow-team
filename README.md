@@ -26,13 +26,28 @@ and the whole team is configured in one file:
 
 ```bash
 pnpm install
-cp .env.example .env.local
 pnpm dev
 ```
 
 Open `http://localhost:3000`.
 
-## Environment
+## Runtime Configuration
+
+The app reads your Codex user settings by default instead of requiring a
+project-local `.env.local` file:
+
+- Model and base URL: `~/.codex/config.toml`
+- Credentials: `~/.codex/auth.json`
+
+With the current local setup, that means the team inherits the same OpenAI
+compatible provider and model selection that your Codex CLI already uses.
+Restart the dev server after changing your Codex config so the server reloads
+those settings.
+
+### Optional Environment Fallbacks
+
+If you are running outside that Codex setup, the server still accepts these
+environment variables:
 
 ```bash
 OPENAI_API_KEY=your_openai_api_key
@@ -41,8 +56,8 @@ OPENAI_MODEL=gpt-5.2-codex
 TEAM_OWNER_NAME=Your Team
 ```
 
-`OPENAI_MODEL` defaults to `gpt-5.2-codex`, which OpenAI currently
-recommends for agentic coding tasks in Codex-like environments.
+`OPENAI_MODEL` falls back to `gpt-5.2-codex` when neither the Codex config nor
+the environment provides a model override.
 
 ## Project Layout
 
@@ -83,5 +98,5 @@ role stays lightweight.
 
 - Thread history is stored locally in `data/team-threads.json`.
 - A legacy `.env` from the previous copied project may still exist locally.
-  If it contains an old GitHub token, rotate it and replace it with this
-  project's OpenAI-focused env setup.
+  If it contains unrelated secrets from the copied app, rotate them and remove
+  them from this project.

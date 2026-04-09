@@ -16,7 +16,7 @@ export const teamConfigSchema = z.object({
   model: z.object({
     provider: z.literal("openai"),
     model: z.string().trim().min(1),
-    reasoningEffort: z.enum(["low", "medium", "high"]),
+    reasoningEffort: z.enum(["minimal", "low", "medium", "high", "xhigh"]),
     textVerbosity: z.enum(["low", "medium", "high"]),
     maxOutputTokens: z.number().int().positive(),
   }),

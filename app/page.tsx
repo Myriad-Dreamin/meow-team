@@ -1,6 +1,9 @@
 import { TeamConsole } from "@/components/team-console";
 import { teamConfig } from "@/team.config";
 import { listAvailableRolePrompts, loadWorkflowRolePrompts } from "@/lib/team/prompts";
+import { codexUserConfigDisplayPaths, teamRuntimeConfig } from "@/lib/team/runtime-config";
+
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const [workflowRoles, availableRoles] = await Promise.all([
@@ -8,7 +11,7 @@ export default async function HomePage() {
     listAvailableRolePrompts(),
   ]);
 
-  const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
+  const hasApiKey = teamRuntimeConfig.hasApiKey;
 
   return (
     <main className="page-shell">
@@ -45,10 +48,12 @@ export default async function HomePage() {
       {!hasApiKey ? (
         <section className="warning-panel">
           <p className="eyebrow">Configuration Needed</p>
-          <h2>Add `OPENAI_API_KEY` to `.env.local` to run the team.</h2>
+          <h2>Connect your Codex user config to run the team.</h2>
           <p>
-            The homepage can still show the configuration, but actual AgentKit runs are disabled
-            until the OpenAI key is available.
+            The server reads model settings from <code>{codexUserConfigDisplayPaths.config}</code>{" "}
+            and credentials from <code>{codexUserConfigDisplayPaths.auth}</code>. The homepage can
+            still show the configuration, but actual AgentKit runs stay disabled until that auth is
+            available.
           </p>
         </section>
       ) : null}
