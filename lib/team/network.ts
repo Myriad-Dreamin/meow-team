@@ -3,10 +3,9 @@ import {
   createNetwork,
   createState,
   createTool,
-  openai as agentKitOpenAi,
+  openai,
   type Message,
 } from "@inngest/agent-kit";
-import { openaiResponses } from "@inngest/ai/models";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import { createTeamHistory } from "@/lib/team/history";
@@ -57,24 +56,18 @@ export type TeamRunSummary = {
 };
 
 const createTeamModel = () => {
-  return openaiResponses({
+  // AgentKit 0.13.2 does not understand the newer "openai-responses" adapter
+  // format yet, so use the compatible OpenAI chat adapter until upstream
+  // support lands.
+  return openai({
     model: teamConfig.model.model,
     apiKey: teamRuntimeConfig.apiKey ?? undefined,
     baseUrl: teamRuntimeConfig.baseUrl,
     defaultParameters: {
       store: false,
-      parallel_tool_calls: false,
-      max_output_tokens: teamConfig.model.maxOutputTokens,
-      reasoning: {
-        effort: teamConfig.model.reasoningEffort,
-      },
-      text: {
-        verbosity: teamConfig.model.textVerbosity,
-      },
+      max_completion_tokens: teamConfig.model.maxOutputTokens,
     },
-    // AgentKit 0.13.2 still types models against @inngest/ai 0.1.6,
-    // while the Responses adapter lives in @inngest/ai 0.1.7.
-  }) as unknown as ReturnType<typeof agentKitOpenAi>;
+  });
 };
 
 const buildInitialState = (

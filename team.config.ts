@@ -25,9 +25,19 @@ export const teamConfig = defineTeamConfig({
   repositories: {
     roots: [
       {
-        id: "local-workspace",
-        label: "Local Workspace",
+        id: "work-ts",
+        label: "Typescript",
         directory: path.resolve(process.cwd(), ".."),
+      },
+      {
+        id: "work-rust",
+        label: "Rust",
+        directory: path.resolve(process.cwd(), "../../rust"),
+      },
+      {
+        id: "revival",
+        label: "Revival Projects",
+        directory: "/mnt/sda2/revival/",
       },
     ],
   },

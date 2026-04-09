@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useState } from "react";
+import { startTransition, useState, type FormEvent } from "react";
 import type { TeamRunSummary } from "@/lib/team/network";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 
@@ -14,7 +14,7 @@ type RunState =
   | {
       status: "idle";
       error: null;
-      result: null;
+      result: TeamRunSummary | null;
     }
   | {
       status: "running";
@@ -38,12 +38,67 @@ const initialRunState: RunState = {
   result: null,
 };
 
+type TeamRunAcceptedResponse = {
+  accepted: true;
+  status: "running";
+  threadId: string;
+  startedAt: string;
+};
+
+const tryParseJson = (value: string): unknown => {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null;
+};
+
+const isTeamRunSummary = (value: unknown): value is TeamRunSummary => {
+  return (
+    isRecord(value) &&
+    "threadId" in value &&
+    "assignmentNumber" in value &&
+    "handoffs" in value &&
+    "steps" in value
+  );
+};
+
+const isAcceptedResponse = (value: unknown): value is TeamRunAcceptedResponse => {
+  return isRecord(value) && value.accepted === true && typeof value.threadId === "string";
+};
+
+const readErrorMessage = (value: unknown): string | null => {
+  if (!isRecord(value) || typeof value.error !== "string" || !value.error.trim()) {
+    return null;
+  }
+
+  return value.error;
+};
+
+const buildUnexpectedResponseMessage = (response: Response, body: string): string => {
+  const trimmed = body.trim();
+  if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+    return `Team run failed with HTTP ${response.status}. The server returned an HTML error page instead of JSON, which usually means the production request crashed or timed out. Check Live Thread Status below for partial progress.`;
+  }
+
+  if (!trimmed) {
+    return `Team run failed with HTTP ${response.status}. The server returned an empty response.`;
+  }
+
+  return `Team run failed with HTTP ${response.status}. The server returned an unexpected response body.`;
+};
+
 export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConsoleProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [threadId, setThreadId] = useState("");
   const [repositoryId, setRepositoryId] = useState("");
   const [reset, setReset] = useState(false);
   const [runState, setRunState] = useState<RunState>(initialRunState);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const isRunning = runState.status === "running";
   const hasRepositories = repositories.length > 0;
@@ -60,6 +115,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         error: "Enter a request before running the team.",
         result: runState.result,
       });
+      setNotice(null);
       return;
     }
 
@@ -72,6 +128,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
       error: null,
       result: runState.result,
     });
+    setNotice(null);
 
     try {
       const response = await fetch("/api/team/run", {
@@ -87,9 +144,28 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         }),
       });
 
-      const payload = (await response.json()) as TeamRunSummary | { error?: string };
-      if (!response.ok || !("threadId" in payload)) {
-        throw new Error("error" in payload ? payload.error || "Team run failed." : "Team run failed.");
+      const rawPayload = await response.text();
+      const payload = tryParseJson(rawPayload);
+
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload) ?? buildUnexpectedResponseMessage(response, rawPayload));
+      }
+
+      if (isAcceptedResponse(payload)) {
+        setThreadId(payload.threadId);
+        setRunState({
+          status: "idle",
+          error: null,
+          result: runState.result,
+        });
+        setNotice(
+          `Team run started on thread ${payload.threadId}. Follow the live status board below while planner, coder, and reviewer keep working.`,
+        );
+        return;
+      }
+
+      if (!isTeamRunSummary(payload)) {
+        throw new Error(buildUnexpectedResponseMessage(response, rawPayload));
       }
 
       setThreadId(payload.threadId ?? "");
@@ -98,6 +174,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         error: null,
         result: payload,
       });
+      setNotice(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Team run failed.";
       setRunState({
@@ -105,7 +182,17 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         error: message,
         result: runState.result,
       });
+      setNotice(null);
     }
+  };
+
+  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    startTransition(() => {
+      void handleSubmit(formData);
+    });
   };
 
   return (
@@ -125,14 +212,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         ) : null}
       </div>
 
-      <form
-        className="console-form"
-        action={(formData) => {
-          startTransition(() => {
-            void handleSubmit(formData);
-          });
-        }}
-      >
+      <form className="console-form" onSubmit={handleFormSubmit}>
         <label className="field">
           <span>Request</span>
           <textarea
@@ -207,6 +287,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories }: TeamConso
         </button>
       </form>
 
+      {notice ? <p className="info-callout">{notice}</p> : null}
       {runState.error ? <p className="error-callout">{runState.error}</p> : null}
 
       {runState.result ? (

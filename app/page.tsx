@@ -1,5 +1,7 @@
 import { TeamConsole } from "@/components/team-console";
+import { ThreadStatusBoard } from "@/components/thread-status-board";
 import { teamConfig } from "@/team.config";
+import { listTeamThreadSummaries } from "@/lib/team/history";
 import { listAvailableRolePrompts, loadWorkflowRolePrompts } from "@/lib/team/prompts";
 import { listConfiguredRepositories, resolveConfiguredRepositoryRoots } from "@/lib/team/repositories";
 import { codexUserConfigDisplayPaths, teamRuntimeConfig } from "@/lib/team/runtime-config";
@@ -8,10 +10,11 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const configuredRepositoryRoots = resolveConfiguredRepositoryRoots(teamConfig);
-  const [workflowRoles, availableRoles, availableRepositories] = await Promise.all([
+  const [workflowRoles, availableRoles, availableRepositories, threadSummaries] = await Promise.all([
     loadWorkflowRolePrompts(teamConfig),
     listAvailableRolePrompts(),
     listConfiguredRepositories(teamConfig),
+    listTeamThreadSummaries(teamConfig.storage.threadFile),
   ]);
 
   const hasApiKey = teamRuntimeConfig.hasApiKey;
@@ -43,7 +46,7 @@ export default async function HomePage() {
           <article>
             <span className="metric-label">Codex Backend</span>
             <strong>{teamConfig.model.model}</strong>
-            <p>OpenAI Responses API through the Inngest AI adapter.</p>
+            <p>OpenAI-compatible chat adapter through the Inngest AI adapter.</p>
           </article>
           <article>
             <span className="metric-label">Repositories</span>
@@ -125,6 +128,8 @@ defineTeamConfig({
         initialPrompt="Design a new role prompt for a researcher, add it to the workflow, and make the reviewer call out any missing validation."
         repositories={availableRepositories}
       />
+
+      <ThreadStatusBoard initialThreads={threadSummaries} />
 
       <section className="footer-grid">
         <section className="info-panel">

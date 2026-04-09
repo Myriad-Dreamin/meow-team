@@ -345,6 +345,15 @@ main {
   background: rgba(107, 26, 26, 0.42);
 }
 
+.info-callout {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(125, 242, 198, 0.24);
+  color: var(--text);
+  background: rgba(18, 64, 54, 0.36);
+}
+
 .run-result {
   display: grid;
   gap: 18px;
@@ -446,6 +455,88 @@ main {
 .library-pill {
   padding: 10px 14px;
   color: var(--text);
+}
+
+.thread-board {
+  display: grid;
+  gap: 14px;
+}
+
+.thread-card {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px;
+  background: var(--panel-soft);
+}
+
+.thread-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.thread-card-subtitle,
+.thread-request {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.thread-request {
+  margin-top: 14px;
+}
+
+.thread-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.thread-meta-grid p {
+  margin: 10px 0 0;
+}
+
+.thread-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.status-running,
+.status-completed {
+  background: rgba(125, 242, 198, 0.12);
+  color: var(--accent);
+}
+
+.status-approved {
+  background: rgba(117, 229, 178, 0.16);
+  color: var(--approved);
+}
+
+.status-needs_revision {
+  background: rgba(255, 201, 110, 0.14);
+  color: var(--warning);
+}
+
+.status-failed {
+  background: rgba(255, 143, 143, 0.14);
+  color: var(--danger);
 }
 
 @media (max-width: 920px) {
