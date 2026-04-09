@@ -12,10 +12,13 @@ import {
   buildLaneBranchName,
   buildLaneWorktreePath,
   commitWorktreeChanges,
+  deleteManagedBranches,
   detectBranchConflict,
   ensureLaneWorktree,
+  ExistingBranchesRequireDeleteError,
   getBranchHead,
   hasWorktreeChanges,
+  listExistingBranches,
   resolveRepositoryBaseBranch,
   resolveWorktreeRoot,
 } from "@/lib/team/git";
@@ -428,6 +431,7 @@ export const createPlannerDispatchAssignment = async ({
   plannerDeliverable,
   branchPrefix,
   tasks,
+  deleteExistingBranches = false,
 }: {
   threadId: string;
   assignmentNumber: number;
@@ -436,6 +440,7 @@ export const createPlannerDispatchAssignment = async ({
   plannerDeliverable: string;
   branchPrefix: string;
   tasks: DispatchTask[];
+  deleteExistingBranches?: boolean;
 }): Promise<TeamDispatchAssignment> => {
   if (!repository) {
     throw new Error("Dispatching coder and reviewer lanes requires a selected repository.");
@@ -492,6 +497,34 @@ export const createPlannerDispatchAssignment = async ({
     },
     now,
   );
+
+  const targetBranchNames = [
+    canonicalBranchName,
+    ...assignment.lanes.flatMap((lane) => (lane.branchName ? [lane.branchName] : [])),
+  ];
+  const existingBranches = await listExistingBranches({
+    repositoryPath: repository.path,
+    branchNames: targetBranchNames,
+  });
+
+  if (existingBranches.length > 0) {
+    if (!deleteExistingBranches) {
+      throw new ExistingBranchesRequireDeleteError(existingBranches);
+    }
+
+    await deleteManagedBranches({
+      repositoryPath: repository.path,
+      worktreeRoot: resolvedWorktreeRoot,
+      branchNames: existingBranches,
+    });
+    assignment.plannerNotes = [
+      createPlannerNote(
+        `Human confirmed deletion of existing branches before rematerializing proposals: ${existingBranches.join(", ")}.`,
+        now,
+      ),
+      ...assignment.plannerNotes,
+    ];
+  }
 
   await materializeAssignmentProposals({
     repositoryPath: repository.path,

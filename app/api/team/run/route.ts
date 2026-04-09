@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
+import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
 import { markTeamThreadFailed, threadHasActiveDispatchAssignment } from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
@@ -28,6 +29,12 @@ type TeamRunStreamEvent =
       type: "error";
       threadId: string;
       error: string;
+    }
+  | {
+      type: "branch_delete_required";
+      threadId: string;
+      error: string;
+      branches: string[];
     };
 
 const runTeamSchema = z.object({
@@ -35,6 +42,7 @@ const runTeamSchema = z.object({
   threadId: z.string().trim().min(1).optional(),
   repositoryId: z.string().trim().min(1).optional(),
   reset: z.boolean().optional(),
+  deleteExistingBranches: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -135,21 +143,30 @@ export async function POST(request: Request) {
             const message = error instanceof Error ? error.message : "Unknown error.";
             console.error(`[team-run:${threadId}] ${message}`);
 
-            try {
-              await markTeamThreadFailed({
-                threadFile: teamConfig.storage.threadFile,
+            if (error instanceof ExistingBranchesRequireDeleteError) {
+              writeEvent({
+                type: "branch_delete_required",
+                threadId,
+                error: message,
+                branches: error.branchNames,
+              });
+            } else {
+              try {
+                await markTeamThreadFailed({
+                  threadFile: teamConfig.storage.threadFile,
+                  threadId,
+                  error: message,
+                });
+              } catch {
+                // The thread may not have been created yet.
+              }
+
+              writeEvent({
+                type: "error",
                 threadId,
                 error: message,
               });
-            } catch {
-              // The thread may not have been created yet.
             }
-
-            writeEvent({
-              type: "error",
-              threadId,
-              error: message,
-            });
           } finally {
             close();
           }

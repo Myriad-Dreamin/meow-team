@@ -3,7 +3,13 @@ import { teamConfig } from "@/team.config";
 import { applyHandoff, summarizeHandoffs } from "@/lib/team/agent-helpers";
 import { runCodexStructuredOutput } from "@/lib/team/codex-cli";
 import { createPlannerDispatchAssignment, ensurePendingDispatchWork } from "@/lib/team/dispatch";
-import { appendTeamExecutionStep, getTeamThreadRecord, upsertTeamThreadRun } from "@/lib/team/history";
+import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
+import {
+  appendTeamExecutionStep,
+  getTeamThreadRecord,
+  updateTeamThreadRecord,
+  upsertTeamThreadRun,
+} from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
@@ -275,12 +281,14 @@ export const runTeam = async ({
   threadId,
   repositoryId,
   reset,
+  deleteExistingBranches,
   onPlannerLogEntry,
 }: {
   input: string;
   threadId?: string;
   repositoryId?: string;
   reset?: boolean;
+  deleteExistingBranches?: boolean;
   onPlannerLogEntry?: (entry: TeamCodexLogEntry) => Promise<void> | void;
 }): Promise<TeamRunSummary> => {
   const selectedRepository = await findConfiguredRepository(teamConfig, repositoryId);
@@ -367,6 +375,7 @@ export const runTeam = async ({
         plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
         branchPrefix: plannerResponse.dispatch.branchPrefix,
         tasks: plannerResponse.dispatch.tasks,
+        deleteExistingBranches,
       });
     }
 
@@ -395,6 +404,32 @@ export const runTeam = async ({
       steps: [step],
     };
   } catch (error) {
+    if (error instanceof ExistingBranchesRequireDeleteError) {
+      try {
+        await updateTeamThreadRecord({
+          threadFile: teamConfig.storage.threadFile,
+          threadId: resolvedThreadId,
+          updater: (thread, now) => {
+            thread.run = {
+              status: "completed",
+              startedAt: thread.run?.startedAt ?? thread.createdAt,
+              finishedAt: now,
+              lastError: error.message,
+            };
+          },
+        });
+      } catch {
+        // The thread may not have been created yet.
+      }
+
+      await forwardPlannerEvent({
+        source: "system",
+        message: error.message,
+        createdAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+
     await forwardPlannerEvent({
       source: "system",
       message: `Planner run failed: ${error instanceof Error ? error.message : "Unknown error."}`,

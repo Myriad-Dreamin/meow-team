@@ -58,11 +58,27 @@ type TeamRunErrorStreamEvent = {
   error: string;
 };
 
+type TeamRunBranchDeleteRequiredStreamEvent = {
+  type: "branch_delete_required";
+  threadId: string;
+  error: string;
+  branches: string[];
+};
+
 type TeamRunStreamEvent =
   | TeamRunAcceptedStreamEvent
   | TeamRunCodexEventStreamEvent
   | TeamRunResultStreamEvent
-  | TeamRunErrorStreamEvent;
+  | TeamRunErrorStreamEvent
+  | TeamRunBranchDeleteRequiredStreamEvent;
+
+type TeamRunRequest = {
+  input: string;
+  threadId?: string;
+  repositoryId?: string;
+  reset: boolean;
+  deleteExistingBranches?: boolean;
+};
 
 type TeamLogsResponse = {
   entries: TeamCodexLogEntry[];
@@ -149,6 +165,19 @@ const isErrorStreamEvent = (value: unknown): value is TeamRunErrorStreamEvent =>
   );
 };
 
+const isBranchDeleteRequiredStreamEvent = (
+  value: unknown,
+): value is TeamRunBranchDeleteRequiredStreamEvent => {
+  return (
+    isRecord(value) &&
+    value.type === "branch_delete_required" &&
+    typeof value.threadId === "string" &&
+    typeof value.error === "string" &&
+    Array.isArray(value.branches) &&
+    value.branches.every((branch) => typeof branch === "string")
+  );
+};
+
 const isLogsResponse = (value: unknown): value is TeamLogsResponse => {
   return isRecord(value) && Array.isArray(value.entries) && value.entries.every(isTeamCodexLogEntry);
 };
@@ -172,6 +201,15 @@ const buildUnexpectedResponseMessage = (response: Response, body: string): strin
   }
 
   return `Team run failed with HTTP ${response.status}. The server returned an unexpected response body.`;
+};
+
+const buildBranchDeletePrompt = (branches: string[]): string => {
+  const branchList = branches.map((branchName) => `- ${branchName}`).join("\n");
+  return [
+    "The planner found existing branches with the same names:",
+    branchList,
+    "Delete those branches and any managed harness worktrees attached to them, then rerun the planner?",
+  ].join("\n\n");
 };
 
 const mergeLogEntries = (
@@ -388,14 +426,14 @@ export function TeamConsole({
     stderrElement.scrollTop = stderrElement.scrollHeight;
   }, [stderrEntries.length]);
 
-  const handleSubmit = async (formData: FormData) => {
-    const nextPrompt = String(formData.get("prompt") ?? "").trim();
-    const nextThreadId = String(formData.get("threadId") ?? "").trim();
-    const nextRepositoryId = String(formData.get("repositoryId") ?? "").trim();
-    const shouldReset = formData.get("reset") === "on";
-    const previousResult = runState.result;
-
-    if (!nextPrompt) {
+  const executeRun = async (
+    request: TeamRunRequest,
+    previousResult = runState.result,
+    options: {
+      preserveLogs?: boolean;
+    } = {},
+  ) => {
+    if (!request.input) {
       setRunState({
         status: "error",
         error: "Enter a request before running the team.",
@@ -405,20 +443,26 @@ export function TeamConsole({
       return;
     }
 
-    setPrompt(nextPrompt);
-    setThreadId(nextThreadId);
-    setRepositoryId(nextRepositoryId);
-    setReset(shouldReset);
+    setPrompt(request.input);
+    setThreadId(request.threadId ?? "");
+    setRepositoryId(request.repositoryId ?? "");
+    setReset(request.reset);
     setRunState({
       status: "running",
       error: null,
       result: previousResult,
     });
-    setNotice(null);
-    setLogError(null);
-    setLogEntries([]);
-    setActiveThreadId(null);
-    setActiveLogStartedAt(null);
+
+    if (options.preserveLogs) {
+      setLogError(null);
+      setNotice("Branch deletion confirmed. Rerunning the planner.");
+    } else {
+      setNotice(null);
+      setLogError(null);
+      setLogEntries([]);
+      setActiveThreadId(null);
+      setActiveLogStartedAt(null);
+    }
 
     try {
       const response = await fetch("/api/team/run", {
@@ -427,10 +471,11 @@ export function TeamConsole({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          input: nextPrompt,
-          threadId: nextThreadId || undefined,
-          repositoryId: nextRepositoryId || undefined,
-          reset: shouldReset,
+          input: request.input,
+          threadId: request.threadId || undefined,
+          repositoryId: request.repositoryId || undefined,
+          reset: request.reset,
+          deleteExistingBranches: request.deleteExistingBranches,
         }),
       });
 
@@ -448,6 +493,7 @@ export function TeamConsole({
       const decoder = new TextDecoder();
       let buffer = "";
       let sawTerminalEvent = false;
+      let retryRequest: TeamRunRequest | null = null;
 
       const handleStreamEvent = (event: TeamRunStreamEvent) => {
         if (isAcceptedStreamEvent(event)) {
@@ -480,6 +526,30 @@ export function TeamConsole({
           return;
         }
 
+        if (isBranchDeleteRequiredStreamEvent(event)) {
+          sawTerminalEvent = true;
+          setThreadId(event.threadId);
+          setActiveThreadId(event.threadId);
+
+          if (window.confirm(buildBranchDeletePrompt(event.branches))) {
+            retryRequest = {
+              ...request,
+              threadId: event.threadId,
+              deleteExistingBranches: true,
+            };
+            setNotice("Branch deletion confirmed. Rerunning the planner.");
+            return;
+          }
+
+          setRunState({
+            status: "error",
+            error: "Planning stopped because the existing branches were left in place.",
+            result: previousResult,
+          });
+          setNotice(null);
+          return;
+        }
+
         sawTerminalEvent = true;
         setThreadId(event.threadId);
         setActiveThreadId(event.threadId);
@@ -491,7 +561,7 @@ export function TeamConsole({
         setNotice(null);
       };
 
-      while (true) {
+      outer: while (true) {
         const { done, value } = await reader.read();
         if (done) {
           break;
@@ -512,13 +582,25 @@ export function TeamConsole({
             !isAcceptedStreamEvent(parsed) &&
             !isCodexEventStreamEvent(parsed) &&
             !isResultStreamEvent(parsed) &&
-            !isErrorStreamEvent(parsed)
+            !isErrorStreamEvent(parsed) &&
+            !isBranchDeleteRequiredStreamEvent(parsed)
           ) {
             throw new Error("Team run stream returned an unexpected event payload.");
           }
 
           handleStreamEvent(parsed);
+
+          if (retryRequest) {
+            await reader.cancel();
+            break outer;
+          }
         }
+      }
+
+      if (retryRequest) {
+        return executeRun(retryRequest, previousResult, {
+          preserveLogs: true,
+        });
       }
 
       const trailing = buffer.trim();
@@ -528,12 +610,19 @@ export function TeamConsole({
           !isAcceptedStreamEvent(parsed) &&
           !isCodexEventStreamEvent(parsed) &&
           !isResultStreamEvent(parsed) &&
-          !isErrorStreamEvent(parsed)
+          !isErrorStreamEvent(parsed) &&
+          !isBranchDeleteRequiredStreamEvent(parsed)
         ) {
           throw new Error("Team run stream returned an unexpected final payload.");
         }
 
         handleStreamEvent(parsed);
+      }
+
+      if (retryRequest) {
+        return executeRun(retryRequest, previousResult, {
+          preserveLogs: true,
+        });
       }
 
       if (!sawTerminalEvent) {
@@ -548,6 +637,20 @@ export function TeamConsole({
       });
       setNotice(null);
     }
+  };
+
+  const handleSubmit = async (formData: FormData) => {
+    const nextPrompt = String(formData.get("prompt") ?? "").trim();
+    const nextThreadId = String(formData.get("threadId") ?? "").trim();
+    const nextRepositoryId = String(formData.get("repositoryId") ?? "").trim();
+    const shouldReset = formData.get("reset") === "on";
+
+    return executeRun({
+      input: nextPrompt,
+      threadId: nextThreadId || undefined,
+      repositoryId: nextRepositoryId || undefined,
+      reset: shouldReset,
+    });
   };
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {

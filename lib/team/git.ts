@@ -7,6 +7,32 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+export class ExistingBranchesRequireDeleteError extends Error {
+  branchNames: string[];
+
+  constructor(branchNames: string[]) {
+    const uniqueBranchNames = Array.from(
+      new Set(
+        branchNames
+          .map((branchName) => branchName.trim())
+          .filter((branchName): branchName is string => branchName.length > 0),
+      ),
+    );
+    const formattedBranches = uniqueBranchNames.map((branchName) => `- ${branchName}`).join("\n");
+
+    super(
+      [
+        "The planner found existing branches that must be deleted before this assignment can be rematerialized:",
+        formattedBranches,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    this.name = "ExistingBranchesRequireDeleteError";
+    this.branchNames = uniqueBranchNames;
+  }
+}
+
 const runGit = async (
   repositoryPath: string,
   args: string[],
@@ -40,6 +66,147 @@ const branchExists = async (repositoryPath: string, branchName: string): Promise
     return true;
   } catch {
     return false;
+  }
+};
+
+type GitWorktreeRecord = {
+  worktreePath: string;
+  branchName: string | null;
+};
+
+const listGitWorktrees = async (repositoryPath: string): Promise<GitWorktreeRecord[]> => {
+  const { stdout } = await runGit(repositoryPath, ["worktree", "list", "--porcelain"]);
+  const worktrees: GitWorktreeRecord[] = [];
+  let current: GitWorktreeRecord | null = null;
+
+  for (const line of stdout.split("\n")) {
+    if (!line) {
+      if (current) {
+        worktrees.push(current);
+        current = null;
+      }
+      continue;
+    }
+
+    if (line.startsWith("worktree ")) {
+      if (current) {
+        worktrees.push(current);
+      }
+
+      current = {
+        worktreePath: line.slice("worktree ".length),
+        branchName: null,
+      };
+      continue;
+    }
+
+    if (line.startsWith("branch ") && current) {
+      const refName = line.slice("branch ".length);
+      current.branchName = refName.startsWith("refs/heads/")
+        ? refName.slice("refs/heads/".length)
+        : refName;
+    }
+  }
+
+  if (current) {
+    worktrees.push(current);
+  }
+
+  return worktrees;
+};
+
+const isPathInsideRoot = (candidatePath: string, rootPath: string): boolean => {
+  const relativePath = path.relative(rootPath, candidatePath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+};
+
+export const listExistingBranches = async ({
+  repositoryPath,
+  branchNames,
+}: {
+  repositoryPath: string;
+  branchNames: string[];
+}): Promise<string[]> => {
+  const uniqueBranchNames = Array.from(
+    new Set(
+      branchNames
+        .map((branchName) => branchName.trim())
+        .filter((branchName): branchName is string => branchName.length > 0),
+    ),
+  );
+  const existingBranches: string[] = [];
+
+  for (const branchName of uniqueBranchNames) {
+    if (await branchExists(repositoryPath, branchName)) {
+      existingBranches.push(branchName);
+    }
+  }
+
+  return existingBranches;
+};
+
+export const deleteManagedBranches = async ({
+  repositoryPath,
+  worktreeRoot,
+  branchNames,
+}: {
+  repositoryPath: string;
+  worktreeRoot: string;
+  branchNames: string[];
+}): Promise<void> => {
+  const existingBranches = await listExistingBranches({
+    repositoryPath,
+    branchNames,
+  });
+
+  if (existingBranches.length === 0) {
+    return;
+  }
+
+  const targetBranches = new Set(existingBranches);
+  const worktrees = await listGitWorktrees(repositoryPath);
+  const blockingWorktrees = worktrees.filter((worktree) => {
+    if (!worktree.branchName || !targetBranches.has(worktree.branchName)) {
+      return false;
+    }
+
+    return (
+      worktree.worktreePath === repositoryPath ||
+      !isPathInsideRoot(worktree.worktreePath, worktreeRoot)
+    );
+  });
+
+  if (blockingWorktrees.length > 0) {
+    const blockingDetails = blockingWorktrees
+      .map((worktree) => `${worktree.branchName} -> ${worktree.worktreePath}`)
+      .join(", ");
+    throw new Error(
+      `Unable to delete the existing branch selection because it is checked out outside the managed worktree root: ${blockingDetails}. Switch those worktrees away from the branch before retrying.`,
+    );
+  }
+
+  const managedWorktrees = worktrees.filter((worktree) => {
+    if (!worktree.branchName || !targetBranches.has(worktree.branchName)) {
+      return false;
+    }
+
+    return (
+      worktree.worktreePath !== repositoryPath &&
+      isPathInsideRoot(worktree.worktreePath, worktreeRoot)
+    );
+  });
+
+  for (const worktree of managedWorktrees) {
+    await runGit(repositoryPath, ["worktree", "remove", "--force", worktree.worktreePath]);
+    await removeWorktreeDirectory(worktree.worktreePath);
+  }
+
+  if (managedWorktrees.length > 0) {
+    await runGit(repositoryPath, ["worktree", "prune"]);
+  }
+
+  for (const branchName of existingBranches) {
+    await runGit(repositoryPath, ["branch", "-D", branchName]);
   }
 };
 
