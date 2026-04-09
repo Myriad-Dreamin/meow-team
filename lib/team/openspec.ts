@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
+  buildLaneWorktreePath,
   commitWorktreeChanges,
   ensureBranchRef,
   ensureLaneWorktree,
@@ -50,8 +51,11 @@ type ProposalLane = Pick<
   | "proposalChangeName"
   | "proposalPath"
   | "branchName"
-  | "worktreePath"
 >;
+
+const describeWorktreePool = (worktreeRoot: string): string => {
+  return `${worktreeRoot}/moew-N`;
+};
 
 const normalizeSentence = (value: string): string => {
   const trimmed = value.trim().replace(/\s+/g, " ");
@@ -96,7 +100,7 @@ const buildProposalMarkdown = ({
   plannerSummary,
   plannerDeliverable,
   requestInput,
-  worktreePath,
+  worktreeRoot,
 }: {
   repositoryPath: string;
   canonicalBranchName: string;
@@ -107,7 +111,7 @@ const buildProposalMarkdown = ({
   plannerSummary: string | null;
   plannerDeliverable: string | null;
   requestInput: string | null;
-  worktreePath: string;
+  worktreeRoot: string;
 }): string => {
   const capabilityName = buildCapabilityName(proposalChangeName);
 
@@ -138,7 +142,7 @@ ${buildProposalWhy({
 - Affected repository: \`${path.basename(repositoryPath)}\`
 - Canonical branch: \`${canonicalBranchName}\`
 - Proposal branch: \`${branchName}\`
-- Reusable worktree: \`${path.basename(worktreePath)}\`
+- Reusable worktree pool: \`${describeWorktreePool(worktreeRoot)}\`
 - Planner deliverable: ${normalizeSentence(plannerDeliverable ?? plannerSummary ?? taskTitle)}
 `;
 };
@@ -150,7 +154,7 @@ const buildDesignMarkdown = ({
   taskTitle,
   taskObjective,
   plannerDeliverable,
-  worktreePath,
+  worktreeRoot,
 }: {
   canonicalBranchName: string;
   proposalChangeName: string;
@@ -158,7 +162,7 @@ const buildDesignMarkdown = ({
   taskTitle: string;
   taskObjective: string;
   plannerDeliverable: string | null;
-  worktreePath: string;
+  worktreeRoot: string;
 }): string => {
   return `## Context
 
@@ -171,7 +175,7 @@ from canonical branch \`${canonicalBranchName}\`.
 **Goals:**
 - ${normalizeSentence(taskObjective)}
 - Preserve a reviewable OpenSpec contract before coding starts.
-- Reuse managed worktree \`${path.basename(worktreePath)}\` for cache-friendly execution.
+- Reuse a managed worktree from \`${describeWorktreePool(worktreeRoot)}\` for cache-friendly execution.
 
 **Non-Goals:**
 - Implement sibling proposals in the same branch.
@@ -201,13 +205,13 @@ const buildSpecMarkdown = ({
   taskTitle,
   taskObjective,
   branchName,
-  worktreePath,
+  worktreeRoot,
 }: {
   proposalChangeName: string;
   taskTitle: string;
   taskObjective: string;
   branchName: string;
-  worktreePath: string;
+  worktreeRoot: string;
 }): string => {
   return `## ADDED Requirements
 
@@ -225,7 +229,7 @@ until human feedback explicitly requests request-group replanning.
 
 #### Scenario: Dedicated execution workspace
 - **WHEN** the coder starts work on this proposal
-- **THEN** the coder SHALL use reusable worktree \`${path.basename(worktreePath)}\`
+- **THEN** the coder SHALL use a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\`
 `;
 };
 
@@ -233,17 +237,17 @@ const buildTasksMarkdown = ({
   taskTitle,
   taskObjective,
   branchName,
-  worktreePath,
+  worktreeRoot,
 }: {
   taskTitle: string;
   taskObjective: string;
   branchName: string;
-  worktreePath: string;
+  worktreeRoot: string;
 }): string => {
   return `## 1. Proposal Alignment
 
 - [ ] 1.1 Review the approved OpenSpec artifacts for "${taskTitle}"
-- [ ] 1.2 Confirm branch \`${branchName}\` and reusable worktree \`${path.basename(worktreePath)}\` are ready
+- [ ] 1.2 Confirm branch \`${branchName}\` and a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\` are ready
 
 ## 2. Implementation
 
@@ -286,7 +290,8 @@ const writeProposalArtifacts = async ({
   plannerSummary,
   plannerDeliverable,
   requestInput,
-  worktreePath,
+  workspacePath,
+  worktreeRoot,
 }: {
   repositoryPath: string;
   canonicalBranchName: string;
@@ -298,9 +303,10 @@ const writeProposalArtifacts = async ({
   plannerSummary: string | null;
   plannerDeliverable: string | null;
   requestInput: string | null;
-  worktreePath: string;
+  workspacePath: string;
+  worktreeRoot: string;
 }): Promise<void> => {
-  const proposalRoot = path.join(worktreePath, proposalPath);
+  const proposalRoot = path.join(workspacePath, proposalPath);
   const capabilityName = buildCapabilityName(proposalChangeName);
   const specDirectory = path.join(proposalRoot, "specs", capabilityName);
 
@@ -318,7 +324,7 @@ const writeProposalArtifacts = async ({
       plannerSummary,
       plannerDeliverable,
       requestInput,
-      worktreePath,
+      worktreeRoot,
     }),
     "utf8",
   );
@@ -331,7 +337,7 @@ const writeProposalArtifacts = async ({
       taskTitle,
       taskObjective,
       plannerDeliverable,
-      worktreePath,
+      worktreeRoot,
     }),
     "utf8",
   );
@@ -342,7 +348,7 @@ const writeProposalArtifacts = async ({
       taskTitle,
       taskObjective,
       branchName,
-      worktreePath,
+      worktreeRoot,
     }),
     "utf8",
   );
@@ -352,7 +358,7 @@ const writeProposalArtifacts = async ({
       taskTitle,
       taskObjective,
       branchName,
-      worktreePath,
+      worktreeRoot,
     }),
     "utf8",
   );
@@ -405,7 +411,6 @@ export const materializeAssignmentProposals = async ({
       proposalChangeName: string;
       proposalPath: string;
       branchName: string;
-      worktreePath: string;
       taskTitle: string;
       taskObjective: string;
     } =>
@@ -414,8 +419,7 @@ export const materializeAssignmentProposals = async ({
           lane.taskObjective &&
           lane.proposalChangeName &&
           lane.proposalPath &&
-          lane.branchName &&
-          lane.worktreePath,
+          lane.branchName,
       ),
   );
 
@@ -423,7 +427,10 @@ export const materializeAssignmentProposals = async ({
     return;
   }
 
-  const stagingWorktreePath = activeLanes[0].worktreePath;
+  const stagingWorktreePath = buildLaneWorktreePath({
+    worktreeRoot,
+    laneIndex: 1,
+  });
   await ensureLaneWorktree({
     repositoryPath,
     worktreeRoot,
@@ -448,7 +455,8 @@ export const materializeAssignmentProposals = async ({
       plannerSummary,
       plannerDeliverable,
       requestInput,
-      worktreePath: lane.worktreePath,
+      workspacePath: stagingWorktreePath,
+      worktreeRoot,
     });
   }
 

@@ -24,6 +24,7 @@ export const teamConfig = defineTeamConfig({
   },
   dispatch: {
     workerCount: 3,
+    maxProposalCount: 6,
     branchPrefix: "team-dispatch",
     baseBranch: "main",
     worktreeRoot: ".meow-team-worktrees",

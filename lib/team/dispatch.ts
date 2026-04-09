@@ -330,48 +330,15 @@ const createProposalLane = ({
   branchPrefix,
   assignmentNumber,
   baseBranch,
-  worktreeRoot,
 }: {
   laneIndex: number;
-  task?: DispatchTask;
+  task: DispatchTask;
   branchPrefix: string;
   assignmentNumber: number;
   baseBranch: string;
-  worktreeRoot: string;
 }): TeamWorkerLaneRecord => {
   const laneId = `lane-${laneIndex}`;
   const now = new Date().toISOString();
-
-  if (!task) {
-    return {
-      laneId,
-      laneIndex,
-      status: "idle",
-      taskTitle: null,
-      taskObjective: null,
-      proposalChangeName: null,
-      proposalPath: null,
-      branchName: null,
-      baseBranch: null,
-      worktreePath: null,
-      latestDecision: null,
-      latestCoderSummary: null,
-      latestReviewerSummary: null,
-      latestActivity: "Idle and waiting for planner work.",
-      approvalRequestedAt: null,
-      approvalGrantedAt: null,
-      queuedAt: null,
-      runCount: 0,
-      revisionCount: 0,
-      requeueReason: null,
-      lastError: null,
-      pullRequest: null,
-      events: [],
-      startedAt: null,
-      finishedAt: null,
-      updatedAt: now,
-    };
-  }
 
   const branchName = buildLaneBranchName({
     branchPrefix,
@@ -393,12 +360,10 @@ const createProposalLane = ({
     taskObjective: task.objective,
     proposalChangeName,
     proposalPath: buildProposalPath(proposalChangeName),
+    workerSlot: null,
     branchName,
     baseBranch,
-    worktreePath: buildLaneWorktreePath({
-      worktreeRoot,
-      laneIndex,
-    }),
+    worktreePath: null,
     latestDecision: null,
     latestCoderSummary: null,
     latestReviewerSummary: null,
@@ -469,14 +434,13 @@ export const createPlannerDispatchAssignment = async ({
       canonicalBranchName,
       baseBranch: resolvedBaseBranch,
       workerCount: teamConfig.dispatch.workerCount,
-      lanes: Array.from({ length: teamConfig.dispatch.workerCount }, (_, index) =>
+      lanes: tasks.map((task, index) =>
         createProposalLane({
           laneIndex: index + 1,
-          task: tasks[index],
+          task,
           branchPrefix,
           assignmentNumber,
           baseBranch: resolvedBaseBranch,
-          worktreeRoot: resolvedWorktreeRoot,
         }),
       ),
       plannerNotes: [
@@ -519,6 +483,47 @@ export const createPlannerDispatchAssignment = async ({
   return assignment;
 };
 
+const isPoolOccupyingLaneStatus = (status: TeamWorkerLaneRecord["status"]): boolean => {
+  return status === "queued" || status === "coding" || status === "reviewing";
+};
+
+const assignQueuedProposalWorkerSlots = ({
+  assignment,
+  worktreeRoot,
+}: {
+  assignment: TeamDispatchAssignment;
+  worktreeRoot: string;
+}): void => {
+  const occupiedSlots = new Set(
+    assignment.lanes
+      .filter((lane) => lane.workerSlot && isPoolOccupyingLaneStatus(lane.status))
+      .map((lane) => lane.workerSlot as number),
+  );
+
+  const availableSlots = Array.from({ length: assignment.workerCount }, (_, index) => index + 1).filter(
+    (slot) => !occupiedSlots.has(slot),
+  );
+
+  const queue = assignment.lanes
+    .filter((lane) => lane.status === "queued" && !lane.workerSlot)
+    .sort((left, right) => {
+      return (left.queuedAt ?? left.updatedAt).localeCompare(right.queuedAt ?? right.updatedAt);
+    });
+
+  for (const lane of queue) {
+    const slot = availableSlots.shift();
+    if (!slot) {
+      break;
+    }
+
+    lane.workerSlot = slot;
+    lane.worktreePath = buildLaneWorktreePath({
+      worktreeRoot,
+      laneIndex: slot,
+    });
+  }
+};
+
 const runLaneCycle = async ({
   threadId,
   assignmentNumber,
@@ -537,6 +542,10 @@ const runLaneCycle = async ({
     const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
     const lane = findLane(assignment, laneId);
     if (lane.status !== "queued" && lane.status !== "coding" && lane.status !== "reviewing") {
+      return;
+    }
+
+    if (!lane.workerSlot || !lane.worktreePath) {
       return;
     }
 
@@ -653,6 +662,8 @@ const runLaneCycle = async ({
             "Reviewer requested changes and returned the proposal to the coding-review queue.";
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
+          mutableLane.workerSlot = null;
+          mutableLane.worktreePath = null;
           mutableLane.queuedAt = now;
           mutableLane.requeueReason = "reviewer_requested_changes";
           mutableLane.updatedAt = now;
@@ -702,6 +713,8 @@ const runLaneCycle = async ({
           mutableLane.latestActivity = "Planner detected a pull request conflict and requeued the lane.";
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
+          mutableLane.workerSlot = null;
+          mutableLane.worktreePath = null;
           mutableLane.queuedAt = mutableNow;
           mutableLane.requeueReason = "planner_detected_conflict";
           mutableLane.pullRequest = {
@@ -744,6 +757,7 @@ const runLaneCycle = async ({
         mutableLane.latestReviewerSummary = reviewerHandoff.summary;
         mutableLane.latestActivity = "Reviewer completed machine review for the approved proposal.";
         mutableLane.runCount += 1;
+        mutableLane.workerSlot = null;
         mutableLane.requeueReason = null;
         mutableLane.pullRequest = {
           ...pullRequest,
@@ -807,6 +821,7 @@ const ensureLaneRun = ({
           const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
           const lane = findLane(assignment, laneId);
           lane.status = "failed";
+          lane.workerSlot = null;
           lane.lastError = message;
           lane.latestActivity = "Background lane execution failed.";
           lane.updatedAt = now;
@@ -822,6 +837,7 @@ const ensureLaneRun = ({
       });
     } finally {
       activeLaneRuns.delete(key);
+      void ensurePendingDispatchWork({ threadId });
     }
   })();
 
@@ -839,8 +855,39 @@ export const ensurePendingDispatchWork = async ({
   );
 
   for (const pending of pendingAssignments) {
+    if (pending.assignment.repository) {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId: pending.threadId,
+        updater: (thread, now) => {
+          const assignment = findAssignment(
+            thread.dispatchAssignments,
+            pending.assignment.assignmentNumber,
+          );
+          assignQueuedProposalWorkerSlots({
+            assignment,
+            worktreeRoot: resolveWorktreeRoot({
+              repositoryPath: assignment.repository?.path ?? pending.assignment.repository?.path ?? "",
+              worktreeRoot: teamConfig.dispatch.worktreeRoot,
+            }),
+          });
+          synchronizeDispatchAssignment(assignment, now);
+        },
+      });
+    }
+  }
+
+  const refreshedAssignments = await listPendingDispatchAssignments(
+    teamConfig.storage.threadFile,
+    threadId,
+  );
+
+  for (const pending of refreshedAssignments) {
     for (const lane of pending.assignment.lanes) {
-      if (lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing") {
+      if (
+        (lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing") &&
+        lane.workerSlot
+      ) {
         ensureLaneRun({
           threadId: pending.threadId,
           assignmentNumber: pending.assignment.assignmentNumber,
@@ -873,6 +920,8 @@ export const approveLaneProposal = async ({
       lane.status = "queued";
       lane.latestActivity = "Human approved the proposal and added it to the coding-review queue.";
       lane.approvalGrantedAt = now;
+      lane.workerSlot = null;
+      lane.worktreePath = null;
       lane.queuedAt = now;
       lane.updatedAt = now;
       lane.finishedAt = null;

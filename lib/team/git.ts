@@ -76,12 +76,8 @@ export const buildLaneBranchName = ({
   assignmentNumber: number;
   laneIndex: number;
 }): string => {
-  const canonicalBranchName = buildCanonicalBranchName({
-    branchPrefix,
-    assignmentNumber,
-  });
-
-  return `${canonicalBranchName}/proposal-${laneIndex}`;
+  const sanitizedPrefix = sanitizeBranchSegment(branchPrefix);
+  return `requests/${sanitizedPrefix}/a${assignmentNumber}-proposal-${laneIndex}`;
 };
 
 export const resolveWorktreeRoot = ({

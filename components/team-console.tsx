@@ -203,9 +203,9 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
         <h2>Continuous Assignment Console</h2>
         <p className="section-copy">
           Reuse the same thread ID to keep the planning conversation continuous. The planner
-          creates up to {workerCount} proposals for the current request group. Human approval then
-          feeds the coding-review queue, with each approved proposal using its own branch and
-          reusable worktree.
+          creates one or more proposals for the current request group, and the shared
+          coding-review pool runs up to {workerCount} approved proposals at a time using reusable
+          worktrees.
         </p>
         {hasRepositories ? (
           <p className="field-hint">

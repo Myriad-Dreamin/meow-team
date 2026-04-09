@@ -41,7 +41,7 @@ export default async function HomePage() {
           <article>
             <span className="metric-label">Workflow</span>
             <strong>{`planner -> ${teamConfig.dispatch.workerCount}x(coder + reviewer)`}</strong>
-            <p>Planner creates proposal lanes first, then approved proposals flow into background coding and machine review.</p>
+            <p>Planner creates request proposals first, then approved proposals flow into the shared coding and machine-review pool.</p>
           </article>
           <article>
             <span className="metric-label">Codex Backend</span>
@@ -61,9 +61,9 @@ export default async function HomePage() {
             </p>
           </article>
           <article>
-            <span className="metric-label">Parallel Lanes</span>
+            <span className="metric-label">Worker Pool</span>
             <strong>{teamConfig.dispatch.workerCount}</strong>
-            <p>Idle until a human approves a proposal, then tracked live through coding, review, and replanning feedback.</p>
+            <p>Idle until proposals are approved, then reused across coding, review, and replanning feedback cycles.</p>
           </article>
         </div>
       </section>
@@ -98,7 +98,7 @@ defineTeamConfig({
   owner: { name: "${teamConfig.owner.name}" },
   workflow: ${JSON.stringify(teamConfig.workflow)},
   model: { model: "${teamConfig.model.model}" },
-  dispatch: { workerCount: ${teamConfig.dispatch.workerCount} },
+  dispatch: { workerCount: ${teamConfig.dispatch.workerCount}, maxProposalCount: ${teamConfig.dispatch.maxProposalCount} },
   repositories: { roots: ${configuredRepositoryRoots.length} },
   maxIterations: ${teamConfig.maxIterations},
 });`}</pre>

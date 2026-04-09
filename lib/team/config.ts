@@ -23,6 +23,7 @@ const repositoryRootSchema = z.object({
 
 const dispatchConfigSchema = z.object({
   workerCount: z.number().int().positive(),
+  maxProposalCount: z.number().int().positive(),
   branchPrefix: z.string().trim().min(1),
   baseBranch: z.string().trim().min(1),
   worktreeRoot: z.string().trim().min(1),

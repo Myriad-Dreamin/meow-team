@@ -75,7 +75,7 @@ const createPlannerDispatchTool = () => {
           }),
         )
         .min(1)
-        .max(teamConfig.dispatch.workerCount),
+        .max(teamConfig.dispatch.maxProposalCount),
     }),
     handler: async ({ planSummary, plannerDeliverable, branchPrefix, tasks }, { network }) => {
       const state = network.state.data;
@@ -119,8 +119,8 @@ const createPlannerSystemPrompt = (prompt: string) => {
       repositoryContext,
       `Configured workflow: ${state.workflow.join(" -> ")}`,
       `Current assignment number: ${state.assignmentNumber}.`,
-      `Configured background lanes: ${teamConfig.dispatch.workerCount} coder+reviewer pairs.`,
-      `Each proposal gets its own canonical branch namespace, dedicated worktree path, and coding-review lifecycle once a human approves it.`,
+      `Configured coding-review pool size: ${teamConfig.dispatch.workerCount}.`,
+      `Planner proposals are separate from the coding-review pool. The planner can create one or more proposals, then approved proposals are scheduled onto the shared coder/reviewer pool.`,
       `OpenSpec context:`,
       describeLocalOpenSpecSkills(),
       buildOpenSpecSkillReference(),
@@ -129,11 +129,11 @@ const createPlannerSystemPrompt = (prompt: string) => {
       `Current handoffs for this assignment:`,
       summarizeHandoffs(state),
       `Rules:`,
-      `- Create a practical engineering plan and split it into between 1 and ${teamConfig.dispatch.workerCount} concrete proposals for the request group.`,
+      `- Create a practical engineering plan and split it into between 1 and ${teamConfig.dispatch.maxProposalCount} concrete proposals for the request group.`,
       `- Call dispatch_parallel_work exactly once to persist those proposals, then stop. Do not assume coding starts before a human approves a proposal.`,
       `- Align each proposal with the local OpenSpec flow so the backend can materialize a real OpenSpec change for it.`,
       `- Each proposal title should be concise and stable enough to become part of an OpenSpec change name.`,
-      `- Use branchPrefix as a short, git-friendly theme for the request group. The backend creates a canonical branch namespace plus per-proposal branch names and reusable worktrees.`,
+      `- Use branchPrefix as a short, git-friendly theme for the request group. The backend creates a canonical branch plus per-proposal branches, while coding uses reusable pool worktrees.`,
       `- Always call save_handoff exactly once when you are done planning.`,
       `- If no repository is selected, explain that dispatch is blocked and do not invent repository operations.`,
     ].join("\n\n");

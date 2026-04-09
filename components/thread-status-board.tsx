@@ -483,6 +483,10 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                               <p>{lane.worktreePath ?? "Not allocated"}</p>
                             </div>
                             <div>
+                              <span className="meta-label">Pool Slot</span>
+                              <p>{lane.workerSlot ? `moew-${lane.workerSlot}` : "Waiting for pool"}</p>
+                            </div>
+                            <div>
                               <span className="meta-label">OpenSpec Change</span>
                               <p>{lane.proposalChangeName ?? "Not materialized"}</p>
                             </div>
