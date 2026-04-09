@@ -442,11 +442,25 @@ main {
   background: rgba(52, 15, 20, 0.56);
 }
 
+.codex-stderr-list {
+  display: grid;
+  gap: 12px;
+  max-height: 320px;
+  margin-top: 12px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .codex-log-item {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 14px 16px;
   background: rgba(7, 18, 33, 0.82);
+}
+
+.codex-log-item-stderr {
+  border-color: rgba(255, 143, 143, 0.18);
+  background: rgba(39, 11, 15, 0.78);
 }
 
 .codex-log-meta {
@@ -496,8 +510,6 @@ main {
 }
 
 .codex-stderr-message {
-  max-height: 320px;
-  overflow: auto;
   color: #ffd7d7;
 }
 

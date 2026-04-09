@@ -8,6 +8,7 @@ import type { TeamCodexLogEntry } from "@/lib/team/types";
 type TeamConsoleProps = {
   disabled: boolean;
   initialPrompt: string;
+  initialLogThreadId: string | null;
   repositories: TeamRepositoryOption[];
   workerCount: number;
 };
@@ -67,8 +68,20 @@ type TeamLogsResponse = {
   entries: TeamCodexLogEntry[];
 };
 
+type TeamCodexLogGroup = {
+  id: string;
+  source: TeamCodexLogEntry["source"];
+  contextEntry: TeamCodexLogEntry;
+  startedAt: string;
+  endedAt: string;
+  message: string;
+  lineCount: number;
+};
+
 const LOG_POLL_INTERVAL_MS = 3000;
 const MAX_VISIBLE_LOGS = 240;
+const ACTIVE_LOG_THREAD_ID_STORAGE_KEY = "team-console.active-log-thread-id";
+const ACTIVE_LOG_STARTED_AT_STORAGE_KEY = "team-console.active-log-started-at";
 
 const initialRunState: RunState = {
   status: "idle",
@@ -209,29 +222,68 @@ const describeLogContext = (entry: TeamCodexLogEntry): string => {
   return parts.join(" | ");
 };
 
-const formatStderrBlock = (entries: TeamCodexLogEntry[]): string => {
-  return entries
-    .map((entry) => {
-      const context = describeLogContext(entry);
-      const timestamp = formatTimestamp(entry.createdAt);
-
-      return [`[${timestamp}]${context ? ` ${context}` : ""}`, entry.message].join("\n");
-    })
-    .join("\n\n");
+const shareLogContext = (left: TeamCodexLogEntry, right: TeamCodexLogEntry): boolean => {
+  return (
+    left.source === right.source &&
+    left.roleId === right.roleId &&
+    left.laneId === right.laneId &&
+    left.assignmentNumber === right.assignmentNumber
+  );
 };
 
-export function TeamConsole({ disabled, initialPrompt, repositories, workerCount }: TeamConsoleProps) {
+const groupConsecutiveLogEntries = (entries: TeamCodexLogEntry[]): TeamCodexLogGroup[] => {
+  const groups: TeamCodexLogGroup[] = [];
+
+  for (const entry of entries) {
+    const previousGroup = groups.at(-1);
+    if (previousGroup && shareLogContext(previousGroup.contextEntry, entry)) {
+      previousGroup.message = `${previousGroup.message}\n${entry.message}`;
+      previousGroup.endedAt = entry.createdAt;
+      previousGroup.lineCount += 1;
+      continue;
+    }
+
+    groups.push({
+      id: entry.id,
+      source: entry.source,
+      contextEntry: entry,
+      startedAt: entry.createdAt,
+      endedAt: entry.createdAt,
+      message: entry.message,
+      lineCount: 1,
+    });
+  }
+
+  return groups;
+};
+
+const formatLogGroupTimestamp = (group: TeamCodexLogGroup): string => {
+  const startedAt = formatTimestamp(group.startedAt);
+  if (group.startedAt === group.endedAt) {
+    return startedAt;
+  }
+
+  return `${startedAt} -> ${formatTimestamp(group.endedAt)}`;
+};
+
+export function TeamConsole({
+  disabled,
+  initialPrompt,
+  initialLogThreadId,
+  repositories,
+  workerCount,
+}: TeamConsoleProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [threadId, setThreadId] = useState("");
   const [repositoryId, setRepositoryId] = useState("");
   const [reset, setReset] = useState(false);
   const [runState, setRunState] = useState<RunState>(initialRunState);
   const [notice, setNotice] = useState<string | null>(null);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(initialLogThreadId);
   const [activeLogStartedAt, setActiveLogStartedAt] = useState<string | null>(null);
   const [logEntries, setLogEntries] = useState<TeamCodexLogEntry[]>([]);
   const [logError, setLogError] = useState<string | null>(null);
-  const stderrScrollRef = useRef<HTMLPreElement | null>(null);
+  const stderrScrollRef = useRef<HTMLDivElement | null>(null);
 
   const isRunning = runState.status === "running";
   const hasRepositories = repositories.length > 0;
@@ -239,10 +291,27 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
     ? logEntries.filter((entry) => entry.createdAt >= activeLogStartedAt)
     : logEntries;
   const stderrEntries = visibleLogEntries.filter((entry) => entry.source === "stderr");
+  const groupedStderrEntries = groupConsecutiveLogEntries(stderrEntries);
   const timelineLogEntries = visibleLogEntries.filter((entry) => entry.source !== "stderr");
-  const stderrOutput = formatStderrBlock(stderrEntries);
 
   useEffect(() => {
+    const storedThreadId = window.localStorage.getItem(ACTIVE_LOG_THREAD_ID_STORAGE_KEY);
+    const storedStartedAt = window.localStorage.getItem(ACTIVE_LOG_STARTED_AT_STORAGE_KEY);
+
+    if (storedThreadId) {
+      setActiveThreadId(storedThreadId);
+      setActiveLogStartedAt(storedStartedAt || null);
+      return;
+    }
+
+    if (initialLogThreadId) {
+      setActiveThreadId(initialLogThreadId);
+    }
+  }, [initialLogThreadId]);
+
+  useEffect(() => {
+    setLogEntries([]);
+
     if (!activeThreadId) {
       setLogError(null);
       return;
@@ -294,13 +363,30 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
   }, [activeThreadId]);
 
   useEffect(() => {
+    if (!activeThreadId) {
+      window.localStorage.removeItem(ACTIVE_LOG_THREAD_ID_STORAGE_KEY);
+      window.localStorage.removeItem(ACTIVE_LOG_STARTED_AT_STORAGE_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(ACTIVE_LOG_THREAD_ID_STORAGE_KEY, activeThreadId);
+
+    if (activeLogStartedAt) {
+      window.localStorage.setItem(ACTIVE_LOG_STARTED_AT_STORAGE_KEY, activeLogStartedAt);
+      return;
+    }
+
+    window.localStorage.removeItem(ACTIVE_LOG_STARTED_AT_STORAGE_KEY);
+  }, [activeLogStartedAt, activeThreadId]);
+
+  useEffect(() => {
     const stderrElement = stderrScrollRef.current;
     if (!stderrElement) {
       return;
     }
 
     stderrElement.scrollTop = stderrElement.scrollHeight;
-  }, [stderrOutput]);
+  }, [stderrEntries.length]);
 
   const handleSubmit = async (formData: FormData) => {
     const nextPrompt = String(formData.get("prompt") ?? "").trim();
@@ -581,6 +667,7 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
               polled so coder and reviewer lane output continues showing up here after proposal
               approval.
             </p>
+            <p className="field-hint">Watching thread {activeThreadId}.</p>
           </div>
 
           {stderrEntries.length > 0 ? (
@@ -588,12 +675,26 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
               <div className="codex-log-meta">
                 <span className="log-source log-source-stderr">stderr</span>
                 <span>
-                  {stderrEntries.length} message{stderrEntries.length === 1 ? "" : "s"}
+                  {stderrEntries.length} line{stderrEntries.length === 1 ? "" : "s"}
+                </span>
+                <span>
+                  {groupedStderrEntries.length} block{groupedStderrEntries.length === 1 ? "" : "s"}
                 </span>
               </div>
-              <pre ref={stderrScrollRef} className="codex-log-message codex-stderr-message">
-                {stderrOutput}
-              </pre>
+              <div ref={stderrScrollRef} className="codex-stderr-list">
+                {groupedStderrEntries.map((group) => (
+                  <article className="codex-log-item codex-log-item-stderr" key={group.id}>
+                    <div className="codex-log-meta">
+                      <span>{describeLogContext(group.contextEntry)}</span>
+                      <span>{formatLogGroupTimestamp(group)}</span>
+                      {group.lineCount > 1 ? (
+                        <span>{group.lineCount} lines</span>
+                      ) : null}
+                    </div>
+                    <pre className="codex-log-message codex-stderr-message">{group.message}</pre>
+                  </article>
+                ))}
+              </div>
             </article>
           ) : null}
 

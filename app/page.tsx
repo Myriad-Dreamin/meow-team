@@ -132,6 +132,7 @@ defineTeamConfig({
       <TeamConsole
         disabled={!hasApiKey}
         initialPrompt="Create multiple implementation proposals for a new onboarding flow, wait for human approval, and then queue coding plus machine review for the approved proposals."
+        initialLogThreadId={threadSummaries[0]?.threadId ?? null}
         repositories={availableRepositories}
         workerCount={teamConfig.dispatch.workerCount}
       />
