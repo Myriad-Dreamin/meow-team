@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Earth Online Launcher",
-  description: "RPG-style browser homepage launcher for Earth Online.",
+  title: "Harness Team",
+  description: "Continuous AgentKit engineering team with Codex as the backend model.",
 };
 
 type RootLayoutProps = Readonly<{
