@@ -74,6 +74,7 @@ type TeamRunStreamEvent =
 
 type TeamRunRequest = {
   input: string;
+  title?: string;
   threadId?: string;
   repositoryId?: string;
   reset: boolean;
@@ -122,6 +123,8 @@ const isTeamRunSummary = (value: unknown): value is TeamRunSummary => {
     isRecord(value) &&
     "threadId" in value &&
     "assignmentNumber" in value &&
+    typeof value.requestTitle === "string" &&
+    typeof value.requestText === "string" &&
     "handoffs" in value &&
     "steps" in value
   );
@@ -312,6 +315,7 @@ export function TeamConsole({
   workerCount,
 }: TeamConsoleProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [title, setTitle] = useState("");
   const [threadId, setThreadId] = useState("");
   const [repositoryId, setRepositoryId] = useState("");
   const [reset, setReset] = useState(false);
@@ -444,6 +448,7 @@ export function TeamConsole({
     }
 
     setPrompt(request.input);
+    setTitle(request.title ?? "");
     setThreadId(request.threadId ?? "");
     setRepositoryId(request.repositoryId ?? "");
     setReset(request.reset);
@@ -472,6 +477,7 @@ export function TeamConsole({
         },
         body: JSON.stringify({
           input: request.input,
+          title: request.title || undefined,
           threadId: request.threadId || undefined,
           repositoryId: request.repositoryId || undefined,
           reset: request.reset,
@@ -641,12 +647,14 @@ export function TeamConsole({
 
   const handleSubmit = async (formData: FormData) => {
     const nextPrompt = String(formData.get("prompt") ?? "").trim();
+    const nextTitle = String(formData.get("title") ?? "").trim();
     const nextThreadId = String(formData.get("threadId") ?? "").trim();
     const nextRepositoryId = String(formData.get("repositoryId") ?? "").trim();
     const shouldReset = formData.get("reset") === "on";
 
     return executeRun({
       input: nextPrompt,
+      title: nextTitle || undefined,
       threadId: nextThreadId || undefined,
       repositoryId: nextRepositoryId || undefined,
       reset: shouldReset,
@@ -690,6 +698,17 @@ export function TeamConsole({
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             placeholder="Plan multiple proposals for a new onboarding flow, wait for human approval, then queue coding and machine review for the approved proposals."
+            disabled={disabled || isRunning}
+          />
+        </label>
+
+        <label className="field">
+          <span>Request Title</span>
+          <input
+            name="title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Optional human title. Leave blank to generate one."
             disabled={disabled || isRunning}
           />
         </label>
@@ -826,6 +845,12 @@ export function TeamConsole({
 
       {runState.result ? (
         <div className="run-result">
+          <div className="result-request-card">
+            <span className="meta-label">Request Title</span>
+            <p className="result-request-title">{runState.result.requestTitle}</p>
+            <p className="result-request-copy">{runState.result.requestText}</p>
+          </div>
+
           <div className="result-meta">
             <div>
               <span className="meta-label">Thread</span>

@@ -39,6 +39,7 @@ type TeamRunStreamEvent =
 
 const runTeamSchema = z.object({
   input: z.string().trim().min(1, "A prompt is required."),
+  title: z.string().trim().min(1).optional(),
   threadId: z.string().trim().min(1).optional(),
   repositoryId: z.string().trim().min(1).optional(),
   reset: z.boolean().optional(),

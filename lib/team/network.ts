@@ -13,6 +13,10 @@ import {
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
+import {
+  buildDeterministicRequestTitle,
+  normalizeRequestTitle,
+} from "@/lib/team/request-title";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type { TeamCodexEvent, TeamCodexLogEntry, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
@@ -27,6 +31,8 @@ export type TeamRunState = {
   handoffs: Partial<Record<string, TeamRoleHandoff>>;
   handoffCounter: number;
   assignmentNumber: number;
+  requestTitle: string | null;
+  requestText: string | null;
   latestInput: string | null;
   forceReset: boolean;
 };
@@ -34,6 +40,8 @@ export type TeamRunState = {
 export type TeamRunSummary = {
   threadId: string | null;
   assignmentNumber: number;
+  requestTitle: string;
+  requestText: string;
   approved: boolean;
   repository: TeamRepositoryOption | null;
   workflow: string[];
@@ -41,9 +49,23 @@ export type TeamRunSummary = {
   steps: TeamExecutionStep[];
 };
 
+type ResolvedRequestMetadata = {
+  requestTitle: string;
+  requestText: string;
+};
+
+const normalizeRequestText = (value: string | null | undefined): string | null => {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+};
+
 const plannerTaskSchema = z.object({
   title: z.string().trim().min(1),
   objective: z.string().trim().min(1),
+});
+
+const requestTitleSchema = z.object({
+  title: z.string().trim().min(1),
 });
 
 const plannerResponseSchema = z.object({
@@ -128,6 +150,19 @@ const plannerOutputJsonSchema = {
   },
 } as const;
 
+const requestTitleOutputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title"],
+  properties: {
+    title: {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+    },
+  },
+} as const;
+
 const buildInitialState = (
   forceReset: boolean,
   selectedRepository: TeamRepositoryOption | null,
@@ -142,6 +177,8 @@ const buildInitialState = (
     handoffs: {},
     handoffCounter: 0,
     assignmentNumber: 1,
+    requestTitle: null,
+    requestText: null,
     latestInput: null,
     forceReset,
   };
@@ -157,13 +194,33 @@ const buildLocalSkillReference = (): string => {
 };
 
 const buildPlannerRequestContext = (state: TeamRunState): string => {
+  const sections: string[] = [];
   const latestInput = state.latestInput?.trim();
+  const requestTitle = normalizeRequestTitle(state.requestTitle);
+  const requestText = state.requestText?.trim();
 
-  if (!latestInput) {
-    return "Current assignment input: none recorded. Ask for clarification instead of inventing product requirements.";
+  if (requestTitle) {
+    sections.push(`Current request title: ${requestTitle}`);
   }
 
-  return `Current assignment input:\n${latestInput}`;
+  if (requestText) {
+    sections.push(`Raw request text:\n${requestText}`);
+  }
+
+  if (!latestInput) {
+    sections.push(
+      "Current assignment input: none recorded. Ask for clarification instead of inventing product requirements.",
+    );
+    return sections.join("\n\n");
+  }
+
+  sections.push(
+    requestText && latestInput !== requestText
+      ? `Current planning input:\n${latestInput}`
+      : `Current assignment input:\n${latestInput}`,
+  );
+
+  return sections.join("\n\n");
 };
 
 const filterWorkflowHandoffs = (
@@ -238,6 +295,52 @@ const createPlannerStep = ({
   };
 };
 
+const buildRequestTitlePrompt = ({
+  input,
+  requestText,
+}: {
+  input: string;
+  requestText: string;
+}): string => {
+  return [
+    "Create a concise title for an engineering request.",
+    "Rules:",
+    "- Keep it plain English and specific.",
+    "- Prefer 2 to 8 words when possible.",
+    "- Do not include quotes, markdown, IDs, or trailing punctuation.",
+    `Raw request text:\n${requestText}`,
+    input !== requestText ? `Current planning input:\n${input}` : null,
+    "Final response requirements:",
+    "- Return JSON that matches the provided schema exactly.",
+    "- Put the title in title.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+const generateRequestTitle = async ({
+  input,
+  requestText,
+  worktreePath,
+}: {
+  input: string;
+  requestText: string;
+  worktreePath: string;
+}): Promise<string | null> => {
+  const response = await runCodexStructuredOutput({
+    worktreePath,
+    prompt: buildRequestTitlePrompt({
+      input,
+      requestText,
+    }),
+    responseSchema: requestTitleSchema,
+    outputJsonSchema: requestTitleOutputJsonSchema,
+    codexHomePrefix: "request-title",
+  });
+
+  return normalizeRequestTitle(response.title);
+};
+
 const buildRunState = ({
   input,
   reset,
@@ -248,13 +351,19 @@ const buildRunState = ({
   reset: boolean;
   selectedRepository: TeamRepositoryOption | null;
   existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
-}): TeamRunState => {
+}): {
+  state: TeamRunState;
+  shouldResetAssignment: boolean;
+} => {
   const baseState = buildInitialState(reset, selectedRepository);
   if (!existingThread) {
     return {
-      ...baseState,
-      latestInput: input,
-      forceReset: false,
+      state: {
+        ...baseState,
+        latestInput: input,
+        forceReset: false,
+      },
+      shouldResetAssignment: true,
     };
   }
 
@@ -265,20 +374,118 @@ const buildRunState = ({
     (storedData.selectedRepository?.id ?? null) !== (selectedRepository?.id ?? null);
 
   return {
-    ...baseState,
-    assignmentNumber: shouldResetAssignment
-      ? (storedData.assignmentNumber ?? 0) + 1
-      : storedData.assignmentNumber,
-    latestInput: input,
-    handoffCounter: shouldResetAssignment ? 0 : storedData.handoffCounter,
-    handoffs: shouldResetAssignment ? {} : filterWorkflowHandoffs(storedData),
-    forceReset: false,
+    state: {
+      ...baseState,
+      assignmentNumber: shouldResetAssignment
+        ? (storedData.assignmentNumber ?? 0) + 1
+        : storedData.assignmentNumber,
+      latestInput: input,
+      handoffCounter: shouldResetAssignment ? 0 : storedData.handoffCounter,
+      handoffs: shouldResetAssignment ? {} : filterWorkflowHandoffs(storedData),
+      forceReset: false,
+    },
+    shouldResetAssignment,
+  };
+};
+
+const resolveRequestMetadata = async ({
+  input,
+  providedTitle,
+  providedRequestText,
+  existingThread,
+  shouldResetAssignment,
+  worktreePath,
+  logEvent,
+}: {
+  input: string;
+  providedTitle?: string;
+  providedRequestText?: string;
+  existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  shouldResetAssignment: boolean;
+  worktreePath: string;
+  logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
+}): Promise<ResolvedRequestMetadata> => {
+  const requestText =
+    normalizeRequestText(providedRequestText) ??
+    (shouldResetAssignment ? null : normalizeRequestText(existingThread?.data.requestText)) ??
+    input.trim();
+  const humanTitle = normalizeRequestTitle(providedTitle);
+
+  if (humanTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Using human request title: ${humanTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+
+    return {
+      requestTitle: humanTitle,
+      requestText,
+    };
+  }
+
+  const preservedTitle =
+    shouldResetAssignment ? null : normalizeRequestTitle(existingThread?.data.requestTitle);
+  if (preservedTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Reusing request title: ${preservedTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+
+    return {
+      requestTitle: preservedTitle,
+      requestText,
+    };
+  }
+
+  try {
+    const generatedTitle = await generateRequestTitle({
+      input,
+      requestText,
+      worktreePath,
+    });
+
+    if (generatedTitle) {
+      await logEvent?.({
+        source: "system",
+        message: `Generated request title: ${generatedTitle}`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return {
+        requestTitle: generatedTitle,
+        requestText,
+      };
+    }
+  } catch (error) {
+    await logEvent?.({
+      source: "system",
+      message: `Request title generation fell back to a deterministic title: ${
+        error instanceof Error ? error.message : "Unknown error."
+      }`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const fallbackTitle = buildDeterministicRequestTitle(requestText);
+  await logEvent?.({
+    source: "system",
+    message: `Using deterministic request title fallback: ${fallbackTitle}`,
+    createdAt: new Date().toISOString(),
+  });
+
+  return {
+    requestTitle: fallbackTitle,
+    requestText,
   };
 };
 
 export const runTeam = async ({
   input,
   threadId,
+  title,
+  requestText,
   repositoryId,
   reset,
   deleteExistingBranches,
@@ -286,6 +493,8 @@ export const runTeam = async ({
 }: {
   input: string;
   threadId?: string;
+  title?: string;
+  requestText?: string;
   repositoryId?: string;
   reset?: boolean;
   deleteExistingBranches?: boolean;
@@ -301,7 +510,7 @@ export const runTeam = async ({
 
   const resolvedThreadId = threadId ?? crypto.randomUUID();
   const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, resolvedThreadId);
-  const state = buildRunState({
+  const { state, shouldResetAssignment } = buildRunState({
     input,
     reset: Boolean(reset),
     selectedRepository,
@@ -328,6 +537,18 @@ export const runTeam = async ({
       );
     }
   };
+
+  const requestMetadata = await resolveRequestMetadata({
+    input,
+    providedTitle: title,
+    providedRequestText: requestText,
+    existingThread,
+    shouldResetAssignment,
+    worktreePath: selectedRepository?.path ?? process.cwd(),
+    logEvent: forwardPlannerEvent,
+  });
+  state.requestTitle = requestMetadata.requestTitle;
+  state.requestText = requestMetadata.requestText;
 
   try {
     await upsertTeamThreadRun({
@@ -371,6 +592,8 @@ export const runTeam = async ({
         threadId: resolvedThreadId,
         assignmentNumber: state.assignmentNumber,
         repository: selectedRepository,
+        requestTitle: requestMetadata.requestTitle,
+        requestText: requestMetadata.requestText,
         plannerSummary: plannerResponse.dispatch.planSummary,
         plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
         branchPrefix: plannerResponse.dispatch.branchPrefix,
@@ -397,6 +620,8 @@ export const runTeam = async ({
     return {
       threadId: resolvedThreadId,
       assignmentNumber: state.assignmentNumber,
+      requestTitle: requestMetadata.requestTitle,
+      requestText: requestMetadata.requestText,
       approved: false,
       repository: selectedRepository,
       workflow: state.workflow,

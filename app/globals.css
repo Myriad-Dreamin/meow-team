@@ -377,16 +377,36 @@ main {
   margin-top: 24px;
 }
 
+.result-request-card,
 .result-meta {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   padding: 16px;
   border-radius: 22px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.result-meta {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
 }
 
 .result-meta p {
   margin: 10px 0 0;
+}
+
+.result-request-title {
+  margin: 4px 0 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.result-request-copy {
+  margin: 4px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .decision-pill,
@@ -579,6 +599,11 @@ main {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.thread-card-title {
+  margin-top: 6px;
+  font-size: 1.16rem;
 }
 
 .thread-card-subtitle,

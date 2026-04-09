@@ -146,6 +146,8 @@ export type TeamDispatchAssignment = {
   assignmentNumber: number;
   status: TeamDispatchAssignmentStatus;
   repository: TeamRepositoryOption | null;
+  requestTitle: string | null;
+  requestText: string | null;
   requestedAt: string;
   startedAt: string | null;
   finishedAt: string | null;

@@ -45,6 +45,8 @@ export async function POST(request: Request) {
     void runTeam({
       input: nextRun.input,
       threadId: body.threadId,
+      title: nextRun.title,
+      requestText: nextRun.requestText,
       repositoryId: nextRun.repositoryId,
       reset: true,
     }).catch(async (error) => {
