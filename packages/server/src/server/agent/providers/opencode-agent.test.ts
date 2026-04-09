@@ -315,6 +315,23 @@ const hasOpenCode = isBinaryInstalled("opencode");
 });
 
 describe("OpenCode adapter context-window normalization", () => {
+  test("builds OpenCode file parts for image prompt blocks", () => {
+    expect(
+      __openCodeInternals.buildOpenCodePromptParts([
+        { type: "text", text: "Describe this image." },
+        { type: "image", mimeType: "image/png", data: "YWJjMTIz" },
+      ]),
+    ).toEqual([
+      { type: "text", text: "Describe this image." },
+      {
+        type: "file",
+        mime: "image/png",
+        filename: "attachment-1.png",
+        url: "data:image/png;base64,YWJjMTIz",
+      },
+    ]);
+  });
+
   test("preserves provider catalog context limit in model metadata", () => {
     const definition = __openCodeInternals.buildOpenCodeModelDefinition(
       { id: "openai", name: "OpenAI" },

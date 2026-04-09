@@ -4,8 +4,10 @@ import {
   createOpencodeClient,
   type AssistantMessage as OpenCodeAssistantMessage,
   type Event as OpenCodeEvent,
+  type FilePartInput as OpenCodeFilePartInput,
   type OpencodeClient,
   type Part as OpenCodePart,
+  type TextPartInput as OpenCodeTextPartInput,
 } from "@opencode-ai/sdk/v2/client";
 import net from "node:net";
 import type { Logger } from "pino";
@@ -494,7 +496,66 @@ function hasNormalizedOpenCodeUsage(usage: AgentUsage): boolean {
   ].some((value) => typeof value === "number" && Number.isFinite(value));
 }
 
+function getOpenCodeAttachmentExtension(mimeType: string): string {
+  switch (mimeType) {
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    case "image/svg+xml":
+      return "svg";
+    default:
+      return "bin";
+  }
+}
+
+function toOpenCodeDataUrl(mimeType: string, data: string): { mimeType: string; url: string } {
+  const match = data.match(/^data:([^;,]+);base64,(.+)$/);
+  if (match) {
+    return {
+      mimeType: match[1] ?? mimeType,
+      url: data,
+    };
+  }
+  return {
+    mimeType,
+    url: `data:${mimeType};base64,${data}`,
+  };
+}
+
+function buildOpenCodePromptParts(
+  prompt: AgentPromptInput,
+): Array<OpenCodeTextPartInput | OpenCodeFilePartInput> {
+  if (typeof prompt === "string") {
+    return [{ type: "text", text: prompt }];
+  }
+  let attachmentOrdinal = 0;
+  const output: Array<OpenCodeTextPartInput | OpenCodeFilePartInput> = [];
+  for (const part of prompt) {
+    if (part.type === "text") {
+      output.push({ type: "text", text: part.text });
+      continue;
+    }
+    attachmentOrdinal += 1;
+    const normalized = toOpenCodeDataUrl(part.mimeType, part.data);
+    output.push({
+      type: "file",
+      mime: normalized.mimeType,
+      filename: `attachment-${attachmentOrdinal}.${getOpenCodeAttachmentExtension(
+        normalized.mimeType,
+      )}`,
+      url: normalized.url,
+    });
+  }
+  return output;
+}
+
 export const __openCodeInternals = {
+  buildOpenCodePromptParts,
   buildOpenCodeModelContextWindowLookup,
   buildOpenCodeModelDefinition,
   buildOpenCodeModelLookupKey,
@@ -1436,7 +1497,7 @@ class OpenCodeAgentSession implements AgentSession {
     this.accumulatedUsage =
       contextWindowMaxTokens !== undefined ? { contextWindowMaxTokens } : {};
 
-    const parts = this.buildPromptParts(prompt);
+    const parts = buildOpenCodePromptParts(prompt);
     const model = this.parseModel(this.config.model);
     const thinkingOptionId = this.config.thinkingOptionId;
     const effectiveVariant = thinkingOptionId ?? undefined;
@@ -1860,15 +1921,6 @@ class OpenCodeAgentSession implements AgentSession {
     this.abortController?.abort();
     this.subscribers.clear();
     this.activeForegroundTurnId = null;
-  }
-
-  private buildPromptParts(prompt: AgentPromptInput): Array<{ type: "text"; text: string }> {
-    if (typeof prompt === "string") {
-      return [{ type: "text", text: prompt }];
-    }
-    return prompt
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => ({ type: "text", text: p.text }));
   }
 
   private parseSlashCommandInput(text: string): { commandName: string; args?: string } | null {
