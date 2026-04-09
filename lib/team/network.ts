@@ -4,11 +4,12 @@ import { applyHandoff, summarizeHandoffs } from "@/lib/team/agent-helpers";
 import { runCodexStructuredOutput } from "@/lib/team/codex-cli";
 import { createPlannerDispatchAssignment, ensurePendingDispatchWork } from "@/lib/team/dispatch";
 import { appendTeamExecutionStep, getTeamThreadRecord, upsertTeamThreadRun } from "@/lib/team/history";
+import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
-import type { TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
+import type { TeamCodexEvent, TeamCodexLogEntry, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
 
 export type TeamRunState = {
   teamId: string;
@@ -149,6 +150,16 @@ const buildLocalSkillReference = (): string => {
   ].join("\n");
 };
 
+const buildPlannerRequestContext = (state: TeamRunState): string => {
+  const latestInput = state.latestInput?.trim();
+
+  if (!latestInput) {
+    return "Current assignment input: none recorded. Ask for clarification instead of inventing product requirements.";
+  }
+
+  return `Current assignment input:\n${latestInput}`;
+};
+
 const filterWorkflowHandoffs = (
   state: TeamRunState,
 ): Partial<Record<string, TeamRoleHandoff>> => {
@@ -188,6 +199,7 @@ const buildPlannerPrompt = ({
     `OpenSpec context:`,
     describeLocalOpenSpecSkills(),
     buildOpenSpecSkillReference(),
+    buildPlannerRequestContext(state),
     `Your role prompt is below:`,
     plannerPrompt.trim(),
     `Current handoffs for this assignment:`,
@@ -263,11 +275,13 @@ export const runTeam = async ({
   threadId,
   repositoryId,
   reset,
+  onPlannerLogEntry,
 }: {
   input: string;
   threadId?: string;
   repositoryId?: string;
   reset?: boolean;
+  onPlannerLogEntry?: (entry: TeamCodexLogEntry) => Promise<void> | void;
 }): Promise<TeamRunSummary> => {
   const selectedRepository = await findConfiguredRepository(teamConfig, repositoryId);
 
@@ -286,75 +300,106 @@ export const runTeam = async ({
     existingThread,
   });
 
-  await upsertTeamThreadRun({
-    threadFile: teamConfig.storage.threadFile,
-    threadId: resolvedThreadId,
-    state,
-    input,
-  });
-
-  const plannerRole = await loadRolePrompt("planner");
-  const plannerResponse = await runCodexStructuredOutput({
-    worktreePath: selectedRepository?.path ?? process.cwd(),
-    prompt: buildPlannerPrompt({
-      plannerPrompt: plannerRole.prompt,
-      state,
-    }),
-    responseSchema: plannerResponseSchema,
-    outputJsonSchema: plannerOutputJsonSchema,
-    codexHomePrefix: "planner",
-  });
-
-  applyHandoff({
-    state,
-    role: plannerRole,
-    summary: plannerResponse.handoff.summary,
-    deliverable: plannerResponse.handoff.deliverable,
-    decision: plannerResponse.handoff.decision,
-  });
-
-  if (!selectedRepository && plannerResponse.dispatch) {
-    throw new Error("Planner produced dispatch proposals without a selected repository.");
-  }
-
-  if (selectedRepository && !plannerResponse.dispatch) {
-    throw new Error("Planner completed without dispatch proposals.");
-  }
-
-  if (selectedRepository && plannerResponse.dispatch) {
-    await createPlannerDispatchAssignment({
+  const forwardPlannerEvent = async (event: TeamCodexEvent): Promise<void> => {
+    const entry = await appendTeamCodexLogEvent({
+      threadFile: teamConfig.storage.threadFile,
       threadId: resolvedThreadId,
       assignmentNumber: state.assignmentNumber,
-      repository: selectedRepository,
-      plannerSummary: plannerResponse.dispatch.planSummary,
-      plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
-      branchPrefix: plannerResponse.dispatch.branchPrefix,
-      tasks: plannerResponse.dispatch.tasks,
+      roleId: "planner",
+      laneId: null,
+      event,
     });
-  }
 
-  const step = createPlannerStep({
-    agentName: plannerRole.name,
-    deliverable: plannerResponse.handoff.deliverable,
-  });
-  await appendTeamExecutionStep({
-    threadFile: teamConfig.storage.threadFile,
-    threadId: resolvedThreadId,
-    state,
-    step,
-  });
-
-  void ensurePendingDispatchWork({
-    threadId: resolvedThreadId,
-  });
-
-  return {
-    threadId: resolvedThreadId,
-    assignmentNumber: state.assignmentNumber,
-    approved: false,
-    repository: selectedRepository,
-    workflow: state.workflow,
-    handoffs: getOrderedHandoffs(state),
-    steps: [step],
+    try {
+      await onPlannerLogEntry?.(entry);
+    } catch (error) {
+      console.error(
+        `[team-run:${resolvedThreadId}] Unable to forward planner log entry: ${
+          error instanceof Error ? error.message : "Unknown error."
+        }`,
+      );
+    }
   };
+
+  try {
+    await upsertTeamThreadRun({
+      threadFile: teamConfig.storage.threadFile,
+      threadId: resolvedThreadId,
+      state,
+      input,
+    });
+
+    const plannerRole = await loadRolePrompt("planner");
+    const plannerResponse = await runCodexStructuredOutput({
+      worktreePath: selectedRepository?.path ?? process.cwd(),
+      prompt: buildPlannerPrompt({
+        plannerPrompt: plannerRole.prompt,
+        state,
+      }),
+      responseSchema: plannerResponseSchema,
+      outputJsonSchema: plannerOutputJsonSchema,
+      codexHomePrefix: "planner",
+      onEvent: forwardPlannerEvent,
+    });
+
+    applyHandoff({
+      state,
+      role: plannerRole,
+      summary: plannerResponse.handoff.summary,
+      deliverable: plannerResponse.handoff.deliverable,
+      decision: plannerResponse.handoff.decision,
+    });
+
+    if (!selectedRepository && plannerResponse.dispatch) {
+      throw new Error("Planner produced dispatch proposals without a selected repository.");
+    }
+
+    if (selectedRepository && !plannerResponse.dispatch) {
+      throw new Error("Planner completed without dispatch proposals.");
+    }
+
+    if (selectedRepository && plannerResponse.dispatch) {
+      await createPlannerDispatchAssignment({
+        threadId: resolvedThreadId,
+        assignmentNumber: state.assignmentNumber,
+        repository: selectedRepository,
+        plannerSummary: plannerResponse.dispatch.planSummary,
+        plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
+        branchPrefix: plannerResponse.dispatch.branchPrefix,
+        tasks: plannerResponse.dispatch.tasks,
+      });
+    }
+
+    const step = createPlannerStep({
+      agentName: plannerRole.name,
+      deliverable: plannerResponse.handoff.deliverable,
+    });
+    await appendTeamExecutionStep({
+      threadFile: teamConfig.storage.threadFile,
+      threadId: resolvedThreadId,
+      state,
+      step,
+    });
+
+    void ensurePendingDispatchWork({
+      threadId: resolvedThreadId,
+    });
+
+    return {
+      threadId: resolvedThreadId,
+      assignmentNumber: state.assignmentNumber,
+      approved: false,
+      repository: selectedRepository,
+      workflow: state.workflow,
+      handoffs: getOrderedHandoffs(state),
+      steps: [step],
+    };
+  } catch (error) {
+    await forwardPlannerEvent({
+      source: "system",
+      message: `Planner run failed: ${error instanceof Error ? error.message : "Unknown error."}`,
+      createdAt: new Date().toISOString(),
+    });
+    throw error;
+  }
 };

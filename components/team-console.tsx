@@ -1,8 +1,9 @@
 "use client";
 
-import { startTransition, useState, type FormEvent } from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
 import type { TeamRunSummary } from "@/lib/team/network";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamCodexLogEntry } from "@/lib/team/types";
 
 type TeamConsoleProps = {
   disabled: boolean;
@@ -33,17 +34,46 @@ type RunState =
       result: TeamRunSummary | null;
     };
 
+type TeamRunAcceptedStreamEvent = {
+  type: "accepted";
+  status: "running";
+  threadId: string;
+  startedAt: string;
+};
+
+type TeamRunCodexEventStreamEvent = {
+  type: "codex_event";
+  entry: TeamCodexLogEntry;
+};
+
+type TeamRunResultStreamEvent = {
+  type: "result";
+  result: TeamRunSummary;
+};
+
+type TeamRunErrorStreamEvent = {
+  type: "error";
+  threadId: string;
+  error: string;
+};
+
+type TeamRunStreamEvent =
+  | TeamRunAcceptedStreamEvent
+  | TeamRunCodexEventStreamEvent
+  | TeamRunResultStreamEvent
+  | TeamRunErrorStreamEvent;
+
+type TeamLogsResponse = {
+  entries: TeamCodexLogEntry[];
+};
+
+const LOG_POLL_INTERVAL_MS = 3000;
+const MAX_VISIBLE_LOGS = 240;
+
 const initialRunState: RunState = {
   status: "idle",
   error: null,
   result: null,
-};
-
-type TeamRunAcceptedResponse = {
-  accepted: true;
-  status: "running";
-  threadId: string;
-  startedAt: string;
 };
 
 const tryParseJson = (value: string): unknown => {
@@ -68,8 +98,46 @@ const isTeamRunSummary = (value: unknown): value is TeamRunSummary => {
   );
 };
 
-const isAcceptedResponse = (value: unknown): value is TeamRunAcceptedResponse => {
-  return isRecord(value) && value.accepted === true && typeof value.threadId === "string";
+const isTeamCodexLogEntry = (value: unknown): value is TeamCodexLogEntry => {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.source === "string" &&
+    typeof value.message === "string" &&
+    typeof value.createdAt === "string"
+  );
+};
+
+const isAcceptedStreamEvent = (value: unknown): value is TeamRunAcceptedStreamEvent => {
+  return (
+    isRecord(value) &&
+    value.type === "accepted" &&
+    value.status === "running" &&
+    typeof value.threadId === "string" &&
+    typeof value.startedAt === "string"
+  );
+};
+
+const isCodexEventStreamEvent = (value: unknown): value is TeamRunCodexEventStreamEvent => {
+  return isRecord(value) && value.type === "codex_event" && isTeamCodexLogEntry(value.entry);
+};
+
+const isResultStreamEvent = (value: unknown): value is TeamRunResultStreamEvent => {
+  return isRecord(value) && value.type === "result" && isTeamRunSummary(value.result);
+};
+
+const isErrorStreamEvent = (value: unknown): value is TeamRunErrorStreamEvent => {
+  return (
+    isRecord(value) &&
+    value.type === "error" &&
+    typeof value.threadId === "string" &&
+    typeof value.error === "string"
+  );
+};
+
+const isLogsResponse = (value: unknown): value is TeamLogsResponse => {
+  return isRecord(value) && Array.isArray(value.entries) && value.entries.every(isTeamCodexLogEntry);
 };
 
 const readErrorMessage = (value: unknown): string | null => {
@@ -83,7 +151,7 @@ const readErrorMessage = (value: unknown): string | null => {
 const buildUnexpectedResponseMessage = (response: Response, body: string): string => {
   const trimmed = body.trim();
   if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
-    return `Team run failed with HTTP ${response.status}. The server returned an HTML error page instead of JSON, which usually means the production request crashed or timed out. Check Live Thread Status below for partial progress.`;
+    return `Team run failed with HTTP ${response.status}. The server returned an HTML error page instead of JSON, which usually means the request crashed or timed out. Check Live Thread Status below for partial progress.`;
   }
 
   if (!trimmed) {
@@ -93,6 +161,65 @@ const buildUnexpectedResponseMessage = (response: Response, body: string): strin
   return `Team run failed with HTTP ${response.status}. The server returned an unexpected response body.`;
 };
 
+const mergeLogEntries = (
+  currentEntries: TeamCodexLogEntry[],
+  nextEntries: TeamCodexLogEntry[],
+): TeamCodexLogEntry[] => {
+  const byId = new Map<string, TeamCodexLogEntry>();
+
+  for (const entry of currentEntries) {
+    byId.set(entry.id, entry);
+  }
+
+  for (const entry of nextEntries) {
+    byId.set(entry.id, entry);
+  }
+
+  return Array.from(byId.values())
+    .sort((left, right) => {
+      if (left.createdAt !== right.createdAt) {
+        return left.createdAt.localeCompare(right.createdAt);
+      }
+
+      return left.id.localeCompare(right.id);
+    })
+    .slice(-MAX_VISIBLE_LOGS);
+};
+
+const formatTimestamp = (value: string | null): string => {
+  if (!value) {
+    return "Not recorded";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+};
+
+const describeLogContext = (entry: TeamCodexLogEntry): string => {
+  const parts = [
+    entry.roleId ?? "system",
+    entry.laneId ?? null,
+    entry.assignmentNumber ? `Assignment #${entry.assignmentNumber}` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return parts.join(" | ");
+};
+
+const formatStderrBlock = (entries: TeamCodexLogEntry[]): string => {
+  return entries
+    .map((entry) => {
+      const context = describeLogContext(entry);
+      const timestamp = formatTimestamp(entry.createdAt);
+
+      return [`[${timestamp}]${context ? ` ${context}` : ""}`, entry.message].join("\n");
+    })
+    .join("\n\n");
+};
+
 export function TeamConsole({ disabled, initialPrompt, repositories, workerCount }: TeamConsoleProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [threadId, setThreadId] = useState("");
@@ -100,21 +227,83 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
   const [reset, setReset] = useState(false);
   const [runState, setRunState] = useState<RunState>(initialRunState);
   const [notice, setNotice] = useState<string | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [activeLogStartedAt, setActiveLogStartedAt] = useState<string | null>(null);
+  const [logEntries, setLogEntries] = useState<TeamCodexLogEntry[]>([]);
+  const [logError, setLogError] = useState<string | null>(null);
 
   const isRunning = runState.status === "running";
   const hasRepositories = repositories.length > 0;
+  const visibleLogEntries = activeLogStartedAt
+    ? logEntries.filter((entry) => entry.createdAt >= activeLogStartedAt)
+    : logEntries;
+  const stderrEntries = visibleLogEntries.filter((entry) => entry.source === "stderr");
+  const timelineLogEntries = visibleLogEntries.filter((entry) => entry.source !== "stderr");
+  const stderrOutput = formatStderrBlock(stderrEntries);
+
+  useEffect(() => {
+    if (!activeThreadId) {
+      setLogError(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadLogs = async () => {
+      try {
+        const response = await fetch(
+          `/api/team/logs?threadId=${encodeURIComponent(activeThreadId)}&limit=${MAX_VISIBLE_LOGS}`,
+          {
+            cache: "no-store",
+          },
+        );
+
+        const rawPayload = await response.text();
+        const payload = tryParseJson(rawPayload);
+        if (!response.ok || !isLogsResponse(payload)) {
+          throw new Error(
+            readErrorMessage(payload) ?? buildUnexpectedResponseMessage(response, rawPayload),
+          );
+        }
+
+        if (!isCancelled) {
+          setLogEntries((current) => mergeLogEntries(current, payload.entries));
+          setLogError(null);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setLogError(
+            error instanceof Error ? error.message : "Unable to refresh persisted Codex CLI logs.",
+          );
+        }
+      }
+    };
+
+    void loadLogs();
+    const intervalId = window.setInterval(() => {
+      if (!isCancelled) {
+        void loadLogs();
+      }
+    }, LOG_POLL_INTERVAL_MS);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeThreadId]);
 
   const handleSubmit = async (formData: FormData) => {
     const nextPrompt = String(formData.get("prompt") ?? "").trim();
     const nextThreadId = String(formData.get("threadId") ?? "").trim();
     const nextRepositoryId = String(formData.get("repositoryId") ?? "").trim();
     const shouldReset = formData.get("reset") === "on";
+    const previousResult = runState.result;
 
     if (!nextPrompt) {
       setRunState({
         status: "error",
         error: "Enter a request before running the team.",
-        result: runState.result,
+        result: previousResult,
       });
       setNotice(null);
       return;
@@ -127,9 +316,13 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
     setRunState({
       status: "running",
       error: null,
-      result: runState.result,
+      result: previousResult,
     });
     setNotice(null);
+    setLogError(null);
+    setLogEntries([]);
+    setActiveThreadId(null);
+    setActiveLogStartedAt(null);
 
     try {
       const response = await fetch("/api/team/run", {
@@ -145,43 +338,117 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
         }),
       });
 
-      const rawPayload = await response.text();
-      const payload = tryParseJson(rawPayload);
-
       if (!response.ok) {
+        const rawPayload = await response.text();
+        const payload = tryParseJson(rawPayload);
         throw new Error(readErrorMessage(payload) ?? buildUnexpectedResponseMessage(response, rawPayload));
       }
 
-      if (isAcceptedResponse(payload)) {
-        setThreadId(payload.threadId);
+      if (!response.body) {
+        throw new Error("Team run started without a readable stream response.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let sawTerminalEvent = false;
+
+      const handleStreamEvent = (event: TeamRunStreamEvent) => {
+        if (isAcceptedStreamEvent(event)) {
+          setThreadId(event.threadId);
+          setActiveThreadId(event.threadId);
+          setActiveLogStartedAt(event.startedAt);
+          setNotice(
+            `Streaming planner output on thread ${event.threadId}. Planner logs appear live here, and coder or reviewer lanes will keep appending to the persisted thread log after proposal approval.`,
+          );
+          return;
+        }
+
+        if (isCodexEventStreamEvent(event)) {
+          setLogEntries((current) => mergeLogEntries(current, [event.entry]));
+          return;
+        }
+
+        if (isResultStreamEvent(event)) {
+          sawTerminalEvent = true;
+          setThreadId(event.result.threadId ?? "");
+          setActiveThreadId(event.result.threadId ?? null);
+          setRunState({
+            status: "success",
+            error: null,
+            result: event.result,
+          });
+          setNotice(
+            "Planner finished. Approve the proposals in Live Thread Status to start coder and reviewer lanes; their Codex CLI logs will continue appearing here.",
+          );
+          return;
+        }
+
+        sawTerminalEvent = true;
+        setThreadId(event.threadId);
+        setActiveThreadId(event.threadId);
         setRunState({
-          status: "idle",
-          error: null,
-          result: runState.result,
+          status: "error",
+          error: event.error,
+          result: previousResult,
         });
-        setNotice(
-          `Planner proposal generation started on thread ${payload.threadId}. Follow the live status board below, approve the proposals you want, and the coding-review queue will pick them up from there.`,
-        );
-        return;
+        setNotice(null);
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            continue;
+          }
+
+          const parsed = tryParseJson(trimmed);
+          if (
+            !isAcceptedStreamEvent(parsed) &&
+            !isCodexEventStreamEvent(parsed) &&
+            !isResultStreamEvent(parsed) &&
+            !isErrorStreamEvent(parsed)
+          ) {
+            throw new Error("Team run stream returned an unexpected event payload.");
+          }
+
+          handleStreamEvent(parsed);
+        }
       }
 
-      if (!isTeamRunSummary(payload)) {
-        throw new Error(buildUnexpectedResponseMessage(response, rawPayload));
+      const trailing = buffer.trim();
+      if (trailing) {
+        const parsed = tryParseJson(trailing);
+        if (
+          !isAcceptedStreamEvent(parsed) &&
+          !isCodexEventStreamEvent(parsed) &&
+          !isResultStreamEvent(parsed) &&
+          !isErrorStreamEvent(parsed)
+        ) {
+          throw new Error("Team run stream returned an unexpected final payload.");
+        }
+
+        handleStreamEvent(parsed);
       }
 
-      setThreadId(payload.threadId ?? "");
-      setRunState({
-        status: "success",
-        error: null,
-        result: payload,
-      });
-      setNotice(null);
+      if (!sawTerminalEvent) {
+        throw new Error("Team run stream ended before a final result was returned.");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Team run failed.";
       setRunState({
         status: "error",
         error: message,
-        result: runState.result,
+        result: previousResult,
       });
       setNotice(null);
     }
@@ -292,6 +559,54 @@ export function TeamConsole({ disabled, initialPrompt, repositories, workerCount
 
       {notice ? <p className="info-callout">{notice}</p> : null}
       {runState.error ? <p className="error-callout">{runState.error}</p> : null}
+      {logError ? <p className="error-callout">{logError}</p> : null}
+
+      {activeThreadId ? (
+        <div className="timeline-panel codex-log-panel">
+          <div className="section-header compact">
+            <p className="eyebrow">Codex Output</p>
+            <h3>Live Thread Log</h3>
+            <p className="section-copy">
+              Streaming planner output appears immediately, and the same thread-scoped log file is
+              polled so coder and reviewer lane output continues showing up here after proposal
+              approval.
+            </p>
+          </div>
+
+          {stderrEntries.length > 0 ? (
+            <article className="codex-stderr-panel">
+              <div className="codex-log-meta">
+                <span className="log-source log-source-stderr">stderr</span>
+                <span>
+                  {stderrEntries.length} message{stderrEntries.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <pre className="codex-log-message codex-stderr-message">{stderrOutput}</pre>
+            </article>
+          ) : null}
+
+          {timelineLogEntries.length > 0 ? (
+            <div className="codex-log-list">
+              {timelineLogEntries.map((entry) => (
+                <article className="codex-log-item" key={entry.id}>
+                  <div className="codex-log-meta">
+                    <span className={`log-source log-source-${entry.source}`}>{entry.source}</span>
+                    <span>{describeLogContext(entry)}</span>
+                    <span>{formatTimestamp(entry.createdAt)}</span>
+                  </div>
+                  <pre className="codex-log-message">{entry.message}</pre>
+                </article>
+              ))}
+            </div>
+          ) : visibleLogEntries.length === 0 ? (
+            <p className="timeline-copy">
+              {isRunning
+                ? "Waiting for Codex CLI output..."
+                : "No Codex CLI output has been recorded for this thread yet."}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {runState.result ? (
         <div className="run-result">

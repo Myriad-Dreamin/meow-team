@@ -2,6 +2,22 @@ import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 
 export type TeamRoleDecision = "continue" | "approved" | "needs_revision";
 
+export type TeamCodexLogSource = "stdout" | "stderr" | "system";
+
+export type TeamCodexEvent = {
+  source: TeamCodexLogSource;
+  message: string;
+  createdAt: string;
+};
+
+export type TeamCodexLogEntry = TeamCodexEvent & {
+  id: string;
+  threadId: string;
+  assignmentNumber: number | null;
+  roleId: string | null;
+  laneId: string | null;
+};
+
 export type TeamRoleHandoff = {
   roleId: string;
   roleName: string;

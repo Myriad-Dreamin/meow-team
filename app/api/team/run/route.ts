@@ -4,9 +4,31 @@ import { teamConfig } from "@/team.config";
 import { markTeamThreadFailed, threadHasActiveDispatchAssignment } from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
-import { runTeam } from "@/lib/team/network";
+import { runTeam, type TeamRunSummary } from "@/lib/team/network";
+import type { TeamCodexLogEntry } from "@/lib/team/types";
 
 export const runtime = "nodejs";
+
+type TeamRunStreamEvent =
+  | {
+      type: "accepted";
+      threadId: string;
+      startedAt: string;
+      status: "running";
+    }
+  | {
+      type: "codex_event";
+      entry: TeamCodexLogEntry;
+    }
+  | {
+      type: "result";
+      result: TeamRunSummary;
+    }
+  | {
+      type: "error";
+      threadId: string;
+      error: string;
+    };
 
 const runTeamSchema = z.object({
   input: z.string().trim().min(1, "A prompt is required."),
@@ -58,29 +80,90 @@ export async function POST(request: Request) {
 
     const threadId = body.threadId ?? crypto.randomUUID();
     const startedAt = new Date().toISOString();
+    const encoder = new TextEncoder();
 
-    void runTeam({
-      ...body,
-      threadId,
-    }).catch(async (error) => {
-      const message = error instanceof Error ? error.message : "Unknown error.";
-      console.error(`[team-run:${threadId}] ${message}`);
-      await markTeamThreadFailed({
-        threadFile: teamConfig.storage.threadFile,
-        threadId,
-        error: message,
-      });
+    const stream = new ReadableStream({
+      start(controller) {
+        let closed = false;
+
+        const close = () => {
+          if (closed) {
+            return;
+          }
+
+          closed = true;
+          controller.close();
+        };
+
+        const writeEvent = (event: TeamRunStreamEvent) => {
+          if (closed) {
+            return;
+          }
+
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        };
+
+        request.signal.addEventListener("abort", () => {
+          closed = true;
+        });
+
+        void (async () => {
+          writeEvent({
+            type: "accepted",
+            threadId,
+            startedAt,
+            status: "running",
+          });
+
+          try {
+            const result = await runTeam({
+              ...body,
+              threadId,
+              onPlannerLogEntry: async (entry) => {
+                writeEvent({
+                  type: "codex_event",
+                  entry,
+                });
+              },
+            });
+
+            writeEvent({
+              type: "result",
+              result,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown error.";
+            console.error(`[team-run:${threadId}] ${message}`);
+
+            try {
+              await markTeamThreadFailed({
+                threadFile: teamConfig.storage.threadFile,
+                threadId,
+                error: message,
+              });
+            } catch {
+              // The thread may not have been created yet.
+            }
+
+            writeEvent({
+              type: "error",
+              threadId,
+              error: message,
+            });
+          } finally {
+            close();
+          }
+        })();
+      },
     });
 
-    return NextResponse.json(
-      {
-        accepted: true,
-        status: "running",
-        threadId,
-        startedAt,
+    return new Response(stream, {
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/x-ndjson; charset=utf-8",
       },
-      { status: 202 },
-    );
+      status: 200,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

@@ -36,11 +36,7 @@ Thumbs.db
 *.pem
 
 # local runtime data
-/data/*.json
-/data/*.sqlite
-/data/*.sqlite-shm
-/data/*.sqlite-wal
-/data/wallpapers/*
+/data/**/*
 
 # TypeScript build cache
 *.tsbuildinfo

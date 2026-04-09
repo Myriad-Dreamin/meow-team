@@ -25,6 +25,7 @@ import {
   synchronizeDispatchAssignment,
   updateTeamThreadRecord,
 } from "@/lib/team/history";
+import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import {
   buildProposalChangeName,
   buildProposalPath,
@@ -38,6 +39,7 @@ import type {
   TeamPlannerNote,
   TeamPullRequestRecord,
   TeamRoleHandoff,
+  TeamCodexEvent,
   TeamWorkerEventActor,
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
@@ -291,10 +293,12 @@ const runRoleWithCodexCli = async ({
   role,
   state,
   input,
+  onEvent,
 }: {
   role: RolePrompt;
   state: LaneRunState;
   input: string;
+  onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<LaneRunState> => {
   const response = await runCodexLaneRole({
     worktreePath: state.worktreePath,
@@ -303,6 +307,7 @@ const runRoleWithCodexCli = async ({
       state,
       input,
     }),
+    onEvent,
   });
 
   applyHandoff({
@@ -641,6 +646,16 @@ const runLaneCycle = async ({
       }),
       input:
         lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
+      onEvent: async (event) => {
+        await appendTeamCodexLogEvent({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          assignmentNumber,
+          roleId: coderRole.id,
+          laneId,
+          event,
+        });
+      },
     });
 
     const coderHandoff = coderState.handoffs.coder;
@@ -694,6 +709,19 @@ const runLaneCycle = async ({
         },
       });
 
+      await appendTeamCodexLogEvent({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        assignmentNumber,
+        roleId: coderRole.id,
+        laneId,
+        event: {
+          source: "system",
+          message: noBranchOutputMessage,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
       return;
     }
 
@@ -740,6 +768,16 @@ const runLaneCycle = async ({
         lane.taskTitle ??
         assignment.plannerSummary ??
         "Review the lane output.",
+      onEvent: async (event) => {
+        await appendTeamCodexLogEvent({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          assignmentNumber,
+          roleId: reviewerRole.id,
+          laneId,
+          event,
+        });
+      },
     });
 
     const reviewerHandoff = reviewerState.handoffs.reviewer;
@@ -943,6 +981,18 @@ const ensureLaneRun = ({
             now,
           );
           synchronizeDispatchAssignment(assignment, now);
+        },
+      });
+      await appendTeamCodexLogEvent({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        assignmentNumber,
+        roleId: null,
+        laneId,
+        event: {
+          source: "system",
+          message,
+          createdAt: new Date().toISOString(),
         },
       });
     } finally {

@@ -1,16 +1,14 @@
 import "server-only";
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import { teamRuntimeConfig } from "@/lib/team/runtime-config";
+import type { TeamCodexEvent, TeamCodexLogSource } from "@/lib/team/types";
 
-const execFileAsync = promisify(execFile);
-const CODEX_EXEC_OUTPUT_BUFFER = 1024 * 1024 * 12;
 const ERROR_OUTPUT_LINE_LIMIT = 80;
 const GLOBAL_CODEX_SKILLS_ROOT = path.join(homedir(), ".codex", "skills");
 const REPOSITORY_CODEX_SKILLS_ROOT = path.join(process.cwd(), ".codex", "skills");
@@ -49,6 +47,20 @@ const parseStructuredMessage = <TSchema extends z.ZodTypeAny>(
     .replace(/\s*```$/u, "");
 
   return schema.parse(JSON.parse(normalized));
+};
+
+const createCodexEvent = ({
+  source,
+  message,
+}: {
+  source: TeamCodexLogSource;
+  message: string;
+}): TeamCodexEvent => {
+  return {
+    source,
+    message,
+    createdAt: new Date().toISOString(),
+  };
 };
 
 const buildCodexExecArgs = ({
@@ -198,12 +210,14 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   responseSchema,
   outputJsonSchema,
   codexHomePrefix,
+  onEvent,
 }: {
   worktreePath: string;
   prompt: string;
   responseSchema: TSchema;
   outputJsonSchema: object;
   codexHomePrefix: string;
+  onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<z.infer<TSchema>> => {
   const codexHomeRoot = path.join(path.dirname(worktreePath), ".codex-runner-home");
   await fs.mkdir(codexHomeRoot, { recursive: true });
@@ -217,42 +231,176 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   await fs.writeFile(schemaPath, JSON.stringify(outputJsonSchema, null, 2), "utf8");
 
   try {
-    const result = await execFileAsync(
-      "codex",
-      buildCodexExecArgs({
-        worktreePath,
-        schemaPath,
-        outputPath,
-        prompt,
+    const args = buildCodexExecArgs({
+      worktreePath,
+      schemaPath,
+      outputPath,
+      prompt,
+    });
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
+    let stdoutRemainder = "";
+    let stderrRemainder = "";
+    let eventQueue = Promise.resolve();
+
+    const queueEvent = (event: TeamCodexEvent): void => {
+      if (!event.message.trim()) {
+        return;
+      }
+
+      eventQueue = eventQueue.then(async () => {
+        try {
+          await onEvent?.(event);
+        } catch (error) {
+          throw new Error(
+            `Codex event handling failed: ${
+              error instanceof Error ? error.message : "Unknown error."
+            }`,
+          );
+        }
+      });
+    };
+
+    const queueBufferedLines = ({
+      source,
+      chunk,
+      remainder,
+    }: {
+      source: TeamCodexLogSource;
+      chunk: string;
+      remainder: string;
+    }): string => {
+      const combined = `${remainder}${chunk}`;
+      const lines = combined.split(/\r?\n/u);
+      const nextRemainder = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const message = line.trimEnd();
+        if (!message.trim()) {
+          continue;
+        }
+
+        queueEvent(
+          createCodexEvent({
+            source,
+            message,
+          }),
+        );
+      }
+
+      return nextRemainder;
+    };
+
+    const flushRemainder = ({
+      source,
+      remainder,
+    }: {
+      source: TeamCodexLogSource;
+      remainder: string;
+    }): void => {
+      const message = remainder.trimEnd();
+      if (!message.trim()) {
+        return;
+      }
+
+      queueEvent(
+        createCodexEvent({
+          source,
+          message,
+        }),
+      );
+    };
+
+    queueEvent(
+      createCodexEvent({
+        source: "system",
+        message: `Launching Codex CLI in ${worktreePath}.`,
       }),
-      {
+    );
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      const child = spawn("codex", args, {
         cwd: worktreePath,
         env: {
           ...process.env,
           CODEX_HOME: codexHome,
           OPENAI_API_KEY: teamRuntimeConfig.apiKey ?? process.env.OPENAI_API_KEY ?? "",
         },
-        maxBuffer: CODEX_EXEC_OUTPUT_BUFFER,
-      },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+
+      child.stdout?.on("data", (chunk: string) => {
+        stdoutBuffer += chunk;
+        stdoutRemainder = queueBufferedLines({
+          source: "stdout",
+          chunk,
+          remainder: stdoutRemainder,
+        });
+      });
+
+      child.stderr?.on("data", (chunk: string) => {
+        stderrBuffer += chunk;
+        stderrRemainder = queueBufferedLines({
+          source: "stderr",
+          chunk,
+          remainder: stderrRemainder,
+        });
+      });
+
+      child.on("error", reject);
+      child.on("close", (code) => {
+        flushRemainder({
+          source: "stdout",
+          remainder: stdoutRemainder,
+        });
+        flushRemainder({
+          source: "stderr",
+          remainder: stderrRemainder,
+        });
+        resolve(code ?? 0);
+      });
+    });
+
+    queueEvent(
+      createCodexEvent({
+        source: "system",
+        message:
+          exitCode === 0
+            ? "Codex CLI completed successfully."
+            : `Codex CLI exited with status ${exitCode}.`,
+      }),
     );
 
-    const rawMessage = await fs.readFile(outputPath, "utf8");
-    return parseStructuredMessage(rawMessage || result.stdout, responseSchema);
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException & {
-      stdout?: string;
-      stderr?: string;
-    };
+    await eventQueue;
 
-    try {
-      const rawMessage = await fs.readFile(outputPath, "utf8");
-      return parseStructuredMessage(rawMessage, responseSchema);
-    } catch {
-      // Fall through to the richer execution error below.
+    const rawMessage = await fs.readFile(outputPath, "utf8");
+    if (exitCode !== 0) {
+      throw new Error(
+        trimErrorOutput([stderrBuffer, stdoutBuffer].filter(Boolean).join("\n")) ||
+          `Codex CLI exited with status ${exitCode}.`,
+      );
     }
 
-    const output = trimErrorOutput([nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n"));
-    throw new Error(output || "Codex CLI execution failed without any captured output.");
+    return parseStructuredMessage(rawMessage || stdoutBuffer, responseSchema);
+  } catch (error) {
+    const isEventHandlingError =
+      error instanceof Error && error.message.startsWith("Codex event handling failed:");
+
+    if (!isEventHandlingError) {
+      try {
+        const rawMessage = await fs.readFile(outputPath, "utf8");
+        return parseStructuredMessage(rawMessage, responseSchema);
+      } catch {
+        // Fall through to the richer execution error below.
+      }
+    }
+
+    const message =
+      error instanceof Error ? error.message : "Codex CLI execution failed without any captured output.";
+    throw new Error(message);
   } finally {
     await fs.rm(codexHome, {
       force: true,
@@ -298,9 +446,11 @@ const codexLaneOutputJsonSchema = {
 export const runCodexLaneRole = async ({
   worktreePath,
   prompt,
+  onEvent,
 }: {
   worktreePath: string;
   prompt: string;
+  onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<CodexLaneResponse> => {
   return runCodexStructuredOutput({
     worktreePath,
@@ -308,5 +458,6 @@ export const runCodexLaneRole = async ({
     responseSchema: codexLaneResponseSchema,
     outputJsonSchema: codexLaneOutputJsonSchema,
     codexHomePrefix: "lane",
+    onEvent,
   });
 };
