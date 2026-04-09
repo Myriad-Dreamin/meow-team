@@ -100,6 +100,14 @@ export const buildLaneWorktreePath = ({
   return path.join(worktreeRoot, `meow-${laneIndex}`);
 };
 
+export const buildPlannerWorktreePath = ({
+  worktreeRoot,
+}: {
+  worktreeRoot: string;
+}): string => {
+  return path.join(worktreeRoot, "planner-staging");
+};
+
 export const resolveRepositoryBaseBranch = async (
   repositoryPath: string,
   preferredBranch: string,

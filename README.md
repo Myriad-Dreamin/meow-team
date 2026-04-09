@@ -1,7 +1,7 @@
 # Harness Team
 
-Harness Team is a fresh Next.js + AgentKit project for running a small,
-continuously configured engineering team with Codex as the LLM backend.
+Harness Team is a Next.js project for running a small, continuously configured
+engineering team with Codex CLI as the execution backend.
 
 The default team follows a simple harness engineering workflow:
 
@@ -15,12 +15,14 @@ and the whole team is configured in one file:
 
 ## Why this shape
 
-- It follows AgentKit's example patterns around `createAgent`,
-  `createTool`, `createNetwork`, and deterministic code-based routing.
-- It keeps one owner-controlled team configuration instead of scattering
-  agent definitions across the app.
-- It supports continuous work by persisting each thread's AgentKit history
-  and current handoff state to local JSON storage.
+- It keeps one owner-controlled team configuration instead of scattering role
+  behavior across the app.
+- It runs planner, coder, and reviewer steps through Codex CLI with structured
+  outputs instead of opaque in-process orchestration.
+- It exposes repo-local skills to Codex CLI so the harness can teach role- and
+  repository-specific workflows without custom tool code.
+- It supports continuous work by persisting each thread's step history and
+  current handoff state to local JSON storage.
 
 ## Quick Start
 
@@ -67,7 +69,9 @@ the environment provides a model override.
 - [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles):
   Markdown system prompts for each role.
 - [`lib/team/network.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/network.ts):
-  AgentKit network creation, routing, and state.
+  planner orchestration and thread state management.
+- [`lib/team/codex-cli.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/codex-cli.ts):
+  structured Codex CLI execution helpers plus temporary skill exposure.
 - [`lib/team/history.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/history.ts):
   persistent thread storage for continuous runs.
 - [`lib/team/repositories.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/repositories.ts):

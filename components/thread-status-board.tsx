@@ -269,7 +269,9 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
           setActionNotice("Proposal approval recorded. The coding-review queue is refreshing.");
           setRefreshError(null);
         } catch (error) {
-          setRefreshError(error instanceof Error ? error.message : "Unable to approve this proposal.");
+          setRefreshError(
+            error instanceof Error ? error.message : "Unable to approve this proposal.",
+          );
         } finally {
           setApprovalKey((current) => (current === nextApprovalKey ? null : current));
         }
@@ -418,7 +420,9 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                 </div>
 
                 {thread.latestCanonicalBranchName ? (
-                  <p className="thread-branch">Canonical branch: {thread.latestCanonicalBranchName}</p>
+                  <p className="thread-branch">
+                    Canonical branch: {thread.latestCanonicalBranchName}
+                  </p>
                 ) : thread.latestBranchPrefix ? (
                   <p className="thread-branch">Branch prefix: {thread.latestBranchPrefix}</p>
                 ) : null}
@@ -483,8 +487,18 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                               <p>{lane.worktreePath ?? "Not allocated"}</p>
                             </div>
                             <div>
+                              <span className="meta-label">Review Commit</span>
+                              <p>
+                                {lane.latestImplementationCommit
+                                  ? lane.latestImplementationCommit.slice(0, 12)
+                                  : "Not requested"}
+                              </p>
+                            </div>
+                            <div>
                               <span className="meta-label">Pool Slot</span>
-                              <p>{lane.workerSlot ? `moew-${lane.workerSlot}` : "Waiting for pool"}</p>
+                              <p>
+                                {lane.workerSlot ? `moew-${lane.workerSlot}` : "Waiting for pool"}
+                              </p>
                             </div>
                             <div>
                               <span className="meta-label">OpenSpec Change</span>
@@ -557,7 +571,9 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                             </div>
                           ) : null}
 
-                          {lane.lastError ? <p className="error-callout">{lane.lastError}</p> : null}
+                          {lane.lastError ? (
+                            <p className="error-callout">{lane.lastError}</p>
+                          ) : null}
                         </article>
                       );
                     })}

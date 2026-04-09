@@ -23,12 +23,11 @@ export default async function HomePage() {
     <main className="page-shell">
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">AgentKit Harness</p>
+          <p className="eyebrow">Codex Harness</p>
           <h1>One config, one owner, one continuous engineering team.</h1>
           <p className="lead">
-            This project resets the copied launcher into a clean AgentKit setup that uses Codex
-            as the backend model, deterministic routing, and Markdown role prompts for harness
-            engineering.
+            This project runs a clean Codex CLI harness with deterministic routing, repo-local
+            skills, and Markdown role prompts for harness engineering.
           </p>
         </div>
 
@@ -46,7 +45,7 @@ export default async function HomePage() {
           <article>
             <span className="metric-label">Codex Backend</span>
             <strong>{teamConfig.model.model}</strong>
-            <p>OpenAI-compatible chat adapter through the Inngest AI adapter.</p>
+            <p>Structured Codex CLI runs over the configured OpenAI-compatible backend.</p>
           </article>
           <article>
             <span className="metric-label">Repositories</span>
@@ -75,7 +74,7 @@ export default async function HomePage() {
           <p>
             The server reads model settings from <code>{codexUserConfigDisplayPaths.config}</code>{" "}
             and credentials from <code>{codexUserConfigDisplayPaths.auth}</code>. The homepage can
-            still show the configuration, but actual AgentKit runs stay disabled until that auth is
+            still show the configuration, but actual harness runs stay disabled until that auth is
             available.
           </p>
         </section>
@@ -187,7 +186,7 @@ defineTeamConfig({
             <h2>How persistence works</h2>
           </div>
           <p className="section-copy">
-            The planner stores its AgentKit thread history in local JSON, while background worker
+            The planner stores its structured step history in local JSON, while background worker
             lanes persist proposal, branch, worktree, queue, pull request, and feedback state
             alongside the thread. Reusing a thread ID keeps the same planning conversation alive
             after the current request-group cycle finishes.

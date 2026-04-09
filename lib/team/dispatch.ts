@@ -1,15 +1,21 @@
 import "server-only";
 
-import { createAgent, createNetwork, createState, createTool } from "@inngest/agent-kit";
-import { z } from "zod";
 import { teamConfig } from "@/team.config";
-import { createSaveHandoffTool, summarizeHandoffs, type TeamRoleState } from "@/lib/team/agent-helpers";
+import {
+  applyHandoff,
+  summarizeHandoffs,
+  type TeamRoleState,
+} from "@/lib/team/agent-helpers";
+import { runCodexLaneRole } from "@/lib/team/codex-cli";
 import {
   buildCanonicalBranchName,
   buildLaneBranchName,
   buildLaneWorktreePath,
+  commitWorktreeChanges,
   detectBranchConflict,
   ensureLaneWorktree,
+  getBranchHead,
+  hasWorktreeChanges,
   resolveRepositoryBaseBranch,
   resolveWorktreeRoot,
 } from "@/lib/team/git";
@@ -19,7 +25,6 @@ import {
   synchronizeDispatchAssignment,
   updateTeamThreadRecord,
 } from "@/lib/team/history";
-import { createTeamModel, ensureOpenAiApiKey } from "@/lib/team/model";
 import {
   buildProposalChangeName,
   buildProposalPath,
@@ -61,6 +66,7 @@ type LaneRunState = TeamRoleState & {
   branchName: string;
   baseBranch: string;
   worktreePath: string;
+  implementationCommit: string | null;
   conflictNote: string | null;
   pullRequestDraft: LanePullRequestDraft | null;
 };
@@ -71,11 +77,7 @@ const laneRunKey = (threadId: string, assignmentNumber: number, laneId: string):
   return `${threadId}:${assignmentNumber}:${laneId}`;
 };
 
-const createLaneEvent = (
-  actor: TeamWorkerEventActor,
-  message: string,
-  createdAt: string,
-) => {
+const createLaneEvent = (actor: TeamWorkerEventActor, message: string, createdAt: string) => {
   return {
     id: crypto.randomUUID(),
     actor,
@@ -136,7 +138,11 @@ const findLane = (assignment: TeamDispatchAssignment, laneId: string): TeamWorke
   return lane;
 };
 
-const appendPlannerNote = (assignment: TeamDispatchAssignment, message: string, now: string): void => {
+const appendPlannerNote = (
+  assignment: TeamDispatchAssignment,
+  message: string,
+  now: string,
+): void => {
   assignment.plannerNotes = [...assignment.plannerNotes, createPlannerNote(message, now)];
 };
 
@@ -170,7 +176,8 @@ const buildLaneInitialState = ({
     laneId: lane.laneId,
     laneIndex: lane.laneIndex,
     taskTitle: lane.taskTitle ?? `Lane ${lane.laneIndex} task`,
-    taskObjective: lane.taskObjective ?? assignment.plannerSummary ?? "Implement the assigned task.",
+    taskObjective:
+      lane.taskObjective ?? assignment.plannerSummary ?? "Implement the assigned task.",
     planSummary: assignment.plannerSummary ?? "No planner summary provided.",
     planDeliverable: assignment.plannerDeliverable ?? "No planner deliverable provided.",
     branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
@@ -181,6 +188,7 @@ const buildLaneInitialState = ({
         repositoryPath: repository.path,
         worktreeRoot: teamConfig.dispatch.worktreeRoot,
       }),
+    implementationCommit: lane.latestImplementationCommit,
     conflictNote:
       lane.requeueReason === "planner_detected_conflict"
         ? "Planner detected a pull request conflict. Resolve the branch and prepare it for review again."
@@ -193,106 +201,129 @@ const buildLaneInitialState = ({
   };
 };
 
-const createLaneSystemPrompt = (role: RolePrompt) => {
-  return async ({ network }: { network?: { state: { data: LaneRunState } } }) => {
-    const state = network?.state.data;
-    if (!state) {
-      return role.prompt.trim();
-    }
-
-    return [
-      `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
-      `Owner: ${state.ownerName}.`,
-      `Shared objective: ${state.objective}`,
-      `Repository: ${state.repository.name} at ${state.repository.path}.`,
-      `Dedicated branch: ${state.branchName}.`,
-      `Base branch: ${state.baseBranch}.`,
-      `Dedicated worktree: ${state.worktreePath}.`,
-      `Lane index: ${state.laneIndex}.`,
-      `Task title: ${state.taskTitle}.`,
-      `Task objective: ${state.taskObjective}`,
-      `Planner summary: ${state.planSummary}`,
-      `Planner deliverable: ${state.planDeliverable}`,
-      state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
-      `Workflow context: ${state.workflow.join(" -> ")}`,
-      `Current handoffs:`,
-      summarizeHandoffs(state),
-      `Your role prompt is below:`,
-      role.prompt.trim(),
-      `Rules:`,
-      `- Operate only on this lane's branch and worktree.`,
-      `- Always call save_handoff exactly once before finishing.`,
-      role.id === "reviewer"
-        ? `- If the branch is ready, call publish_pull_request before save_handoff and set decision to approved to mark machine review complete.`
-        : `- As coder, always set decision to continue and hand off cleanly to the reviewer.`,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-  };
-};
-
-const createPublishPullRequestTool = () => {
-  return createTool({
-    name: "publish_pull_request",
-    description:
-      "Create or refresh the lane's CI pull request once the approved proposal is ready to finish machine review.",
-    parameters: z.object({
-      title: z.string().trim().min(1),
-      summary: z.string().trim().min(1),
-    }),
-    handler: async ({ title, summary }, { network }) => {
-      const state = network.state.data as LaneRunState;
-      state.pullRequestDraft = {
-        title,
-        summary,
-      };
-
-      return {
-        ok: true,
-        branchName: state.branchName,
-        baseBranch: state.baseBranch,
-      };
-    },
-  });
-};
-
-const runRoleNetwork = async ({
+const buildLanePrompt = ({
   role,
   state,
   input,
-  tools = [],
 }: {
   role: RolePrompt;
   state: LaneRunState;
   input: string;
-  tools?: ReturnType<typeof createTool>[];
+}): string => {
+  return [
+    `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
+    `Owner: ${state.ownerName}.`,
+    `Shared objective: ${state.objective}`,
+    `Repository: ${state.repository.name} at ${state.repository.path}.`,
+    `Dedicated branch: ${state.branchName}.`,
+    `Base branch: ${state.baseBranch}.`,
+    `Dedicated worktree: ${state.worktreePath}.`,
+    state.implementationCommit
+      ? `Implementation commit ready for review: ${state.implementationCommit}.`
+      : role.id === "reviewer"
+        ? "Implementation commit ready for review: none."
+        : null,
+    `Lane index: ${state.laneIndex}.`,
+    `Task title: ${state.taskTitle}.`,
+    `Task objective: ${state.taskObjective}`,
+    `Planner summary: ${state.planSummary}`,
+    `Planner deliverable: ${state.planDeliverable}`,
+    state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
+    `Workflow context: ${state.workflow.join(" -> ")}`,
+    `Current handoffs:`,
+    summarizeHandoffs(state),
+    `Current assignment input: ${input}`,
+    `Codex skill context:`,
+    [
+      "- `.codex/skills/team-harness-workflow/SKILL.md`",
+      "- `.codex/skills/team-harness-workflow/references/lanes.md`",
+      "- `.codex/skills/openspec-apply-change/SKILL.md`",
+    ].join("\n"),
+    `Repository instructions: read INSTRUCTIONS.md and AGENTS.md before changing code, use pnpm for scripts, and keep project text in English.`,
+    `Your role prompt is below:`,
+    role.prompt.trim(),
+    `Execution rules:`,
+    `- Operate only inside the dedicated worktree and branch for this lane.`,
+    `- Use Codex CLI native repository tools and shell access to inspect, edit, and validate work.`,
+    role.id === "reviewer"
+      ? `- Treat missing concrete branch output as blocking; do not approve conceptual guidance alone.`
+      : `- Produce concrete repository changes before finishing.`,
+    role.id === "reviewer"
+      ? `- Approve only when the implementation is genuinely review-ready.`
+      : `- Finish with decision "continue" after implementation exists for review.`,
+    `Final response requirements:`,
+    `- Your final response must match the provided JSON schema exactly.`,
+    `- Put the concise handoff in "summary" and the detailed notes in "deliverable".`,
+    role.id === "reviewer"
+      ? `- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. If not approved, set both pullRequestTitle and pullRequestSummary to null.`
+      : `- For coder, set decision to "continue" and set pullRequestTitle and pullRequestSummary to null.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+const buildCoderCommitMessage = ({
+  lane,
+}: {
+  lane: Pick<TeamWorkerLaneRecord, "laneIndex" | "taskTitle" | "requeueReason">;
+}): string => {
+  const taskLabel = lane.taskTitle?.trim() || `proposal ${lane.laneIndex}`;
+
+  if (lane.requeueReason === "reviewer_requested_changes") {
+    return `coder: address review feedback for ${taskLabel}`;
+  }
+
+  if (lane.requeueReason === "planner_detected_conflict") {
+    return `coder: resolve conflict for ${taskLabel}`;
+  }
+
+  return `coder: implement ${taskLabel}`;
+};
+
+const noBranchOutputMessage =
+  "Coder completed without producing a new branch commit. The lane was stopped to avoid an infinite coder/reviewer loop.";
+
+const shortenCommit = (commit: string): string => {
+  return commit.slice(0, 12);
+};
+
+const runRoleWithCodexCli = async ({
+  role,
+  state,
+  input,
+}: {
+  role: RolePrompt;
+  state: LaneRunState;
+  input: string;
 }): Promise<LaneRunState> => {
-  ensureOpenAiApiKey();
-  const teamModel = createTeamModel();
-  const agent = createAgent<LaneRunState>({
-    name: role.id,
-    description: role.summary,
-    system: createLaneSystemPrompt(role),
-    tools: [createSaveHandoffTool<LaneRunState>(role), ...tools],
-    model: teamModel,
+  const response = await runCodexLaneRole({
+    worktreePath: state.worktreePath,
+    prompt: buildLanePrompt({
+      role,
+      state,
+      input,
+    }),
   });
 
-  const network = createNetwork<LaneRunState>({
-    name: `${teamConfig.name} ${role.id} lane`,
-    description: `Single-role execution for ${role.id} in a background lane.`,
-    agents: [agent],
-    defaultModel: teamModel,
-    maxIter: 2,
-    router: async ({ network: currentNetwork }) => {
-      return currentNetwork.state.results.length === 0 ? currentNetwork.agents.get(role.id) : undefined;
-    },
+  applyHandoff({
+    state,
+    role,
+    summary: response.summary,
+    deliverable: response.deliverable,
+    decision: response.decision,
   });
 
-  const run = await network.run(input, {
-    state: createState(state),
-  });
+  if (role.id === "reviewer") {
+    state.pullRequestDraft =
+      response.pullRequestTitle && response.pullRequestSummary
+        ? {
+            title: response.pullRequestTitle,
+            summary: response.pullRequestSummary,
+          }
+        : null;
+  }
 
-  return run.state.data;
+  return state;
 };
 
 const createPullRequestRecord = ({
@@ -364,6 +395,7 @@ const createProposalLane = ({
     branchName,
     baseBranch,
     worktreePath: null,
+    latestImplementationCommit: null,
     latestDecision: null,
     latestCoderSummary: null,
     latestReviewerSummary: null,
@@ -500,9 +532,10 @@ const assignQueuedProposalWorkerSlots = ({
       .map((lane) => lane.workerSlot as number),
   );
 
-  const availableSlots = Array.from({ length: assignment.workerCount }, (_, index) => index + 1).filter(
-    (slot) => !occupiedSlots.has(slot),
-  );
+  const availableSlots = Array.from(
+    { length: assignment.workerCount },
+    (_, index) => index + 1,
+  ).filter((slot) => !occupiedSlots.has(slot));
 
   const queue = assignment.lanes
     .filter((lane) => lane.status === "queued" && !lane.workerSlot)
@@ -557,10 +590,14 @@ const runLaneCycle = async ({
       threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
-        const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+        const mutableAssignment = findAssignment(
+          mutableThread.dispatchAssignments,
+          assignmentNumber,
+        );
         const mutableLane = findLane(mutableAssignment, laneId);
         mutableLane.status = "coding";
         mutableLane.lastError = null;
+        mutableLane.latestImplementationCommit = null;
         mutableLane.startedAt = mutableLane.startedAt ?? now;
         mutableLane.finishedAt = null;
         mutableLane.latestActivity =
@@ -586,9 +623,14 @@ const runLaneCycle = async ({
       startPoint: assignment.canonicalBranchName ?? lane.baseBranch,
     });
 
+    const branchHeadBeforeCoding = await getBranchHead({
+      repositoryPath: assignment.repository.path,
+      branchName: lane.branchName,
+    });
+
     const coderRole = await loadRolePrompt("coder");
     const reviewerRole = await loadRolePrompt("reviewer");
-    const coderState = await runRoleNetwork({
+    const coderState = await runRoleWithCodexCli({
       role: coderRole,
       state: buildLaneInitialState({
         repository: assignment.repository,
@@ -597,7 +639,8 @@ const runLaneCycle = async ({
         workflow: ["coder"],
         handoffs: {},
       }),
-      input: lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
+      input:
+        lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
     });
 
     const coderHandoff = coderState.handoffs.coder;
@@ -605,21 +648,75 @@ const runLaneCycle = async ({
       throw new Error(`Coder lane ${lane.laneIndex} completed without saving a handoff.`);
     }
 
+    if (await hasWorktreeChanges(lane.worktreePath)) {
+      await commitWorktreeChanges({
+        worktreePath: lane.worktreePath,
+        message: buildCoderCommitMessage({
+          lane,
+        }),
+      });
+    }
+
+    const branchHeadAfterCoding = await getBranchHead({
+      repositoryPath: assignment.repository.path,
+      branchName: lane.branchName,
+    });
+
+    if (branchHeadAfterCoding === branchHeadBeforeCoding) {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (mutableThread, now) => {
+          const mutableAssignment = findAssignment(
+            mutableThread.dispatchAssignments,
+            assignmentNumber,
+          );
+          const mutableLane = findLane(mutableAssignment, laneId);
+          mutableLane.status = "failed";
+          mutableLane.latestImplementationCommit = null;
+          mutableLane.latestCoderSummary = coderHandoff.summary;
+          mutableLane.latestDecision = coderHandoff.decision;
+          mutableLane.latestActivity = "Coder finished without producing branch output.";
+          mutableLane.lastError = noBranchOutputMessage;
+          mutableLane.runCount += 1;
+          mutableLane.workerSlot = null;
+          mutableLane.worktreePath = null;
+          mutableLane.updatedAt = now;
+          mutableLane.finishedAt = now;
+          appendLaneEvent(mutableLane, "coder", `Coder handoff: ${coderHandoff.summary}`, now);
+          appendLaneEvent(mutableLane, "system", noBranchOutputMessage, now);
+          appendPlannerNote(
+            mutableAssignment,
+            `Lane ${mutableLane.laneIndex} stopped because the coder produced no branch output.`,
+            now,
+          );
+          synchronizeDispatchAssignment(mutableAssignment, now);
+        },
+      });
+
+      return;
+    }
+
     await updateTeamThreadRecord({
       threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
-        const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+        const mutableAssignment = findAssignment(
+          mutableThread.dispatchAssignments,
+          assignmentNumber,
+        );
         const mutableLane = findLane(mutableAssignment, laneId);
+        const reviewCommit = shortenCommit(branchHeadAfterCoding);
         mutableLane.status = "reviewing";
+        mutableLane.latestImplementationCommit = branchHeadAfterCoding;
         mutableLane.latestCoderSummary = coderHandoff.summary;
         mutableLane.latestDecision = coderHandoff.decision;
-        mutableLane.latestActivity = "Reviewer is evaluating the branch output.";
+        mutableLane.latestActivity = `Reviewer is evaluating implementation commit ${reviewCommit}.`;
         mutableLane.updatedAt = now;
         appendLaneEvent(
           mutableLane,
           "coder",
-          `Coder handoff: ${coderHandoff.summary}`,
+          `Coder requested review for commit ${reviewCommit}: ${coderHandoff.summary}`,
           now,
         );
         appendLaneEvent(mutableLane, "reviewer", mutableLane.latestActivity, now);
@@ -627,7 +724,7 @@ const runLaneCycle = async ({
       },
     });
 
-    const reviewerState = await runRoleNetwork({
+    const reviewerState = await runRoleWithCodexCli({
       role: reviewerRole,
       state: buildLaneInitialState({
         repository: assignment.repository,
@@ -638,8 +735,11 @@ const runLaneCycle = async ({
           coder: coderHandoff,
         },
       }),
-      input: lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Review the lane output.",
-      tools: [createPublishPullRequestTool()],
+      input:
+        lane.taskObjective ??
+        lane.taskTitle ??
+        assignment.plannerSummary ??
+        "Review the lane output.",
     });
 
     const reviewerHandoff = reviewerState.handoffs.reviewer;
@@ -652,7 +752,10 @@ const runLaneCycle = async ({
         threadFile: teamConfig.storage.threadFile,
         threadId,
         updater: (mutableThread, now) => {
-          const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+          const mutableAssignment = findAssignment(
+            mutableThread.dispatchAssignments,
+            assignmentNumber,
+          );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
           mutableLane.latestDecision = reviewerHandoff.decision;
@@ -704,13 +807,17 @@ const runLaneCycle = async ({
         threadFile: teamConfig.storage.threadFile,
         threadId,
         updater: (mutableThread, mutableNow) => {
-          const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+          const mutableAssignment = findAssignment(
+            mutableThread.dispatchAssignments,
+            assignmentNumber,
+          );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestReviewerSummary = reviewerHandoff.summary;
-          mutableLane.latestActivity = "Planner detected a pull request conflict and requeued the lane.";
+          mutableLane.latestActivity =
+            "Planner detected a pull request conflict and requeued the lane.";
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
           mutableLane.workerSlot = null;
@@ -749,7 +856,10 @@ const runLaneCycle = async ({
       threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, mutableNow) => {
-        const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
+        const mutableAssignment = findAssignment(
+          mutableThread.dispatchAssignments,
+          assignmentNumber,
+        );
         const mutableLane = findLane(mutableAssignment, laneId);
         mutableLane.status = "approved";
         mutableLane.latestDecision = reviewerHandoff.decision;
@@ -867,7 +977,8 @@ export const ensurePendingDispatchWork = async ({
           assignQueuedProposalWorkerSlots({
             assignment,
             worktreeRoot: resolveWorktreeRoot({
-              repositoryPath: assignment.repository?.path ?? pending.assignment.repository?.path ?? "",
+              repositoryPath:
+                assignment.repository?.path ?? pending.assignment.repository?.path ?? "",
               worktreeRoot: teamConfig.dispatch.worktreeRoot,
             }),
           });

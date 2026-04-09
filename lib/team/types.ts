@@ -13,6 +13,12 @@ export type TeamRoleHandoff = {
   updatedAt: string;
 };
 
+export type TeamExecutionStep = {
+  agentName: string;
+  createdAt: string;
+  text: string;
+};
+
 export type TeamThreadStatus =
   | "planning"
   | "running"
@@ -90,6 +96,7 @@ export type TeamWorkerLaneRecord = {
   branchName: string | null;
   baseBranch: string | null;
   worktreePath: string | null;
+  latestImplementationCommit: string | null;
   latestDecision: TeamRoleDecision | null;
   latestCoderSummary: string | null;
   latestReviewerSummary: string | null;

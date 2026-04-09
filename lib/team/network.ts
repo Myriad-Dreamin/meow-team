@@ -1,15 +1,14 @@
-import { createAgent, createNetwork, createState, createTool } from "@inngest/agent-kit";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
-import { createSaveHandoffTool, formatTextMessage, summarizeHandoffs } from "@/lib/team/agent-helpers";
+import { applyHandoff, summarizeHandoffs } from "@/lib/team/agent-helpers";
+import { runCodexStructuredOutput } from "@/lib/team/codex-cli";
 import { createPlannerDispatchAssignment, ensurePendingDispatchWork } from "@/lib/team/dispatch";
-import { createTeamHistory } from "@/lib/team/history";
-import { createTeamModel, ensureOpenAiApiKey } from "@/lib/team/model";
+import { appendTeamExecutionStep, getTeamThreadRecord, upsertTeamThreadRun } from "@/lib/team/history";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
-import type { TeamRoleHandoff } from "@/lib/team/types";
+import type { TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
 
 export type TeamRunState = {
   teamId: string;
@@ -32,12 +31,95 @@ export type TeamRunSummary = {
   repository: TeamRepositoryOption | null;
   workflow: string[];
   handoffs: TeamRoleHandoff[];
-  steps: Array<{
-    agentName: string;
-    createdAt: string;
-    text: string;
-  }>;
+  steps: TeamExecutionStep[];
 };
+
+const plannerTaskSchema = z.object({
+  title: z.string().trim().min(1),
+  objective: z.string().trim().min(1),
+});
+
+const plannerResponseSchema = z.object({
+  handoff: z.object({
+    summary: z.string().trim().min(1),
+    deliverable: z.string().trim().min(1),
+    decision: z.enum(["continue", "approved", "needs_revision"]),
+  }),
+  dispatch: z
+    .object({
+      planSummary: z.string().trim().min(1),
+      plannerDeliverable: z.string().trim().min(1),
+      branchPrefix: z.string().trim().min(1),
+      tasks: z.array(plannerTaskSchema).min(1).max(teamConfig.dispatch.maxProposalCount),
+    })
+    .nullable(),
+});
+
+const plannerOutputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["handoff", "dispatch"],
+  properties: {
+    handoff: {
+      type: "object",
+      additionalProperties: false,
+      required: ["summary", "deliverable", "decision"],
+      properties: {
+        summary: {
+          type: "string",
+          minLength: 1,
+        },
+        deliverable: {
+          type: "string",
+          minLength: 1,
+        },
+        decision: {
+          type: "string",
+          enum: ["continue", "approved", "needs_revision"],
+        },
+      },
+    },
+    dispatch: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      required: ["planSummary", "plannerDeliverable", "branchPrefix", "tasks"],
+      properties: {
+        planSummary: {
+          type: "string",
+          minLength: 1,
+        },
+        plannerDeliverable: {
+          type: "string",
+          minLength: 1,
+        },
+        branchPrefix: {
+          type: "string",
+          minLength: 1,
+        },
+        tasks: {
+          type: "array",
+          minItems: 1,
+          maxItems: teamConfig.dispatch.maxProposalCount,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["title", "objective"],
+            properties: {
+              title: {
+                type: "string",
+                minLength: 1,
+              },
+              objective: {
+                type: "string",
+                minLength: 1,
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
 
 const buildInitialState = (
   forceReset: boolean,
@@ -58,117 +140,121 @@ const buildInitialState = (
   };
 };
 
-const createPlannerDispatchTool = () => {
-  return createTool({
-    name: "dispatch_parallel_work",
-    description:
-      "Register multiple planner proposals for the current request. Human approval is required before any coding-review lane starts.",
-    parameters: z.object({
-      planSummary: z.string().trim().min(1),
-      plannerDeliverable: z.string().trim().min(1),
-      branchPrefix: z.string().trim().min(1),
-      tasks: z
-        .array(
-          z.object({
-            title: z.string().trim().min(1),
-            objective: z.string().trim().min(1),
-          }),
-        )
-        .min(1)
-        .max(teamConfig.dispatch.maxProposalCount),
-    }),
-    handler: async ({ planSummary, plannerDeliverable, branchPrefix, tasks }, { network }) => {
-      const state = network.state.data;
-      const threadId = network.state.threadId;
-
-      if (!threadId) {
-        throw new Error("Planner dispatch requires a thread ID.");
-      }
-
-      const assignment = await createPlannerDispatchAssignment({
-        threadId,
-        assignmentNumber: state.assignmentNumber,
-        repository: state.selectedRepository,
-        plannerSummary: planSummary,
-        plannerDeliverable,
-        branchPrefix,
-        tasks,
-      });
-
-      return {
-        ok: true,
-        assignmentNumber: assignment.assignmentNumber,
-        workerCount: assignment.workerCount,
-        taskCount: tasks.length,
-      };
-    },
-  });
+const buildLocalSkillReference = (): string => {
+  return [
+    "Local repo skills:",
+    "- `.codex/skills/team-harness-workflow/SKILL.md`",
+    "- `.codex/skills/team-harness-workflow/references/planner.md`",
+    "- `.codex/skills/team-harness-workflow/references/lanes.md`",
+  ].join("\n");
 };
 
-const createPlannerSystemPrompt = (prompt: string) => {
-  return async ({ network }: { network?: { state: { data: TeamRunState } } }) => {
-    const state = network?.state.data ?? buildInitialState(false, null);
-    const repositoryContext = state.selectedRepository
-      ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
-      : "Selected repository: none. Parallel dispatch requires a selected repository.";
+const filterWorkflowHandoffs = (
+  state: TeamRunState,
+): Partial<Record<string, TeamRoleHandoff>> => {
+  return Object.fromEntries(
+    Object.entries(state.handoffs).filter(([roleId]) => state.workflow.includes(roleId)),
+  );
+};
 
-    return [
-      `You are Planner, the dispatch coordinator inside the ${state.teamName} engineering harness.`,
-      `Owner: ${state.ownerName}.`,
-      `Shared objective: ${state.objective}`,
-      repositoryContext,
-      `Configured workflow: ${state.workflow.join(" -> ")}`,
-      `Current assignment number: ${state.assignmentNumber}.`,
-      `Configured coding-review pool size: ${teamConfig.dispatch.workerCount}.`,
-      `Planner proposals are separate from the coding-review pool. The planner can create one or more proposals, then approved proposals are scheduled onto the shared coder/reviewer pool.`,
-      `OpenSpec context:`,
-      describeLocalOpenSpecSkills(),
-      buildOpenSpecSkillReference(),
-      `Your role prompt is below:`,
-      prompt.trim(),
-      `Current handoffs for this assignment:`,
-      summarizeHandoffs(state),
-      `Rules:`,
-      `- Create a practical engineering plan and split it into between 1 and ${teamConfig.dispatch.maxProposalCount} concrete proposals for the request group.`,
-      `- Call dispatch_parallel_work exactly once to persist those proposals, then stop. Do not assume coding starts before a human approves a proposal.`,
-      `- Align each proposal with the local OpenSpec flow so the backend can materialize a real OpenSpec change for it.`,
-      `- Each proposal title should be concise and stable enough to become part of an OpenSpec change name.`,
-      `- Use branchPrefix as a short, git-friendly theme for the request group. The backend creates a canonical branch plus per-proposal branches, while coding uses reusable pool worktrees.`,
-      `- Always call save_handoff exactly once when you are done planning.`,
-      `- If no repository is selected, explain that dispatch is blocked and do not invent repository operations.`,
-    ].join("\n\n");
+const getOrderedHandoffs = (state: TeamRunState): TeamRoleHandoff[] => {
+  return Object.values(filterWorkflowHandoffs(state))
+    .filter((handoff): handoff is TeamRoleHandoff => Boolean(handoff))
+    .sort((left, right) => left.sequence - right.sequence);
+};
+
+const buildPlannerPrompt = ({
+  plannerPrompt,
+  state,
+}: {
+  plannerPrompt: string;
+  state: TeamRunState;
+}): string => {
+  const repositoryContext = state.selectedRepository
+    ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
+    : "Selected repository: none. Proposal dispatch is blocked until a repository is selected.";
+
+  return [
+    `You are Planner, the dispatch coordinator inside the ${state.teamName} engineering harness.`,
+    `Owner: ${state.ownerName}.`,
+    `Shared objective: ${state.objective}`,
+    repositoryContext,
+    `Configured workflow: ${state.workflow.join(" -> ")}`,
+    `Current assignment number: ${state.assignmentNumber}.`,
+    `Configured coding-review pool size: ${teamConfig.dispatch.workerCount}.`,
+    `Planner proposals are separate from the coding-review pool. The planner can create one or more proposals, then approved proposals are scheduled onto the shared coder/reviewer pool.`,
+    `Codex skill context:`,
+    buildLocalSkillReference(),
+    `OpenSpec context:`,
+    describeLocalOpenSpecSkills(),
+    buildOpenSpecSkillReference(),
+    `Your role prompt is below:`,
+    plannerPrompt.trim(),
+    `Current handoffs for this assignment:`,
+    summarizeHandoffs(state),
+    `Rules:`,
+    `- Create a practical engineering plan and split it into between 1 and ${teamConfig.dispatch.maxProposalCount} concrete proposals for the request group when a repository is selected.`,
+    `- Keep proposals logical and implementation-focused. Do not describe them as tied to a specific branch or worker slot.`,
+    `- Align each proposal with the local OpenSpec flow so the backend can materialize a real OpenSpec change for it.`,
+    `- Use branchPrefix as a short, git-friendly theme for the request group.`,
+    `- If no repository is selected, explain that dispatch is blocked and set dispatch to null.`,
+    `Final response requirements:`,
+    `- Return JSON that matches the provided schema exactly.`,
+    `- Put the planner handoff in handoff.summary and handoff.deliverable.`,
+    `- Set handoff.decision to "continue".`,
+    `- If dispatch is possible, fill dispatch.planSummary, dispatch.plannerDeliverable, dispatch.branchPrefix, and dispatch.tasks.`,
+  ].join("\n\n");
+};
+
+const createPlannerStep = ({
+  agentName,
+  deliverable,
+}: {
+  agentName: string;
+  deliverable: string;
+}): TeamExecutionStep => {
+  return {
+    agentName,
+    createdAt: new Date().toISOString(),
+    text: deliverable,
   };
 };
 
-export const getTeamRuntime = async () => {
-  ensureOpenAiApiKey();
-  const teamModel = createTeamModel();
-  const plannerRole = await loadRolePrompt("planner");
-  const plannerAgent = createAgent<TeamRunState>({
-    name: plannerRole.id,
-    description: plannerRole.summary,
-    system: createPlannerSystemPrompt(plannerRole.prompt),
-    tools: [createPlannerDispatchTool(), createSaveHandoffTool<TeamRunState>(plannerRole)],
-    model: teamModel,
-  });
+const buildRunState = ({
+  input,
+  reset,
+  selectedRepository,
+  existingThread,
+}: {
+  input: string;
+  reset: boolean;
+  selectedRepository: TeamRepositoryOption | null;
+  existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+}): TeamRunState => {
+  const baseState = buildInitialState(reset, selectedRepository);
+  if (!existingThread) {
+    return {
+      ...baseState,
+      latestInput: input,
+      forceReset: false,
+    };
+  }
 
-  const network = createNetwork<TeamRunState>({
-    name: teamConfig.name,
-    description: `${teamConfig.owner.objective} Dispatch planning happens here; coder and reviewer lanes continue in the background.`,
-    agents: [plannerAgent],
-    defaultModel: teamModel,
-    maxIter: 2,
-    history: createTeamHistory(teamConfig.storage.threadFile),
-    router: async ({ network: currentNetwork }) => {
-      return currentNetwork.state.results.length === 0
-        ? currentNetwork.agents.get(plannerRole.id)
-        : undefined;
-    },
-  });
+  const storedData = existingThread.data;
+  const shouldResetAssignment =
+    reset ||
+    storedData.latestInput !== input ||
+    (storedData.selectedRepository?.id ?? null) !== (selectedRepository?.id ?? null);
 
   return {
-    config: teamConfig,
-    network,
+    ...baseState,
+    assignmentNumber: shouldResetAssignment
+      ? (storedData.assignmentNumber ?? 0) + 1
+      : storedData.assignmentNumber,
+    latestInput: input,
+    handoffCounter: shouldResetAssignment ? 0 : storedData.handoffCounter,
+    handoffs: shouldResetAssignment ? {} : filterWorkflowHandoffs(storedData),
+    forceReset: false,
   };
 };
 
@@ -183,7 +269,6 @@ export const runTeam = async ({
   repositoryId?: string;
   reset?: boolean;
 }): Promise<TeamRunSummary> => {
-  const runtime = await getTeamRuntime();
   const selectedRepository = await findConfiguredRepository(teamConfig, repositoryId);
 
   if (repositoryId && !selectedRepository) {
@@ -192,34 +277,84 @@ export const runTeam = async ({
     );
   }
 
-  const state = createState(buildInitialState(Boolean(reset), selectedRepository), {
-    threadId,
+  const resolvedThreadId = threadId ?? crypto.randomUUID();
+  const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, resolvedThreadId);
+  const state = buildRunState({
+    input,
+    reset: Boolean(reset),
+    selectedRepository,
+    existingThread,
   });
-  const run = await runtime.network.run(input, { state });
+
+  await upsertTeamThreadRun({
+    threadFile: teamConfig.storage.threadFile,
+    threadId: resolvedThreadId,
+    state,
+    input,
+  });
+
+  const plannerRole = await loadRolePrompt("planner");
+  const plannerResponse = await runCodexStructuredOutput({
+    worktreePath: selectedRepository?.path ?? process.cwd(),
+    prompt: buildPlannerPrompt({
+      plannerPrompt: plannerRole.prompt,
+      state,
+    }),
+    responseSchema: plannerResponseSchema,
+    outputJsonSchema: plannerOutputJsonSchema,
+    codexHomePrefix: "planner",
+  });
+
+  applyHandoff({
+    state,
+    role: plannerRole,
+    summary: plannerResponse.handoff.summary,
+    deliverable: plannerResponse.handoff.deliverable,
+    decision: plannerResponse.handoff.decision,
+  });
+
+  if (!selectedRepository && plannerResponse.dispatch) {
+    throw new Error("Planner produced dispatch proposals without a selected repository.");
+  }
+
+  if (selectedRepository && !plannerResponse.dispatch) {
+    throw new Error("Planner completed without dispatch proposals.");
+  }
+
+  if (selectedRepository && plannerResponse.dispatch) {
+    await createPlannerDispatchAssignment({
+      threadId: resolvedThreadId,
+      assignmentNumber: state.assignmentNumber,
+      repository: selectedRepository,
+      plannerSummary: plannerResponse.dispatch.planSummary,
+      plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
+      branchPrefix: plannerResponse.dispatch.branchPrefix,
+      tasks: plannerResponse.dispatch.tasks,
+    });
+  }
+
+  const step = createPlannerStep({
+    agentName: plannerRole.name,
+    deliverable: plannerResponse.handoff.deliverable,
+  });
+  await appendTeamExecutionStep({
+    threadFile: teamConfig.storage.threadFile,
+    threadId: resolvedThreadId,
+    state,
+    step,
+  });
 
   void ensurePendingDispatchWork({
-    threadId: run.state.threadId ?? undefined,
-  });
-
-  const handoffs = runtime.config.workflow
-    .map((roleId) => run.state.data.handoffs[roleId])
-    .filter((handoff): handoff is TeamRoleHandoff => Boolean(handoff));
-
-  const steps = run.state.results.map((result) => {
-    return {
-      agentName: result.agentName,
-      createdAt: result.createdAt.toISOString(),
-      text: result.output.map((message) => formatTextMessage(message)).filter(Boolean).join("\n\n"),
-    };
+    threadId: resolvedThreadId,
   });
 
   return {
-    threadId: run.state.threadId ?? null,
-    assignmentNumber: run.state.data.assignmentNumber,
+    threadId: resolvedThreadId,
+    assignmentNumber: state.assignmentNumber,
     approved: false,
-    repository: run.state.data.selectedRepository,
-    workflow: runtime.config.workflow,
-    handoffs,
-    steps,
+    repository: selectedRepository,
+    workflow: state.workflow,
+    handoffs: getOrderedHandoffs(state),
+    steps: [step],
   };
 };

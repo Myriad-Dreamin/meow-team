@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.16.1",
-  "description": "Continuous AgentKit engineering harness powered by Codex.",
+  "description": "Continuous Codex CLI engineering harness.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,9 +14,6 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@inngest/agent-kit": "^0.13.2",
-    "@inngest/ai": "^0.1.7",
-    "inngest": "^4.2.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -33,10 +30,5 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "@inngest/ai": "^0.1.7"
-    }
   }
 }

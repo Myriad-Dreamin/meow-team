@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Build a clean AgentKit-based engineering harness where one owner configures a
+Build a clean Codex CLI-based engineering harness where one owner configures a
 small continuous team and runs it through a simple web interface.
 
 ## Non-Negotiable Rules
@@ -10,9 +10,10 @@ small continuous team and runs it through a simple web interface.
 - Use English for all project content, code comments, docs, and UI copy.
 - Keep the stack full TypeScript with pure Next.js App Router.
 - Use `pnpm` for dependency and script management.
-- Build the multi-agent workflow with AgentKit primitives:
-  `createAgent`, `createTool`, `createNetwork`, and deterministic routing.
-- Use Codex through the OpenAI backend for the default model configuration.
+- Build the multi-agent workflow around Codex CLI structured runs, repo-local
+  skills, and deterministic orchestration in application code.
+- Use Codex through the configured OpenAI-compatible backend for the default
+  model configuration.
 
 ## Product Direction
 

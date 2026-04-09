@@ -1,5 +1,3 @@
-import { createTool, type Message } from "@inngest/agent-kit";
-import { z } from "zod";
 import type { RolePrompt } from "@/lib/team/prompts";
 import type { TeamRoleDecision, TeamRoleHandoff } from "@/lib/team/types";
 
@@ -8,21 +6,6 @@ export type TeamRoleState = {
   handoffs: Partial<Record<string, TeamRoleHandoff>>;
   handoffCounter: number;
   assignmentNumber: number;
-};
-
-export const formatTextMessage = (message: Message): string => {
-  if (message.type !== "text") {
-    return "";
-  }
-
-  if (typeof message.content === "string") {
-    return message.content;
-  }
-
-  return message.content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n");
 };
 
 export const summarizeHandoffs = (state: Pick<TeamRoleState, "workflow" | "handoffs">): string => {
@@ -57,43 +40,40 @@ export const normalizeDecision = (
   return "continue";
 };
 
-export const createSaveHandoffTool = <TState extends TeamRoleState>(role: RolePrompt) => {
-  return createTool({
-    name: "save_handoff",
-    description: "Persist this role's handoff for the next step in the engineering workflow.",
-    parameters: z.object({
-      summary: z.string().trim().min(1),
-      deliverable: z.string().trim().min(1),
-      decision: z.enum(["continue", "approved", "needs_revision"]).default("continue"),
-    }),
-    handler: async ({ summary, deliverable, decision }, { network }) => {
-      const state = network.state.data as TState;
-      const sequence = state.handoffCounter + 1;
-      const normalizedDecision = normalizeDecision(role.id, decision);
+export const applyHandoff = <TState extends TeamRoleState>({
+  state,
+  role,
+  summary,
+  deliverable,
+  decision,
+}: {
+  state: TState;
+  role: RolePrompt;
+  summary: string;
+  deliverable: string;
+  decision: TeamRoleDecision;
+}): TeamRoleHandoff => {
+  const sequence = state.handoffCounter + 1;
+  const normalizedDecision = normalizeDecision(role.id, decision);
 
-      state.handoffCounter = sequence;
-      state.handoffs = {
-        ...state.handoffs,
-        [role.id]: {
-          roleId: role.id,
-          roleName: role.name,
-          summary,
-          deliverable,
-          decision: normalizedDecision,
-          sequence,
-          assignmentNumber: state.assignmentNumber,
-          updatedAt: new Date().toISOString(),
-        },
-      };
+  const handoff: TeamRoleHandoff = {
+    roleId: role.id,
+    roleName: role.name,
+    summary,
+    deliverable,
+    decision: normalizedDecision,
+    sequence,
+    assignmentNumber: state.assignmentNumber,
+    updatedAt: new Date().toISOString(),
+  };
 
-      return {
-        ok: true,
-        roleId: role.id,
-        decision: normalizedDecision,
-        sequence,
-      };
-    },
-  });
+  state.handoffCounter = sequence;
+  state.handoffs = {
+    ...state.handoffs,
+    [role.id]: handoff,
+  };
+
+  return handoff;
 };
 
 export const resolveNextRoleId = (state: TeamRoleState): string | undefined => {

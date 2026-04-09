@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
-  buildLaneWorktreePath,
+  buildPlannerWorktreePath,
   commitWorktreeChanges,
   ensureBranchRef,
   ensureLaneWorktree,
@@ -45,16 +45,11 @@ const runOpenSpec = async (
 
 type ProposalLane = Pick<
   TeamWorkerLaneRecord,
-  | "laneIndex"
-  | "taskTitle"
-  | "taskObjective"
-  | "proposalChangeName"
-  | "proposalPath"
-  | "branchName"
+  "laneIndex" | "taskTitle" | "taskObjective" | "proposalChangeName" | "proposalPath" | "branchName"
 >;
 
 const describeWorktreePool = (worktreeRoot: string): string => {
-  return `${worktreeRoot}/moew-N`;
+  return `${worktreeRoot}/meow-N`;
 };
 
 const normalizeSentence = (value: string): string => {
@@ -92,9 +87,7 @@ const buildProposalWhy = ({
 
 const buildProposalMarkdown = ({
   repositoryPath,
-  canonicalBranchName,
   proposalChangeName,
-  branchName,
   taskTitle,
   taskObjective,
   plannerSummary,
@@ -103,9 +96,7 @@ const buildProposalMarkdown = ({
   worktreeRoot,
 }: {
   repositoryPath: string;
-  canonicalBranchName: string;
   proposalChangeName: string;
-  branchName: string;
   taskTitle: string;
   taskObjective: string;
   plannerSummary: string | null;
@@ -127,7 +118,7 @@ ${buildProposalWhy({
 
 - Introduce the \`${proposalChangeName}\` OpenSpec change for proposal "${taskTitle}".
 - ${normalizeSentence(taskObjective)}
-- Keep implementation isolated on branch \`${branchName}\` while the request group stays anchored to \`${canonicalBranchName}\`.
+- Keep the proposal logically scoped so any approved coding-review worker can claim it without replanning.
 
 ## Capabilities
 
@@ -140,25 +131,19 @@ ${buildProposalWhy({
 ## Impact
 
 - Affected repository: \`${path.basename(repositoryPath)}\`
-- Canonical branch: \`${canonicalBranchName}\`
-- Proposal branch: \`${branchName}\`
-- Reusable worktree pool: \`${describeWorktreePool(worktreeRoot)}\`
+- Coding-review execution: pooled workers with reusable worktrees from \`${describeWorktreePool(worktreeRoot)}\`
 - Planner deliverable: ${normalizeSentence(plannerDeliverable ?? plannerSummary ?? taskTitle)}
 `;
 };
 
 const buildDesignMarkdown = ({
-  canonicalBranchName,
   proposalChangeName,
-  branchName,
   taskTitle,
   taskObjective,
   plannerDeliverable,
   worktreeRoot,
 }: {
-  canonicalBranchName: string;
   proposalChangeName: string;
-  branchName: string;
   taskTitle: string;
   taskObjective: string;
   plannerDeliverable: string | null;
@@ -167,25 +152,26 @@ const buildDesignMarkdown = ({
   return `## Context
 
 This change captures proposal "${taskTitle}" as OpenSpec change \`${proposalChangeName}\`.
-Implementation starts only after human approval and runs on proposal branch \`${branchName}\`
-from canonical branch \`${canonicalBranchName}\`.
+Implementation starts only after human approval and is claimed by the next
+available coding-review worker from the shared pool.
 
 ## Goals / Non-Goals
 
 **Goals:**
 - ${normalizeSentence(taskObjective)}
 - Preserve a reviewable OpenSpec contract before coding starts.
+- Keep the proposal logical enough that any pooled worker can execute it.
 - Reuse a managed worktree from \`${describeWorktreePool(worktreeRoot)}\` for cache-friendly execution.
 
 **Non-Goals:**
-- Implement sibling proposals in the same branch.
+- Bind this proposal to a specific branch or worker slot before approval.
 - Expand scope beyond the approved proposal without human feedback.
-- Replace the canonical request-group branch with lane-specific history.
+- Merge sibling proposals into a single coding pass without replanning.
 
 ## Decisions
 
 - Store the proposal as a dedicated OpenSpec change before coding begins.
-- Keep the implementation branch separate from the canonical request-group branch.
+- Let the pooled coding-review runtime allocate execution branches and worktrees after approval.
 - Use planner output as the starting point for reviewer validation and follow-up tasks.
 - Prefer incremental implementation that can be requeued after machine review feedback.
 
@@ -204,13 +190,11 @@ const buildSpecMarkdown = ({
   proposalChangeName,
   taskTitle,
   taskObjective,
-  branchName,
   worktreeRoot,
 }: {
   proposalChangeName: string;
   taskTitle: string;
   taskObjective: string;
-  branchName: string;
   worktreeRoot: string;
 }): string => {
   return `## ADDED Requirements
@@ -221,33 +205,32 @@ and keep the work aligned with this proposal's objective: ${normalizeSentence(ta
 
 #### Scenario: Approved proposal enters execution
 - **WHEN** a human approves the "${taskTitle}" proposal
-- **THEN** the system SHALL queue coding and machine review for branch \`${branchName}\`
+- **THEN** the system SHALL queue the proposal into the pooled coding and machine-review workflow
 
 ### Requirement: Proposal execution stays isolated
-The system SHALL keep proposal execution isolated to the dedicated branch and reusable worktree
-until human feedback explicitly requests request-group replanning.
+The system SHALL keep proposal execution isolated to the claimed implementation
+branch and reusable worktree until human feedback explicitly requests
+request-group replanning.
 
 #### Scenario: Dedicated execution workspace
 - **WHEN** the coder starts work on this proposal
-- **THEN** the coder SHALL use a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\`
+- **THEN** the system SHALL provide a dedicated implementation branch and a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\`
 `;
 };
 
 const buildTasksMarkdown = ({
   taskTitle,
   taskObjective,
-  branchName,
   worktreeRoot,
 }: {
   taskTitle: string;
   taskObjective: string;
-  branchName: string;
   worktreeRoot: string;
 }): string => {
   return `## 1. Proposal Alignment
 
 - [ ] 1.1 Review the approved OpenSpec artifacts for "${taskTitle}"
-- [ ] 1.2 Confirm branch \`${branchName}\` and a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\` are ready
+- [ ] 1.2 Confirm the proposal is ready for pooled execution and a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\` can be claimed
 
 ## 2. Implementation
 
@@ -281,10 +264,8 @@ const ensureOpenSpecChange = async ({
 
 const writeProposalArtifacts = async ({
   repositoryPath,
-  canonicalBranchName,
   proposalChangeName,
   proposalPath,
-  branchName,
   taskTitle,
   taskObjective,
   plannerSummary,
@@ -294,10 +275,8 @@ const writeProposalArtifacts = async ({
   worktreeRoot,
 }: {
   repositoryPath: string;
-  canonicalBranchName: string;
   proposalChangeName: string;
   proposalPath: string;
-  branchName: string;
   taskTitle: string;
   taskObjective: string;
   plannerSummary: string | null;
@@ -316,9 +295,7 @@ const writeProposalArtifacts = async ({
     path.join(proposalRoot, "proposal.md"),
     buildProposalMarkdown({
       repositoryPath,
-      canonicalBranchName,
       proposalChangeName,
-      branchName,
       taskTitle,
       taskObjective,
       plannerSummary,
@@ -331,9 +308,7 @@ const writeProposalArtifacts = async ({
   await fs.writeFile(
     path.join(proposalRoot, "design.md"),
     buildDesignMarkdown({
-      canonicalBranchName,
       proposalChangeName,
-      branchName,
       taskTitle,
       taskObjective,
       plannerDeliverable,
@@ -347,7 +322,6 @@ const writeProposalArtifacts = async ({
       proposalChangeName,
       taskTitle,
       taskObjective,
-      branchName,
       worktreeRoot,
     }),
     "utf8",
@@ -357,7 +331,6 @@ const writeProposalArtifacts = async ({
     buildTasksMarkdown({
       taskTitle,
       taskObjective,
-      branchName,
       worktreeRoot,
     }),
     "utf8",
@@ -407,7 +380,9 @@ export const materializeAssignmentProposals = async ({
   lanes: ProposalLane[];
 }): Promise<void> => {
   const activeLanes = lanes.filter(
-    (lane): lane is ProposalLane & {
+    (
+      lane,
+    ): lane is ProposalLane & {
       proposalChangeName: string;
       proposalPath: string;
       branchName: string;
@@ -416,10 +391,10 @@ export const materializeAssignmentProposals = async ({
     } =>
       Boolean(
         lane.taskTitle &&
-          lane.taskObjective &&
-          lane.proposalChangeName &&
-          lane.proposalPath &&
-          lane.branchName,
+        lane.taskObjective &&
+        lane.proposalChangeName &&
+        lane.proposalPath &&
+        lane.branchName,
       ),
   );
 
@@ -427,9 +402,8 @@ export const materializeAssignmentProposals = async ({
     return;
   }
 
-  const stagingWorktreePath = buildLaneWorktreePath({
+  const stagingWorktreePath = buildPlannerWorktreePath({
     worktreeRoot,
-    laneIndex: 1,
   });
   await ensureLaneWorktree({
     repositoryPath,
@@ -446,10 +420,8 @@ export const materializeAssignmentProposals = async ({
     });
     await writeProposalArtifacts({
       repositoryPath,
-      canonicalBranchName,
       proposalChangeName: lane.proposalChangeName,
       proposalPath: lane.proposalPath,
-      branchName: lane.branchName,
       taskTitle: lane.taskTitle,
       taskObjective: lane.taskObjective,
       plannerSummary,

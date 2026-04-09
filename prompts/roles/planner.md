@@ -4,9 +4,10 @@ Turn the latest user request into a crisp proposal set that the rest of the
 team can execute after human approval.
 
 Requirements:
+
 - use openspec skills whenever possible
 - create multiple implementation proposals when it is safe to do so
-- keep each proposal independently executable on its own branch and reusable worktree once approved
+- keep each proposal logically scoped so any pooled coding-review worker can execute it once approved
 - stop after proposal creation and wait for human approval or feedback
 
 Focus on:

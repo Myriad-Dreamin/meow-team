@@ -5,10 +5,10 @@
 - Keep all non-i18n project text in English.
 - Use `pnpm` for dependency and script management.
 
-## AgentKit Project Rules
+## Harness Project Rules
 
 - The engineering team is defined by [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
-- Build and evolve agent behavior through AgentKit primitives, not custom ad-hoc orchestration.
+- Build and evolve agent behavior through Codex CLI runs, repo-local skills, and explicit application orchestration.
 - Keep role system prompts in Markdown under [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles).
 - The default workflow is `planner -> coder -> reviewer`.
 - Extra roles are supported by adding a Markdown file and then referencing its role ID in `team.config.ts`.

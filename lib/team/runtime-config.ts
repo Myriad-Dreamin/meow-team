@@ -281,7 +281,7 @@ export const teamRuntimeConfig = {
 } as const;
 
 export const missingOpenAiConfigMessage = [
-  "OpenAI-compatible credentials are required to run the AgentKit network.",
+  "OpenAI-compatible credentials are required to run the Codex CLI harness.",
   `The app first looks for model settings in ${codexUserConfigDisplayPaths.config} and credentials in ${codexUserConfigDisplayPaths.auth}.`,
   "You can still provide OPENAI_API_KEY and OPENAI_BASE_URL as environment fallbacks when needed.",
 ].join(" ");
