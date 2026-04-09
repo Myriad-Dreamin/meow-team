@@ -2,29 +2,33 @@
 
 ## Purpose
 
-Build a browser homepage with a graphical RPG style, positioned as the launcher
-entry for "The Earth Online".
+Build a clean AgentKit-based engineering harness where one owner configures a
+small continuous team and runs it through a simple web interface.
 
 ## Non-Negotiable Rules
 
 - Use English for all project content, code comments, docs, and UI copy.
-- Only internationalization resources may contain non-English language text.
-- Keep the stack full TypeScript with pure Next.js.
-- Use ESLint for linting and Prettier for source formatting.
+- Keep the stack full TypeScript with pure Next.js App Router.
 - Use `pnpm` for dependency and script management.
+- Build the multi-agent workflow with AgentKit primitives:
+  `createAgent`, `createTool`, `createNetwork`, and deterministic routing.
+- Use Codex through the OpenAI backend for the default model configuration.
 
-## Product Direction (Current)
+## Product Direction
 
-- Primary RPG systems in scope:
-  - Quest system
-  - Achievement system
-- Earth Online systems should evolve as modular RPG components that can be enabled independently.
-- Initial phase goal:
-  - Deliver a focused MVP with clear progression feedback.
+- The default supported roles are:
+  - `planner`
+  - `coder`
+  - `reviewer`
+- Additional roles should be easy to add through Markdown prompt files.
+- Team ownership should be defined in a single configuration file.
+- The team should support continuous runs by persisting thread history.
 
 ## Engineering Notes
 
-- Prefer simple architecture over early abstraction.
-- Keep implementation compatible with App Router conventions.
-- Keep game domain behavior inside module folders (for example `lib/github-module`) and keep API routes as thin wrappers.
-- Add tests and stricter quality gates after core scaffolding is stable.
+- Prefer deterministic code-based routing over opaque agent-to-agent autonomy.
+- Keep all role prompts in `prompts/roles`.
+- Keep team configuration in `team.config.ts`.
+- Keep API routes thin and push harness logic into `lib/team`.
+- Treat the reviewer role as a real review pass focused on bugs, regressions,
+  and missing tests.

@@ -1,54 +1,87 @@
-# Earth Online Launcher
+# Harness Team
 
-Earth Online Launcher is a full-stack TypeScript web app built with pure Next.js.
-The product goal is to provide a browser start page with a graphical RPG flavor,
-designed as a launcher-style entry point for "Earth Online".
+Harness Team is a fresh Next.js + AgentKit project for running a small,
+continuously configured engineering team with Codex as the LLM backend.
 
-## Core Vision
+The default team follows a simple harness engineering workflow:
 
-- Create an immersive, game-like browser homepage experience.
-- Treat daily browsing actions as gameplay progression.
-- Keep the first version focused and ship an MVP quickly.
+- `planner` turns a request into an execution plan.
+- `coder` implements or proposes the concrete change.
+- `reviewer` checks the work for bugs, regressions, and missing tests.
 
-## Planned RPG Systems (Initial Scope)
+Role behavior lives in Markdown prompts under [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles),
+and the whole team is configured in one file:
+[`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
 
-- Quest System:
-  - Daily and weekly tasks.
-  - Task completion states and rewards.
-- Achievement System:
-  - Milestone tracking.
-  - Badge-style unlock feedback.
+## Why this shape
 
-## Tech Stack
-
-- Framework: Next.js (App Router)
-- Language: TypeScript (front-end + server-side)
-- Linting: ESLint
-- Formatting: Prettier
-
-## Language Policy
-
-Project text and code comments must be in English only, except files and messages
-intended for internationalization content.
+- It follows AgentKit's example patterns around `createAgent`,
+  `createTool`, `createNetwork`, and deterministic code-based routing.
+- It keeps one owner-controlled team configuration instead of scattering
+  agent definitions across the app.
+- It supports continuous work by persisting each thread's AgentKit history
+  and current handoff state to local JSON storage.
 
 ## Quick Start
 
 ```bash
 pnpm install
+cp .env.example .env.local
 pnpm dev
 ```
 
-Open `http://localhost:3000` after the dev server starts.
+Open `http://localhost:3000`.
+
+## Environment
+
+```bash
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_BASE_URL=
+OPENAI_MODEL=gpt-5.2-codex
+TEAM_OWNER_NAME=Your Team
+```
+
+`OPENAI_MODEL` defaults to `gpt-5.2-codex`, which OpenAI currently
+recommends for agentic coding tasks in Codex-like environments.
+
+## Project Layout
+
+- [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts):
+  single source of truth for the team owner, workflow, storage, and model.
+- [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles):
+  Markdown system prompts for each role.
+- [`lib/team/network.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/network.ts):
+  AgentKit network creation, routing, and state.
+- [`lib/team/history.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/history.ts):
+  persistent thread storage for continuous runs.
+- [`app/api/team/run/route.ts`](/home/kamiyoru/work/ts/meow-team/app/api/team/run/route.ts):
+  API endpoint that runs the team for a prompt and returns the handoffs.
+
+## Adding a Role
+
+1. Create a new Markdown prompt file in
+   [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles), for example
+   `researcher.md`.
+2. Add the role ID to the `workflow` array in
+   [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
+3. Restart the dev server if you want the homepage metadata to refresh immediately.
+
+The app resolves role titles from the first Markdown heading, so adding a new
+role stays lightweight.
 
 ## Scripts
 
-- `pnpm dev` - start development server
-- `pnpm build` - build for production
-- `pnpm start` - start production server
-- `pnpm lint` - run ESLint
-- `pnpm format` - format files with Prettier
-- `pnpm format:check` - check formatting with Prettier
+- `pnpm dev` starts the Next.js app.
+- `pnpm build` builds the production app.
+- `pnpm start` runs the production server.
+- `pnpm lint` runs ESLint.
+- `pnpm typecheck` runs TypeScript without emitting files.
+- `pnpm format` formats the repo with Prettier.
+- `pnpm format:check` checks formatting.
 
-## Status
+## Notes
 
-Project initialization in progress.
+- Thread history is stored locally in `data/team-threads.json`.
+- A legacy `.env` from the previous copied project may still exist locally.
+  If it contains an old GitHub token, rotate it and replace it with this
+  project's OpenAI-focused env setup.
