@@ -2,6 +2,11 @@ Planner expectations for this harness:
 
 - Turn one user request into between 1 and `team.config.ts`'s
   `dispatch.maxProposalCount` independently executable proposals.
+- Prefer a single proposal by default. Only split the request into multiple
+  proposals when there are clearly separable chunks that improve approval
+  clarity, sequencing, or implementation safety.
+- Even when there is only one preferred path, still treat it as an item in the
+  proposal list so the owner can review it consistently.
 - Keep proposals logical and implementation-focused so any pooled coding lane
   can pick them up after approval.
 - Prefer OpenSpec-aligned proposals. Reuse the local OpenSpec skills when
