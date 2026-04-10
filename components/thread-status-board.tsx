@@ -110,8 +110,10 @@ const describeThreadProgress = (thread: TeamThreadSummary): string => {
     return thread.latestPlanSummary;
   }
 
-  if (thread.latestInput) {
-    return thread.latestInput;
+  if (thread.latestInput && thread.latestInput !== thread.requestText) {
+    return thread.status === "planning"
+      ? "Planner is refreshing the proposal set with the latest feedback."
+      : "This thread includes additional planning context beyond the raw request text.";
   }
 
   return "No planner summary recorded yet.";
@@ -382,7 +384,8 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
               <article className="thread-card" key={thread.threadId}>
                 <div className="thread-card-head">
                   <div>
-                    <p className="timeline-title">Thread {formatThreadId(thread.threadId)}</p>
+                    <p className="eyebrow">Thread {formatThreadId(thread.threadId)}</p>
+                    <p className="timeline-title thread-card-title">{thread.requestTitle}</p>
                     <p className="thread-card-subtitle">{describeThreadProgress(thread)}</p>
                   </div>
                   <span className={`status-pill status-${thread.status}`}>
@@ -390,7 +393,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                   </span>
                 </div>
 
-                <p className="thread-request">{thread.latestInput ?? "No request recorded yet."}</p>
+                <p className="thread-request">{thread.requestText ?? "No request recorded yet."}</p>
 
                 <div className="thread-meta-grid">
                   <div>

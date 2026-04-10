@@ -528,6 +528,8 @@ export const createPlannerDispatchAssignment = async ({
   threadId,
   assignmentNumber,
   repository,
+  requestTitle,
+  requestText,
   plannerSummary,
   plannerDeliverable,
   branchPrefix,
@@ -537,6 +539,8 @@ export const createPlannerDispatchAssignment = async ({
   threadId: string;
   assignmentNumber: number;
   repository: TeamRepositoryOption | null;
+  requestTitle: string;
+  requestText: string;
   plannerSummary: string;
   plannerDeliverable: string;
   branchPrefix: string;
@@ -560,13 +564,14 @@ export const createPlannerDispatchAssignment = async ({
     branchPrefix,
     assignmentNumber,
   });
-  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
 
   const assignment: TeamDispatchAssignment = synchronizeDispatchAssignment(
     {
       assignmentNumber,
       status: "planning",
       repository,
+      requestTitle,
+      requestText,
       requestedAt: now,
       startedAt: now,
       finishedAt: null,
@@ -633,7 +638,7 @@ export const createPlannerDispatchAssignment = async ({
     canonicalBranchName,
     plannerSummary,
     plannerDeliverable,
-    requestInput: thread?.data.latestInput ?? thread?.userMessages[0]?.content ?? null,
+    requestInput: requestText,
     worktreeRoot: resolvedWorktreeRoot,
     lanes: assignment.lanes,
   });
@@ -1296,6 +1301,7 @@ const buildFeedbackReplanInput = ({
 }): string => {
   return [
     `Original request:\n${originalRequest}`,
+    assignment.requestTitle ? `Current request title:\n${assignment.requestTitle}` : null,
     assignment.plannerSummary ? `Latest planner summary:\n${assignment.plannerSummary}` : null,
     assignment.canonicalBranchName
       ? `Canonical branch namespace:\n${assignment.canonicalBranchName}`
@@ -1331,6 +1337,8 @@ export const prepareAssignmentReplan = async ({
   suggestion: string;
 }): Promise<{
   input: string;
+  title: string | undefined;
+  requestText: string;
   repositoryId: string | undefined;
 }> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
@@ -1353,7 +1361,7 @@ export const prepareAssignmentReplan = async ({
   }
 
   const targetLane = scope === "proposal" ? findLane(assignment, laneId ?? "") : null;
-  const originalRequest = thread.userMessages[0]?.content ?? thread.data.latestInput;
+  const originalRequest = assignment.requestText ?? thread.data.requestText ?? thread.data.latestInput;
   if (!originalRequest) {
     throw new Error("The original request could not be recovered for replanning.");
   }
@@ -1410,6 +1418,8 @@ export const prepareAssignmentReplan = async ({
       lane: targetLane,
       suggestion,
     }),
+    title: assignment.requestTitle ?? thread.data.requestTitle ?? undefined,
+    requestText: originalRequest,
     repositoryId: thread.data.selectedRepository?.id,
   };
 };

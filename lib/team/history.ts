@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type { TeamRunState } from "@/lib/team/network";
+import { resolveDisplayRequestTitle } from "@/lib/team/request-title";
 import type {
   TeamDispatchAssignment,
   TeamDispatchAssignmentStatus,
@@ -78,6 +79,8 @@ export type TeamThreadSummary = {
   threadId: string;
   assignmentNumber: number;
   status: TeamThreadStatus;
+  requestTitle: string;
+  requestText: string | null;
   latestInput: string | null;
   repository: TeamRepositoryOption | null;
   workflow: string[];
@@ -217,6 +220,8 @@ const normalizeDispatchAssignment = (
 ): TeamDispatchAssignment => {
   return {
     ...assignment,
+    requestTitle: assignment.requestTitle ?? null,
+    requestText: assignment.requestText ?? null,
     canonicalBranchName: assignment.canonicalBranchName ?? null,
     lanes: assignment.lanes.map(normalizeWorkerLane),
     plannerNotes: assignment.plannerNotes ?? [],
@@ -226,9 +231,19 @@ const normalizeDispatchAssignment = (
   };
 };
 
+const normalizeRunState = (state: TeamRunState): TeamRunState => {
+  return {
+    ...state,
+    requestTitle: state.requestTitle ?? null,
+    requestText: state.requestText ?? null,
+    latestInput: state.latestInput ?? null,
+  };
+};
+
 const normalizeStoredThread = (thread: StoredThread): TeamThreadRecord => {
   return {
     ...thread,
+    data: normalizeRunState(thread.data),
     results: (thread.results ?? []).map(normalizeExecutionStep),
     dispatchAssignments: (thread.dispatchAssignments ?? []).map(normalizeDispatchAssignment),
   };
@@ -494,16 +509,26 @@ const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
   const status = deriveThreadStatus(thread);
   const latestAssignment = getLatestDispatchAssignment(thread);
   const workerLanes = latestAssignment?.lanes ?? [];
+  const latestInput =
+    thread.data.latestInput ??
+    thread.userMessages.at(-1)?.content ??
+    thread.userMessages[0]?.content ??
+    null;
+  const requestText =
+    latestAssignment?.requestText ??
+    thread.data.requestText ??
+    latestInput;
 
   return {
     threadId: thread.threadId,
     assignmentNumber: thread.data.assignmentNumber,
     status,
-    latestInput:
-      thread.data.latestInput ??
-      thread.userMessages.at(-1)?.content ??
-      thread.userMessages[0]?.content ??
-      null,
+    requestTitle: resolveDisplayRequestTitle({
+      requestTitle: latestAssignment?.requestTitle ?? thread.data.requestTitle,
+      requestText,
+    }),
+    requestText,
+    latestInput,
     repository: thread.data.selectedRepository,
     workflow: thread.data.workflow,
     latestRoleId: latestHandoff?.roleId ?? null,
