@@ -17,6 +17,7 @@ interface UseProvidersSnapshotResult {
   error: string | null;
   supportsSnapshot: boolean;
   refresh: () => void;
+  invalidate: () => void;
 }
 
 export function useProvidersSnapshot(serverId: string | null): UseProvidersSnapshotResult {
@@ -66,6 +67,10 @@ export function useProvidersSnapshot(serverId: string | null): UseProvidersSnaps
     void client.refreshProvidersSnapshot();
   }, [client]);
 
+  const invalidate = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey });
+  }, [queryClient, queryKey]);
+
   return {
     entries: snapshotQuery.data?.entries ?? undefined,
     isLoading: snapshotQuery.isLoading,
@@ -73,6 +78,7 @@ export function useProvidersSnapshot(serverId: string | null): UseProvidersSnaps
     error: snapshotQuery.error instanceof Error ? snapshotQuery.error.message : null,
     supportsSnapshot,
     refresh,
+    invalidate,
   };
 }
 

@@ -226,6 +226,7 @@ function DraftAgentScreenContent({
     isModelLoading,
     modelError,
     refreshProviderModels,
+    invalidateProviderModels,
     setProviderAndModelFromUser,
     persistFormPreferences,
   } = useAgentFormState({
@@ -1268,6 +1269,7 @@ function DraftAgentScreenContent({
                 onSelectThinkingOption: setThinkingOptionFromUser,
                 features: draftFeatures,
                 onSetFeature: setDraftFeatureValue,
+                onModelSelectorOpen: invalidateProviderModels,
                 disabled: isSubmitting,
               }}
             />

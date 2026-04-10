@@ -80,6 +80,7 @@ export function WorkspaceDraftAgentTab({
     availableThinkingOptions,
     isModelLoading,
     setProviderAndModelFromUser,
+    invalidateProviderModels,
     persistFormPreferences,
   } = useAgentFormState({
     initialServerId: serverId,
@@ -373,6 +374,7 @@ export function WorkspaceDraftAgentTab({
               features: draftFeatures,
               onSetFeature: handleSetFeatureWithFocus,
               onDropdownClose: () => focusInputRef.current?.(),
+              onModelSelectorOpen: invalidateProviderModels,
               disabled: isSubmitting,
             }}
           />

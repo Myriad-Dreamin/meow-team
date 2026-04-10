@@ -88,6 +88,7 @@ type ControlledAgentStatusBarProps = {
   features?: AgentFeature[];
   onSetFeature?: (featureId: string, value: unknown) => void;
   onDropdownClose?: () => void;
+  onModelSelectorOpen?: () => void;
 };
 
 export interface DraftAgentStatusBarProps {
@@ -110,6 +111,7 @@ export interface DraftAgentStatusBarProps {
   features?: AgentFeature[];
   onSetFeature?: (featureId: string, value: unknown) => void;
   onDropdownClose?: () => void;
+  onModelSelectorOpen?: () => void;
   disabled?: boolean;
 }
 
@@ -217,6 +219,7 @@ function ControlledStatusBar({
   features,
   onSetFeature,
   onDropdownClose,
+  onModelSelectorOpen,
 }: ControlledAgentStatusBarProps) {
   const { theme } = useUnistyles();
   const isWeb = Platform.OS === "web";
@@ -411,6 +414,7 @@ function ControlledStatusBar({
                     onToggleFavorite={onToggleFavoriteModel}
                     isLoading={isModelLoading}
                     disabled={modelDisabled}
+                    onOpen={onModelSelectorOpen}
                     onClose={onDropdownClose}
                   />
                 </View>
@@ -662,6 +666,7 @@ function ControlledStatusBar({
                   onToggleFavorite={onToggleFavoriteModel}
                   isLoading={isModelLoading}
                   disabled={modelDisabled}
+                  onOpen={onModelSelectorOpen}
                   onClose={onDropdownClose}
                   renderTrigger={({ selectedModelLabel }) => (
                     <View
@@ -875,6 +880,7 @@ export function AgentStatusBar({ agentId, serverId, onDropdownClose }: AgentStat
     entries: snapshotEntries,
     isLoading: snapshotIsLoading,
     isFetching: snapshotIsFetching,
+    invalidate: invalidateSnapshot,
   } = useProvidersSnapshot(serverId);
 
   const snapshotModels = useMemo(() => {
@@ -1035,6 +1041,7 @@ export function AgentStatusBar({ agentId, serverId, onDropdownClose }: AgentStat
         });
       }}
       isModelLoading={snapshotIsLoading || snapshotIsFetching}
+      onModelSelectorOpen={invalidateSnapshot}
       onDropdownClose={onDropdownClose}
       disabled={!client}
     />
@@ -1061,6 +1068,7 @@ export function DraftAgentStatusBar({
   features,
   onSetFeature,
   onDropdownClose,
+  onModelSelectorOpen,
   disabled = false,
 }: DraftAgentStatusBarProps) {
   const isWeb = Platform.OS === "web";
@@ -1105,6 +1113,7 @@ export function DraftAgentStatusBar({
           }}
           isLoading={isAllModelsLoading}
           disabled={disabled}
+          onOpen={onModelSelectorOpen}
           onClose={onDropdownClose}
         />
         <ControlledStatusBar
@@ -1154,6 +1163,7 @@ export function DraftAgentStatusBar({
         onSelectThinkingOption={onSelectThinkingOption}
         features={features}
         onSetFeature={onSetFeature}
+        onModelSelectorOpen={onModelSelectorOpen}
         disabled={disabled}
       />
     </>
