@@ -127,12 +127,27 @@ export const listTeamCodexLogEntries = async ({
 
   try {
     const raw = await fs.readFile(logFilePath, "utf8");
-    return raw
+    const lines = raw
       .split(/\r?\n/u)
       .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as TeamCodexLogEntry)
-      .slice(-limit);
+      .filter(Boolean);
+    const entries: TeamCodexLogEntry[] = [];
+
+    for (const [index, line] of lines.entries()) {
+      try {
+        entries.push(JSON.parse(line) as TeamCodexLogEntry);
+      } catch (error) {
+        if (index !== lines.length - 1) {
+          console.warn(
+            `[team-logs:${threadId}] Ignoring malformed log line ${index + 1}: ${
+              error instanceof Error ? error.message : "Unknown error."
+            }`,
+          );
+        }
+      }
+    }
+
+    return entries.slice(-limit);
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === "ENOENT") {

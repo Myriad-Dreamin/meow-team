@@ -122,6 +122,8 @@ export type PendingDispatchAssignment = {
 };
 
 const mutationQueues = new Map<string, Promise<unknown>>();
+const THREAD_STORE_READ_RETRY_COUNT = 3;
+const THREAD_STORE_READ_RETRY_DELAY_MS = 25;
 
 const emptyStore = (): ThreadStore => ({ threads: {} });
 
@@ -129,27 +131,66 @@ const resolveStorePath = (threadFile: string): string => {
   return path.isAbsolute(threadFile) ? threadFile : path.join(process.cwd(), threadFile);
 };
 
+const sleep = async (delayMs: number): Promise<void> => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+};
+
+const isUnexpectedEndOfJsonError = (error: unknown): boolean => {
+  return error instanceof SyntaxError && /Unexpected end of JSON input/u.test(error.message);
+};
+
 const ensureStoreDirectory = async (storePath: string): Promise<void> => {
   await fs.mkdir(path.dirname(storePath), { recursive: true });
 };
 
 const readThreadStore = async (storePath: string): Promise<ThreadStore> => {
-  try {
-    const raw = await fs.readFile(storePath, "utf8");
-    const parsed = JSON.parse(raw) as ThreadStore;
-    return parsed.threads ? parsed : emptyStore();
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === "ENOENT") {
-      return emptyStore();
+  for (let attempt = 0; attempt <= THREAD_STORE_READ_RETRY_COUNT; attempt += 1) {
+    try {
+      const raw = await fs.readFile(storePath, "utf8");
+      const parsed = JSON.parse(raw) as ThreadStore;
+      return parsed.threads ? parsed : emptyStore();
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ENOENT") {
+        return emptyStore();
+      }
+
+      if (
+        isUnexpectedEndOfJsonError(error) &&
+        attempt < THREAD_STORE_READ_RETRY_COUNT
+      ) {
+        await sleep(THREAD_STORE_READ_RETRY_DELAY_MS);
+        continue;
+      }
+
+      if (isUnexpectedEndOfJsonError(error)) {
+        throw new Error(
+          `Thread store at ${storePath} could not be parsed after ${THREAD_STORE_READ_RETRY_COUNT + 1} read attempts.`,
+        );
+      }
+
+      throw error;
     }
-    throw error;
   }
+
+  return emptyStore();
 };
 
 const writeThreadStore = async (storePath: string, store: ThreadStore): Promise<void> => {
   await ensureStoreDirectory(storePath);
-  await fs.writeFile(storePath, JSON.stringify(store, null, 2), "utf8");
+  const temporaryStorePath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
+
+  try {
+    // Use an atomic rename so concurrent readers never observe partial JSON.
+    await fs.writeFile(temporaryStorePath, JSON.stringify(store, null, 2), "utf8");
+    await fs.rename(temporaryStorePath, storePath);
+  } finally {
+    await fs.rm(temporaryStorePath, {
+      force: true,
+    });
+  }
 };
 
 const queueStoreMutation = async <T>(storePath: string, task: () => Promise<T>): Promise<T> => {

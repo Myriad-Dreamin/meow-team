@@ -6,9 +6,18 @@ import { ensurePendingDispatchWork } from "@/lib/team/dispatch";
 export const runtime = "nodejs";
 
 export async function GET() {
-  await ensurePendingDispatchWork();
-  const threads = await listTeamThreadSummaries(teamConfig.storage.threadFile);
-  return NextResponse.json({
-    threads,
-  });
+  try {
+    await ensurePendingDispatchWork();
+    const threads = await listTeamThreadSummaries(teamConfig.storage.threadFile);
+    return NextResponse.json({
+      threads,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Unable to load living threads.",
+      },
+      { status: 500 },
+    );
+  }
 }

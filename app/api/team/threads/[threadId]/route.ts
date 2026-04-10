@@ -12,21 +12,30 @@ type RouteContext = {
 };
 
 export async function GET(_request: Request, context: RouteContext) {
-  const { threadId } = await context.params;
+  try {
+    const { threadId } = await context.params;
 
-  await ensurePendingDispatchWork({ threadId });
-  const thread = await getTeamThreadDetail(teamConfig.storage.threadFile, threadId);
+    await ensurePendingDispatchWork({ threadId });
+    const thread = await getTeamThreadDetail(teamConfig.storage.threadFile, threadId);
 
-  if (!thread) {
+    if (!thread) {
+      return NextResponse.json(
+        {
+          error: `Thread ${threadId} was not found.`,
+        },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({
+      thread,
+    });
+  } catch (error) {
     return NextResponse.json(
       {
-        error: `Thread ${threadId} was not found.`,
+        error: error instanceof Error ? error.message : "Unable to load the thread.",
       },
-      { status: 404 },
+      { status: 500 },
     );
   }
-
-  return NextResponse.json({
-    thread,
-  });
 }
