@@ -36,6 +36,19 @@ const trimErrorOutput = (value: string): string => {
   return lines.slice(-ERROR_OUTPUT_LINE_LIMIT).join("\n");
 };
 
+const readOptionalFile = async (filePath: string): Promise<string | null> => {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+};
+
 const parseStructuredMessage = <TSchema extends z.ZodTypeAny>(
   raw: string,
   schema: TSchema,
@@ -224,6 +237,7 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   const codexHome = await fs.mkdtemp(path.join(codexHomeRoot, `${codexHomePrefix}-`));
   const schemaPath = path.join(codexHome, "output-schema.json");
   const outputPath = path.join(codexHome, "output.json");
+  let stdoutBuffer = "";
 
   await prepareCodexHome({
     codexHome,
@@ -237,7 +251,6 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
       outputPath,
       prompt,
     });
-    let stdoutBuffer = "";
     let stderrBuffer = "";
     let stdoutRemainder = "";
     let stderrRemainder = "";
@@ -377,7 +390,6 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
 
     await eventQueue;
 
-    const rawMessage = await fs.readFile(outputPath, "utf8");
     if (exitCode !== 0) {
       throw new Error(
         trimErrorOutput([stderrBuffer, stdoutBuffer].filter(Boolean).join("\n")) ||
@@ -385,15 +397,26 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
       );
     }
 
-    return parseStructuredMessage(rawMessage || stdoutBuffer, responseSchema);
+    const rawMessage = await readOptionalFile(outputPath);
+    const structuredMessage = rawMessage ?? stdoutBuffer;
+
+    if (!structuredMessage.trim()) {
+      throw new Error("Codex CLI completed without producing structured output.");
+    }
+
+    return parseStructuredMessage(structuredMessage, responseSchema);
   } catch (error) {
     const isEventHandlingError =
       error instanceof Error && error.message.startsWith("Codex event handling failed:");
 
     if (!isEventHandlingError) {
       try {
-        const rawMessage = await fs.readFile(outputPath, "utf8");
-        return parseStructuredMessage(rawMessage, responseSchema);
+        const rawMessage = await readOptionalFile(outputPath);
+        const structuredMessage = rawMessage ?? stdoutBuffer;
+
+        if (structuredMessage.trim()) {
+          return parseStructuredMessage(structuredMessage, responseSchema);
+        }
       } catch {
         // Fall through to the richer execution error below.
       }
