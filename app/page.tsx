@@ -1,21 +1,25 @@
-import { TeamConsole } from "@/components/team-console";
-import { ThreadStatusBoard } from "@/components/thread-status-board";
+import { TeamWorkspace } from "@/components/team-workspace";
 import { teamConfig } from "@/team.config";
 import { listTeamThreadSummaries } from "@/lib/team/history";
 import { listAvailableRolePrompts, loadWorkflowRolePrompts } from "@/lib/team/prompts";
-import { listConfiguredRepositories, resolveConfiguredRepositoryRoots } from "@/lib/team/repositories";
+import {
+  listConfiguredRepositories,
+  resolveConfiguredRepositoryRoots,
+} from "@/lib/team/repositories";
 import { codexUserConfigDisplayPaths, teamRuntimeConfig } from "@/lib/team/runtime-config";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const configuredRepositoryRoots = resolveConfiguredRepositoryRoots(teamConfig);
-  const [workflowRoles, availableRoles, availableRepositories, threadSummaries] = await Promise.all([
-    loadWorkflowRolePrompts(teamConfig),
-    listAvailableRolePrompts(),
-    listConfiguredRepositories(teamConfig),
-    listTeamThreadSummaries(teamConfig.storage.threadFile),
-  ]);
+  const [workflowRoles, availableRoles, availableRepositories, threadSummaries] = await Promise.all(
+    [
+      loadWorkflowRolePrompts(teamConfig),
+      listAvailableRolePrompts(),
+      listConfiguredRepositories(teamConfig),
+      listTeamThreadSummaries(teamConfig.storage.threadFile),
+    ],
+  );
 
   const hasApiKey = teamRuntimeConfig.hasApiKey;
 
@@ -40,7 +44,10 @@ export default async function HomePage() {
           <article>
             <span className="metric-label">Workflow</span>
             <strong>{`planner -> ${teamConfig.dispatch.workerCount}x(coder + reviewer)`}</strong>
-            <p>Planner creates request proposals first, then approved proposals flow into the shared coding and machine-review pool.</p>
+            <p>
+              Planner creates request proposals first, then approved proposals flow into the shared
+              coding and machine-review pool.
+            </p>
           </article>
           <article>
             <span className="metric-label">Codex Backend</span>
@@ -62,7 +69,10 @@ export default async function HomePage() {
           <article>
             <span className="metric-label">Worker Pool</span>
             <strong>{teamConfig.dispatch.workerCount}</strong>
-            <p>Idle until proposals are approved, then reused across coding, review, and replanning feedback cycles.</p>
+            <p>
+              Idle until proposals are approved, then reused across coding, review, and replanning
+              feedback cycles.
+            </p>
           </article>
         </div>
       </section>
@@ -80,40 +90,21 @@ export default async function HomePage() {
         </section>
       ) : null}
 
-      <section className="content-grid">
-        <section className="info-panel">
-          <div className="section-header">
-            <p className="eyebrow">Single Config</p>
-            <h2>Owned Team Settings</h2>
-            <p className="section-copy">
-              Everything that defines the active team lives in one file: owner, workflow, storage,
-              model settings, proposal lanes, reusable worktree roots, and allowed local repository directories.
-            </p>
-          </div>
+      <TeamWorkspace
+        disabled={!hasApiKey}
+        initialPrompt="Create multiple implementation proposals for a new onboarding flow, wait for human approval, and then queue coding plus machine review for the approved proposals."
+        initialLogThreadId={threadSummaries[0]?.threadId ?? null}
+        initialThreads={threadSummaries}
+        repositories={availableRepositories}
+        workerCount={teamConfig.dispatch.workerCount}
+      />
 
-          <pre className="code-block">{`// team.config.ts
-defineTeamConfig({
-  name: "${teamConfig.name}",
-  owner: { name: "${teamConfig.owner.name}" },
-  workflow: ${JSON.stringify(teamConfig.workflow)},
-  model: { model: "${teamConfig.model.model}" },
-  dispatch: { workerCount: ${teamConfig.dispatch.workerCount}, maxProposalCount: ${teamConfig.dispatch.maxProposalCount} },
-  repositories: { roots: ${configuredRepositoryRoots.length} },
-  maxIterations: ${teamConfig.maxIterations},
-});`}</pre>
-        </section>
-
+      <section className="footer-grid">
         <section className="info-panel">
-          <div className="section-header">
+          <div className="section-header compact">
             <p className="eyebrow">Roles</p>
             <h2>Workflow Prompts</h2>
-            <p className="section-copy">
-              Each role comes from a Markdown prompt file. To add a new role, create a new prompt
-              and add its role ID to the workflow in `team.config.ts`. The planner remains the
-              proposal coordinator while coder and reviewer prompts are reused inside each approved proposal lane.
-            </p>
           </div>
-
           <div className="role-grid">
             {workflowRoles.map((role) => (
               <article className="role-card" key={role.id}>
@@ -127,19 +118,7 @@ defineTeamConfig({
             ))}
           </div>
         </section>
-      </section>
 
-      <TeamConsole
-        disabled={!hasApiKey}
-        initialPrompt="Create multiple implementation proposals for a new onboarding flow, wait for human approval, and then queue coding plus machine review for the approved proposals."
-        initialLogThreadId={threadSummaries[0]?.threadId ?? null}
-        repositories={availableRepositories}
-        workerCount={teamConfig.dispatch.workerCount}
-      />
-
-      <ThreadStatusBoard initialThreads={threadSummaries} />
-
-      <section className="footer-grid">
         <section className="info-panel">
           <div className="section-header compact">
             <p className="eyebrow">Role Library</p>

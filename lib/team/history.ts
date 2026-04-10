@@ -49,6 +49,8 @@ type StoredUserMessage = {
   timestamp: string;
 };
 
+export type TeamThreadUserMessage = StoredUserMessage;
+
 type StoredThread = {
   threadId: string;
   data: TeamRunState;
@@ -104,6 +106,14 @@ export type TeamThreadSummary = {
   workerLanes: TeamWorkerLaneRecord[];
   plannerNotes: TeamPlannerNote[];
   humanFeedback: TeamHumanFeedbackRecord[];
+};
+
+export type TeamThreadDetail = {
+  summary: TeamThreadSummary;
+  userMessages: TeamThreadUserMessage[];
+  steps: TeamExecutionStep[];
+  handoffs: TeamRoleHandoff[];
+  dispatchAssignments: TeamDispatchAssignment[];
 };
 
 export type PendingDispatchAssignment = {
@@ -499,11 +509,7 @@ const deriveNextRoleId = (state: TeamRunState, status: TeamThreadStatus): string
   return state.workflow[currentIndex + 1] ?? null;
 };
 
-const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
-  const thread = synchronizeTeamThreadRun(
-    normalizeStoredThread(storedThread),
-    storedThread.updatedAt,
-  );
+const summarizeThreadRecord = (thread: TeamThreadRecord): TeamThreadSummary => {
   const orderedHandoffs = getOrderedHandoffs(thread.data);
   const latestHandoff = orderedHandoffs.at(-1);
   const status = deriveThreadStatus(thread);
@@ -514,10 +520,7 @@ const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
     thread.userMessages.at(-1)?.content ??
     thread.userMessages[0]?.content ??
     null;
-  const requestText =
-    latestAssignment?.requestText ??
-    thread.data.requestText ??
-    latestInput;
+  const requestText = latestAssignment?.requestText ?? thread.data.requestText ?? latestInput;
 
   return {
     threadId: thread.threadId,
@@ -554,6 +557,15 @@ const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
   };
 };
 
+const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
+  const thread = synchronizeTeamThreadRun(
+    normalizeStoredThread(storedThread),
+    storedThread.updatedAt,
+  );
+
+  return summarizeThreadRecord(thread);
+};
+
 export const listTeamThreadSummaries = async (
   threadFile: string,
   limit = 24,
@@ -576,6 +588,28 @@ export const getTeamThreadRecord = async (
   const thread = store.threads[threadId];
 
   return thread ? synchronizeTeamThreadRun(normalizeStoredThread(thread), thread.updatedAt) : null;
+};
+
+export const getTeamThreadDetail = async (
+  threadFile: string,
+  threadId: string,
+): Promise<TeamThreadDetail | null> => {
+  const thread = await getTeamThreadRecord(threadFile, threadId);
+  if (!thread) {
+    return null;
+  }
+
+  const handoffs = getOrderedHandoffs(thread.data);
+
+  return {
+    summary: summarizeThreadRecord(thread),
+    userMessages: thread.userMessages,
+    steps: thread.results,
+    handoffs,
+    dispatchAssignments: [...thread.dispatchAssignments].sort(
+      (left, right) => right.assignmentNumber - left.assignmentNumber,
+    ),
+  };
 };
 
 export const updateTeamThreadRecord = async <T>({
