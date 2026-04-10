@@ -718,6 +718,53 @@ main {
   background: rgba(18, 64, 54, 0.36);
 }
 
+.branch-delete-callout {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 201, 110, 0.3);
+  color: var(--text);
+  background: rgba(78, 52, 9, 0.28);
+}
+
+.branch-delete-title,
+.branch-delete-copy {
+  margin: 0;
+}
+
+.branch-delete-title {
+  font-weight: 700;
+  color: var(--warning);
+}
+
+.branch-delete-copy {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.branch-delete-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.branch-delete-list li {
+  color: var(--text);
+}
+
+.branch-delete-list code {
+  font-family: var(--font-mono);
+}
+
+.branch-delete-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .run-result {
   display: grid;
   gap: 18px;

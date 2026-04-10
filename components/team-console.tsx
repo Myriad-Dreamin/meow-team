@@ -87,6 +87,13 @@ type TeamRunRequest = {
   deleteExistingBranches?: boolean;
 };
 
+type PendingBranchDeletion = {
+  request: TeamRunRequest;
+  previousResult: TeamRunSummary | null;
+  threadId: string;
+  branches: string[];
+};
+
 const ACTIVE_LOG_THREAD_ID_STORAGE_KEY = "team-console.active-log-thread-id";
 const ACTIVE_LOG_STARTED_AT_STORAGE_KEY = "team-console.active-log-started-at";
 
@@ -181,15 +188,6 @@ const buildUnexpectedResponseMessage = (response: Response, body: string): strin
   return `Team run failed with HTTP ${response.status}. The server returned an unexpected response body.`;
 };
 
-const buildBranchDeletePrompt = (branches: string[]): string => {
-  const branchList = branches.map((branchName) => `- ${branchName}`).join("\n");
-  return [
-    "The planner found existing branches with the same names:",
-    branchList,
-    "Delete those branches and any managed harness worktrees attached to them, then rerun the planner?",
-  ].join("\n\n");
-};
-
 export function TeamConsole({
   disabled,
   initialPrompt,
@@ -208,8 +206,12 @@ export function TeamConsole({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialLogThreadId);
   const [activeLogStartedAt, setActiveLogStartedAt] = useState<string | null>(null);
   const [logEntries, setLogEntries] = useState<TeamCodexLogEntry[]>([]);
+  const [pendingBranchDeletion, setPendingBranchDeletion] =
+    useState<PendingBranchDeletion | null>(null);
 
   const isRunning = runState.status === "running";
+  const isAwaitingBranchDeletion = pendingBranchDeletion !== null;
+  const isBusy = isRunning || isAwaitingBranchDeletion;
   const hasRepositories = repositories.length > 0;
 
   useEffect(() => {
@@ -270,6 +272,7 @@ export function TeamConsole({
     setThreadId(request.threadId ?? "");
     setRepositoryId(request.repositoryId ?? "");
     setReset(request.reset);
+    setPendingBranchDeletion(null);
     setRunState({
       status: "running",
       error: null,
@@ -317,7 +320,6 @@ export function TeamConsole({
       const decoder = new TextDecoder();
       let buffer = "";
       let sawTerminalEvent = false;
-      let retryRequest: TeamRunRequest | null = null;
 
       const handleStreamEvent = (event: TeamRunStreamEvent) => {
         if (isAcceptedStreamEvent(event)) {
@@ -357,27 +359,25 @@ export function TeamConsole({
           setThreadId(event.threadId);
           setActiveThreadId(event.threadId);
           onThreadActivity?.(event.threadId);
-
-          if (window.confirm(buildBranchDeletePrompt(event.branches))) {
-            retryRequest = {
-              ...request,
-              threadId: event.threadId,
-              deleteExistingBranches: true,
-            };
-            setNotice("Branch deletion confirmed. Rerunning the planner.");
-            return;
-          }
-
           setRunState({
-            status: "error",
-            error: "Planning stopped because the existing branches were left in place.",
+            status: "idle",
+            error: null,
             result: previousResult,
           });
-          setNotice(null);
+          setPendingBranchDeletion({
+            request,
+            previousResult,
+            threadId: event.threadId,
+            branches: event.branches,
+          });
+          setNotice(
+            "Planner is waiting for confirmation to delete the existing proposal branches and rerun the assignment.",
+          );
           return;
         }
 
         sawTerminalEvent = true;
+        setPendingBranchDeletion(null);
         setThreadId(event.threadId);
         setActiveThreadId(event.threadId);
         onThreadActivity?.(event.threadId);
@@ -389,7 +389,7 @@ export function TeamConsole({
         setNotice(null);
       };
 
-      outer: while (true) {
+      while (true) {
         const { done, value } = await reader.read();
         if (done) {
           break;
@@ -417,18 +417,7 @@ export function TeamConsole({
           }
 
           handleStreamEvent(parsed);
-
-          if (retryRequest) {
-            await reader.cancel();
-            break outer;
-          }
         }
-      }
-
-      if (retryRequest) {
-        return executeRun(retryRequest, previousResult, {
-          preserveLogs: true,
-        });
       }
 
       const trailing = buffer.trim();
@@ -447,12 +436,6 @@ export function TeamConsole({
         handleStreamEvent(parsed);
       }
 
-      if (retryRequest) {
-        return executeRun(retryRequest, previousResult, {
-          preserveLogs: true,
-        });
-      }
-
       if (!sawTerminalEvent) {
         throw new Error("Team run stream ended before a final result was returned.");
       }
@@ -465,6 +448,40 @@ export function TeamConsole({
       });
       setNotice(null);
     }
+  };
+
+  const handleConfirmBranchDeletion = () => {
+    if (!pendingBranchDeletion) {
+      return;
+    }
+
+    const nextRequest: TeamRunRequest = {
+      ...pendingBranchDeletion.request,
+      threadId: pendingBranchDeletion.threadId,
+      deleteExistingBranches: true,
+    };
+    const previousResult = pendingBranchDeletion.previousResult;
+
+    setPendingBranchDeletion(null);
+    startTransition(() => {
+      void executeRun(nextRequest, previousResult, {
+        preserveLogs: true,
+      });
+    });
+  };
+
+  const handleKeepExistingBranches = () => {
+    if (!pendingBranchDeletion) {
+      return;
+    }
+
+    setRunState({
+      status: "error",
+      error: "Planning stopped because the existing branches were left in place.",
+      result: pendingBranchDeletion.previousResult,
+    });
+    setPendingBranchDeletion(null);
+    setNotice(null);
   };
 
   const handleSubmit = async (formData: FormData) => {
@@ -519,7 +536,7 @@ export function TeamConsole({
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             placeholder="Plan multiple proposals for a new onboarding flow, wait for human approval, then queue coding and machine review for the approved proposals."
-            disabled={disabled || isRunning}
+            disabled={disabled || isBusy}
           />
         </label>
 
@@ -530,7 +547,7 @@ export function TeamConsole({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Optional human title. Leave blank to generate one."
-            disabled={disabled || isRunning}
+            disabled={disabled || isBusy}
           />
         </label>
 
@@ -542,7 +559,7 @@ export function TeamConsole({
               value={threadId}
               onChange={(event) => setThreadId(event.target.value)}
               placeholder="Optional continuous thread"
-              disabled={disabled || isRunning}
+              disabled={disabled || isBusy}
             />
           </label>
 
@@ -553,7 +570,7 @@ export function TeamConsole({
                 name="repositoryId"
                 value={repositoryId}
                 onChange={(event) => setRepositoryId(event.target.value)}
-                disabled={disabled || isRunning}
+                disabled={disabled || isBusy}
               >
                 <option value="">No repository selected</option>
                 {repositories.map((repository) => (
@@ -571,7 +588,7 @@ export function TeamConsole({
                 type="checkbox"
                 checked={reset}
                 onChange={(event) => setReset(event.target.checked)}
-                disabled={disabled || isRunning}
+                disabled={disabled || isBusy}
               />
               <span>Start a fresh assignment cycle</span>
             </label>
@@ -585,25 +602,63 @@ export function TeamConsole({
               type="checkbox"
               checked={reset}
               onChange={(event) => setReset(event.target.checked)}
-              disabled={disabled || isRunning}
+              disabled={disabled || isBusy}
             />
             <span>Start a fresh assignment cycle</span>
           </label>
         ) : null}
 
-        <button className="primary-button" type="submit" disabled={disabled || isRunning}>
+        <button className="primary-button" type="submit" disabled={disabled || isBusy}>
           {isRunning ? "Planning proposals..." : "Plan Proposals"}
         </button>
       </form>
 
       {notice ? <p className="info-callout">{notice}</p> : null}
       {runState.error ? <p className="error-callout">{runState.error}</p> : null}
+      {pendingBranchDeletion ? (
+        <div className="branch-delete-callout" role="alert">
+          <p className="branch-delete-title">Existing proposal branches found</p>
+          <p className="branch-delete-copy">
+            Delete these branches and any managed harness worktrees attached to them, then rerun
+            the planner for the same request?
+          </p>
+          <ul className="branch-delete-list">
+            {pendingBranchDeletion.branches.map((branchName) => (
+              <li key={branchName}>
+                <code>{branchName}</code>
+              </li>
+            ))}
+          </ul>
+          <div className="branch-delete-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={handleConfirmBranchDeletion}
+              disabled={disabled}
+            >
+              Delete And Continue
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={handleKeepExistingBranches}
+              disabled={disabled}
+            >
+              Keep Existing Branches
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <TeamThreadLogPanel
         description="Streaming planner output appears immediately, and the same thread-scoped log file is polled so coder and reviewer lane output continues showing up here after proposal approval."
         emptyMessage="No Codex CLI output has been recorded for this thread yet."
-        isPending={isRunning}
-        pendingMessage="Waiting for Codex CLI output..."
+        isPending={isBusy}
+        pendingMessage={
+          isAwaitingBranchDeletion
+            ? "Waiting for branch deletion confirmation..."
+            : "Waiting for Codex CLI output..."
+        }
         seedEntries={logEntries}
         startedAt={activeLogStartedAt}
         threadId={activeThreadId}
