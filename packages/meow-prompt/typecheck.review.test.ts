@@ -1,34 +1,36 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { build } from "vite";
 import { describe, expect, it } from "vitest";
-import { syncMeowPromptDeclarationsForNext } from "../../next.config";
+import { createMeowPromptViteSyncConfig } from "./src/vite-plugin";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-const formatDiagnostics = (diagnostics: readonly ts.Diagnostic[]): string => {
+const formatDiagnostics = (
+  diagnostics: readonly ts.Diagnostic[],
+  currentDirectory: string,
+): string => {
   return ts.formatDiagnosticsWithColorAndContext(diagnostics, {
     getCanonicalFileName: (fileName) => fileName,
-    getCurrentDirectory: () => repoRoot,
+    getCurrentDirectory: () => currentDirectory,
     getNewLine: () => "\n",
   });
 };
 
 describe("meow-prompt typecheck regression", () => {
-  it("keeps fresh prompt imports typed for TypeScript validation", () => {
-    const temporaryDirectory = mkdtempSync(
-      path.join(repoRoot, "tmp-meow-prompt-typecheck-review-"),
-    );
-    const promptPath = path.join(temporaryDirectory, "fresh.prompt.md");
+  it("keeps app prompt imports typed after the Vite bootstrap runs without a docs directory", async () => {
+    const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "meow-prompt-typecheck-review-"));
+    const appDirectory = path.join(temporaryDirectory, "app");
+    const promptPath = path.join(appDirectory, "fresh.prompt.md");
     const consumerPath = path.join(temporaryDirectory, "fresh-consumer.ts");
-    const declarationPath = path.join(temporaryDirectory, "fresh.prompt.d.md.ts");
+    const declarationPath = path.join(appDirectory, "fresh.prompt.d.md.ts");
 
     try {
+      mkdirSync(appDirectory, { recursive: true });
       writeFileSync(promptPath, "---\ntitle: Fresh prompt\n---\nHello [[param:name]].\n", "utf8");
       writeFileSync(
         consumerPath,
-        `import { frontmatter, prompt, type Args, type FrontMatter } from "./fresh.prompt.md";
+        `import { frontmatter, prompt, type Args, type FrontMatter } from "./app/fresh.prompt.md";
 
 const typedFrontmatter: FrontMatter = frontmatter;
 const title: "Fresh prompt" = typedFrontmatter.title;
@@ -43,7 +45,7 @@ void output;
         "utf8",
       );
 
-      syncMeowPromptDeclarationsForNext();
+      await build(createMeowPromptViteSyncConfig(temporaryDirectory));
 
       const declarationSource = readFileSync(declarationPath, "utf8");
       const program = ts.createProgram([consumerPath], {
@@ -59,7 +61,7 @@ void output;
 
       expect(declarationSource).toContain('readonly title: "Fresh prompt";');
       expect(declarationSource).toContain("readonly name: unknown;");
-      expect(diagnostics, formatDiagnostics(diagnostics)).toHaveLength(0);
+      expect(diagnostics, formatDiagnostics(diagnostics, temporaryDirectory)).toHaveLength(0);
     } finally {
       rmSync(temporaryDirectory, {
         force: true,

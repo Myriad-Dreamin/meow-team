@@ -42,6 +42,9 @@ importers:
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
+      vite:
+        specifier: ^8.0.8
+        version: 8.0.8(@types/node@22.19.13)
       vitest:
         specifier: ^4.1.4
         version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@22.19.13)(vite@8.0.8(@types/node@22.19.13))
@@ -51,6 +54,9 @@ importers:
       js-yaml:
         specifier: 4.1.1
         version: 4.1.1
+      vite:
+        specifier: ^8.0.0
+        version: 8.0.8(@types/node@22.19.13)
 
 packages:
 

@@ -11,9 +11,11 @@ Delete the Turbopack-specific `meow-prompt` integration, replace `walkDirectory`
 ## Capabilities
 
 ### New Capabilities
+
 - `meow-prompt-vite-a1-p1-remove-turbopack-and-direct-vite-loading`: Delete the Turbopack-specific `meow-prompt` integration, replace `walkDirectory`-based declaration syncing with Vite-managed loading for `app` and optional `docs`, and update tests/config so supported prompt imports remain typed under the new flow.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

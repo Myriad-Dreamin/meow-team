@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import yaml from "js-yaml";
 
 type LoadYaml = (source: string, options?: { schema?: unknown }) => unknown;
 type ParseYaml = (source: string) => unknown;
@@ -7,7 +7,6 @@ type YamlModule = {
   JSON_SCHEMA: unknown;
 };
 
-const require = createRequire(import.meta.url);
 let parseYaml: ParseYaml | null = null;
 
 const getParseYaml = (): ParseYaml => {
@@ -15,7 +14,7 @@ const getParseYaml = (): ParseYaml => {
     return parseYaml;
   }
 
-  const { load, JSON_SCHEMA } = require("js-yaml") as YamlModule;
+  const { load, JSON_SCHEMA } = yaml as YamlModule;
   parseYaml = (source) => load(source, { schema: JSON_SCHEMA });
   return parseYaml;
 };
