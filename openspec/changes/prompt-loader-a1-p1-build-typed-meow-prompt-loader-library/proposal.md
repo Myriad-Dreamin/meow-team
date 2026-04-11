@@ -11,9 +11,11 @@ Create `packages/meow-prompt` with markdown-template parsing, typed direct-impor
 ## Capabilities
 
 ### New Capabilities
+
 - `prompt-loader-a1-p1-build-typed-meow-prompt-loader-library`: Create `packages/meow-prompt` with markdown-template parsing, typed direct-import support, builtin raw pipes, requested initial tests, and AGENTS syntax documentation.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

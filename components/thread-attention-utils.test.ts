@@ -21,6 +21,7 @@ const createLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLa
   baseBranch: "main",
   worktreePath: "/tmp/meow-1",
   latestImplementationCommit: null,
+  pushedCommit: null,
   latestCoderHandoff: null,
   latestReviewerHandoff: null,
   latestDecision: null,
