@@ -2,6 +2,7 @@ import "server-only";
 
 import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -223,28 +224,43 @@ export const sanitizeBranchSegment = (value: string): string => {
   );
 };
 
+const encodeWorktreePathSegment = (value: string): string => {
+  // Hex keeps the raw identity reversible while remaining safe on case-insensitive filesystems.
+  return Buffer.from(value, "utf8").toString("hex") || "assignment";
+};
+
+const buildThreadBranchSegment = (threadId: string): string => {
+  const readableSegment = sanitizeBranchSegment(threadId).replace(/\//g, "-").slice(0, 24);
+  const threadHash = createHash("sha256").update(threadId).digest("hex").slice(0, 16);
+  return readableSegment ? `${readableSegment}-${threadHash}` : `thread-${threadHash}`;
+};
+
 export const buildCanonicalBranchName = ({
+  threadId,
   branchPrefix,
   assignmentNumber,
 }: {
+  threadId: string;
   branchPrefix: string;
   assignmentNumber: number;
 }): string => {
   const sanitizedPrefix = sanitizeBranchSegment(branchPrefix);
-  return `requests/${sanitizedPrefix}/a${assignmentNumber}`;
+  return `requests/${sanitizedPrefix}/${buildThreadBranchSegment(threadId)}/a${assignmentNumber}`;
 };
 
 export const buildLaneBranchName = ({
+  threadId,
   branchPrefix,
   assignmentNumber,
   laneIndex,
 }: {
+  threadId: string;
   branchPrefix: string;
   assignmentNumber: number;
   laneIndex: number;
 }): string => {
   const sanitizedPrefix = sanitizeBranchSegment(branchPrefix);
-  return `requests/${sanitizedPrefix}/a${assignmentNumber}-proposal-${laneIndex}`;
+  return `requests/${sanitizedPrefix}/${buildThreadBranchSegment(threadId)}/a${assignmentNumber}-proposal-${laneIndex}`;
 };
 
 export const resolveWorktreeRoot = ({
@@ -269,10 +285,15 @@ export const buildLaneWorktreePath = ({
 
 export const buildPlannerWorktreePath = ({
   worktreeRoot,
+  threadId,
+  assignmentNumber,
 }: {
   worktreeRoot: string;
+  threadId: string;
+  assignmentNumber: number;
 }): string => {
-  return path.join(worktreeRoot, "planner-staging");
+  const encodedThreadId = encodeWorktreePathSegment(threadId);
+  return path.join(worktreeRoot, `planner-${encodedThreadId}-a${assignmentNumber}`);
 };
 
 export const resolveRepositoryBaseBranch = async (
