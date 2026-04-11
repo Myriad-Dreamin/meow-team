@@ -13,7 +13,7 @@ import {
   resolveRepositoryBaseBranch,
   tryRebaseWorktreeBranch,
 } from "@/lib/git/ops";
-import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type { TeamRepositoryContext, TeamRepositoryOption } from "@/lib/git/repository";
 import { applyHandoff, type TeamRoleState } from "@/lib/team/agent-helpers";
 import {
   buildCanonicalBranchName,
@@ -66,26 +66,20 @@ type LanePullRequestDraft = {
   summary: string;
 };
 
-type LaneRunState = TeamRoleState & {
-  teamName: string;
-  ownerName: string;
-  objective: string;
-  repository: TeamRepositoryOption;
-  laneId: string;
-  laneIndex: number;
-  taskTitle: string;
-  taskObjective: string;
-  requestTitle: string;
-  conventionalTitle: TeamDispatchAssignment["conventionalTitle"];
-  planSummary: string;
-  planDeliverable: string;
-  branchName: string;
-  baseBranch: string;
-  worktreePath: string;
-  implementationCommit: string | null;
-  conflictNote: string | null;
-  pullRequestDraft: LanePullRequestDraft | null;
-};
+type LaneRunState = TeamRoleState &
+  TeamRepositoryContext & {
+    teamName: string;
+    ownerName: string;
+    objective: string;
+    laneId: string;
+    laneIndex: number;
+    taskTitle: string;
+    taskObjective: string;
+    planSummary: string;
+    planDeliverable: string;
+    conflictNote: string | null;
+    pullRequestDraft: LanePullRequestDraft | null;
+  };
 
 export class DispatchThreadCapacityError extends Error {
   workerCount: number;
@@ -335,7 +329,7 @@ const buildLaneInitialState = ({
     handoffCounter: getHighestHandoffSequence(handoffs),
     assignmentNumber: assignment.assignmentNumber,
     pullRequestDraft: null,
-  };
+  } as LaneRunState;
 };
 
 const buildCoderCommitMessage = ({

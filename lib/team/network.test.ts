@@ -106,7 +106,7 @@ describe.sequential("runTeam", () => {
       }),
     };
     const plannerAgentMock = {
-      run: vi.fn(async (input: PlannerAgentArgs[0]) => {
+      run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         callOrder.push("planner");
         expect(input.state.requestTitle).toBe("Dispatch Coordination");
         expect(input.state.conventionalTitle).toBeNull();
@@ -116,14 +116,14 @@ describe.sequential("runTeam", () => {
           handoff: {
             summary: "Planner summary",
             deliverable: "Planner deliverable",
-            decision: "continue",
+            decision: "continue" as const,
           },
           dispatch: {
             planSummary: "Plan summary",
             plannerDeliverable: "Plan deliverable",
             branchPrefix: "dispatch-coordination",
             conventionalTitle: {
-              type: "dev",
+              type: "dev" as const,
               scope: "dispatch/coordination",
             },
             tasks: [
@@ -226,7 +226,7 @@ describe.sequential("runTeam", () => {
 
     const requestTitleAgentMock = { run: vi.fn() };
     const plannerAgentMock = {
-      run: vi.fn(async (input: PlannerAgentArgs[0]) => {
+      run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         expect(input.state.requestTitle).toBe("Human Title");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toBeNull();
@@ -235,7 +235,7 @@ describe.sequential("runTeam", () => {
           handoff: {
             summary: "Planner is waiting for a repository",
             deliverable: "Select a repository before proposal dispatch can continue.",
-            decision: "continue",
+            decision: "continue" as const,
           },
           dispatch: null,
         } satisfies PlannerAgentResult;

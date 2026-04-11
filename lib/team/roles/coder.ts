@@ -1,15 +1,14 @@
 import { z } from "zod";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import type { TeamRepositoryContext } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
-import { describeConventionalTitleMetadata } from "@/lib/team/request-title";
 import {
-  rolePromptSchema,
-  teamConventionalTitleSchema,
-  teamRepositoryOptionSchema,
-  teamRoleDecisionSchema,
-  teamRoleHandoffSchema,
-} from "@/lib/team/roles/schemas";
-import type { TeamCodexEvent } from "@/lib/team/types";
+  describeConventionalTitleMetadata,
+  type ConventionalTitleMetadata,
+} from "@/lib/team/request-title";
+import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
+import type { RolePrompt } from "@/lib/team/prompts";
+import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
 
 const coderOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -19,42 +18,34 @@ const coderOutputSchema = z.object({
   pullRequestSummary: z.string().trim().min(1).nullable(),
 });
 
-const coderInputSchema = z.object({
-  role: rolePromptSchema,
-  input: z.string().trim().min(1),
-  state: z.object({
-    teamName: z.string().trim().min(1),
-    ownerName: z.string().trim().min(1),
-    objective: z.string().trim().min(1),
-    repository: teamRepositoryOptionSchema,
-    laneId: z.string().trim().min(1),
-    laneIndex: z.number().int().positive(),
-    taskTitle: z.string().trim().min(1),
-    taskObjective: z.string().trim().min(1),
-    requestTitle: z.string().trim().min(1),
-    conventionalTitle: teamConventionalTitleSchema.nullable(),
-    planSummary: z.string().trim().min(1),
-    planDeliverable: z.string().trim().min(1),
-    branchName: z.string().trim().min(1),
-    baseBranch: z.string().trim().min(1),
-    worktreePath: z.string().trim().min(1),
-    implementationCommit: z.string().trim().min(1).nullable(),
-    conflictNote: z.string().trim().min(1).nullable(),
-    workflow: z.array(z.string().trim().min(1)).min(1),
-    handoffs: z.record(z.string(), teamRoleHandoffSchema.optional()),
-    handoffCounter: z.number().int().nonnegative(),
-    assignmentNumber: z.number().int().positive(),
-  }),
-});
+export type CoderRoleState = TeamRepositoryContext & {
+  teamName: string;
+  ownerName: string;
+  objective: string;
+  laneId: string;
+  laneIndex: number;
+  taskTitle: string;
+  taskObjective: string;
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
+  planSummary: string;
+  planDeliverable: string;
+  conflictNote: string | null;
+  workflow: string[];
+  handoffs: Partial<Record<string, TeamRoleHandoff>>;
+  handoffCounter: number;
+  assignmentNumber: number;
+};
 
-export type CoderRoleState = z.infer<typeof coderInputSchema>["state"];
-
-export type CoderRoleInput = z.infer<typeof coderInputSchema> & {
+export type CoderRoleInput = {
+  role: RolePrompt;
+  input: string;
+  state: CoderRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };
 
 export type CoderRoleOutput = z.infer<typeof coderOutputSchema>;
-type CoderPromptInput = z.infer<typeof coderInputSchema>;
+type CoderPromptInput = Omit<CoderRoleInput, "onEvent">;
 
 const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
   return [
@@ -108,11 +99,10 @@ export class CoderAgent {
 
   async run(input: CoderRoleInput): Promise<CoderRoleOutput> {
     const { onEvent, ...roleInput } = input;
-    const parsedInput = coderInputSchema.parse(roleInput);
 
     return this.executor({
-      worktreePath: parsedInput.state.worktreePath,
-      prompt: buildCoderPrompt(parsedInput),
+      worktreePath: roleInput.state.worktreePath,
+      prompt: buildCoderPrompt(roleInput),
       responseSchema: coderOutputSchema,
       codexHomePrefix: "lane",
       onEvent,

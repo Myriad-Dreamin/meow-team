@@ -1,9 +1,9 @@
 import { z } from "zod";
-export { teamRepositoryOptionSchema } from "@/lib/git/repository";
 import {
   CONVENTIONAL_TITLE_SCOPE_PATTERN,
   CONVENTIONAL_TITLE_TYPES,
 } from "@/lib/team/request-title";
+export { teamRepositoryOptionSchema } from "@/lib/git/repository";
 
 export const teamRoleDecisionSchema = z.enum(["continue", "approved", "needs_revision"]);
 

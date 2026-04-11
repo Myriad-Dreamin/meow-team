@@ -1,20 +1,18 @@
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
+import type { RolePrompt } from "@/lib/team/prompts";
 import {
+  CONVENTIONAL_TITLE_SCOPE_PATTERN,
   CONVENTIONAL_TITLE_TYPES,
   describeConventionalTitleMetadata,
+  type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
-import {
-  rolePromptSchema,
-  teamConventionalTitleSchema,
-  teamRepositoryOptionSchema,
-  teamRoleDecisionSchema,
-  teamRoleHandoffSchema,
-} from "@/lib/team/roles/schemas";
-import type { TeamCodexEvent } from "@/lib/team/types";
+import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
+import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
 
 const plannerTaskSchema = z.object({
   title: z.string().trim().min(1),
@@ -26,7 +24,10 @@ const plannerDispatchSchema = z
     planSummary: z.string().trim().min(1),
     plannerDeliverable: z.string().trim().min(1),
     branchPrefix: z.string().trim().min(1),
-    conventionalTitle: teamConventionalTitleSchema,
+    conventionalTitle: z.object({
+      type: z.enum(CONVENTIONAL_TITLE_TYPES),
+      scope: z.string().trim().regex(CONVENTIONAL_TITLE_SCOPE_PATTERN).nullable(),
+    }),
     tasks: z.array(plannerTaskSchema).min(1).max(teamConfig.dispatch.maxProposalCount),
   })
   .nullable();
@@ -40,33 +41,30 @@ const plannerOutputSchema = z.object({
   dispatch: plannerDispatchSchema,
 });
 
-const plannerInputSchema = z.object({
-  role: rolePromptSchema,
-  worktreePath: z.string().trim().min(1),
-  state: z.object({
-    teamName: z.string().trim().min(1),
-    ownerName: z.string().trim().min(1),
-    objective: z.string().trim().min(1),
-    selectedRepository: teamRepositoryOptionSchema.nullable(),
-    workflow: z.array(z.string().trim().min(1)).min(1),
-    handoffs: z.record(z.string(), teamRoleHandoffSchema.optional()),
-    handoffCounter: z.number().int().nonnegative(),
-    assignmentNumber: z.number().int().positive(),
-    requestTitle: z.string().trim().min(1).nullable(),
-    conventionalTitle: teamConventionalTitleSchema.nullable(),
-    requestText: z.string().trim().min(1).nullable(),
-    latestInput: z.string().trim().min(1).nullable(),
-  }),
-});
+export type PlannerRoleState = {
+  teamName: string;
+  ownerName: string;
+  objective: string;
+  selectedRepository: TeamRepositoryOption | null;
+  workflow: string[];
+  handoffs: Partial<Record<string, TeamRoleHandoff>>;
+  handoffCounter: number;
+  assignmentNumber: number;
+  requestTitle: string | null;
+  conventionalTitle: ConventionalTitleMetadata | null;
+  requestText: string | null;
+  latestInput: string | null;
+};
 
-export type PlannerRoleState = z.infer<typeof plannerInputSchema>["state"];
-
-export type PlannerRoleInput = z.infer<typeof plannerInputSchema> & {
+export type PlannerRoleInput = {
+  role: RolePrompt;
+  worktreePath: string;
+  state: PlannerRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };
 
 export type PlannerRoleOutput = z.infer<typeof plannerOutputSchema>;
-type PlannerPromptInput = z.infer<typeof plannerInputSchema>;
+type PlannerPromptInput = Omit<PlannerRoleInput, "onEvent">;
 
 const buildLocalSkillReference = (): string => {
   return [
@@ -125,7 +123,7 @@ const buildPlannerPrompt = ({ role, state }: PlannerPromptInput): string => {
     `Configured workflow: ${state.workflow.join(" -> ")}`,
     `Current assignment number: ${state.assignmentNumber}.`,
     `Configured coding-review pool size: ${teamConfig.dispatch.workerCount}.`,
-    `Planner proposals are separate from the coding-review pool. The planner can create one or more proposals, then approved proposals are scheduled onto the shared coder/reviewer pool.`,
+    "Planner proposals are separate from the coding-review pool. The planner can create one or more proposals, then approved proposals are scheduled onto the shared coder/reviewer pool.",
     "Codex skill context:",
     buildLocalSkillReference(),
     "OpenSpec context:",
@@ -158,11 +156,10 @@ export class PlannerAgent {
 
   async run(input: PlannerRoleInput): Promise<PlannerRoleOutput> {
     const { onEvent, ...roleInput } = input;
-    const parsedInput = plannerInputSchema.parse(roleInput);
 
     return this.executor({
-      worktreePath: parsedInput.worktreePath,
-      prompt: buildPlannerPrompt(parsedInput),
+      worktreePath: roleInput.worktreePath,
+      prompt: buildPlannerPrompt(roleInput),
       responseSchema: plannerOutputSchema,
       codexHomePrefix: "planner",
       onEvent,
