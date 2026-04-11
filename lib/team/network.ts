@@ -547,7 +547,9 @@ const generateRequestMetadata = async ({
 
   return {
     requestTitle: normalizeRequestTitle(generatedTitleResponse.title),
-    conventionalTitle: normalizeConventionalTitleMetadata(generatedTitleResponse.conventionalTitle),
+    conventionalTitle: tasks?.length
+      ? normalizeConventionalTitleMetadata(generatedTitleResponse.conventionalTitle)
+      : null,
   };
 };
 

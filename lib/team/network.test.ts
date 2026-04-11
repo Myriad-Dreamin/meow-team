@@ -403,6 +403,134 @@ describe.sequential("runTeam", () => {
     expect(thread?.results).toHaveLength(1);
   });
 
+  it("regenerates conventional metadata after planning even if the initial title pass returns one", async () => {
+    findConfiguredRepositoryMock.mockResolvedValue(repository);
+    const callOrder: string[] = [];
+
+    const executorMock = vi.fn(async () => {
+      throw new Error("executor should not be called");
+    });
+    const executor = executorMock as unknown as TeamRoleDependencies["executor"];
+
+    const requestTitleAgentMock = {
+      run: vi.fn(async (input: RequestTitleAgentArgs[0]) => {
+        callOrder.push(input.tasks?.length ? "request-title:metadata" : "request-title:initial");
+
+        if (!input.tasks?.length) {
+          return {
+            title: "Dispatch Coordination",
+            conventionalTitle: {
+              type: "fix" as const,
+              scope: "stale/scope",
+            },
+          };
+        }
+
+        expect(input.tasks).toEqual([
+          {
+            title: "Stabilize dispatch flow",
+            objective: "Inject role dependencies into the scheduler.",
+          },
+        ]);
+
+        return {
+          title: "Dispatch Coordination",
+          conventionalTitle: {
+            type: "dev" as const,
+            scope: "dispatch/coordination",
+          },
+        };
+      }),
+    };
+    const plannerAgentMock = {
+      run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        callOrder.push("planner");
+        expect(input.state.requestTitle).toBe("Dispatch Coordination");
+        expect(input.state.conventionalTitle).toBeNull();
+        expect(input.state.selectedRepository).toEqual(repository);
+
+        return {
+          handoff: {
+            summary: "Planner summary",
+            deliverable: "Planner deliverable",
+            decision: "continue" as const,
+          },
+          dispatch: {
+            planSummary: "Plan summary",
+            plannerDeliverable: "Plan deliverable",
+            branchPrefix: "dispatch-coordination",
+            tasks: [
+              {
+                title: "Stabilize dispatch flow",
+                objective: "Inject role dependencies into the scheduler.",
+              },
+            ],
+          },
+        };
+      }),
+    };
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
+      dependencies: {
+        executor,
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+      },
+      persistState: persistStateMock,
+    });
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
+      input: "Ship reliable dispatch coordination.",
+      repositoryId: repository.id,
+      threadId: "thread-stale-conventional-title",
+    });
+    await persistTeamRunState(env, initialState);
+    const result = await runTeam(env, initialState);
+
+    expect(callOrder).toEqual(["request-title:initial", "planner", "request-title:metadata"]);
+    expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(2);
+    expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
+    expect(createPlannerDispatchAssignmentMock).toHaveBeenCalledWith({
+      threadId: "thread-stale-conventional-title",
+      assignmentNumber: 1,
+      repository,
+      requestTitle: "dev(dispatch/coordination): stabilize dispatch flow",
+      conventionalTitle: {
+        type: "dev",
+        scope: "dispatch/coordination",
+      },
+      requestText: "Ship reliable dispatch coordination.",
+      plannerSummary: "Plan summary",
+      plannerDeliverable: "Plan deliverable",
+      branchPrefix: "dispatch-coordination",
+      tasks: [
+        {
+          title: "Stabilize dispatch flow",
+          objective: "Inject role dependencies into the scheduler.",
+        },
+      ],
+      deleteExistingBranches: undefined,
+    });
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "init",
+      "planning",
+      "metadata-generation",
+      "reviewing",
+      "completed",
+    ]);
+    expect(result?.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+
+    const thread = await getTeamThreadRecord(
+      teamConfig.storage.threadFile,
+      "thread-stale-conventional-title",
+    );
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+    expect(thread?.data.conventionalTitle).toEqual({
+      type: "dev",
+      scope: "dispatch/coordination",
+    });
+  });
+
   it("reuses a provided title and skips request-title generation when dispatch is blocked", async () => {
     const executorMock = vi.fn(async () => {
       throw new Error("executor should not be called");
