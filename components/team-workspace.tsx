@@ -183,8 +183,6 @@ export function TeamWorkspace({
 
   return (
     <section className="workspace-shell">
-      <TeamStatusBar />
-
       <aside className="workspace-sidebar">
         <div className="workspace-sidebar-header">
           <h2>Harness Workspace</h2>
@@ -314,6 +312,8 @@ export function TeamWorkspace({
           )}
         </div>
       </div>
+
+      <TeamStatusBar />
     </section>
   );
 }

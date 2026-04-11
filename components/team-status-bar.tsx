@@ -188,67 +188,59 @@ export function TeamStatusBar() {
         : snapshot
           ? formatTimestamp(snapshot.sampledAt)
           : "Waiting for first sample.";
+  const cpuSummary =
+    snapshot === null
+      ? "--"
+      : snapshot.host.cpuPercent === null
+        ? "Sampling..."
+        : `${snapshot.host.cpuPercent.toFixed(1)}%`;
+  const memorySummary =
+    snapshot === null
+      ? "--"
+      : `${snapshot.host.memoryPercent.toFixed(1)}% • ${formatBytes(snapshot.host.usedMemoryBytes)} / ${formatBytes(snapshot.host.totalMemoryBytes)}`;
 
   return (
-    <section className="workspace-status-bar">
-      <div className="workspace-status-section">
+    <section aria-label="Workspace status" className="workspace-status-bar">
+      <div className="workspace-status-group">
         <p className="workspace-status-label">Workspace</p>
-        <div className="workspace-status-row">
-          <div className="workspace-status-total">
-            <span className="workspace-status-total-value">
-              {activeThreadCount === null ? "--" : activeThreadCount}
-            </span>
-            <div>
-              <p className="workspace-status-total-label">Active Threads</p>
-              <p className="workspace-status-note">
-                {livingThreadCount === null
-                  ? statusNote
-                  : `${livingThreadCount} living thread${livingThreadCount === 1 ? "" : "s"} tracked`}
-              </p>
-            </div>
-          </div>
-
-          <div className="workspace-status-lane-list">
-            {laneTotals.length > 0 ? (
-              laneTotals.map((item) => (
-                <span className={`status-pill ${item.className}`} key={item.key}>
-                  {item.label} {item.value}
-                </span>
-              ))
-            ) : (
-              <span className="workspace-status-note">
-                {activeThreadCount && activeThreadCount > 0 ? "Planning only." : "No active lanes."}
+        <div className="workspace-status-inline-metric">
+          <span className="workspace-status-inline-value">
+            {activeThreadCount === null ? "--" : activeThreadCount}
+          </span>
+          <span>active</span>
+        </div>
+        <div className="workspace-status-inline-metric">
+          <span className="workspace-status-inline-value">
+            {livingThreadCount === null ? "--" : livingThreadCount}
+          </span>
+          <span>living</span>
+        </div>
+        <div className="workspace-status-lane-list">
+          {laneTotals.length > 0 ? (
+            laneTotals.map((item) => (
+              <span className={`status-pill ${item.className}`} key={item.key}>
+                {item.label} {item.value}
               </span>
-            )}
-          </div>
+            ))
+          ) : (
+            <span className="workspace-status-note">
+              {activeThreadCount && activeThreadCount > 0 ? "Planning only." : "No active lanes."}
+            </span>
+          )}
         </div>
       </div>
 
-      <div className="workspace-status-section workspace-status-section-right">
+      <div className="workspace-status-group workspace-status-group-right">
         <p className="workspace-status-label">Host</p>
-        <div className="workspace-status-row workspace-status-row-right">
-          <div className="workspace-status-metric">
-            <span className="workspace-status-metric-label">CPU</span>
-            <span className="workspace-status-metric-value">
-              {snapshot === null
-                ? "--"
-                : snapshot.host.cpuPercent === null
-                  ? "Sampling..."
-                  : `${snapshot.host.cpuPercent.toFixed(1)}%`}
-            </span>
-          </div>
-
-          <div className="workspace-status-metric">
-            <span className="workspace-status-metric-label">Memory</span>
-            <span className="workspace-status-metric-value">
-              {snapshot === null
-                ? "--"
-                : `${snapshot.host.memoryPercent.toFixed(1)}% • ${formatBytes(snapshot.host.usedMemoryBytes)} / ${formatBytes(snapshot.host.totalMemoryBytes)}`}
-            </span>
-          </div>
-
-          <p className="workspace-status-note">{statusNote}</p>
+        <div className="workspace-status-inline-metric">
+          <span className="workspace-status-inline-key">CPU</span>
+          <span className="workspace-status-inline-value">{cpuSummary}</span>
         </div>
+        <div className="workspace-status-inline-metric">
+          <span className="workspace-status-inline-key">Memory</span>
+          <span className="workspace-status-inline-value">{memorySummary}</span>
+        </div>
+        <p className="workspace-status-note">{statusNote}</p>
       </div>
     </section>
   );
