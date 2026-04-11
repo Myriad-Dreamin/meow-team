@@ -517,7 +517,7 @@ export const resolveGitHubPushRemote = async ({
     remoteName,
   ]);
   const repositoryUrl =
-    normalizeGitHubRepositoryUrl(fetchUrl) ?? normalizeGitHubRepositoryUrl(pushUrl);
+    normalizeGitHubRepositoryUrl(pushUrl) ?? normalizeGitHubRepositoryUrl(fetchUrl);
 
   if (!repositoryUrl) {
     throw new Error(

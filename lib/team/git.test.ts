@@ -215,6 +215,35 @@ describe("resolveGitHubPushRemote", () => {
       repositoryUrl: "https://github.com/example/meow-team",
     });
   });
+
+  it("prefers the push URL when fetch and push point at different GitHub repositories", async () => {
+    const repositoryPath = await createRepository();
+
+    await runGit(repositoryPath, [
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/upstream-repository.git",
+    ]);
+    await runGit(repositoryPath, [
+      "remote",
+      "set-url",
+      "--push",
+      "origin",
+      "git@github.com:example/fork-repository.git",
+    ]);
+
+    await expect(
+      resolveGitHubPushRemote({
+        repositoryPath,
+      }),
+    ).resolves.toEqual({
+      remoteName: "origin",
+      fetchUrl: "https://github.com/example/upstream-repository.git",
+      pushUrl: "git@github.com:example/fork-repository.git",
+      repositoryUrl: "https://github.com/example/fork-repository",
+    });
+  });
 });
 
 describe("pushLaneBranch", () => {
