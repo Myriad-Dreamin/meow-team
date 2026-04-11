@@ -46,9 +46,9 @@ jobs:
             bot
             ignore-semantic-pull-request
       - uses: marocchino/sticky-pull-request-comment@v2
-        # When the previous steps fails, the workflow would stop. By adding this
-        # condition you can continue the execution with the populated error message.
-        if: always() && (steps.lint_pr_title.outputs.error_message != null)
+        # When the previous step fails, keep running so the sticky comment can
+        # report the semantic title error.
+        if: ${{ always() && steps.lint_pr_title.outcome == 'failure' }}
         with:
           header: pr-title-lint-error
           message: |
@@ -63,7 +63,7 @@ jobs:
             ${{ steps.lint_pr_title.outputs.error_message }}
             ```
       # Delete a previous comment when the issue has been resolved
-      - if: ${{ steps.lint_pr_title.outputs.error_message == null }}
+      - if: ${{ always() && steps.lint_pr_title.outcome == 'success' }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: pr-title-lint-error

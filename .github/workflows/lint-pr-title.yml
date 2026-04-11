@@ -37,7 +37,7 @@ jobs:
             bot
             ignore-semantic-pull-request
       - uses: marocchino/sticky-pull-request-comment@v2
-        if: ${{ always() && (steps.lint_pr_title.outputs.error_message != null) }}
+        if: ${{ always() && steps.lint_pr_title.outcome == 'failure' }}
         with:
           header: pr-title-lint-error
           message: |
@@ -47,7 +47,7 @@ jobs:
             ```
             ${{ steps.lint_pr_title.outputs.error_message }}
             ```
-      - if: ${{ steps.lint_pr_title.outputs.error_message == null }}
+      - if: ${{ always() && steps.lint_pr_title.outcome == 'success' }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: pr-title-lint-error
