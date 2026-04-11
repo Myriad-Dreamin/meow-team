@@ -17,4 +17,7 @@ Shared expectations:
 - Use repo-local skills from `.codex/skills` when they fit, especially the
   OpenSpec skills.
 - Use `pnpm` for validation and package commands.
+- Reviewer suggestions must include either a failing PoC test artifact or a
+  reviewer todo artifact. See `references/lanes.md` for the detailed
+  contract.
 - Keep final outputs concrete and structured for the harness to persist.

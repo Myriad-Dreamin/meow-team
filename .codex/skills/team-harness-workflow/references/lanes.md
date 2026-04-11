@@ -23,5 +23,19 @@ Reviewer lane guidance:
   validation.
 - Approve only when the branch is genuinely ready for machine review
   completion.
+- When you give any suggestion or request changes, include one concrete
+  follow-up artifact with the feedback.
+- Create or update a failing Proof of Concept test that reproduces the issue
+  for the coder to fix. Mock filesystem, network, and other external
+  dependencies with Vitest, for example via `vi.mock`, so the test runs in
+  isolation without side effects. Create a reusable mock class or mock module
+  and share it across tests when it is reusable.
+- If a meaningful failing test is not practical, create a reviewer todo
+  artifact for the coder. Prefer adding an inline code comment near the
+  affected code that clearly describes the required change.
+- If the code should not be edited, for example because it is an external
+  library, configuration, or an unresolved question, add a todo item to the
+  root `TODO.md` with a clear description and a link to the relevant code or
+  issue.
 - If approving, provide a short pull request title and summary suitable for the
   local CI artifact.

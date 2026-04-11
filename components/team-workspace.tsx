@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
+import { TeamStatusBar } from "@/components/team-status-bar";
 import { ThreadDetailPanel } from "@/components/thread-detail-panel";
 import {
   describeThreadProgress,
@@ -182,14 +183,11 @@ export function TeamWorkspace({
 
   return (
     <section className="workspace-shell">
+      <TeamStatusBar />
+
       <aside className="workspace-sidebar">
         <div className="workspace-sidebar-header">
-          <p className="eyebrow">Editor View</p>
           <h2>Harness Workspace</h2>
-          <p className="section-copy">
-            Use the left tabs like an editor explorer: start a new run, then reopen any living
-            thread to recover its stored planning history and current request-group state.
-          </p>
         </div>
 
         <div className="workspace-nav">

@@ -35,6 +35,7 @@ import {
   materializeAssignmentProposals,
 } from "@/lib/team/openspec";
 import { loadRolePrompt, type RolePrompt } from "@/lib/team/prompts";
+import { buildReviewerExecutionRules } from "@/lib/team/reviewer-guidance";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type {
   TeamDispatchAssignment,
@@ -349,12 +350,12 @@ const buildLanePrompt = ({
     `Execution rules:`,
     `- Operate only inside the dedicated worktree and branch for this lane.`,
     `- Use Codex CLI native repository tools and shell access to inspect, edit, and validate work.`,
-    role.id === "reviewer"
-      ? `- Treat missing concrete branch output as blocking; do not approve conceptual guidance alone.`
-      : `- Produce concrete repository changes before finishing.`,
-    role.id === "reviewer"
-      ? `- Approve only when the implementation is genuinely review-ready.`
-      : `- Finish with decision "continue" after implementation exists for review.`,
+    ...(role.id === "reviewer"
+      ? buildReviewerExecutionRules().map((rule) => `- ${rule}`)
+      : [
+          `- Produce concrete repository changes before finishing.`,
+          `- Finish with decision "continue" after implementation exists for review.`,
+        ]),
     `Final response requirements:`,
     `- Your final response must match the provided JSON schema exactly.`,
     `- Put the concise handoff in "summary" and the detailed notes in "deliverable".`,
