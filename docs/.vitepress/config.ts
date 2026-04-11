@@ -45,6 +45,10 @@ const docsConfig = {
         link: "/notification",
       },
       {
+        text: "Roadmaps",
+        link: "/roadmap/",
+      },
+      {
         text: "API Guide",
         link: "/api",
       },
@@ -65,6 +69,25 @@ const docsConfig = {
             {
               text: "Desktop Notifications",
               link: "/notification",
+            },
+          ],
+        },
+      ],
+      "/roadmap/": [
+        {
+          text: "Roadmaps",
+          items: [
+            {
+              text: "Overview",
+              link: "/roadmap/",
+            },
+            {
+              text: "Owner Harness Team",
+              link: "/roadmap/owner-harness-team/",
+            },
+            {
+              text: "Workflow Orchestration",
+              link: "/roadmap/owner-harness-team/workflow-orchestration",
             },
           ],
         },
