@@ -66,7 +66,6 @@ const buildLocalSkillReference = (): string => {
     "- `.codex/skills/team-harness-workflow/SKILL.md`",
     "- `.codex/skills/team-harness-workflow/references/planner.md`",
     "- `.codex/skills/team-harness-workflow/references/lanes.md`",
-    "- `docs/roadmap/index.md`",
   ].join("\n");
 };
 
