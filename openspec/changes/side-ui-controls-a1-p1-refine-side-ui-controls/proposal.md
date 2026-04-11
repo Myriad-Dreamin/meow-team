@@ -11,9 +11,11 @@ Create a single implementation proposal that updates the workspace shell navigat
 ## Capabilities
 
 ### New Capabilities
+
 - `side-ui-controls-a1-p1-refine-side-ui-controls`: Create a single implementation proposal that updates the workspace shell navigation and status bar: move `Run Team` to an icon-only `+` beside `Living Threads`, add a `Settings` tab opened from a gear icon in the status bar, relocate desktop alerts controls into that tab, remove redundant editor/status labels, and keep existing thread/status behavior intact.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

@@ -5,6 +5,11 @@ import type { TeamStatusSnapshotResponse } from "@/lib/team/status";
 
 type RefreshState = "loading" | "live" | "stale" | "error";
 
+type TeamStatusBarProps = {
+  isSettingsSelected: boolean;
+  onSelectSettings: () => void;
+};
+
 const POLL_INTERVAL_MS = 1000;
 
 const laneStatusItems = [
@@ -130,7 +135,30 @@ const formatTimestamp = (value: string): string => {
   return `Updated ${timestamp.toLocaleTimeString()}`;
 };
 
-export function TeamStatusBar() {
+const SettingsIcon = ({ className }: { className?: string }) => (
+  <svg
+    aria-hidden="true"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth="1.75"
+    viewBox="0 0 20 20"
+  >
+    <circle cx="10" cy="10" r="3.25" />
+    <path d="M10 1.75v2.5" />
+    <path d="M10 15.75v2.5" />
+    <path d="m4.17 4.17 1.77 1.77" />
+    <path d="m14.06 14.06 1.77 1.77" />
+    <path d="M1.75 10h2.5" />
+    <path d="M15.75 10h2.5" />
+    <path d="m4.17 15.83 1.77-1.77" />
+    <path d="m14.06 5.94 1.77-1.77" />
+  </svg>
+);
+
+export function TeamStatusBar({ isSettingsSelected, onSelectSettings }: TeamStatusBarProps) {
   const [snapshot, setSnapshot] = useState<TeamStatusSnapshotResponse | null>(null);
   const [refreshState, setRefreshState] = useState<RefreshState>("loading");
 
@@ -206,7 +234,16 @@ export function TeamStatusBar() {
   return (
     <section aria-label="Workspace status" className="workspace-status-bar">
       <div className="workspace-status-group">
-        <p className="workspace-status-label">Workspace</p>
+        <button
+          aria-pressed={isSettingsSelected}
+          className={`workspace-icon-button workspace-status-icon-button ${isSettingsSelected ? "workspace-icon-button-active" : ""}`}
+          title="Settings"
+          type="button"
+          onClick={onSelectSettings}
+        >
+          <SettingsIcon className="workspace-icon" />
+          <span className="sr-only">Settings</span>
+        </button>
         <div className="workspace-status-inline-metric">
           <span className="workspace-status-inline-value">
             {activeThreadCount === null ? "--" : activeThreadCount}
@@ -235,7 +272,6 @@ export function TeamStatusBar() {
       </div>
 
       <div className="workspace-status-group workspace-status-group-right">
-        <p className="workspace-status-label">Host</p>
         <div className="workspace-status-inline-metric">
           <span className="workspace-status-inline-key">CPU</span>
           <span className="workspace-status-inline-value">{cpuSummary}</span>
