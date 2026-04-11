@@ -3,6 +3,11 @@ import path from "node:path";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type { TeamRunState } from "@/lib/team/network";
 import { resolveDisplayRequestTitle } from "@/lib/team/request-title";
+import {
+  createEmptyWorkerLaneCounts,
+  mergeWorkerLaneCounts,
+  type TeamWorkspaceStatusSnapshot,
+} from "@/lib/team/status";
 import type {
   TeamDispatchAssignment,
   TeamDispatchAssignmentStatus,
@@ -364,15 +369,7 @@ const countWorkerLanes = (lanes: TeamWorkerLaneRecord[]): TeamWorkerLaneCounts =
 
       return counts;
     },
-    {
-      idle: 0,
-      queued: 0,
-      coding: 0,
-      reviewing: 0,
-      awaitingHumanApproval: 0,
-      approved: 0,
-      failed: 0,
-    },
+    createEmptyWorkerLaneCounts(),
   );
 };
 
@@ -618,6 +615,35 @@ export const listTeamThreadSummaries = async (
     .map(summarizeThread)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     .slice(0, limit);
+};
+
+export const getTeamWorkspaceStatusSnapshot = async (
+  threadFile: string,
+): Promise<TeamWorkspaceStatusSnapshot> => {
+  const storePath = resolveStorePath(threadFile);
+  const store = await readThreadStore(storePath);
+
+  return Object.values(store.threads).reduce<TeamWorkspaceStatusSnapshot>(
+    (snapshot, storedThread) => {
+      const summary = summarizeThread(storedThread);
+
+      snapshot.livingThreadCount += 1;
+
+      if (isTerminalThreadStatus(summary.status)) {
+        return snapshot;
+      }
+
+      snapshot.activeThreadCount += 1;
+      snapshot.laneCounts = mergeWorkerLaneCounts(snapshot.laneCounts, summary.workerCounts);
+
+      return snapshot;
+    },
+    {
+      activeThreadCount: 0,
+      livingThreadCount: 0,
+      laneCounts: createEmptyWorkerLaneCounts(),
+    },
+  );
 };
 
 export const getTeamThreadRecord = async (

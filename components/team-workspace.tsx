@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
+import { TeamStatusBar } from "@/components/team-status-bar";
 import { ThreadDetailPanel } from "@/components/thread-detail-panel";
 import {
   describeThreadProgress,
@@ -182,6 +183,8 @@ export function TeamWorkspace({
 
   return (
     <section className="workspace-shell">
+      <TeamStatusBar />
+
       <aside className="workspace-sidebar">
         <div className="workspace-sidebar-header">
           <h2>Harness Workspace</h2>
