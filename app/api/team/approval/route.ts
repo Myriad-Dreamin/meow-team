@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { approveLaneProposal } from "@/lib/team/dispatch";
+import { approveLaneProposal, approveLanePullRequest } from "@/lib/team/dispatch";
 
 export const runtime = "nodejs";
 
@@ -8,12 +8,17 @@ const approveLaneSchema = z.object({
   threadId: z.string().trim().min(1),
   assignmentNumber: z.number().int().positive(),
   laneId: z.string().trim().min(1),
+  target: z.enum(["proposal", "pull_request"]).optional(),
 });
 
 export async function POST(request: Request) {
   try {
     const body = approveLaneSchema.parse(await request.json());
-    await approveLaneProposal(body);
+    if (body.target === "pull_request") {
+      await approveLanePullRequest(body);
+    } else {
+      await approveLaneProposal(body);
+    }
 
     return NextResponse.json({
       ok: true,

@@ -9,6 +9,7 @@ import {
   formatFeedbackLabel,
   formatThreadId,
   formatTimestamp,
+  getLaneApprovalAction,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
   getLaneStatusClassName,
@@ -18,6 +19,7 @@ import {
 } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamHumanFeedbackScope } from "@/lib/team/types";
+import type { LaneApprovalAction } from "@/components/thread-view-utils";
 
 type ThreadStatusBoardProps = {
   initialThreads: TeamThreadSummary[];
@@ -99,7 +101,12 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
     };
   }, []);
 
-  const handleApprove = (threadId: string, assignmentNumber: number, laneId: string) => {
+  const handleApprove = (
+    threadId: string,
+    assignmentNumber: number,
+    laneId: string,
+    approvalAction: LaneApprovalAction,
+  ) => {
     const nextApprovalKey = `${threadId}:${assignmentNumber}:${laneId}`;
     startTransition(() => {
       setApprovalKey(nextApprovalKey);
@@ -114,6 +121,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
               threadId,
               assignmentNumber,
               laneId,
+              target: approvalAction.target,
             }),
           });
 
@@ -124,17 +132,15 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
             const message =
               isRecord(payload) && typeof payload.error === "string"
                 ? payload.error
-                : "Unable to approve this proposal.";
+                : approvalAction.errorFallback;
             throw new Error(message);
           }
 
           setThreads(await fetchThreads());
-          setActionNotice("Proposal approval recorded. The coding-review queue is refreshing.");
+          setActionNotice(approvalAction.successNotice);
           setRefreshError(null);
         } catch (error) {
-          setRefreshError(
-            error instanceof Error ? error.message : "Unable to approve this proposal.",
-          );
+          setRefreshError(error instanceof Error ? error.message : approvalAction.errorFallback);
         } finally {
           setApprovalKey((current) => (current === nextApprovalKey ? null : current));
         }
@@ -323,7 +329,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                       );
                       const isApproving = approvalKey === currentApprovalKey;
                       const isSendingFeedback = feedbackKey === laneFeedbackKey;
-                      const canApprove = lane.status === "awaiting_human_approval";
+                      const approvalAction = getLaneApprovalAction(lane);
                       const canSendLaneFeedback =
                         canRestart && lane.status !== "idle" && lane.status !== "failed";
                       const branchDisplay = getLaneBranchDisplay(lane);
@@ -416,21 +422,39 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                           {lane.pullRequest ? (
                             <div className="lane-pr-strip">
                               <span>{pullRequestStatusLabels[lane.pullRequest.status]}</span>
-                              <span>{lane.pullRequest.title}</span>
+                              {lane.pullRequest.url ? (
+                                <a
+                                  className="lane-meta-link"
+                                  href={lane.pullRequest.url}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  {lane.pullRequest.title}
+                                </a>
+                              ) : (
+                                <span>{lane.pullRequest.title}</span>
+                              )}
                               <span>{formatTimestamp(lane.pullRequest.updatedAt)}</span>
                             </div>
                           ) : null}
 
-                          {canApprove ? (
+                          {approvalAction ? (
                             <button
                               className="secondary-button"
                               type="button"
                               disabled={isApproving}
                               onClick={() =>
-                                handleApprove(thread.threadId, thread.assignmentNumber, lane.laneId)
+                                handleApprove(
+                                  thread.threadId,
+                                  thread.assignmentNumber,
+                                  lane.laneId,
+                                  approvalAction,
+                                )
                               }
                             >
-                              {isApproving ? "Recording approval..." : "Approve Proposal"}
+                              {isApproving
+                                ? approvalAction.pendingLabel
+                                : approvalAction.buttonLabel}
                             </button>
                           ) : null}
 

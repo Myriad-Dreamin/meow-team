@@ -18,10 +18,18 @@ export const threadStatusLabels: Record<TeamThreadStatus, string> = {
 
 export const pullRequestStatusLabels: Record<TeamPullRequestStatus, string> = {
   draft: "Draft PR",
-  awaiting_human_approval: "Awaiting Approval",
-  approved: "Machine Reviewed",
+  awaiting_human_approval: "Awaiting Final Approval",
+  approved: "GitHub PR Ready",
   conflict: "Conflict",
-  failed: "Failed",
+  failed: "Finalization Failed",
+};
+
+export type LaneApprovalAction = {
+  target: "proposal" | "pull_request";
+  buttonLabel: string;
+  pendingLabel: string;
+  successNotice: string;
+  errorFallback: string;
 };
 
 export const formatTimestamp = (value: string | null): string => {
@@ -137,10 +145,64 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
   }
 
   if (lane.status === "approved") {
+    if (lane.pullRequest?.status === "awaiting_human_approval") {
+      return lane.pullRequest.humanApprovedAt
+        ? "Final human approval was recorded. The system is archiving this OpenSpec change and refreshing the GitHub PR."
+        : "Coding and machine review are complete. Human approval can now archive this OpenSpec change and open or refresh the GitHub PR.";
+    }
+
+    if (lane.pullRequest?.status === "approved") {
+      return "Human approval archived this lane's OpenSpec change and refreshed the GitHub PR for merge into the base branch.";
+    }
+
+    if (lane.pullRequest?.status === "failed") {
+      return "Machine review is complete, but final approval failed before the OpenSpec archive and GitHub PR delivery could finish.";
+    }
+
     return "Coding and machine review are complete. Human feedback can start a fresh planning pass from this proposal or the whole request group.";
   }
 
   return lane.latestActivity ?? "Proposal work is active.";
+};
+
+export const getLaneApprovalAction = (lane: TeamWorkerLaneRecord): LaneApprovalAction | null => {
+  if (lane.status === "awaiting_human_approval") {
+    return {
+      target: "proposal",
+      buttonLabel: "Approve Proposal",
+      pendingLabel: "Queueing proposal...",
+      successNotice: "Proposal approval recorded. The coding-review queue is refreshing.",
+      errorFallback: "Unable to approve this proposal.",
+    };
+  }
+
+  if (lane.status !== "approved" || !lane.pullRequest) {
+    return null;
+  }
+
+  if (lane.pullRequest.status === "awaiting_human_approval" && !lane.pullRequest.humanApprovedAt) {
+    return {
+      target: "pull_request",
+      buttonLabel: "Approve and Open PR",
+      pendingLabel: "Archiving and opening PR...",
+      successNotice:
+        "Final approval recorded. The OpenSpec change was archived and the GitHub PR was refreshed.",
+      errorFallback: "Unable to finalize this reviewed branch.",
+    };
+  }
+
+  if (lane.pullRequest.status === "failed") {
+    return {
+      target: "pull_request",
+      buttonLabel: "Retry Finalization",
+      pendingLabel: "Retrying finalization...",
+      successNotice:
+        "Finalization retried. The OpenSpec change was archived and the GitHub PR was refreshed.",
+      errorFallback: "Unable to retry GitHub PR finalization.",
+    };
+  }
+
+  return null;
 };
 
 export const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
@@ -156,7 +218,7 @@ export const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
     case "awaiting_human_approval":
       return "Awaiting Approval";
     case "approved":
-      return "Machine Reviewed";
+      return lane.pullRequest?.status === "approved" ? "Completed" : "Machine Reviewed";
     case "failed":
       return "Failed";
   }
@@ -165,6 +227,10 @@ export const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
 export const getLaneStatusClassName = (lane: TeamWorkerLaneRecord): string => {
   if (lane.status === "queued" && lane.pullRequest?.status === "conflict") {
     return "status-conflict";
+  }
+
+  if (lane.status === "approved" && lane.pullRequest?.status === "approved") {
+    return "status-completed";
   }
 
   switch (lane.status) {

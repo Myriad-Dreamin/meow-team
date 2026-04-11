@@ -40,14 +40,13 @@ const createApprovalNotification = (
   thread: TeamThreadSummary,
   lane: TeamWorkerLaneRecord,
 ): ThreadAttentionNotification => {
-  const marker =
-    lane.approvalRequestedAt ??
-    lane.pullRequest?.humanApprovalRequestedAt ??
-    lane.queuedAt ??
-    lane.updatedAt;
+  const isFinalApprovalWait = lane.status === "approved";
+  const marker = isFinalApprovalWait
+    ? (lane.pullRequest?.humanApprovalRequestedAt ?? lane.updatedAt)
+    : (lane.approvalRequestedAt ?? lane.queuedAt ?? lane.updatedAt);
 
   return {
-    body: `${formatProposalLabel(lane)} is waiting for human approval in thread ${formatThreadId(thread.threadId)}.`,
+    body: `${formatProposalLabel(lane)} is waiting for ${isFinalApprovalWait ? "final human approval" : "human approval"} in thread ${formatThreadId(thread.threadId)}.`,
     fingerprint: buildLaneFingerprint(thread.threadId, lane, "awaiting_human_approval", marker),
     laneId: lane.laneId,
     reason: "awaiting_human_approval",
@@ -61,7 +60,7 @@ const createLaneFailureNotification = (
   thread: TeamThreadSummary,
   lane: TeamWorkerLaneRecord,
 ): ThreadAttentionNotification => {
-  const marker = lane.finishedAt ?? lane.updatedAt;
+  const marker = lane.status === "approved" ? lane.updatedAt : (lane.finishedAt ?? lane.updatedAt);
 
   return {
     body: `${formatProposalLabel(lane)} failed in thread ${formatThreadId(thread.threadId)}. ${summarizeFailureMessage(lane.lastError)}.`,
@@ -96,10 +95,20 @@ export const collectThreadAttentionNotifications = (
   const notifications: ThreadAttentionNotification[] = [];
 
   for (const thread of threads) {
-    const failedLanes = thread.workerLanes.filter((lane) => lane.status === "failed");
-    const approvalLanes = thread.workerLanes.filter(
-      (lane) => lane.status === "awaiting_human_approval",
+    const failedLanes = thread.workerLanes.filter(
+      (lane) => lane.status === "failed" || lane.pullRequest?.status === "failed",
     );
+    const approvalLanes = thread.workerLanes.filter((lane) => {
+      if (lane.status === "awaiting_human_approval") {
+        return true;
+      }
+
+      return (
+        lane.status === "approved" &&
+        lane.pullRequest?.status === "awaiting_human_approval" &&
+        !lane.pullRequest.humanApprovedAt
+      );
+    });
 
     for (const lane of approvalLanes) {
       notifications.push(createApprovalNotification(thread, lane));
