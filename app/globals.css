@@ -491,6 +491,8 @@ main {
 }
 
 .workspace-sidebar-header {
+  display: grid;
+  gap: 18px;
   padding: 24px 22px 20px;
   border-bottom: 1px solid var(--line);
 }
@@ -507,6 +509,94 @@ main {
 .workspace-sidebar-header h2 {
   margin-top: 8px;
   font-size: 2rem;
+}
+
+.workspace-notification-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(7, 18, 33, 0.68);
+}
+
+.workspace-notification-panel-enabled {
+  border-color: rgba(117, 229, 178, 0.28);
+  background:
+    radial-gradient(circle at top right, rgba(117, 229, 178, 0.12), transparent 34%),
+    rgba(7, 18, 33, 0.72);
+}
+
+.workspace-notification-panel-pending,
+.workspace-notification-panel-idle {
+  border-color: rgba(255, 201, 110, 0.22);
+}
+
+.workspace-notification-panel-blocked {
+  border-color: rgba(255, 143, 143, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(255, 143, 143, 0.1), transparent 34%),
+    rgba(25, 14, 21, 0.72);
+}
+
+.workspace-notification-panel-unsupported {
+  border-style: dashed;
+}
+
+.workspace-notification-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-notification-label,
+.workspace-notification-title,
+.workspace-notification-copy {
+  margin: 0;
+}
+
+.workspace-notification-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-notification-title {
+  margin-top: 6px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.workspace-notification-copy {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.workspace-notification-action {
+  justify-self: start;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(11, 27, 47, 0.9);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.workspace-notification-action:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.workspace-notification-action:disabled {
+  opacity: 0.72;
+  cursor: wait;
 }
 
 .workspace-nav {
@@ -1496,6 +1586,7 @@ main {
   .workspace-repository-group-head,
   .workspace-thread-tab-meta-row,
   .workspace-editor-header,
+  .workspace-notification-head,
   .thread-detail-hero,
   .thread-card-head,
   .lane-card-head {
@@ -1504,6 +1595,11 @@ main {
 
   .workspace-editor-meta {
     justify-content: flex-start;
+  }
+
+  .workspace-notification-action {
+    width: 100%;
+    justify-self: stretch;
   }
 
   .client-exception-page-shell {
