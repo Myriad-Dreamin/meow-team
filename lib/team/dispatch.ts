@@ -475,12 +475,14 @@ const createPullRequestRecord = ({
 };
 
 const createProposalLane = ({
+  threadId,
   laneIndex,
   task,
   branchPrefix,
   assignmentNumber,
   baseBranch,
 }: {
+  threadId: string;
   laneIndex: number;
   task: DispatchTask;
   branchPrefix: string;
@@ -491,6 +493,7 @@ const createProposalLane = ({
   const now = new Date().toISOString();
 
   const branchName = buildLaneBranchName({
+    threadId,
     branchPrefix,
     assignmentNumber,
     laneIndex,
@@ -573,6 +576,7 @@ export const createPlannerDispatchAssignment = async ({
     worktreeRoot: teamConfig.dispatch.worktreeRoot,
   });
   const canonicalBranchName = buildCanonicalBranchName({
+    threadId,
     branchPrefix,
     assignmentNumber,
   });
@@ -596,6 +600,7 @@ export const createPlannerDispatchAssignment = async ({
       workerCount: teamConfig.dispatch.workerCount,
       lanes: tasks.map((task, index) =>
         createProposalLane({
+          threadId,
           laneIndex: index + 1,
           task,
           branchPrefix,

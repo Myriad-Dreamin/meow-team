@@ -5,7 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildPlannerWorktreePath, getBranchHead, tryRebaseWorktreeBranch } from "@/lib/team/git";
+import {
+  buildCanonicalBranchName,
+  buildLaneBranchName,
+  buildPlannerWorktreePath,
+  getBranchHead,
+  tryRebaseWorktreeBranch,
+} from "@/lib/team/git";
 
 const execFileAsync = promisify(execFile);
 const temporaryDirectories = new Set<string>();
@@ -112,6 +118,47 @@ describe("buildPlannerWorktreePath", () => {
     expect(slashThreadPath).toBe("/tmp/worktrees/planner-7468726561642f616c706861-a1");
     expect(dashThreadPath).toBe("/tmp/worktrees/planner-7468726561642d616c706861-a1");
     expect(slashThreadPath).not.toBe(dashThreadPath);
+  });
+});
+
+describe("buildCanonicalBranchName", () => {
+  it("namespaces assignment branches by thread identity when prefixes repeat", () => {
+    const slashThreadBranch = buildCanonicalBranchName({
+      threadId: "thread/alpha",
+      branchPrefix: "parallel-worktrees",
+      assignmentNumber: 1,
+    });
+    const dashThreadBranch = buildCanonicalBranchName({
+      threadId: "thread-alpha",
+      branchPrefix: "parallel-worktrees",
+      assignmentNumber: 1,
+    });
+
+    expect(slashThreadBranch).toMatch(/^requests\/parallel-worktrees\/thread-alpha-/);
+    expect(slashThreadBranch).toMatch(/\/a1$/);
+    expect(dashThreadBranch).toMatch(/^requests\/parallel-worktrees\/thread-alpha-/);
+    expect(dashThreadBranch).toMatch(/\/a1$/);
+    expect(slashThreadBranch).not.toBe(dashThreadBranch);
+  });
+});
+
+describe("buildLaneBranchName", () => {
+  it("keeps lane branches stable for the same thread assignment", () => {
+    expect(
+      buildLaneBranchName({
+        threadId: "thread-alpha",
+        branchPrefix: "parallel-worktrees",
+        assignmentNumber: 1,
+        laneIndex: 2,
+      }),
+    ).toBe(
+      buildLaneBranchName({
+        threadId: "thread-alpha",
+        branchPrefix: "parallel-worktrees",
+        assignmentNumber: 1,
+        laneIndex: 2,
+      }),
+    );
   });
 });
 
