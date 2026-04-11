@@ -5,8 +5,8 @@
   "packageManager": "pnpm@10.16.1",
   "description": "Continuous Codex CLI engineering harness.",
   "scripts": {
-    "dev": "unset TURBOPACK; next dev --webpack",
-    "build": "unset TURBOPACK; next build --webpack",
+    "dev": "next dev --turbopack",
+    "build": "next build --turbopack",
     "start": "next start",
     "docs:dev": "node scripts/vitepress-runner.mjs dev",
     "docs:build": "node scripts/vitepress-runner.mjs build",

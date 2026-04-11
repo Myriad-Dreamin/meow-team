@@ -3,22 +3,25 @@ import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const rootDirectory = path.dirname(fileURLToPath(import.meta.url));
-const meowPromptWebpackLoader = path.join(
+const meowPromptLoader = path.join(
   rootDirectory,
   "packages",
   "meow-prompt",
-  "webpack-loader.cjs",
+  "turbopack-loader.cjs",
 );
 
 const nextConfig: NextConfig = {
-  webpack(config) {
-    config.module.rules.push({
-      test: /\.(prompt|template)\.md$/,
-      type: "javascript/auto",
-      use: [meowPromptWebpackLoader],
-    });
-
-    return config;
+  turbopack: {
+    rules: {
+      "*.prompt.md": {
+        loaders: [meowPromptLoader],
+        as: "*.js",
+      },
+      "*.template.md": {
+        loaders: [meowPromptLoader],
+        as: "*.js",
+      },
+    },
   },
 };
 
