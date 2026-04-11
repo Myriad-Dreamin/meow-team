@@ -22,7 +22,7 @@ export const teamConfig = defineTeamConfig({
     threadFile: "data/team-threads.json",
   },
   dispatch: {
-    workerCount: 3,
+    workerCount: 8,
     maxProposalCount: 6,
     branchPrefix: "team-dispatch",
     baseBranch: "main",
