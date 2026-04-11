@@ -1,4 +1,4 @@
-# live-status-a1-p1-add-live-workspace-status-bar Specification
+# workspace-status-bar Specification
 
 ## Purpose
 Define the live workspace status bar capability for the harness, including a
