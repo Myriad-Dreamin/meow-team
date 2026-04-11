@@ -26,18 +26,19 @@ notes, or any workflow that maps conventional-title scope to roadmap docs.
 ## Authoring Rules
 
 1. Read `docs/roadmap/index.md` before editing a roadmap topic.
-2. Keep roadmap index files focused on:
+2. User map request you to read and understand existing `openspec` to update roadmap docs, and also use `openspec` skills to create proposals according to maps.
+3. Keep roadmap index files focused on:
    - one `#` title
    - a brief note describing the roadmap and how its topics relate
    - concise design notes or philosophy
    - links to topic files
-3. Keep topic files focused on:
+4. Keep topic files focused on:
    - one `#` title
    - `##` sections for concrete feature/task themes
    - a final `## Related Specs` section
-4. When adding archived spec references, append Markdown bullet links inside
+5. When adding archived spec references, append Markdown bullet links inside
    `## Related Specs` and avoid duplicates.
-5. Keep prose in English.
+6. Keep prose in English.
 
 ## Expected Workflow
 
