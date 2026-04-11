@@ -1,9 +1,14 @@
 import { teamConfig } from "@/team.config";
 import { applyHandoff } from "@/lib/team/agent-helpers";
-import { createPlannerDispatchAssignment, ensurePendingDispatchWork } from "@/lib/team/dispatch";
+import {
+  createPlannerDispatchAssignment,
+  DispatchThreadCapacityError,
+  ensurePendingDispatchWork,
+} from "@/lib/team/dispatch";
 import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
 import {
   appendTeamExecutionStep,
+  countActiveDispatchThreads,
   getTeamThreadRecord,
   updateTeamThreadRecord,
   upsertTeamThreadRun,
@@ -284,6 +289,15 @@ export const runTeam = async ({
     throw new Error(
       "Selected repository is not available. Only repositories discovered from directories listed in team.config.ts can be used.",
     );
+  }
+
+  if (selectedRepository) {
+    const activeDispatchThreadCount = await countActiveDispatchThreads(
+      teamConfig.storage.threadFile,
+    );
+    if (activeDispatchThreadCount >= teamConfig.dispatch.workerCount) {
+      throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
+    }
   }
 
   const resolvedThreadId = threadId ?? crypto.randomUUID();

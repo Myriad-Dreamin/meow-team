@@ -5,7 +5,6 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
-  buildPlannerWorktreePath,
   commitWorktreeChanges,
   ensureBranchRef,
   ensureLaneWorktree,
@@ -365,8 +364,6 @@ export const buildProposalPath = (proposalChangeName: string): string => {
 };
 
 export const materializeAssignmentProposals = async ({
-  threadId,
-  assignmentNumber,
   repositoryPath,
   baseBranch,
   canonicalBranchName,
@@ -374,10 +371,9 @@ export const materializeAssignmentProposals = async ({
   plannerDeliverable,
   requestInput,
   worktreeRoot,
+  plannerWorktreePath,
   lanes,
 }: {
-  threadId: string;
-  assignmentNumber: number;
   repositoryPath: string;
   baseBranch: string;
   canonicalBranchName: string;
@@ -385,6 +381,7 @@ export const materializeAssignmentProposals = async ({
   plannerDeliverable: string | null;
   requestInput: string | null;
   worktreeRoot: string;
+  plannerWorktreePath: string;
   lanes: ProposalLane[];
 }): Promise<void> => {
   const activeLanes = lanes.filter(
@@ -410,22 +407,17 @@ export const materializeAssignmentProposals = async ({
     return;
   }
 
-  const stagingWorktreePath = buildPlannerWorktreePath({
-    worktreeRoot,
-    threadId,
-    assignmentNumber,
-  });
   await ensureLaneWorktree({
     repositoryPath,
     worktreeRoot,
-    worktreePath: stagingWorktreePath,
+    worktreePath: plannerWorktreePath,
     branchName: canonicalBranchName,
     startPoint: baseBranch,
   });
 
   for (const lane of activeLanes) {
     await ensureOpenSpecChange({
-      worktreePath: stagingWorktreePath,
+      worktreePath: plannerWorktreePath,
       proposalChangeName: lane.proposalChangeName,
     });
     await writeProposalArtifacts({
@@ -437,14 +429,14 @@ export const materializeAssignmentProposals = async ({
       plannerSummary,
       plannerDeliverable,
       requestInput,
-      workspacePath: stagingWorktreePath,
+      workspacePath: plannerWorktreePath,
       worktreeRoot,
     });
   }
 
-  if (await hasWorktreeChanges(stagingWorktreePath)) {
+  if (await hasWorktreeChanges(plannerWorktreePath)) {
     await commitWorktreeChanges({
-      worktreePath: stagingWorktreePath,
+      worktreePath: plannerWorktreePath,
       message: `planner: add openspec proposals for ${canonicalBranchName}`,
     });
   }

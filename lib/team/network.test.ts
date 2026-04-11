@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +42,7 @@ import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 
 type RequestTitleRoleArgs = Parameters<TeamRoleDependencies["requestTitleRole"]>;
 type PlannerRoleArgs = Parameters<TeamRoleDependencies["plannerRole"]>;
+const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 
 const repository: TeamRepositoryOption = {
   id: "repo-1",
@@ -54,10 +55,12 @@ const repository: TeamRepositoryOption = {
 
 describe.sequential("runTeam", () => {
   let originalThreadFile: string;
+  let originalWorkerCount: number;
   let tempDirectory: string;
 
   beforeEach(async () => {
     originalThreadFile = teamConfig.storage.threadFile;
+    originalWorkerCount = teamConfig.dispatch.workerCount;
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), "run-team-"));
     teamConfig.storage.threadFile = path.join(tempDirectory, "threads.json");
 
@@ -71,6 +74,7 @@ describe.sequential("runTeam", () => {
 
   afterEach(async () => {
     teamConfig.storage.threadFile = originalThreadFile;
+    teamConfig.dispatch.workerCount = originalWorkerCount;
     await rm(tempDirectory, {
       force: true,
       recursive: true,
@@ -257,5 +261,133 @@ describe.sequential("runTeam", () => {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-2");
     expect(thread?.data.requestTitle).toBe("Human Title");
     expect(thread?.data.handoffs.planner?.summary).toBe("Planner is waiting for a repository");
+  });
+
+  it("fails fast when all shared meow slots are already assigned to active threads", async () => {
+    teamConfig.dispatch.workerCount = 1;
+    findConfiguredRepositoryMock.mockResolvedValue(repository);
+
+    await writeFile(
+      teamConfig.storage.threadFile,
+      JSON.stringify(
+        {
+          threads: {
+            "active-thread": {
+              threadId: "active-thread",
+              data: {
+                teamId: teamConfig.id,
+                teamName: teamConfig.name,
+                ownerName: teamConfig.owner.name,
+                objective: teamConfig.owner.objective,
+                selectedRepository: repository,
+                workflow: ["planner", "coder", "reviewer"],
+                handoffs: {},
+                handoffCounter: 0,
+                assignmentNumber: 1,
+                requestTitle: "Existing request",
+                requestText: "Keep the current slot busy.",
+                latestInput: "Keep the current slot busy.",
+                forceReset: false,
+              },
+              results: [],
+              userMessages: [],
+              dispatchAssignments: [
+                {
+                  assignmentNumber: 1,
+                  status: "running",
+                  repository,
+                  requestTitle: "Existing request",
+                  requestText: "Keep the current slot busy.",
+                  requestedAt: FIXED_TIMESTAMP,
+                  startedAt: FIXED_TIMESTAMP,
+                  finishedAt: null,
+                  updatedAt: FIXED_TIMESTAMP,
+                  plannerSummary: "Existing summary",
+                  plannerDeliverable: "Existing deliverable",
+                  branchPrefix: "existing",
+                  canonicalBranchName: "requests/existing/a1",
+                  baseBranch: "main",
+                  threadSlot: 1,
+                  plannerWorktreePath: "/tmp/worktrees/meow-1",
+                  workerCount: 1,
+                  lanes: [
+                    {
+                      laneId: "lane-1",
+                      laneIndex: 1,
+                      status: "awaiting_human_approval",
+                      taskTitle: "Existing task",
+                      taskObjective: "Hold the shared slot.",
+                      proposalChangeName: "existing-change",
+                      proposalPath: "openspec/changes/existing-change",
+                      workerSlot: null,
+                      branchName: "requests/existing/a1-proposal-1",
+                      baseBranch: "main",
+                      worktreePath: null,
+                      latestImplementationCommit: null,
+                      pushedCommit: null,
+                      latestCoderHandoff: null,
+                      latestReviewerHandoff: null,
+                      latestDecision: null,
+                      latestCoderSummary: null,
+                      latestReviewerSummary: null,
+                      latestActivity: null,
+                      approvalRequestedAt: FIXED_TIMESTAMP,
+                      approvalGrantedAt: null,
+                      queuedAt: null,
+                      runCount: 0,
+                      revisionCount: 0,
+                      requeueReason: null,
+                      lastError: null,
+                      pullRequest: null,
+                      events: [],
+                      startedAt: null,
+                      finishedAt: null,
+                      updatedAt: FIXED_TIMESTAMP,
+                    },
+                  ],
+                  plannerNotes: [],
+                  humanFeedback: [],
+                  supersededAt: null,
+                  supersededReason: null,
+                },
+              ],
+              run: {
+                status: "running",
+                startedAt: FIXED_TIMESTAMP,
+                finishedAt: null,
+                lastError: null,
+              },
+              createdAt: FIXED_TIMESTAMP,
+              updatedAt: FIXED_TIMESTAMP,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const requestTitleRoleMock = vi.fn();
+    const plannerRoleMock = vi.fn();
+
+    await expect(
+      runTeam({
+        input: "Start another request.",
+        repositoryId: repository.id,
+        threadId: "thread-over-capacity",
+        dependencies: {
+          requestTitleRole:
+            requestTitleRoleMock as unknown as TeamRoleDependencies["requestTitleRole"],
+          plannerRole: plannerRoleMock as unknown as TeamRoleDependencies["plannerRole"],
+        },
+      }),
+    ).rejects.toThrow(
+      "All 1 shared meow worktree slot is already assigned to non-terminal threads.",
+    );
+
+    expect(requestTitleRoleMock).not.toHaveBeenCalled();
+    expect(plannerRoleMock).not.toHaveBeenCalled();
+    expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
   });
 });

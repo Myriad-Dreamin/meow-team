@@ -296,6 +296,8 @@ const normalizeDispatchAssignment = (
     requestTitle: assignment.requestTitle ?? null,
     requestText: assignment.requestText ?? null,
     canonicalBranchName: assignment.canonicalBranchName ?? null,
+    threadSlot: assignment.threadSlot ?? null,
+    plannerWorktreePath: assignment.plannerWorktreePath ?? null,
     lanes: assignment.lanes.map(normalizeWorkerLane),
     plannerNotes: assignment.plannerNotes ?? [],
     humanFeedback: assignment.humanFeedback ?? [],
@@ -779,6 +781,11 @@ export const threadHasActiveDispatchAssignment = async (
   return thread.dispatchAssignments.some(
     (assignment) => !isTerminalDispatchAssignmentStatus(assignment.status),
   );
+};
+
+export const countActiveDispatchThreads = async (threadFile: string): Promise<number> => {
+  const pendingAssignments = await listPendingDispatchAssignments(threadFile);
+  return new Set(pendingAssignments.map((pending) => pending.threadId)).size;
 };
 
 export const markTeamThreadFailed = async ({

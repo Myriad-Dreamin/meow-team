@@ -168,6 +168,8 @@ export type TeamDispatchAssignment = {
   branchPrefix: string | null;
   canonicalBranchName: string | null;
   baseBranch: string | null;
+  threadSlot?: number | null;
+  plannerWorktreePath?: string | null;
   workerCount: number;
   lanes: TeamWorkerLaneRecord[];
   plannerNotes: TeamPlannerNote[];
