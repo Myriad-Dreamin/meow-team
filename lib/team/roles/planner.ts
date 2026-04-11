@@ -34,72 +34,6 @@ const plannerOutputSchema = z.object({
   dispatch: plannerDispatchSchema,
 });
 
-const plannerOutputJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["handoff", "dispatch"],
-  properties: {
-    handoff: {
-      type: "object",
-      additionalProperties: false,
-      required: ["summary", "deliverable", "decision"],
-      properties: {
-        summary: {
-          type: "string",
-          minLength: 1,
-        },
-        deliverable: {
-          type: "string",
-          minLength: 1,
-        },
-        decision: {
-          type: "string",
-          enum: ["continue", "approved", "needs_revision"],
-        },
-      },
-    },
-    dispatch: {
-      type: ["object", "null"],
-      additionalProperties: false,
-      required: ["planSummary", "plannerDeliverable", "branchPrefix", "tasks"],
-      properties: {
-        planSummary: {
-          type: "string",
-          minLength: 1,
-        },
-        plannerDeliverable: {
-          type: "string",
-          minLength: 1,
-        },
-        branchPrefix: {
-          type: "string",
-          minLength: 1,
-        },
-        tasks: {
-          type: "array",
-          minItems: 1,
-          maxItems: teamConfig.dispatch.maxProposalCount,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["title", "objective"],
-            properties: {
-              title: {
-                type: "string",
-                minLength: 1,
-              },
-              objective: {
-                type: "string",
-                minLength: 1,
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const;
-
 const plannerInputSchema = z.object({
   role: rolePromptSchema,
   worktreePath: z.string().trim().min(1),
@@ -212,7 +146,6 @@ export const runPlannerRole = async (
     worktreePath: parsedInput.worktreePath,
     prompt: buildPlannerPrompt(parsedInput),
     responseSchema: plannerOutputSchema,
-    outputJsonSchema: plannerOutputJsonSchema,
     codexHomePrefix: "planner",
     onEvent,
   });

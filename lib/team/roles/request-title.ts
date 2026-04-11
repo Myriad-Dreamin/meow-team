@@ -8,21 +8,8 @@ const requestTitleInputSchema = z.object({
 });
 
 const requestTitleOutputSchema = z.object({
-  title: z.string().trim().min(1),
+  title: z.string().trim().min(1).max(80),
 });
-
-const requestTitleOutputJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["title"],
-  properties: {
-    title: {
-      type: "string",
-      minLength: 1,
-      maxLength: 80,
-    },
-  },
-} as const;
 
 export type RequestTitleRoleInput = z.infer<typeof requestTitleInputSchema>;
 export type RequestTitleRoleOutput = z.infer<typeof requestTitleOutputSchema>;
@@ -57,7 +44,6 @@ export const runRequestTitleRole = async (
     worktreePath: parsedInput.worktreePath,
     prompt: buildRequestTitlePrompt(parsedInput),
     responseSchema: requestTitleOutputSchema,
-    outputJsonSchema: requestTitleOutputJsonSchema,
     codexHomePrefix: "request-title",
   });
 };

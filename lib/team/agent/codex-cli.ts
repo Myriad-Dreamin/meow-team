@@ -221,14 +221,12 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   worktreePath,
   prompt,
   responseSchema,
-  outputJsonSchema,
   codexHomePrefix,
   onEvent,
 }: {
   worktreePath: string;
   prompt: string;
   responseSchema: TSchema;
-  outputJsonSchema: object;
   codexHomePrefix: string;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<z.infer<TSchema>> => {
@@ -242,6 +240,7 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   await prepareCodexHome({
     codexHome,
   });
+  const outputJsonSchema = z.toJSONSchema(responseSchema);
   await fs.writeFile(schemaPath, JSON.stringify(outputJsonSchema, null, 2), "utf8");
 
   try {
@@ -433,40 +432,6 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   }
 };
 
-const codexLaneOutputJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "summary",
-    "deliverable",
-    "decision",
-    "pullRequestTitle",
-    "pullRequestSummary",
-  ],
-  properties: {
-    summary: {
-      type: "string",
-      minLength: 1,
-    },
-    deliverable: {
-      type: "string",
-      minLength: 1,
-    },
-    decision: {
-      type: "string",
-      enum: ["continue", "approved", "needs_revision"],
-    },
-    pullRequestTitle: {
-      type: ["string", "null"],
-      minLength: 1,
-    },
-    pullRequestSummary: {
-      type: ["string", "null"],
-      minLength: 1,
-    },
-  },
-} as const;
-
 export const runCodexLaneRole = async ({
   worktreePath,
   prompt,
@@ -480,7 +445,6 @@ export const runCodexLaneRole = async ({
     worktreePath,
     prompt,
     responseSchema: codexLaneResponseSchema,
-    outputJsonSchema: codexLaneOutputJsonSchema,
     codexHomePrefix: "lane",
     onEvent,
   });

@@ -18,40 +18,6 @@ const reviewerOutputSchema = z.object({
   pullRequestSummary: z.string().trim().min(1).nullable(),
 });
 
-const reviewerOutputJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "summary",
-    "deliverable",
-    "decision",
-    "pullRequestTitle",
-    "pullRequestSummary",
-  ],
-  properties: {
-    summary: {
-      type: "string",
-      minLength: 1,
-    },
-    deliverable: {
-      type: "string",
-      minLength: 1,
-    },
-    decision: {
-      type: "string",
-      enum: ["continue", "approved", "needs_revision"],
-    },
-    pullRequestTitle: {
-      type: ["string", "null"],
-      minLength: 1,
-    },
-    pullRequestSummary: {
-      type: ["string", "null"],
-      minLength: 1,
-    },
-  },
-} as const;
-
 const reviewerInputSchema = z.object({
   role: rolePromptSchema,
   input: z.string().trim().min(1),
@@ -143,7 +109,6 @@ export const runReviewerRole = async (
     worktreePath: parsedInput.state.worktreePath,
     prompt: buildReviewerPrompt(parsedInput),
     responseSchema: reviewerOutputSchema,
-    outputJsonSchema: reviewerOutputJsonSchema,
     codexHomePrefix: "lane",
     onEvent,
   });

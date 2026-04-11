@@ -5,7 +5,6 @@ export type TeamStructuredExecutorInput<TSchema extends z.ZodTypeAny> = {
   worktreePath: string;
   prompt: string;
   responseSchema: TSchema;
-  outputJsonSchema: object;
   codexHomePrefix: string;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };

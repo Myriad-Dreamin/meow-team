@@ -17,40 +17,6 @@ const coderOutputSchema = z.object({
   pullRequestSummary: z.string().trim().min(1).nullable(),
 });
 
-const coderOutputJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "summary",
-    "deliverable",
-    "decision",
-    "pullRequestTitle",
-    "pullRequestSummary",
-  ],
-  properties: {
-    summary: {
-      type: "string",
-      minLength: 1,
-    },
-    deliverable: {
-      type: "string",
-      minLength: 1,
-    },
-    decision: {
-      type: "string",
-      enum: ["continue", "approved", "needs_revision"],
-    },
-    pullRequestTitle: {
-      type: ["string", "null"],
-      minLength: 1,
-    },
-    pullRequestSummary: {
-      type: ["string", "null"],
-      minLength: 1,
-    },
-  },
-} as const;
-
 const coderInputSchema = z.object({
   role: rolePromptSchema,
   input: z.string().trim().min(1),
@@ -139,7 +105,6 @@ export const runCoderRole = async (
     worktreePath: parsedInput.state.worktreePath,
     prompt: buildCoderPrompt(parsedInput),
     responseSchema: coderOutputSchema,
-    outputJsonSchema: coderOutputJsonSchema,
     codexHomePrefix: "lane",
     onEvent,
   });
