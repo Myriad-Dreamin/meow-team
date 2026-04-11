@@ -87,8 +87,9 @@ export type TeamWorkerEvent = {
 
 export type TeamPullRequestRecord = {
   id: string;
-  provider: "local-ci";
+  provider: "local-ci" | "github";
   title: string;
+  summary: string | null;
   branchName: string;
   baseBranch: string;
   status: TeamPullRequestStatus;

@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  archiveOpenSpecChangeInWorktree,
   buildCanonicalBranchName,
   buildLaneBranchName,
   buildPlannerWorktreePath,
@@ -295,6 +296,78 @@ describe("pushLaneBranch", () => {
       commitUrl: `https://github.com/example/meow-team/commit/${commitHash}`,
       commitHash,
       pushedAt: "2026-04-11T10:00:00.000Z",
+    });
+  });
+});
+
+describe("archiveOpenSpecChangeInWorktree", () => {
+  it("moves an active OpenSpec change into the dated archive directory", async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-archive-test-"));
+    temporaryDirectories.add(worktreePath);
+
+    const sourceChangePath = path.join(
+      worktreePath,
+      "openspec",
+      "changes",
+      "change-name",
+      "proposal.md",
+    );
+    await fs.mkdir(path.dirname(sourceChangePath), { recursive: true });
+    await fs.writeFile(sourceChangePath, "proposal\n", "utf8");
+
+    await expect(
+      archiveOpenSpecChangeInWorktree({
+        worktreePath,
+        changeName: "change-name",
+        archiveDate: new Date("2026-04-11T10:00:00.000Z"),
+      }),
+    ).resolves.toEqual({
+      archivedPath: "openspec/changes/archive/2026-04-11-change-name",
+      createdArchive: true,
+    });
+
+    await expect(fs.readFile(sourceChangePath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      fs.readFile(
+        path.join(
+          worktreePath,
+          "openspec",
+          "changes",
+          "archive",
+          "2026-04-11-change-name",
+          "proposal.md",
+        ),
+        "utf8",
+      ),
+    ).resolves.toBe("proposal\n");
+  });
+
+  it("treats an already archived change as idempotent", async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-archive-test-"));
+    temporaryDirectories.add(worktreePath);
+
+    const archiveProposalPath = path.join(
+      worktreePath,
+      "openspec",
+      "changes",
+      "archive",
+      "2026-04-11-change-name",
+      "proposal.md",
+    );
+    await fs.mkdir(path.dirname(archiveProposalPath), { recursive: true });
+    await fs.writeFile(archiveProposalPath, "archived\n", "utf8");
+
+    await expect(
+      archiveOpenSpecChangeInWorktree({
+        worktreePath,
+        changeName: "change-name",
+        archiveDate: new Date("2026-04-11T10:00:00.000Z"),
+      }),
+    ).resolves.toEqual({
+      archivedPath: "openspec/changes/archive/2026-04-11-change-name",
+      createdArchive: false,
     });
   });
 });

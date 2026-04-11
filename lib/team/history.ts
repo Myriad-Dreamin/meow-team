@@ -279,6 +279,8 @@ const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord =
     pullRequest: lane.pullRequest
       ? {
           ...lane.pullRequest,
+          provider: lane.pullRequest.provider === "github" ? "github" : "local-ci",
+          summary: lane.pullRequest.summary ?? null,
           machineReviewedAt: lane.pullRequest.machineReviewedAt ?? null,
         }
       : null,
@@ -404,6 +406,18 @@ const deriveDispatchAssignmentStatus = (
 
   if (assignedLanes.length === 0) {
     return "completed";
+  }
+
+  if (
+    assignedLanes.every(
+      (lane) => lane.status === "approved" && lane.pullRequest?.status === "approved",
+    )
+  ) {
+    return "completed";
+  }
+
+  if (assignedLanes.some((lane) => lane.pullRequest?.status === "failed")) {
+    return "failed";
   }
 
   if (assignedLanes.every((lane) => lane.status === "approved")) {

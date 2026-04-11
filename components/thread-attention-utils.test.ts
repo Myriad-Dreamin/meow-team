@@ -138,6 +138,55 @@ describe("collectThreadAttentionNotifications", () => {
     );
   });
 
+  it("treats machine-reviewed final approval waits as attention-needed", () => {
+    const notifications = collectThreadAttentionNotifications([
+      createThread({
+        status: "approved",
+        latestAssignmentStatus: "approved",
+        workerCounts: {
+          idle: 0,
+          queued: 0,
+          coding: 0,
+          reviewing: 0,
+          awaitingHumanApproval: 0,
+          approved: 1,
+          failed: 0,
+        },
+        workerLanes: [
+          createLane({
+            laneId: "lane-reviewed",
+            status: "approved",
+            updatedAt: "2026-04-11T10:08:00.000Z",
+            pullRequest: {
+              id: "pr-1",
+              provider: "local-ci",
+              title: "Ready for merge",
+              summary: "Machine review approved the branch.",
+              branchName: "requests/desktop-attention/thread-1",
+              baseBranch: "main",
+              status: "awaiting_human_approval",
+              requestedAt: "2026-04-11T10:07:00.000Z",
+              humanApprovalRequestedAt: "2026-04-11T10:07:00.000Z",
+              humanApprovedAt: null,
+              machineReviewedAt: "2026-04-11T10:07:00.000Z",
+              updatedAt: "2026-04-11T10:08:00.000Z",
+              url: null,
+            },
+          }),
+        ],
+      }),
+    ]);
+
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        laneId: "lane-reviewed",
+        reason: "awaiting_human_approval",
+        body: expect.stringContaining("final human approval"),
+        fingerprint: expect.stringContaining("lane-reviewed:awaiting_human_approval"),
+      }),
+    ]);
+  });
+
   it("falls back to a thread-level failure when no worker lane failed", () => {
     const notifications = collectThreadAttentionNotifications([
       createThread({

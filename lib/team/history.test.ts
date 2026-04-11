@@ -271,11 +271,11 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
 
     const serializedLegacyThread = JSON.parse(JSON.stringify(legacyThread)) as typeof legacyThread;
     const serializedLegacyLane = serializedLegacyThread.dispatchAssignments[0]?.lanes[0] as
-      | Record<string, unknown>
+      | { pushedCommit?: unknown }
       | undefined;
 
     if (serializedLegacyLane) {
-      delete serializedLegacyLane.pushedCommit;
+      Reflect.deleteProperty(serializedLegacyLane, "pushedCommit");
     }
 
     await fs.writeFile(
@@ -290,5 +290,55 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     expect(thread?.dispatchAssignments[0]?.lanes[0]?.latestImplementationCommit).toBe(
       "1234567890abcdef1234567890abcdef12345678",
     );
+  });
+
+  it("marks fully finalized machine-reviewed lanes as completed once GitHub delivery is ready", async () => {
+    const storePath = path.join(os.tmpdir(), `team-history-completed-${crypto.randomUUID()}.json`);
+    temporaryFiles.add(storePath);
+
+    const finalizedThread = createStoredThread({
+      threadId: "finalized-thread",
+      status: "approved",
+      dispatchAssignments: [
+        createAssignment({
+          status: "approved",
+          lanes: [
+            {
+              ...createLane({
+                laneId: "finalized-thread-lane-1",
+                laneIndex: 1,
+                status: "approved",
+              }),
+              pullRequest: {
+                id: "pr-1",
+                provider: "github",
+                title: "Ready for merge",
+                summary: "Machine review approved the branch.",
+                branchName: "requests/example/a1-proposal-1",
+                baseBranch: "main",
+                status: "approved",
+                requestedAt: FIXED_TIMESTAMP,
+                humanApprovalRequestedAt: FIXED_TIMESTAMP,
+                humanApprovedAt: FIXED_TIMESTAMP,
+                machineReviewedAt: FIXED_TIMESTAMP,
+                updatedAt: FIXED_TIMESTAMP,
+                url: "https://github.com/example/meow-team/pull/42",
+              },
+            },
+          ],
+        }),
+      ],
+    });
+
+    await fs.writeFile(
+      storePath,
+      JSON.stringify({ threads: { "finalized-thread": finalizedThread } }, null, 2),
+      "utf8",
+    );
+
+    const thread = await getTeamThreadRecord(storePath, "finalized-thread");
+
+    expect(thread?.dispatchAssignments[0]?.status).toBe("completed");
+    expect(thread?.run?.status).toBe("completed");
   });
 });

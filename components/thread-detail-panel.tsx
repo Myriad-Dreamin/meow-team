@@ -10,6 +10,7 @@ import {
   describeThreadProgress,
   formatFeedbackLabel,
   formatTimestamp,
+  getLaneApprovalAction,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
   getLaneStatusClassName,
@@ -18,6 +19,7 @@ import {
   threadStatusLabels,
 } from "@/components/thread-view-utils";
 import type { TeamHumanFeedbackScope } from "@/lib/team/types";
+import type { LaneApprovalAction } from "@/components/thread-view-utils";
 
 type ThreadDetailPanelProps = {
   threadId: string;
@@ -193,7 +195,11 @@ export function ThreadDetailPanel({
     setRefreshError(null);
   };
 
-  const handleApprove = (assignmentNumber: number, laneId: string) => {
+  const handleApprove = (
+    assignmentNumber: number,
+    laneId: string,
+    approvalAction: LaneApprovalAction,
+  ) => {
     const nextApprovalKey = `${threadId}:${assignmentNumber}:${laneId}`;
 
     startTransition(() => {
@@ -209,6 +215,7 @@ export function ThreadDetailPanel({
               threadId,
               assignmentNumber,
               laneId,
+              target: approvalAction.target,
             }),
           });
 
@@ -216,15 +223,13 @@ export function ThreadDetailPanel({
           const payload = tryParseJson(rawPayload);
 
           if (!response.ok) {
-            throw new Error(readErrorMessage(payload) ?? "Unable to approve this proposal.");
+            throw new Error(readErrorMessage(payload) ?? approvalAction.errorFallback);
           }
 
           await refreshAll();
-          setActionNotice("Proposal approval recorded. The coding-review queue is refreshing.");
+          setActionNotice(approvalAction.successNotice);
         } catch (error) {
-          setRefreshError(
-            error instanceof Error ? error.message : "Unable to approve this proposal.",
-          );
+          setRefreshError(error instanceof Error ? error.message : approvalAction.errorFallback);
           setActionNotice(null);
         } finally {
           setApprovalKey((current) => (current === nextApprovalKey ? null : current));
@@ -506,7 +511,7 @@ export function ThreadDetailPanel({
               );
               const isApproving = approvalKey === currentApprovalKey;
               const isSendingFeedback = feedbackKey === laneFeedbackKey;
-              const canApprove = lane.status === "awaiting_human_approval";
+              const approvalAction = getLaneApprovalAction(lane);
               const canSendLaneFeedback =
                 canRestart && lane.status !== "idle" && lane.status !== "failed";
               const branchDisplay = getLaneBranchDisplay(lane);
@@ -595,7 +600,18 @@ export function ThreadDetailPanel({
                   {lane.pullRequest ? (
                     <div className="lane-pr-strip">
                       <span>{pullRequestStatusLabels[lane.pullRequest.status]}</span>
-                      <span>{lane.pullRequest.title}</span>
+                      {lane.pullRequest.url ? (
+                        <a
+                          className="lane-meta-link"
+                          href={lane.pullRequest.url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {lane.pullRequest.title}
+                        </a>
+                      ) : (
+                        <span>{lane.pullRequest.title}</span>
+                      )}
                       <span>{formatTimestamp(lane.pullRequest.updatedAt)}</span>
                     </div>
                   ) : null}
@@ -617,14 +633,16 @@ export function ThreadDetailPanel({
                     </div>
                   ) : null}
 
-                  {canApprove ? (
+                  {approvalAction ? (
                     <button
                       className="secondary-button"
                       type="button"
                       disabled={isApproving}
-                      onClick={() => handleApprove(thread.assignmentNumber, lane.laneId)}
+                      onClick={() =>
+                        handleApprove(thread.assignmentNumber, lane.laneId, approvalAction)
+                      }
                     >
-                      {isApproving ? "Recording approval..." : "Approve Proposal"}
+                      {isApproving ? approvalAction.pendingLabel : approvalAction.buttonLabel}
                     </button>
                   ) : null}
 

@@ -63,6 +63,36 @@ const runGit = async (
   }
 };
 
+const runGh = async (
+  repositoryPath: string,
+  args: string[],
+): Promise<{
+  stdout: string;
+  stderr: string;
+}> => {
+  try {
+    const result = await execFileAsync("gh", args, {
+      cwd: repositoryPath,
+      maxBuffer: 1024 * 1024 * 4,
+    });
+
+    return {
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+    };
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+    };
+
+    const output = [nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(
+      output || `GitHub CLI command failed in ${repositoryPath}: gh ${args.join(" ")}`,
+    );
+  }
+};
+
 const branchExists = async (repositoryPath: string, branchName: string): Promise<boolean> => {
   try {
     await runGit(repositoryPath, ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`]);
@@ -573,6 +603,266 @@ export const pushLaneBranch = async ({
     commitUrl: `${remote.repositoryUrl}/commit/${commitHash}`,
     commitHash,
     pushedAt,
+  };
+};
+
+const pathExists = async (candidatePath: string): Promise<boolean> => {
+  try {
+    await fs.stat(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const archiveOpenSpecChangeInWorktree = async ({
+  worktreePath,
+  changeName,
+  archiveDate = new Date(),
+}: {
+  worktreePath: string;
+  changeName: string;
+  archiveDate?: Date;
+}): Promise<{
+  archivedPath: string;
+  createdArchive: boolean;
+}> => {
+  const datedArchiveName = `${archiveDate.toISOString().slice(0, 10)}-${changeName}`;
+  const sourceRelativePath = path.join("openspec", "changes", changeName);
+  const archiveRelativePath = path.join("openspec", "changes", "archive", datedArchiveName);
+  const sourcePath = path.join(worktreePath, sourceRelativePath);
+  const archivePath = path.join(worktreePath, archiveRelativePath);
+
+  const [sourceExists, archiveExists] = await Promise.all([
+    pathExists(sourcePath),
+    pathExists(archivePath),
+  ]);
+
+  if (sourceExists && archiveExists) {
+    throw new Error(
+      `OpenSpec change ${changeName} cannot be archived because both ${sourceRelativePath} and ${archiveRelativePath} already exist.`,
+    );
+  }
+
+  if (!sourceExists && archiveExists) {
+    return {
+      archivedPath: archiveRelativePath.split(path.sep).join("/"),
+      createdArchive: false,
+    };
+  }
+
+  if (!sourceExists) {
+    throw new Error(`OpenSpec change ${changeName} was not found at ${sourceRelativePath}.`);
+  }
+
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.rename(sourcePath, archivePath);
+
+  return {
+    archivedPath: archiveRelativePath.split(path.sep).join("/"),
+    createdArchive: true,
+  };
+};
+
+const normalizeGitHubRepositorySlug = (repositoryUrl: string): string | null => {
+  const normalizedUrl = normalizeGitHubRepositoryUrl(repositoryUrl);
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  try {
+    return new URL(normalizedUrl).pathname.replace(/^\/+/u, "");
+  } catch {
+    return null;
+  }
+};
+
+const getGitHubRepositoryOwner = (repositorySlug: string): string | null => {
+  const [owner] = repositorySlug.split("/", 1);
+  return owner?.trim() ? owner : null;
+};
+
+type GitHubPullRequestView = {
+  number: number;
+  url: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+};
+
+const listGitHubPullRequests = async ({
+  repositoryPath,
+  baseRepositorySlug,
+  headSelector,
+  baseBranch,
+}: {
+  repositoryPath: string;
+  baseRepositorySlug: string;
+  headSelector: string;
+  baseBranch: string;
+}): Promise<GitHubPullRequestView[]> => {
+  const { stdout } = await runGh(repositoryPath, [
+    "pr",
+    "list",
+    "--repo",
+    baseRepositorySlug,
+    "--base",
+    baseBranch,
+    "--head",
+    headSelector,
+    "--state",
+    "all",
+    "--json",
+    "number,url,state",
+  ]);
+
+  const parsed = JSON.parse(stdout || "[]") as GitHubPullRequestView[];
+  return parsed;
+};
+
+export const createOrUpdateGitHubPullRequest = async ({
+  repositoryPath,
+  branchName,
+  baseBranch,
+  title,
+  body,
+  remoteName = DEFAULT_PUSH_REMOTE_NAME,
+}: {
+  repositoryPath: string;
+  branchName: string;
+  baseBranch: string;
+  title: string;
+  body: string;
+  remoteName?: string;
+}): Promise<{
+  url: string;
+}> => {
+  const remote = await resolveGitHubPushRemote({
+    repositoryPath,
+    remoteName,
+  });
+  const baseRepositorySlug =
+    normalizeGitHubRepositorySlug(remote.fetchUrl) ??
+    normalizeGitHubRepositorySlug(remote.pushUrl) ??
+    normalizeGitHubRepositorySlug(remote.repositoryUrl);
+  const headRepositorySlug =
+    normalizeGitHubRepositorySlug(remote.pushUrl) ??
+    normalizeGitHubRepositorySlug(remote.fetchUrl) ??
+    normalizeGitHubRepositorySlug(remote.repositoryUrl);
+
+  if (!baseRepositorySlug || !headRepositorySlug) {
+    throw new Error(
+      "Git remote does not expose enough GitHub repository metadata to create a pull request.",
+    );
+  }
+
+  const headOwner = getGitHubRepositoryOwner(headRepositorySlug);
+  if (!headOwner) {
+    throw new Error(`GitHub repository slug ${headRepositorySlug} does not include an owner.`);
+  }
+
+  const headSelector =
+    baseRepositorySlug === headRepositorySlug ? branchName : `${headOwner}:${branchName}`;
+  const existingPullRequest = (
+    await listGitHubPullRequests({
+      repositoryPath,
+      baseRepositorySlug,
+      headSelector,
+      baseBranch,
+    })
+  )[0];
+
+  if (existingPullRequest) {
+    if (existingPullRequest.state === "MERGED") {
+      throw new Error(
+        `GitHub pull request ${existingPullRequest.url} is already merged and cannot be refreshed.`,
+      );
+    }
+
+    if (existingPullRequest.state === "CLOSED") {
+      await runGh(repositoryPath, [
+        "pr",
+        "reopen",
+        existingPullRequest.number.toString(),
+        "--repo",
+        baseRepositorySlug,
+      ]);
+    }
+
+    await runGh(repositoryPath, [
+      "pr",
+      "edit",
+      existingPullRequest.number.toString(),
+      "--repo",
+      baseRepositorySlug,
+      "--title",
+      title,
+      "--body",
+      body,
+      "--base",
+      baseBranch,
+    ]);
+
+    const refreshedPullRequest = (
+      await listGitHubPullRequests({
+        repositoryPath,
+        baseRepositorySlug,
+        headSelector,
+        baseBranch,
+      })
+    )[0];
+
+    if (!refreshedPullRequest) {
+      throw new Error(
+        `GitHub pull request refresh completed, but the pull request for ${branchName} could not be resolved afterwards.`,
+      );
+    }
+
+    return {
+      url: refreshedPullRequest.url,
+    };
+  }
+
+  const { stdout } = await runGh(repositoryPath, [
+    "pr",
+    "create",
+    "--repo",
+    baseRepositorySlug,
+    "--base",
+    baseBranch,
+    "--head",
+    headSelector,
+    "--title",
+    title,
+    "--body",
+    body,
+  ]);
+
+  const createdPullRequest = (
+    await listGitHubPullRequests({
+      repositoryPath,
+      baseRepositorySlug,
+      headSelector,
+      baseBranch,
+    })
+  )[0];
+
+  if (createdPullRequest) {
+    return {
+      url: createdPullRequest.url,
+    };
+  }
+
+  const fallbackUrl = stdout
+    .split(/\s+/u)
+    .map((value) => value.trim())
+    .find((value) => /^https?:\/\//u.test(value));
+  if (!fallbackUrl) {
+    throw new Error(
+      `GitHub pull request creation completed, but the pull request for ${branchName} could not be resolved afterwards.`,
+    );
+  }
+
+  return {
+    url: fallbackUrl,
   };
 };
 
