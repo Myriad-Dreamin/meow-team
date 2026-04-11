@@ -1,6 +1,11 @@
 import path from "node:path";
 import { extractFrontmatter, type FrontmatterValue } from "./frontmatter";
-import type { CompiledPlaceholder, CompiledTemplate, PipeArgument } from "./runtime";
+import {
+  assertSupportedPromptPipe,
+  type CompiledPlaceholder,
+  type CompiledTemplate,
+  type PipeArgument,
+} from "./runtime";
 
 export type CompiledPromptModule = {
   code: string;
@@ -26,6 +31,11 @@ const escapePathForImport = (filePath: string): string => {
 
 const createError = (resourcePath: string, message: string): Error => {
   return new Error(`${message} (${resourcePath})`);
+};
+
+const createPipeError = (resourcePath: string, error: unknown): Error => {
+  const message = error instanceof Error ? error.message : String(error);
+  return createError(resourcePath, message);
 };
 
 const renderTypeScriptPropertyKey = (value: string): string => {
@@ -220,6 +230,12 @@ const parsePlaceholder = (value: string, resourcePath: string): CompiledPlacehol
   }
 
   const pipeExpression = parsePipeExpression(value.slice(separatorIndex + 1), resourcePath);
+
+  try {
+    assertSupportedPromptPipe(pipeExpression.name, pipeExpression.args);
+  } catch (error) {
+    throw createPipeError(resourcePath, error);
+  }
 
   return {
     name,

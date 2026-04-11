@@ -17,6 +17,34 @@ type PromptInput = PromptArgsRecord | ((frontmatter: unknown) => PromptArgsRecor
 
 type PromptPipe = (value: unknown, args: readonly PipeArgument[]) => string;
 
+const renderPipeArguments = (args: readonly PipeArgument[]): string => {
+  return args.map((argument) => JSON.stringify(argument)).join(", ");
+};
+
+const assertRawPipeArgs = (args: readonly PipeArgument[]): void => {
+  if (args.length === 0) {
+    return;
+  }
+
+  if (args.length === 1 && args[0] === "json") {
+    return;
+  }
+
+  throw new Error(`Unsupported raw pipe signature: raw(${renderPipeArguments(args)})`);
+};
+
+export const assertSupportedPromptPipe = (
+  pipeName: string,
+  args: readonly PipeArgument[],
+): void => {
+  if (pipeName === "raw") {
+    assertRawPipeArgs(args);
+    return;
+  }
+
+  throw new Error(`Unknown prompt pipe "${pipeName}".`);
+};
+
 const stringifyPromptValue = (value: unknown): string => {
   if (typeof value === "string") {
     return value;
@@ -34,17 +62,13 @@ const stringifyPromptValue = (value: unknown): string => {
 };
 
 const renderRawPipe: PromptPipe = (value, args) => {
-  if (args.length === 0) {
-    return typeof value === "string" ? value : stringifyPromptValue(value);
-  }
+  assertRawPipeArgs(args);
 
-  if (args.length === 1 && args[0] === "json") {
+  if (args.length === 1) {
     return JSON.stringify(value, null, 2) ?? "null";
   }
 
-  throw new Error(
-    `Unsupported raw pipe signature: raw(${args.map((argument) => JSON.stringify(argument)).join(", ")})`,
-  );
+  return typeof value === "string" ? value : stringifyPromptValue(value);
 };
 
 const builtinPipes: Record<string, PromptPipe> = {
@@ -75,6 +99,8 @@ export const renderCompiledTemplate = (
       parts.push(stringifyPromptValue(value));
       continue;
     }
+
+    assertSupportedPromptPipe(placeholder.pipeName, placeholder.pipeArgs);
 
     const pipe = builtinPipes[placeholder.pipeName];
 
