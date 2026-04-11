@@ -17,6 +17,7 @@ const createLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLa
     laneId: "lane-1",
     laneIndex: 1,
     status: "approved",
+    executionPhase: null,
     taskTitle: "Ship the feature",
     taskObjective: "Publish the reviewed branch.",
     proposalChangeName: "change-1",
@@ -133,9 +134,9 @@ describe("thread view approval helpers", () => {
     expect(getLaneApprovalAction(lane)).toEqual({
       target: "pull_request",
       buttonLabel: "Approve and Open PR",
-      pendingLabel: "Archiving and opening PR...",
+      pendingLabel: "Queueing archive pass...",
       successNotice:
-        "Final approval recorded. The OpenSpec change was archived and the GitHub PR was refreshed.",
+        "Final approval recorded. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
       errorFallback: "Unable to finalize this reviewed branch.",
     });
     expect(describeLane(lane)).toContain("open or refresh the GitHub PR");
@@ -184,10 +185,37 @@ describe("thread view approval helpers", () => {
     expect(getLaneApprovalAction(failedLane)).toEqual({
       target: "pull_request",
       buttonLabel: "Retry Finalization",
-      pendingLabel: "Retrying finalization...",
+      pendingLabel: "Retrying archive pass...",
       successNotice:
-        "Finalization retried. The OpenSpec change was archived and the GitHub PR was refreshed.",
+        "Final approval retried. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
       errorFallback: "Unable to retry GitHub PR finalization.",
     });
+  });
+
+  it("shows archive-specific labels and messaging while the final archive pass is running", () => {
+    const lane = createLane({
+      status: "coding",
+      executionPhase: "final_archive",
+      latestActivity: "Coder is running non-interactive /opsx:archive change-1 for final approval.",
+      pullRequest: {
+        id: "pr-1",
+        provider: "local-ci",
+        title: "Ship the feature",
+        summary: "Machine review approved the branch.",
+        branchName: "requests/example/a1-proposal-1",
+        baseBranch: "main",
+        status: "awaiting_human_approval",
+        requestedAt: FIXED_TIMESTAMP,
+        humanApprovalRequestedAt: FIXED_TIMESTAMP,
+        humanApprovedAt: FIXED_TIMESTAMP,
+        machineReviewedAt: FIXED_TIMESTAMP,
+        updatedAt: FIXED_TIMESTAMP,
+        url: null,
+      },
+    });
+
+    expect(getLaneStatusLabel(lane)).toBe("Archiving");
+    expect(describeLane(lane)).toContain("/opsx:archive");
+    expect(getLaneApprovalAction(lane)).toBeNull();
   });
 });

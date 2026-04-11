@@ -8,7 +8,11 @@ import {
 } from "@/lib/team/request-title";
 import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
 import type { RolePrompt } from "@/lib/team/prompts";
-import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
+import type {
+  TeamCodexEvent,
+  TeamRoleHandoff,
+  TeamWorkerLaneExecutionPhase,
+} from "@/lib/team/types";
 
 const coderOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -24,6 +28,7 @@ export type CoderRoleState = TeamRepositoryContext & {
   objective: string;
   laneId: string;
   laneIndex: number;
+  executionPhase: TeamWorkerLaneExecutionPhase | null;
   taskTitle: string;
   taskObjective: string;
   requestTitle: string;
@@ -31,6 +36,8 @@ export type CoderRoleState = TeamRepositoryContext & {
   planSummary: string;
   planDeliverable: string;
   conflictNote: string | null;
+  archiveCommand: string | null;
+  archivePathContext: string | null;
   workflow: string[];
   handoffs: Partial<Record<string, TeamRoleHandoff>>;
   handoffCounter: number;
@@ -48,6 +55,8 @@ export type CoderRoleOutput = z.infer<typeof coderOutputSchema>;
 type CoderPromptInput = Omit<CoderRoleInput, "onEvent">;
 
 const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
+  const isFinalArchive = state.executionPhase === "final_archive";
+
   return [
     `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
     `Owner: ${state.ownerName}.`,
@@ -60,6 +69,7 @@ const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
       ? `Implementation commit ready for review: ${state.implementationCommit}.`
       : null,
     `Lane index: ${state.laneIndex}.`,
+    `Lane execution phase: ${state.executionPhase ?? "implementation"}.`,
     `Task title: ${state.taskTitle}.`,
     `Task objective: ${state.taskObjective}`,
     `Canonical request title: ${state.requestTitle}.`,
@@ -67,6 +77,13 @@ const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
     `Planner summary: ${state.planSummary}`,
     `Planner deliverable: ${state.planDeliverable}`,
     state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
+    isFinalArchive && state.archiveCommand ? `Archive command: ${state.archiveCommand}.` : null,
+    isFinalArchive && state.archivePathContext
+      ? `Archive path context: ${state.archivePathContext}.`
+      : null,
+    isFinalArchive
+      ? "Archive continuation: this is the final coder-only archive pass. Do not route back to reviewer."
+      : null,
     `Workflow context: ${state.workflow.join(" -> ")}`,
     "Current handoffs:",
     summarizeHandoffs(state),

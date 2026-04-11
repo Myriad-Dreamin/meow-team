@@ -54,6 +54,8 @@ export type TeamWorkerLaneStatus =
   | "approved"
   | "failed";
 
+export type TeamWorkerLaneExecutionPhase = "implementation" | "final_archive";
+
 export type TeamPullRequestStatus =
   | "draft"
   | "awaiting_human_approval"
@@ -115,6 +117,7 @@ export type TeamWorkerLaneRecord = {
   laneId: string;
   laneIndex: number;
   status: TeamWorkerLaneStatus;
+  executionPhase: TeamWorkerLaneExecutionPhase | null;
   taskTitle: string | null;
   taskObjective: string | null;
   proposalChangeName: string | null;
