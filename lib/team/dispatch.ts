@@ -720,6 +720,7 @@ export const assignPendingDispatchWorkerSlots = ({
   resolveAssignmentWorktreeRoot: (pending: PendingDispatchAssignment) => string;
 }): void => {
   const occupiedSlots = new Set<number>();
+  let preservedLaneCount = 0;
   const queuedLanes: PendingDispatchLaneAllocation[] = [];
 
   for (const pending of pendingAssignments) {
@@ -735,7 +736,10 @@ export const assignPendingDispatchWorkerSlots = ({
       }
 
       if (lane.workerSlot) {
-        occupiedSlots.add(lane.workerSlot);
+        preservedLaneCount += 1;
+        if (lane.workerSlot >= 1 && lane.workerSlot <= workerCount) {
+          occupiedSlots.add(lane.workerSlot);
+        }
         lane.worktreePath ??= buildLaneWorktreePath({
           worktreeRoot,
           laneIndex: lane.workerSlot,
@@ -753,9 +757,10 @@ export const assignPendingDispatchWorkerSlots = ({
     }
   }
 
-  const availableSlots = Array.from({ length: workerCount }, (_, index) => index + 1).filter(
-    (slot) => !occupiedSlots.has(slot),
-  );
+  const remainingCapacity = Math.max(0, workerCount - preservedLaneCount);
+  const availableSlots = Array.from({ length: workerCount }, (_, index) => index + 1)
+    .filter((slot) => !occupiedSlots.has(slot))
+    .slice(0, remainingCapacity);
 
   for (const { lane, worktreeRoot } of queuedLanes.sort(comparePendingDispatchLaneAllocation)) {
     const slot = availableSlots.shift();

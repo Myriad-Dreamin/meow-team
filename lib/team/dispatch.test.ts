@@ -234,4 +234,45 @@ describe("assignPendingDispatchWorkerSlots", () => {
     expect(pendingAssignments[2].assignment.lanes[0].workerSlot).toBeNull();
     expect(pendingAssignments[2].assignment.lanes[0].worktreePath).toBeNull();
   });
+
+  it("counts preserved out-of-range slots against the shared worker pool", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        lanes: [
+          createLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "coding",
+            workerSlot: 2,
+            worktreePath: null,
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-2",
+        assignmentNumber: 1,
+        lanes: [
+          createLane({
+            laneId: "thread-2-lane-1",
+            laneIndex: 1,
+            status: "queued",
+            queuedAt: "2026-04-11T08:01:00.000Z",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchWorkerSlots({
+      pendingAssignments,
+      workerCount: 1,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[0].assignment.lanes[0].workerSlot).toBe(2);
+    expect(pendingAssignments[0].assignment.lanes[0].worktreePath).toBe("/tmp/worktrees/meow-2");
+    expect(pendingAssignments[1].assignment.lanes[0].workerSlot).toBeNull();
+    expect(pendingAssignments[1].assignment.lanes[0].worktreePath).toBeNull();
+  });
 });
