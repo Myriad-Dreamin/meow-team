@@ -1931,11 +1931,7 @@ export const approveLanePullRequest = async ({
   }
 
   if (pullRequest.status === "approved") {
-    throw new Error("This reviewed branch is already finalized.");
-  }
-
-  if (pullRequest.status === "awaiting_human_approval" && pullRequest.humanApprovedAt) {
-    throw new Error("Final approval is already being processed for this reviewed branch.");
+    return;
   }
 
   if (pullRequest.status !== "awaiting_human_approval" && pullRequest.status !== "failed") {
@@ -1983,14 +1979,7 @@ export const approveLanePullRequest = async ({
       }
 
       if (mutablePullRequest.status === "approved") {
-        throw new Error("This reviewed branch is already finalized.");
-      }
-
-      if (
-        mutablePullRequest.status === "awaiting_human_approval" &&
-        mutablePullRequest.humanApprovedAt
-      ) {
-        throw new Error("Final approval is already being processed for this reviewed branch.");
+        return mutablePullRequest.humanApprovedAt ?? now;
       }
 
       if (
@@ -2004,10 +1993,15 @@ export const approveLanePullRequest = async ({
 
       const nextHumanApprovedAt = mutablePullRequest.humanApprovedAt ?? now;
       const isRetry = mutablePullRequest.status === "failed";
+      const isResume =
+        mutablePullRequest.status === "awaiting_human_approval" &&
+        mutablePullRequest.humanApprovedAt !== null;
 
       mutableLane.latestActivity = isRetry
         ? "Retrying final approval to archive the OpenSpec change and refresh the GitHub PR."
-        : "Human approved the machine-reviewed branch. Archiving the OpenSpec change and refreshing the GitHub PR.";
+        : isResume
+          ? "Resuming final approval to archive the OpenSpec change and refresh the GitHub PR."
+          : "Human approved the machine-reviewed branch. Archiving the OpenSpec change and refreshing the GitHub PR.";
       mutableLane.lastError = null;
       mutableLane.pullRequest = {
         ...mutablePullRequest,
@@ -2016,14 +2010,16 @@ export const approveLanePullRequest = async ({
         updatedAt: now,
       };
       mutableLane.updatedAt = now;
-      appendLaneEvent(
-        mutableLane,
-        "human",
-        isRetry
-          ? "Human retried final approval for the machine-reviewed branch."
-          : "Human approved the machine-reviewed branch for GitHub PR delivery.",
-        now,
-      );
+      if (!isResume) {
+        appendLaneEvent(
+          mutableLane,
+          "human",
+          isRetry
+            ? "Human retried final approval for the machine-reviewed branch."
+            : "Human approved the machine-reviewed branch for GitHub PR delivery.",
+          now,
+        );
+      }
       synchronizeDispatchAssignment(mutableAssignment, now);
 
       return nextHumanApprovedAt;
