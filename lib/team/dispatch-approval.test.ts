@@ -542,6 +542,7 @@ describe("approveLanePullRequest", () => {
       ),
     );
     commitWorktreeChangesMock.mockResolvedValue(undefined);
+    getBranchHeadMock.mockResolvedValue("archive-commit");
 
     await writeThreadStore(createLane(), {
       requestTitle: "dev(vsc/command): Ship the feature",
@@ -566,7 +567,8 @@ describe("approveLanePullRequest", () => {
     expect(pushLaneBranchMock).not.toHaveBeenCalled();
     expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
     expect(lane?.proposalPath).toBe("openspec/changes/archive/2026-04-11-change-1");
-    expect(lane?.latestImplementationCommit).toBe("review-commit");
+    expect(lane?.latestImplementationCommit).toBe("archive-commit");
+    expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
     expect(lane?.pullRequest?.status).toBe("failed");
     expect(lane?.latestActivity).toBe(
       "Final human approval archived the OpenSpec change, but GitHub PR delivery did not complete.",

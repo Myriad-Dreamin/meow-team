@@ -1121,6 +1121,8 @@ const runFinalArchiveCycle = async ({
     throw new Error("Final archive lane is missing repository, branch, or OpenSpec metadata.");
   }
 
+  const repositoryPath = assignment.repository.path;
+  const laneBranchName = lane.branchName;
   const pullRequestSummary =
     lane.pullRequest.summary?.trim() ||
     lane.latestReviewerSummary?.trim() ||
@@ -1140,6 +1142,14 @@ const runFinalArchiveCycle = async ({
     lane.proposalPath?.startsWith("openspec/changes/archive/") ?? false;
   let coderHandoff: TeamRoleHandoff | null = null;
   let coderArchivedThisRun = false;
+  const refreshLatestImplementationCommit = async (): Promise<string> => {
+    latestImplementationCommit = await getBranchHead({
+      repositoryPath,
+      branchName: laneBranchName,
+    });
+
+    return latestImplementationCommit;
+  };
 
   try {
     await updateTeamThreadRecord({
@@ -1259,6 +1269,9 @@ const runFinalArchiveCycle = async ({
       );
     }
 
+    // Capture the archived branch head before any later delivery step can fail.
+    await refreshLatestImplementationCommit();
+
     const roadmapUpdate = await appendArchivedOpenSpecLinksToRoadmapTopic({
       worktreePath: lane.worktreePath,
       changeName: lane.proposalChangeName,
@@ -1271,12 +1284,9 @@ const runFinalArchiveCycle = async ({
         worktreePath: lane.worktreePath,
         message: `system: archive ${lane.proposalChangeName}`,
       });
+      await refreshLatestImplementationCommit();
     }
 
-    latestImplementationCommit = await getBranchHead({
-      repositoryPath: assignment.repository.path,
-      branchName: lane.branchName,
-    });
     updatedPushedCommit = latestImplementationCommit
       ? await pushLaneBranch({
           repositoryPath: assignment.repository.path,
