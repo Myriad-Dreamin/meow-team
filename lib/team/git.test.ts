@@ -1,0 +1,183 @@
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { afterEach, describe, expect, it } from "vitest";
+import { getBranchHead, tryRebaseWorktreeBranch } from "@/lib/team/git";
+
+const execFileAsync = promisify(execFile);
+const temporaryDirectories = new Set<string>();
+
+const runGit = async (repositoryPath: string, args: string[]): Promise<string> => {
+  try {
+    const result = await execFileAsync("git", ["-C", repositoryPath, ...args], {
+      maxBuffer: 1024 * 1024 * 4,
+    });
+    return result.stdout.trim();
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+    };
+    const output = [nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(output || `git ${args.join(" ")} failed in ${repositoryPath}`);
+  }
+};
+
+const createRepository = async (): Promise<string> => {
+  const repositoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-test-"));
+  temporaryDirectories.add(repositoryPath);
+  await runGit(repositoryPath, ["init", "-b", "main"]);
+  await runGit(repositoryPath, ["config", "user.name", "Test User"]);
+  await runGit(repositoryPath, ["config", "user.email", "test@example.com"]);
+  return repositoryPath;
+};
+
+const commitAll = async (repositoryPath: string, message: string): Promise<void> => {
+  await runGit(repositoryPath, ["add", "-A"]);
+  await runGit(repositoryPath, ["commit", "-m", message]);
+};
+
+const writeRepositoryFile = async ({
+  repositoryPath,
+  relativePath,
+  content,
+}: {
+  repositoryPath: string;
+  relativePath: string;
+  content: string;
+}): Promise<void> => {
+  const filePath = path.join(repositoryPath, relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, content, "utf8");
+};
+
+const createWorktreePath = (): string => {
+  const worktreePath = path.join(os.tmpdir(), `team-git-worktree-${randomUUID()}`);
+  temporaryDirectories.add(worktreePath);
+  return worktreePath;
+};
+
+afterEach(async () => {
+  await Promise.all(
+    [...temporaryDirectories].map(async (directoryPath) => {
+      await fs.rm(directoryPath, { recursive: true, force: true });
+    }),
+  );
+
+  temporaryDirectories.clear();
+});
+
+describe("tryRebaseWorktreeBranch", () => {
+  it("rebases the worktree branch onto the base branch when git can apply it cleanly", async () => {
+    const repositoryPath = await createRepository();
+
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "README.md",
+      content: "base\n",
+    });
+    await commitAll(repositoryPath, "base");
+
+    await runGit(repositoryPath, ["checkout", "-b", "feature"]);
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "feature.txt",
+      content: "feature work\n",
+    });
+    await commitAll(repositoryPath, "feature work");
+    const featureHeadBefore = await getBranchHead({
+      repositoryPath,
+      branchName: "feature",
+    });
+
+    await runGit(repositoryPath, ["checkout", "main"]);
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "main.txt",
+      content: "main work\n",
+    });
+    await commitAll(repositoryPath, "main work");
+
+    const worktreePath = createWorktreePath();
+    await runGit(repositoryPath, ["worktree", "add", worktreePath, "feature"]);
+
+    const result = await tryRebaseWorktreeBranch({
+      worktreePath,
+      baseBranch: "main",
+    });
+
+    const featureHeadAfter = await getBranchHead({
+      repositoryPath,
+      branchName: "feature",
+    });
+
+    expect(result).toEqual({
+      applied: true,
+      error: null,
+    });
+    expect(featureHeadAfter).not.toBe(featureHeadBefore);
+    expect(await runGit(worktreePath, ["status", "--short"])).toBe("");
+    expect(await fs.readFile(path.join(worktreePath, "main.txt"), "utf8")).toBe("main work\n");
+    expect(await fs.readFile(path.join(worktreePath, "feature.txt"), "utf8")).toBe(
+      "feature work\n",
+    );
+  });
+
+  it("aborts a failed rebase so the worktree stays reusable", async () => {
+    const repositoryPath = await createRepository();
+
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "conflict.txt",
+      content: "base\n",
+    });
+    await commitAll(repositoryPath, "base");
+
+    await runGit(repositoryPath, ["checkout", "-b", "feature"]);
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "conflict.txt",
+      content: "feature\n",
+    });
+    await commitAll(repositoryPath, "feature change");
+    const featureHeadBefore = await getBranchHead({
+      repositoryPath,
+      branchName: "feature",
+    });
+
+    await runGit(repositoryPath, ["checkout", "main"]);
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "conflict.txt",
+      content: "main\n",
+    });
+    await commitAll(repositoryPath, "main change");
+
+    const worktreePath = createWorktreePath();
+    await runGit(repositoryPath, ["worktree", "add", worktreePath, "feature"]);
+
+    const firstAttempt = await tryRebaseWorktreeBranch({
+      worktreePath,
+      baseBranch: "main",
+    });
+    const secondAttempt = await tryRebaseWorktreeBranch({
+      worktreePath,
+      baseBranch: "main",
+    });
+    const featureHeadAfter = await getBranchHead({
+      repositoryPath,
+      branchName: "feature",
+    });
+
+    expect(firstAttempt.applied).toBe(false);
+    expect(firstAttempt.error).toContain("could not apply");
+    expect(secondAttempt.applied).toBe(false);
+    expect(secondAttempt.error).toContain("could not apply");
+    expect(featureHeadAfter).toBe(featureHeadBefore);
+    expect(await runGit(worktreePath, ["status", "--short"])).toBe("");
+    expect(await fs.readFile(path.join(worktreePath, "conflict.txt"), "utf8")).toBe("feature\n");
+  });
+});

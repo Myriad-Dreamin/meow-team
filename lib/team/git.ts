@@ -455,3 +455,33 @@ export const detectBranchConflict = async ({
     mergeTree.stdout.includes("CONFLICT")
   );
 };
+
+export const tryRebaseWorktreeBranch = async ({
+  worktreePath,
+  baseBranch,
+}: {
+  worktreePath: string;
+  baseBranch: string;
+}): Promise<{
+  applied: boolean;
+  error: string | null;
+}> => {
+  try {
+    await runGit(worktreePath, ["rebase", baseBranch]);
+    return {
+      applied: true,
+      error: null,
+    };
+  } catch (error) {
+    try {
+      await runGit(worktreePath, ["rebase", "--abort"]);
+    } catch {
+      // Ignore cleanup failures and return the original rebase error below.
+    }
+
+    return {
+      applied: false,
+      error: error instanceof Error ? error.message : "Git rebase failed.",
+    };
+  }
+};

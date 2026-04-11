@@ -20,6 +20,7 @@ import {
   hasWorktreeChanges,
   listExistingBranches,
   resolveRepositoryBaseBranch,
+  tryRebaseWorktreeBranch,
   resolveWorktreeRoot,
 } from "@/lib/team/git";
 import {
@@ -390,6 +391,15 @@ const noBranchOutputMessage =
 
 const shortenCommit = (commit: string): string => {
   return commit.slice(0, 12);
+};
+
+const summarizeGitFailure = (message: string): string => {
+  return (
+    message
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? "Git operation failed."
+  );
 };
 
 const runRoleWithCodexCli = async ({
@@ -1000,7 +1010,28 @@ const runLaneCycle = async ({
       branchName: lane.branchName,
     });
 
+    let latestImplementationCommit = branchHeadAfterCoding;
+    let rebaseErrorSummary: string | null = null;
+
     if (hasConflict) {
+      const rebaseAttempt = await tryRebaseWorktreeBranch({
+        worktreePath: lane.worktreePath,
+        baseBranch: lane.baseBranch,
+      });
+
+      if (rebaseAttempt.applied) {
+        latestImplementationCommit = await getBranchHead({
+          repositoryPath: assignment.repository.path,
+          branchName: lane.branchName,
+        });
+      } else {
+        rebaseErrorSummary = rebaseAttempt.error
+          ? summarizeGitFailure(rebaseAttempt.error)
+          : "Git rebase failed.";
+      }
+    }
+
+    if (hasConflict && rebaseErrorSummary) {
       await updateTeamThreadRecord({
         threadFile: teamConfig.storage.threadFile,
         threadId,
@@ -1017,7 +1048,7 @@ const runLaneCycle = async ({
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestReviewerSummary = reviewerHandoff.summary;
           mutableLane.latestActivity =
-            "Planner detected a pull request conflict and requeued the lane.";
+            "Planner detected a pull request conflict, the auto-rebase attempt failed, and the lane was requeued.";
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
           mutableLane.workerSlot = null;
@@ -1037,12 +1068,12 @@ const runLaneCycle = async ({
           appendLaneEvent(
             mutableLane,
             "reviewer",
-            `Reviewer approved the proposal, but the planner detected a conflict: ${reviewerHandoff.summary}`,
+            `Reviewer approved the proposal, but the planner auto-rebase attempt failed after detecting a conflict: ${reviewerHandoff.summary}`,
             mutableNow,
           );
           appendPlannerNote(
             mutableAssignment,
-            `Conflict detected for proposal ${mutableLane.laneIndex}; the coder was requeued before machine review could complete.`,
+            `Conflict detected for proposal ${mutableLane.laneIndex}; automatic rebase onto ${mutableLane.baseBranch ?? lane.baseBranch} failed (${rebaseErrorSummary}), so the coder was requeued before machine review could complete.`,
             mutableNow,
           );
           synchronizeDispatchAssignment(mutableAssignment, mutableNow);
@@ -1062,6 +1093,7 @@ const runLaneCycle = async ({
         );
         const mutableLane = findLane(mutableAssignment, laneId);
         mutableLane.status = "approved";
+        mutableLane.latestImplementationCommit = latestImplementationCommit;
         mutableLane.latestDecision = reviewerHandoff.decision;
         mutableLane.latestCoderHandoff = coderHandoff;
         mutableLane.latestReviewerHandoff = reviewerHandoff;
@@ -1078,6 +1110,14 @@ const runLaneCycle = async ({
         };
         mutableLane.updatedAt = mutableNow;
         mutableLane.finishedAt = mutableNow;
+        if (hasConflict) {
+          appendLaneEvent(
+            mutableLane,
+            "planner",
+            `Planner rebased the lane onto ${mutableLane.baseBranch ?? lane.baseBranch} before final approval.`,
+            mutableNow,
+          );
+        }
         appendLaneEvent(
           mutableLane,
           "reviewer",
@@ -1092,7 +1132,9 @@ const runLaneCycle = async ({
         );
         appendPlannerNote(
           mutableAssignment,
-          `Proposal ${mutableLane.laneIndex} completed coding and machine review.`,
+          hasConflict
+            ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch} and completed coding and machine review.`
+            : `Proposal ${mutableLane.laneIndex} completed coding and machine review.`,
           mutableNow,
         );
         synchronizeDispatchAssignment(mutableAssignment, mutableNow);
