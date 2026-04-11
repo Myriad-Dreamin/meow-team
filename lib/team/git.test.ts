@@ -370,6 +370,33 @@ describe("archiveOpenSpecChangeInWorktree", () => {
       createdArchive: false,
     });
   });
+
+  it("reuses an existing archive from an earlier day when finalization is retried later", async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-archive-test-"));
+    temporaryDirectories.add(worktreePath);
+
+    const archiveProposalPath = path.join(
+      worktreePath,
+      "openspec",
+      "changes",
+      "archive",
+      "2026-04-11-change-name",
+      "proposal.md",
+    );
+    await fs.mkdir(path.dirname(archiveProposalPath), { recursive: true });
+    await fs.writeFile(archiveProposalPath, "archived\n", "utf8");
+
+    await expect(
+      archiveOpenSpecChangeInWorktree({
+        worktreePath,
+        changeName: "change-name",
+        archiveDate: new Date("2026-04-12T10:00:00.000Z"),
+      }),
+    ).resolves.toEqual({
+      archivedPath: "openspec/changes/archive/2026-04-11-change-name",
+      createdArchive: false,
+    });
+  });
 });
 
 describe("tryRebaseWorktreeBranch", () => {

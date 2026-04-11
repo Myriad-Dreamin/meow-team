@@ -1,8 +1,8 @@
 import "server-only";
 
-import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { TeamPushedCommitRecord } from "@/lib/team/types";
@@ -615,6 +615,48 @@ const pathExists = async (candidatePath: string): Promise<boolean> => {
   }
 };
 
+const findExistingArchivedOpenSpecChange = async ({
+  worktreePath,
+  changeName,
+}: {
+  worktreePath: string;
+  changeName: string;
+}): Promise<string | null> => {
+  const archiveRootPath = path.join(worktreePath, "openspec", "changes", "archive");
+
+  let archiveEntries: Dirent<string>[];
+  try {
+    archiveEntries = await fs.readdir(archiveRootPath, {
+      encoding: "utf8",
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+
+  const matchingArchivePaths = archiveEntries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((entryName) => {
+      const match = /^(\d{4}-\d{2}-\d{2})-(.+)$/u.exec(entryName);
+      return match?.[2] === changeName;
+    })
+    .sort((left, right) => left.localeCompare(right))
+    .map((entryName) => path.join("openspec", "changes", "archive", entryName));
+
+  if (matchingArchivePaths.length > 1) {
+    throw new Error(
+      `OpenSpec change ${changeName} has multiple archived copies: ${matchingArchivePaths.join(", ")}.`,
+    );
+  }
+
+  return matchingArchivePaths[0] ?? null;
+};
+
 export const archiveOpenSpecChangeInWorktree = async ({
   worktreePath,
   changeName,
@@ -629,7 +671,11 @@ export const archiveOpenSpecChangeInWorktree = async ({
 }> => {
   const datedArchiveName = `${archiveDate.toISOString().slice(0, 10)}-${changeName}`;
   const sourceRelativePath = path.join("openspec", "changes", changeName);
-  const archiveRelativePath = path.join("openspec", "changes", "archive", datedArchiveName);
+  const archiveRelativePath =
+    (await findExistingArchivedOpenSpecChange({
+      worktreePath,
+      changeName,
+    })) ?? path.join("openspec", "changes", "archive", datedArchiveName);
   const sourcePath = path.join(worktreePath, sourceRelativePath);
   const archivePath = path.join(worktreePath, archiveRelativePath);
 

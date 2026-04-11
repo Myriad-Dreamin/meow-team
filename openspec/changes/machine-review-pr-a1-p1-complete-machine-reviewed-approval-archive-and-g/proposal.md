@@ -11,9 +11,11 @@ Separate machine-reviewed approval from proposal approval, show the approve acti
 ## Capabilities
 
 ### New Capabilities
+
 - `machine-review-pr-a1-p1-complete-machine-reviewed-approval-archive-and-g`: Separate machine-reviewed approval from proposal approval, show the approve action in Machine Reviewed state, archive the approved lane's OpenSpec proposal on-branch, and create or refresh a GitHub PR from that branch into main after human approval.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

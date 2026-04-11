@@ -7,12 +7,14 @@ available coding-review worker from the shared pool.
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Separate machine-reviewed approval from proposal approval, show the approve action in Machine Reviewed state, archive the approved lane's OpenSpec proposal on-branch, and create or refresh a GitHub PR from that branch into main after human approval.
 - Preserve a reviewable OpenSpec contract before coding starts.
 - Keep the proposal logical enough that any pooled worker can execute it.
 - Reuse a managed worktree from `/home/kamiyoru/work/ts/meow-team/.meow-team-worktrees/meow-N` for cache-friendly execution.
 
 **Non-Goals:**
+
 - Bind this proposal to a specific branch or worker slot before approval.
 - Expand scope beyond the approved proposal without human feedback.
 - Merge sibling proposals into a single coding pass without replanning.
