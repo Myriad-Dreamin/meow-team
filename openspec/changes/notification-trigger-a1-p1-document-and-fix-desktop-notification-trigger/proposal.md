@@ -11,9 +11,11 @@ Create `docs/notification.md`, document the exact desktop alert trigger rules an
 ## Capabilities
 
 ### New Capabilities
+
 - `notification-trigger-a1-p1-document-and-fix-desktop-notification-trigger`: Create `docs/notification.md`, document the exact desktop alert trigger rules and prerequisites, reproduce why notifications are not firing, and repair the client notification flow with regression coverage.
 
 ### Modified Capabilities
+
 - None.
 
 ## Conventional Title
@@ -21,7 +23,6 @@ Create `docs/notification.md`, document the exact desktop alert trigger rules an
 - Canonical request/PR title: `fix(desktop/notifications): Document and Fix Desktop Notification Triggers`
 - Conventional title metadata: `fix(desktop/notifications)`
 - Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter `branchPrefix` or OpenSpec change paths.
-
 
 ## Impact
 

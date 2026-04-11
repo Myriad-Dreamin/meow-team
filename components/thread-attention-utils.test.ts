@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildAttentionFingerprintSet,
   collectThreadAttentionNotifications,
   mergeStoredAttentionFingerprints,
-  selectFreshAttentionNotifications,
+  selectUndeliveredAttentionNotifications,
 } from "@/components/thread-attention-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
@@ -218,8 +217,8 @@ describe("collectThreadAttentionNotifications", () => {
   });
 });
 
-describe("selectFreshAttentionNotifications", () => {
-  it("only returns notifications that are new to both the previous and stored sets", () => {
+describe("selectUndeliveredAttentionNotifications", () => {
+  it("keeps active notifications pending until desktop delivery is available", () => {
     const notifications = collectThreadAttentionNotifications([
       createThread({
         workerCounts: {
@@ -259,25 +258,37 @@ describe("selectFreshAttentionNotifications", () => {
         workerLanes: [],
       }),
     ]);
-
-    const activeFingerprints = buildAttentionFingerprintSet(notifications);
-    const previousFingerprints = new Set([notifications[0].fingerprint]);
-    const seenFingerprints = new Set<string>([
-      "thread:thread-99999999:lane:lane-old:awaiting_human_approval:marker:1:0",
-    ]);
+    const deliveredFingerprints = new Set<string>();
 
     expect(
-      selectFreshAttentionNotifications({
+      selectUndeliveredAttentionNotifications({
         nextNotifications: notifications,
-        previousFingerprints,
-        seenFingerprints,
+        deliveredFingerprints,
+        deliveryAvailable: false,
       }),
-    ).toEqual([notifications[1]]);
+    ).toEqual([]);
 
-    expect(mergeStoredAttentionFingerprints(seenFingerprints, activeFingerprints)).toEqual([
-      "thread:thread-99999999:lane:lane-old:awaiting_human_approval:marker:1:0",
-      notifications[0].fingerprint,
-      notifications[1].fingerprint,
-    ]);
+    expect(
+      selectUndeliveredAttentionNotifications({
+        nextNotifications: notifications,
+        deliveredFingerprints,
+        deliveryAvailable: true,
+      }),
+    ).toEqual(notifications);
+
+    const nextDeliveredFingerprints = new Set(
+      mergeStoredAttentionFingerprints(
+        deliveredFingerprints,
+        notifications.map((notification) => notification.fingerprint),
+      ),
+    );
+
+    expect(
+      selectUndeliveredAttentionNotifications({
+        nextNotifications: notifications,
+        deliveredFingerprints: nextDeliveredFingerprints,
+        deliveryAvailable: true,
+      }),
+    ).toEqual([]);
   });
 });

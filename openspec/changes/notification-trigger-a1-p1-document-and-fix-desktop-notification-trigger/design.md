@@ -7,12 +7,14 @@ available coding-review worker from the shared pool.
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Create `docs/notification.md`, document the exact desktop alert trigger rules and prerequisites, reproduce why notifications are not firing, and repair the client notification flow with regression coverage.
 - Preserve a reviewable OpenSpec contract before coding starts.
 - Keep the proposal logical enough that any pooled worker can execute it.
 - Reuse a managed worktree from `/home/kamiyoru/work/ts/meow-team/.meow-team-worktrees/meow-N` for cache-friendly execution.
 
 **Non-Goals:**
+
 - Bind this proposal to a specific branch or worker slot before approval.
 - Expand scope beyond the approved proposal without human feedback.
 - Merge sibling proposals into a single coding pass without replanning.
@@ -31,7 +33,6 @@ available coding-review worker from the shared pool.
 - Canonical request/PR title: `fix(desktop/notifications): Document and Fix Desktop Notification Triggers`
 - Conventional title metadata: `fix(desktop/notifications)`
 - Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter `branchPrefix` or OpenSpec change paths.
-
 
 ## Risks / Trade-offs
 

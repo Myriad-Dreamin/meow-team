@@ -31,7 +31,7 @@ const teamEndpointItems = [
 
 const docsConfig = {
   title: "Meow Team",
-  description: "Documentation for the owner harness team APIs.",
+  description: "Documentation for the owner harness team APIs and workspace guides.",
   cleanUrls: false,
   lastUpdated: true,
   themeConfig: {
@@ -39,6 +39,10 @@ const docsConfig = {
       {
         text: "Home",
         link: "/",
+      },
+      {
+        text: "Notifications",
+        link: "/notification",
       },
       {
         text: "API Guide",
@@ -50,6 +54,21 @@ const docsConfig = {
       },
     ],
     sidebar: {
+      "/": [
+        {
+          text: "Guides",
+          items: [
+            {
+              text: "Overview",
+              link: "/",
+            },
+            {
+              text: "Desktop Notifications",
+              link: "/notification",
+            },
+          ],
+        },
+      ],
       "/api/": [
         {
           text: "API Reference",

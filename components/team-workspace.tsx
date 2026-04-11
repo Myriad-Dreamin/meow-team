@@ -4,10 +4,9 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
 import { TeamStatusBar } from "@/components/team-status-bar";
 import {
-  buildAttentionFingerprintSet,
   collectThreadAttentionNotifications,
   mergeStoredAttentionFingerprints,
-  selectFreshAttentionNotifications,
+  selectUndeliveredAttentionNotifications,
 } from "@/components/thread-attention-utils";
 import { ThreadDetailPanel } from "@/components/thread-detail-panel";
 import {
@@ -57,7 +56,8 @@ type ThreadRepositoryGroup = {
 const POLL_INTERVAL_MS = 5000;
 const SELECTED_TAB_STORAGE_KEY = "team-workspace.selected-tab";
 const DESKTOP_NOTIFICATIONS_ENABLED_STORAGE_KEY = "team-workspace.desktop-attention.enabled";
-const SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY = "team-workspace.desktop-attention.seen";
+const DELIVERED_ATTENTION_FINGERPRINTS_STORAGE_KEY = "team-workspace.desktop-attention.delivered";
+const LEGACY_SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY = "team-workspace.desktop-attention.seen";
 const NO_REPOSITORY_GROUP_KEY = "__no_repository__";
 
 type NotificationPermissionState = NotificationPermission | "unsupported";
@@ -113,21 +113,21 @@ const parseStoredAttentionFingerprints = (value: string | null): string[] => {
   return payload.filter((entry): entry is string => typeof entry === "string");
 };
 
-const readStoredAttentionFingerprints = (): Set<string> => {
+const readStoredDeliveredAttentionFingerprints = (): Set<string> => {
   if (typeof window === "undefined") {
     return new Set();
   }
 
   return new Set(
     parseStoredAttentionFingerprints(
-      window.localStorage.getItem(SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY),
+      window.localStorage.getItem(DELIVERED_ATTENTION_FINGERPRINTS_STORAGE_KEY),
     ),
   );
 };
 
-const persistAttentionFingerprints = (fingerprints: Iterable<string>) => {
+const persistDeliveredAttentionFingerprints = (fingerprints: Iterable<string>) => {
   window.localStorage.setItem(
-    SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY,
+    DELIVERED_ATTENTION_FINGERPRINTS_STORAGE_KEY,
     JSON.stringify(Array.from(fingerprints)),
   );
 };
@@ -232,9 +232,9 @@ export function TeamWorkspace({
     () => getNotificationPermissionState(),
   );
   const [notificationPermissionPending, setNotificationPermissionPending] = useState(false);
-  const previousAttentionFingerprintsRef = useRef<Set<string>>(new Set());
-  const seenAttentionFingerprintsRef = useRef<Set<string>>(readStoredAttentionFingerprints());
-  const hasSeededAttentionFingerprintsRef = useRef(false);
+  const deliveredAttentionFingerprintsRef = useRef<Set<string>>(
+    readStoredDeliveredAttentionFingerprints(),
+  );
 
   useEffect(() => {
     let isCancelled = false;
@@ -287,6 +287,10 @@ export function TeamWorkspace({
   }, [desktopNotificationsEnabled]);
 
   useEffect(() => {
+    window.localStorage.removeItem(LEGACY_SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY);
+  }, []);
+
+  useEffect(() => {
     if (!isNotificationSupported()) {
       return;
     }
@@ -307,49 +311,44 @@ export function TeamWorkspace({
 
   useEffect(() => {
     const activeAttentionNotifications = collectThreadAttentionNotifications(threads);
-    const activeFingerprints = buildAttentionFingerprintSet(activeAttentionNotifications);
-    const storedFingerprints = seenAttentionFingerprintsRef.current;
+    const deliveryAvailable =
+      desktopNotificationsEnabled &&
+      notificationPermission === "granted" &&
+      isNotificationSupported();
+    const deliveredFingerprints = deliveredAttentionFingerprintsRef.current;
+    const attentionNotificationsToDeliver = selectUndeliveredAttentionNotifications({
+      nextNotifications: activeAttentionNotifications,
+      deliveredFingerprints,
+      deliveryAvailable,
+    });
 
-    if (!hasSeededAttentionFingerprintsRef.current) {
-      const seededFingerprints = new Set(
-        mergeStoredAttentionFingerprints(storedFingerprints, activeFingerprints),
-      );
-      previousAttentionFingerprintsRef.current = activeFingerprints;
-      seenAttentionFingerprintsRef.current = seededFingerprints;
-      persistAttentionFingerprints(seededFingerprints);
-      hasSeededAttentionFingerprintsRef.current = true;
+    if (attentionNotificationsToDeliver.length === 0) {
       return;
     }
 
-    const freshAttentionNotifications = selectFreshAttentionNotifications({
-      nextNotifications: activeAttentionNotifications,
-      previousFingerprints: previousAttentionFingerprintsRef.current,
-      seenFingerprints: storedFingerprints,
-    });
+    const deliveredFingerprintsThisPass: string[] = [];
 
-    if (
-      desktopNotificationsEnabled &&
-      notificationPermission === "granted" &&
-      isNotificationSupported()
-    ) {
-      for (const notification of freshAttentionNotifications) {
-        try {
-          new window.Notification(notification.title, {
-            body: notification.body,
-            tag: notification.tag,
-          });
-        } catch {
-          break;
-        }
+    for (const notification of attentionNotificationsToDeliver) {
+      try {
+        new window.Notification(notification.title, {
+          body: notification.body,
+          tag: notification.tag,
+        });
+        deliveredFingerprintsThisPass.push(notification.fingerprint);
+      } catch {
+        break;
       }
     }
 
-    const nextSeenFingerprints = new Set(
-      mergeStoredAttentionFingerprints(storedFingerprints, activeFingerprints),
+    if (deliveredFingerprintsThisPass.length === 0) {
+      return;
+    }
+
+    const nextDeliveredFingerprints = new Set(
+      mergeStoredAttentionFingerprints(deliveredFingerprints, deliveredFingerprintsThisPass),
     );
-    previousAttentionFingerprintsRef.current = activeFingerprints;
-    seenAttentionFingerprintsRef.current = nextSeenFingerprints;
-    persistAttentionFingerprints(nextSeenFingerprints);
+    deliveredAttentionFingerprintsRef.current = nextDeliveredFingerprints;
+    persistDeliveredAttentionFingerprints(nextDeliveredFingerprints);
   }, [desktopNotificationsEnabled, notificationPermission, threads]);
 
   const activeThread =
@@ -410,7 +409,7 @@ export function TeamWorkspace({
         action: null,
         badge: "Blocked",
         badgeClassName: "status-failed",
-        copy: "Allow notifications in browser settings to receive new proposal approval and failure alerts.",
+        copy: "Allow notifications in browser settings to receive current and new proposal approval and failure alerts.",
         heading: "Desktop alerts blocked",
         tone: "blocked",
       } as const;
@@ -425,7 +424,7 @@ export function TeamWorkspace({
         },
         badge: "On",
         badgeClassName: "status-approved",
-        copy: "New proposal approvals and failures will notify once when a thread enters that state.",
+        copy: "Current and new proposal approvals and failures notify once per active state.",
         heading: "Desktop alerts on",
         tone: "enabled",
       } as const;
@@ -440,7 +439,7 @@ export function TeamWorkspace({
         },
         badge: "Pending",
         badgeClassName: "status-awaiting_human_approval",
-        copy: "Approve the browser prompt to turn on desktop alerts for proposal approvals and failures.",
+        copy: "Approve the browser prompt to turn on desktop alerts for current and new proposal approvals and failures.",
         heading: "Requesting permission",
         tone: "pending",
       } as const;
@@ -454,7 +453,7 @@ export function TeamWorkspace({
       },
       badge: "Off",
       badgeClassName: "status-idle",
-      copy: "Opt in to browser notifications for new proposal approval waits and failures.",
+      copy: "Opt in to browser notifications for current and new proposal approval waits and failures.",
       heading: "Desktop alerts off",
       tone: "idle",
     } as const;
