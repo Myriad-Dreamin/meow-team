@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 
 const {
   deleteManagedBranchesMock,
@@ -24,6 +24,13 @@ vi.mock("@/lib/team/git", async () => {
   return {
     ...actual,
     deleteManagedBranches: deleteManagedBranchesMock,
+  };
+});
+
+vi.mock("@/lib/git/ops", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/git/ops")>("@/lib/git/ops");
+  return {
+    ...actual,
     listExistingBranches: listExistingBranchesMock,
     resolveRepositoryBaseBranch: resolveRepositoryBaseBranchMock,
   };

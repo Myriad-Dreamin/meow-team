@@ -1,15 +1,13 @@
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
+import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
-import type { TeamStructuredExecutor } from "@/lib/team/agent/executor";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
-import {
-  rolePromptSchema,
-  teamRepositoryOptionSchema,
-  teamRoleDecisionSchema,
-  teamRoleHandoffSchema,
-} from "@/lib/team/roles/schemas";
+import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
+import type { RolePrompt } from "@/lib/team/prompts";
 import type { TeamCodexEvent } from "@/lib/team/types";
+import type { TeamRoleHandoff } from "@/lib/team/types";
 
 const plannerTaskSchema = z.object({
   title: z.string().trim().min(1),
@@ -34,29 +32,29 @@ const plannerOutputSchema = z.object({
   dispatch: plannerDispatchSchema,
 });
 
-const plannerInputSchema = z.object({
-  role: rolePromptSchema,
-  worktreePath: z.string().trim().min(1),
-  state: z.object({
-    teamName: z.string().trim().min(1),
-    ownerName: z.string().trim().min(1),
-    objective: z.string().trim().min(1),
-    selectedRepository: teamRepositoryOptionSchema.nullable(),
-    workflow: z.array(z.string().trim().min(1)).min(1),
-    handoffs: z.record(z.string(), teamRoleHandoffSchema.optional()),
-    handoffCounter: z.number().int().nonnegative(),
-    assignmentNumber: z.number().int().positive(),
-    requestTitle: z.string().trim().min(1).nullable(),
-    requestText: z.string().trim().min(1).nullable(),
-    latestInput: z.string().trim().min(1).nullable(),
-  }),
-});
+export type PlannerRoleState = {
+  teamName: string;
+  ownerName: string;
+  objective: string;
+  selectedRepository: TeamRepositoryOption | null;
+  workflow: string[];
+  handoffs: Partial<Record<string, TeamRoleHandoff>>;
+  handoffCounter: number;
+  assignmentNumber: number;
+  requestTitle: string | null;
+  requestText: string | null;
+  latestInput: string | null;
+};
 
-export type PlannerRoleInput = z.infer<typeof plannerInputSchema> & {
+export type PlannerRoleInput = {
+  role: RolePrompt;
+  worktreePath: string;
+  state: PlannerRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };
 
 export type PlannerRoleOutput = z.infer<typeof plannerOutputSchema>;
+type PlannerPromptInput = Omit<PlannerRoleInput, "onEvent">;
 
 const buildLocalSkillReference = (): string => {
   return [
@@ -67,7 +65,7 @@ const buildLocalSkillReference = (): string => {
   ].join("\n");
 };
 
-const buildPlannerRequestContext = (input: PlannerRoleInput["state"]): string => {
+const buildPlannerRequestContext = (input: PlannerRoleState): string => {
   const sections: string[] = [];
   const latestInput = input.latestInput?.trim();
   const requestTitle = input.requestTitle?.trim();
@@ -97,7 +95,7 @@ const buildPlannerRequestContext = (input: PlannerRoleInput["state"]): string =>
   return sections.join("\n\n");
 };
 
-const buildPlannerPrompt = ({ role, state }: z.infer<typeof plannerInputSchema>): string => {
+const buildPlannerPrompt = ({ role, state }: PlannerPromptInput): string => {
   const repositoryContext = state.selectedRepository
     ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
     : "Selected repository: none. Proposal dispatch is blocked until a repository is selected.";
@@ -135,18 +133,18 @@ const buildPlannerPrompt = ({ role, state }: z.infer<typeof plannerInputSchema>)
   ].join("\n\n");
 };
 
-export const runPlannerRole = async (
-  input: PlannerRoleInput,
-  executor: TeamStructuredExecutor,
-): Promise<PlannerRoleOutput> => {
-  const { onEvent, ...roleInput } = input;
-  const parsedInput = plannerInputSchema.parse(roleInput);
+export class PlannerAgent {
+  constructor(private readonly executor: TeamStructuredExecutor) {}
 
-  return executor({
-    worktreePath: parsedInput.worktreePath,
-    prompt: buildPlannerPrompt(parsedInput),
-    responseSchema: plannerOutputSchema,
-    codexHomePrefix: "planner",
-    onEvent,
-  });
-};
+  async run(input: PlannerRoleInput): Promise<PlannerRoleOutput> {
+    const { onEvent, ...roleInput } = input;
+
+    return this.executor({
+      worktreePath: roleInput.worktreePath,
+      prompt: buildPlannerPrompt(roleInput),
+      responseSchema: plannerOutputSchema,
+      codexHomePrefix: "planner",
+      onEvent,
+    });
+  }
+}

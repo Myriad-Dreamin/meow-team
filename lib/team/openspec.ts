@@ -4,13 +4,8 @@ import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
-import {
-  commitWorktreeChanges,
-  ensureBranchRef,
-  ensureLaneWorktree,
-  hasWorktreeChanges,
-  sanitizeBranchSegment,
-} from "@/lib/team/git";
+import { commitWorktreeChanges, ensureBranchRef, hasWorktreeChanges } from "@/lib/git/ops";
+import { ensureLaneWorktree, sanitizeBranchSegment } from "@/lib/team/git";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const execFileAsync = promisify(execFile);

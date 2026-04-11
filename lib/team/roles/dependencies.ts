@@ -1,31 +1,37 @@
-import { runCodexStructuredOutput } from "@/lib/team/agent/codex-cli";
-import type { TeamStructuredExecutor } from "@/lib/team/agent/executor";
-import { runCoderRole } from "@/lib/team/roles/coder";
-import { runPlannerRole } from "@/lib/team/roles/planner";
-import { runRequestTitleRole } from "@/lib/team/roles/request-title";
-import { runReviewerRole } from "@/lib/team/roles/reviewer";
+import { runCodexStructuredOutput } from "@/lib/agent/codex-cli";
+import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import { CoderAgent } from "@/lib/team/roles/coder";
+import { PlannerAgent } from "@/lib/team/roles/planner";
+import { RequestTitleAgent } from "@/lib/team/roles/request-title";
+import { ReviewerAgent } from "@/lib/team/roles/reviewer";
 
 export type TeamRoleDependencies = {
   executor: TeamStructuredExecutor;
-  requestTitleRole: typeof runRequestTitleRole;
-  plannerRole: typeof runPlannerRole;
-  coderRole: typeof runCoderRole;
-  reviewerRole: typeof runReviewerRole;
+  requestTitleAgent: Pick<RequestTitleAgent, "run">;
+  plannerAgent: Pick<PlannerAgent, "run">;
+  coderAgent: Pick<CoderAgent, "run">;
+  reviewerAgent: Pick<ReviewerAgent, "run">;
 };
 
-export const defaultTeamRoleDependencies: TeamRoleDependencies = {
-  executor: runCodexStructuredOutput,
-  requestTitleRole: runRequestTitleRole,
-  plannerRole: runPlannerRole,
-  coderRole: runCoderRole,
-  reviewerRole: runReviewerRole,
+const createDefaultRoleAgents = (
+  executor: TeamStructuredExecutor,
+): Omit<TeamRoleDependencies, "executor"> => {
+  return {
+    requestTitleAgent: new RequestTitleAgent(executor),
+    plannerAgent: new PlannerAgent(executor),
+    coderAgent: new CoderAgent(executor),
+    reviewerAgent: new ReviewerAgent(executor),
+  };
 };
 
 export const resolveTeamRoleDependencies = (
   overrides: Partial<TeamRoleDependencies> = {},
 ): TeamRoleDependencies => {
+  const executor = overrides.executor ?? runCodexStructuredOutput;
+
   return {
-    ...defaultTeamRoleDependencies,
+    executor,
+    ...createDefaultRoleAgents(executor),
     ...overrides,
   };
 };

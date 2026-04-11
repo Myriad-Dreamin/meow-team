@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { TeamConfig } from "@/lib/team/config";
+import type { TeamConfig } from "@/lib/config/team";
 
 const rolePromptsDirectory = path.join(process.cwd(), "prompts", "roles");
 

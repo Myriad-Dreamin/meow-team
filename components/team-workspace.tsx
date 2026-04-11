@@ -16,7 +16,7 @@ import {
   threadStatusLabels,
 } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 
 type TeamWorkspaceProps = {
   disabled: boolean;

@@ -9,7 +9,7 @@ import {
   threadHasActiveDispatchAssignment,
 } from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
-import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
+import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
 import { runTeam, type TeamRunSummary } from "@/lib/team/network";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 

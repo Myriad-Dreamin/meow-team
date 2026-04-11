@@ -2,26 +2,29 @@ import "server-only";
 
 import path from "node:path";
 import { teamConfig } from "@/team.config";
-import { applyHandoff, type TeamRoleState } from "@/lib/team/agent-helpers";
 import {
   archiveOpenSpecChangeInWorktree,
+  commitWorktreeChanges,
+  createOrUpdateGitHubPullRequest,
+  detectBranchConflict,
+  getBranchHead,
+  hasWorktreeChanges,
+  listExistingBranches,
+  resolveRepositoryBaseBranch,
+  tryRebaseWorktreeBranch,
+} from "@/lib/git/ops";
+import type { TeamRepositoryContext, TeamRepositoryOption } from "@/lib/git/repository";
+import { applyHandoff, type TeamRoleState } from "@/lib/team/agent-helpers";
+import {
   buildCanonicalBranchName,
   buildLaneBranchName,
   buildLaneWorktreePath,
   buildPlannerWorktreePath,
-  commitWorktreeChanges,
-  createOrUpdateGitHubPullRequest,
   deleteManagedBranches,
-  detectBranchConflict,
   ensureLaneWorktree,
   ExistingBranchesRequireDeleteError,
-  getBranchHead,
-  hasWorktreeChanges,
-  listExistingBranches,
   parseManagedWorktreeSlot,
   pushLaneBranch,
-  resolveRepositoryBaseBranch,
-  tryRebaseWorktreeBranch,
   resolveWorktreeRoot,
 } from "@/lib/team/git";
 import {
@@ -38,7 +41,6 @@ import {
   materializeAssignmentProposals,
 } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import {
   resolveTeamRoleDependencies,
   type TeamRoleDependencies,
@@ -63,24 +65,20 @@ type LanePullRequestDraft = {
   summary: string;
 };
 
-type LaneRunState = TeamRoleState & {
-  teamName: string;
-  ownerName: string;
-  objective: string;
-  repository: TeamRepositoryOption;
-  laneId: string;
-  laneIndex: number;
-  taskTitle: string;
-  taskObjective: string;
-  planSummary: string;
-  planDeliverable: string;
-  branchName: string;
-  baseBranch: string;
-  worktreePath: string;
-  implementationCommit: string | null;
-  conflictNote: string | null;
-  pullRequestDraft: LanePullRequestDraft | null;
-};
+type LaneRunState = TeamRoleState &
+  TeamRepositoryContext & {
+    teamName: string;
+    ownerName: string;
+    objective: string;
+    laneId: string;
+    laneIndex: number;
+    taskTitle: string;
+    taskObjective: string;
+    planSummary: string;
+    planDeliverable: string;
+    conflictNote: string | null;
+    pullRequestDraft: LanePullRequestDraft | null;
+  };
 
 export class DispatchThreadCapacityError extends Error {
   workerCount: number;
@@ -1095,28 +1093,22 @@ const runLaneCycle = async ({
         assignmentNumber,
       }),
     });
-    const coderResponse = await dependencies.coderRole(
-      {
-        role: coderRole,
-        state: coderState,
-        input:
-          lane.taskObjective ??
-          lane.taskTitle ??
-          assignment.plannerSummary ??
-          "Implement the task.",
-        onEvent: async (event) => {
-          await appendTeamCodexLogEvent({
-            threadFile: teamConfig.storage.threadFile,
-            threadId,
-            assignmentNumber,
-            roleId: coderRole.id,
-            laneId,
-            event,
-          });
-        },
+    const coderResponse = await dependencies.coderAgent.run({
+      role: coderRole,
+      state: coderState,
+      input:
+        lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
+      onEvent: async (event) => {
+        await appendTeamCodexLogEvent({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          assignmentNumber,
+          roleId: coderRole.id,
+          laneId,
+          event,
+        });
       },
-      dependencies.executor,
-    );
+    });
 
     const coderHandoff = applyHandoff({
       state: coderState,
@@ -1243,28 +1235,25 @@ const runLaneCycle = async ({
         coder: coderHandoff,
       },
     });
-    const reviewerResponse = await dependencies.reviewerRole(
-      {
-        role: reviewerRole,
-        state: reviewerState,
-        input:
-          lane.taskObjective ??
-          lane.taskTitle ??
-          assignment.plannerSummary ??
-          "Review the lane output.",
-        onEvent: async (event) => {
-          await appendTeamCodexLogEvent({
-            threadFile: teamConfig.storage.threadFile,
-            threadId,
-            assignmentNumber,
-            roleId: reviewerRole.id,
-            laneId,
-            event,
-          });
-        },
+    const reviewerResponse = await dependencies.reviewerAgent.run({
+      role: reviewerRole,
+      state: reviewerState,
+      input:
+        lane.taskObjective ??
+        lane.taskTitle ??
+        assignment.plannerSummary ??
+        "Review the lane output.",
+      onEvent: async (event) => {
+        await appendTeamCodexLogEvent({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          assignmentNumber,
+          roleId: reviewerRole.id,
+          laneId,
+          event,
+        });
       },
-      dependencies.executor,
-    );
+    });
     const reviewerHandoff = applyHandoff({
       state: reviewerState,
       role: reviewerRole,

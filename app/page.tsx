@@ -2,7 +2,7 @@ import { TeamWorkspace } from "@/components/team-workspace";
 import { teamConfig } from "@/team.config";
 import { listTeamThreadSummaries } from "@/lib/team/history";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
-import { teamRuntimeConfig } from "@/lib/team/runtime-config";
+import { teamRuntimeConfig } from "@/lib/config/runtime";
 import { prompt as renderInitialPrompt } from "./home-page-initial-prompt.prompt.md";
 
 export const dynamic = "force-dynamic";

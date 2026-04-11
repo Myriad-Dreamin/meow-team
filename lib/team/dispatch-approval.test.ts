@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getTeamThreadRecord, type TeamThreadRecord } from "@/lib/team/history";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const {
@@ -60,12 +60,19 @@ vi.mock("@/lib/team/git", async () => {
   const actual = await vi.importActual<typeof import("@/lib/team/git")>("@/lib/team/git");
   return {
     ...actual,
+    ensureLaneWorktree: ensureLaneWorktreeMock,
+    pushLaneBranch: pushLaneBranchMock,
+  };
+});
+
+vi.mock("@/lib/git/ops", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/git/ops")>("@/lib/git/ops");
+  return {
+    ...actual,
     archiveOpenSpecChangeInWorktree: archiveOpenSpecChangeInWorktreeMock,
     commitWorktreeChanges: commitWorktreeChangesMock,
     createOrUpdateGitHubPullRequest: createOrUpdateGitHubPullRequestMock,
-    ensureLaneWorktree: ensureLaneWorktreeMock,
     getBranchHead: getBranchHeadMock,
-    pushLaneBranch: pushLaneBranchMock,
   };
 });
 

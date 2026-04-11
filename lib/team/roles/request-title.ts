@@ -1,23 +1,19 @@
 import { z } from "zod";
-import type { TeamStructuredExecutor } from "@/lib/team/agent/executor";
-
-const requestTitleInputSchema = z.object({
-  input: z.string().trim().min(1),
-  requestText: z.string().trim().min(1),
-  worktreePath: z.string().trim().min(1),
-});
+import type { TeamStructuredExecutor } from "@/lib/agent/executor";
 
 const requestTitleOutputSchema = z.object({
   title: z.string().trim().min(1).max(80),
 });
 
-export type RequestTitleRoleInput = z.infer<typeof requestTitleInputSchema>;
+export type RequestTitleRoleInput = {
+  input: string;
+  requestText: string;
+  worktreePath: string;
+};
+
 export type RequestTitleRoleOutput = z.infer<typeof requestTitleOutputSchema>;
 
-const buildRequestTitlePrompt = ({
-  input,
-  requestText,
-}: Pick<RequestTitleRoleInput, "input" | "requestText">): string => {
+const buildRequestTitlePrompt = ({ input, requestText }: RequestTitleRoleInput): string => {
   return [
     "Create a concise title for an engineering request.",
     "Rules:",
@@ -34,16 +30,15 @@ const buildRequestTitlePrompt = ({
     .join("\n\n");
 };
 
-export const runRequestTitleRole = async (
-  input: RequestTitleRoleInput,
-  executor: TeamStructuredExecutor,
-): Promise<RequestTitleRoleOutput> => {
-  const parsedInput = requestTitleInputSchema.parse(input);
+export class RequestTitleAgent {
+  constructor(private readonly executor: TeamStructuredExecutor) {}
 
-  return executor({
-    worktreePath: parsedInput.worktreePath,
-    prompt: buildRequestTitlePrompt(parsedInput),
-    responseSchema: requestTitleOutputSchema,
-    codexHomePrefix: "request-title",
-  });
-};
+  async run(input: RequestTitleRoleInput): Promise<RequestTitleRoleOutput> {
+    return this.executor({
+      worktreePath: input.worktreePath,
+      prompt: buildRequestTitlePrompt(input),
+      responseSchema: requestTitleOutputSchema,
+      codexHomePrefix: "request-title",
+    });
+  }
+}
