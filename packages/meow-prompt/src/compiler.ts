@@ -18,6 +18,7 @@ const PLACEHOLDER_PREFIX = "[[param:";
 const TEMPLATE_FILE_PATTERN = /\.(prompt|template)\.md$/;
 const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const NUMBER_PATTERN = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const TEMPLATE_QUERY_PATTERN = /[?#].*$/;
 
 type ParsedPipeExpression = {
   args: readonly PipeArgument[];
@@ -343,15 +344,21 @@ const renderArgsType = (parameterNames: readonly string[]): string => {
 };
 
 export const isPromptTemplatePath = (filePath: string): boolean => {
-  return TEMPLATE_FILE_PATTERN.test(filePath);
+  return TEMPLATE_FILE_PATTERN.test(normalizePromptTemplatePath(filePath));
+};
+
+export const normalizePromptTemplatePath = (filePath: string): string => {
+  return filePath.replace(TEMPLATE_QUERY_PATTERN, "");
 };
 
 export const getPromptTemplateDeclarationPath = (resourcePath: string): string => {
-  if (!resourcePath.endsWith(".md")) {
+  const normalizedResourcePath = normalizePromptTemplatePath(resourcePath);
+
+  if (!normalizedResourcePath.endsWith(".md")) {
     throw createError(resourcePath, "Prompt template declarations require a .md resource path.");
   }
 
-  return resourcePath.replace(/\.md$/, ".d.md.ts");
+  return normalizedResourcePath.replace(/\.md$/, ".d.md.ts");
 };
 
 export const compilePromptModule = (
