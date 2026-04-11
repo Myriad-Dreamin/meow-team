@@ -1,7 +1,5 @@
-import { z } from "zod";
 import { teamConfig } from "@/team.config";
-import { applyHandoff, summarizeHandoffs } from "@/lib/team/agent-helpers";
-import { runCodexStructuredOutput } from "@/lib/team/codex-cli";
+import { applyHandoff } from "@/lib/team/agent-helpers";
 import { createPlannerDispatchAssignment, ensurePendingDispatchWork } from "@/lib/team/dispatch";
 import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
 import {
@@ -11,13 +9,13 @@ import {
   upsertTeamThreadRun,
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
-import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
 import {
   buildDeterministicRequestTitle,
   normalizeRequestTitle,
 } from "@/lib/team/request-title";
 import { findConfiguredRepository } from "@/lib/team/repositories";
+import { resolveTeamRoleDependencies, type TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type { TeamCodexEvent, TeamCodexLogEntry, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
 
@@ -59,110 +57,6 @@ const normalizeRequestText = (value: string | null | undefined): string | null =
   return normalized ? normalized : null;
 };
 
-const plannerTaskSchema = z.object({
-  title: z.string().trim().min(1),
-  objective: z.string().trim().min(1),
-});
-
-const requestTitleSchema = z.object({
-  title: z.string().trim().min(1),
-});
-
-const plannerResponseSchema = z.object({
-  handoff: z.object({
-    summary: z.string().trim().min(1),
-    deliverable: z.string().trim().min(1),
-    decision: z.enum(["continue", "approved", "needs_revision"]),
-  }),
-  dispatch: z
-    .object({
-      planSummary: z.string().trim().min(1),
-      plannerDeliverable: z.string().trim().min(1),
-      branchPrefix: z.string().trim().min(1),
-      tasks: z.array(plannerTaskSchema).min(1).max(teamConfig.dispatch.maxProposalCount),
-    })
-    .nullable(),
-});
-
-const plannerOutputJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["handoff", "dispatch"],
-  properties: {
-    handoff: {
-      type: "object",
-      additionalProperties: false,
-      required: ["summary", "deliverable", "decision"],
-      properties: {
-        summary: {
-          type: "string",
-          minLength: 1,
-        },
-        deliverable: {
-          type: "string",
-          minLength: 1,
-        },
-        decision: {
-          type: "string",
-          enum: ["continue", "approved", "needs_revision"],
-        },
-      },
-    },
-    dispatch: {
-      type: ["object", "null"],
-      additionalProperties: false,
-      required: ["planSummary", "plannerDeliverable", "branchPrefix", "tasks"],
-      properties: {
-        planSummary: {
-          type: "string",
-          minLength: 1,
-        },
-        plannerDeliverable: {
-          type: "string",
-          minLength: 1,
-        },
-        branchPrefix: {
-          type: "string",
-          minLength: 1,
-        },
-        tasks: {
-          type: "array",
-          minItems: 1,
-          maxItems: teamConfig.dispatch.maxProposalCount,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["title", "objective"],
-            properties: {
-              title: {
-                type: "string",
-                minLength: 1,
-              },
-              objective: {
-                type: "string",
-                minLength: 1,
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const;
-
-const requestTitleOutputJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["title"],
-  properties: {
-    title: {
-      type: "string",
-      minLength: 1,
-      maxLength: 80,
-    },
-  },
-} as const;
-
 const buildInitialState = (
   forceReset: boolean,
   selectedRepository: TeamRepositoryOption | null,
@@ -184,45 +78,6 @@ const buildInitialState = (
   };
 };
 
-const buildLocalSkillReference = (): string => {
-  return [
-    "Local repo skills:",
-    "- `.codex/skills/team-harness-workflow/SKILL.md`",
-    "- `.codex/skills/team-harness-workflow/references/planner.md`",
-    "- `.codex/skills/team-harness-workflow/references/lanes.md`",
-  ].join("\n");
-};
-
-const buildPlannerRequestContext = (state: TeamRunState): string => {
-  const sections: string[] = [];
-  const latestInput = state.latestInput?.trim();
-  const requestTitle = normalizeRequestTitle(state.requestTitle);
-  const requestText = state.requestText?.trim();
-
-  if (requestTitle) {
-    sections.push(`Current request title: ${requestTitle}`);
-  }
-
-  if (requestText) {
-    sections.push(`Raw request text:\n${requestText}`);
-  }
-
-  if (!latestInput) {
-    sections.push(
-      "Current assignment input: none recorded. Ask for clarification instead of inventing product requirements.",
-    );
-    return sections.join("\n\n");
-  }
-
-  sections.push(
-    requestText && latestInput !== requestText
-      ? `Current planning input:\n${latestInput}`
-      : `Current assignment input:\n${latestInput}`,
-  );
-
-  return sections.join("\n\n");
-};
-
 const filterWorkflowHandoffs = (
   state: TeamRunState,
 ): Partial<Record<string, TeamRoleHandoff>> => {
@@ -237,50 +92,6 @@ const getOrderedHandoffs = (state: TeamRunState): TeamRoleHandoff[] => {
     .sort((left, right) => left.sequence - right.sequence);
 };
 
-const buildPlannerPrompt = ({
-  plannerPrompt,
-  state,
-}: {
-  plannerPrompt: string;
-  state: TeamRunState;
-}): string => {
-  const repositoryContext = state.selectedRepository
-    ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
-    : "Selected repository: none. Proposal dispatch is blocked until a repository is selected.";
-
-  return [
-    `You are Planner, the dispatch coordinator inside the ${state.teamName} engineering harness.`,
-    `Owner: ${state.ownerName}.`,
-    `Shared objective: ${state.objective}`,
-    repositoryContext,
-    `Configured workflow: ${state.workflow.join(" -> ")}`,
-    `Current assignment number: ${state.assignmentNumber}.`,
-    `Configured coding-review pool size: ${teamConfig.dispatch.workerCount}.`,
-    `Planner proposals are separate from the coding-review pool. The planner can create one or more proposals, then approved proposals are scheduled onto the shared coder/reviewer pool.`,
-    `Codex skill context:`,
-    buildLocalSkillReference(),
-    `OpenSpec context:`,
-    describeLocalOpenSpecSkills(),
-    buildOpenSpecSkillReference(),
-    buildPlannerRequestContext(state),
-    `Your role prompt is below:`,
-    plannerPrompt.trim(),
-    `Current handoffs for this assignment:`,
-    summarizeHandoffs(state),
-    `Rules:`,
-    `- Create a practical engineering plan and split it into between 1 and ${teamConfig.dispatch.maxProposalCount} concrete proposals for the request group when a repository is selected.`,
-    `- Keep proposals logical and implementation-focused. Do not describe them as tied to a specific branch or worker slot.`,
-    `- Align each proposal with the local OpenSpec flow so the backend can materialize a real OpenSpec change for it.`,
-    `- Use branchPrefix as a short, git-friendly theme for the request group.`,
-    `- If no repository is selected, explain that dispatch is blocked and set dispatch to null.`,
-    `Final response requirements:`,
-    `- Return JSON that matches the provided schema exactly.`,
-    `- Put the planner handoff in handoff.summary and handoff.deliverable.`,
-    `- Set handoff.decision to "continue".`,
-    `- If dispatch is possible, fill dispatch.planSummary, dispatch.plannerDeliverable, dispatch.branchPrefix, and dispatch.tasks.`,
-  ].join("\n\n");
-};
-
 const createPlannerStep = ({
   agentName,
   deliverable,
@@ -293,52 +104,6 @@ const createPlannerStep = ({
     createdAt: new Date().toISOString(),
     text: deliverable,
   };
-};
-
-const buildRequestTitlePrompt = ({
-  input,
-  requestText,
-}: {
-  input: string;
-  requestText: string;
-}): string => {
-  return [
-    "Create a concise title for an engineering request.",
-    "Rules:",
-    "- Keep it plain English and specific.",
-    "- Prefer 2 to 8 words when possible.",
-    "- Do not include quotes, markdown, IDs, or trailing punctuation.",
-    `Raw request text:\n${requestText}`,
-    input !== requestText ? `Current planning input:\n${input}` : null,
-    "Final response requirements:",
-    "- Return JSON that matches the provided schema exactly.",
-    "- Put the title in title.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-};
-
-const generateRequestTitle = async ({
-  input,
-  requestText,
-  worktreePath,
-}: {
-  input: string;
-  requestText: string;
-  worktreePath: string;
-}): Promise<string | null> => {
-  const response = await runCodexStructuredOutput({
-    worktreePath,
-    prompt: buildRequestTitlePrompt({
-      input,
-      requestText,
-    }),
-    responseSchema: requestTitleSchema,
-    outputJsonSchema: requestTitleOutputJsonSchema,
-    codexHomePrefix: "request-title",
-  });
-
-  return normalizeRequestTitle(response.title);
 };
 
 const buildRunState = ({
@@ -395,6 +160,7 @@ const resolveRequestMetadata = async ({
   existingThread,
   shouldResetAssignment,
   worktreePath,
+  dependencies,
   logEvent,
 }: {
   input: string;
@@ -403,6 +169,7 @@ const resolveRequestMetadata = async ({
   existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
   shouldResetAssignment: boolean;
   worktreePath: string;
+  dependencies: TeamRoleDependencies;
   logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<ResolvedRequestMetadata> => {
   const requestText =
@@ -440,11 +207,15 @@ const resolveRequestMetadata = async ({
   }
 
   try {
-    const generatedTitle = await generateRequestTitle({
-      input,
-      requestText,
-      worktreePath,
-    });
+    const generatedTitleResponse = await dependencies.requestTitleRole(
+      {
+        input,
+        requestText,
+        worktreePath,
+      },
+      dependencies.executor,
+    );
+    const generatedTitle = normalizeRequestTitle(generatedTitleResponse.title);
 
     if (generatedTitle) {
       await logEvent?.({
@@ -490,6 +261,7 @@ export const runTeam = async ({
   reset,
   deleteExistingBranches,
   onPlannerLogEntry,
+  dependencies,
 }: {
   input: string;
   threadId?: string;
@@ -499,7 +271,9 @@ export const runTeam = async ({
   reset?: boolean;
   deleteExistingBranches?: boolean;
   onPlannerLogEntry?: (entry: TeamCodexLogEntry) => Promise<void> | void;
+  dependencies?: Partial<TeamRoleDependencies>;
 }): Promise<TeamRunSummary> => {
+  const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
   const selectedRepository = await findConfiguredRepository(teamConfig, repositoryId);
 
   if (repositoryId && !selectedRepository) {
@@ -545,6 +319,7 @@ export const runTeam = async ({
     existingThread,
     shouldResetAssignment,
     worktreePath: selectedRepository?.path ?? process.cwd(),
+    dependencies: resolvedDependencies,
     logEvent: forwardPlannerEvent,
   });
   state.requestTitle = requestMetadata.requestTitle;
@@ -559,17 +334,15 @@ export const runTeam = async ({
     });
 
     const plannerRole = await loadRolePrompt("planner");
-    const plannerResponse = await runCodexStructuredOutput({
-      worktreePath: selectedRepository?.path ?? process.cwd(),
-      prompt: buildPlannerPrompt({
-        plannerPrompt: plannerRole.prompt,
+    const plannerResponse = await resolvedDependencies.plannerRole(
+      {
+        role: plannerRole,
+        worktreePath: selectedRepository?.path ?? process.cwd(),
         state,
-      }),
-      responseSchema: plannerResponseSchema,
-      outputJsonSchema: plannerOutputJsonSchema,
-      codexHomePrefix: "planner",
-      onEvent: forwardPlannerEvent,
-    });
+        onEvent: forwardPlannerEvent,
+      },
+      resolvedDependencies.executor,
+    );
 
     applyHandoff({
       state,
@@ -615,6 +388,7 @@ export const runTeam = async ({
 
     void ensurePendingDispatchWork({
       threadId: resolvedThreadId,
+      dependencies: resolvedDependencies,
     });
 
     return {
