@@ -240,7 +240,22 @@ describe.sequential("runTeam", () => {
 
     const requestTitleAgentMock = {
       run: vi.fn(async (input: RequestTitleAgentArgs[0]) => {
-        callOrder.push("request-title");
+        callOrder.push(input.tasks?.length ? "request-title:metadata" : "request-title:initial");
+
+        if (!input.tasks?.length) {
+          expect(input).toMatchObject({
+            input: "Ship reliable dispatch coordination.",
+            requestText: "Ship reliable dispatch coordination.",
+            worktreePath: repository.path,
+            tasks: null,
+          });
+
+          return {
+            title: "Dispatch Coordination",
+            conventionalTitle: null,
+          };
+        }
+
         expect(input).toMatchObject({
           input: "Ship reliable dispatch coordination.",
           requestText: "Ship reliable dispatch coordination.",
@@ -265,7 +280,7 @@ describe.sequential("runTeam", () => {
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         callOrder.push("planner");
-        expect(input.state.requestTitle).toBeNull();
+        expect(input.state.requestTitle).toBe("Dispatch Coordination");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toEqual(repository);
 
@@ -313,9 +328,9 @@ describe.sequential("runTeam", () => {
     await persistTeamRunState(env, initialState);
     const result = await runTeam(env, initialState);
 
-    expect(callOrder).toEqual(["planner", "request-title"]);
+    expect(callOrder).toEqual(["request-title:initial", "planner", "request-title:metadata"]);
     expect(executorMock).not.toHaveBeenCalled();
-    expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
+    expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(2);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(coderAgentMock.run).not.toHaveBeenCalled();
     expect(reviewerAgentMock.run).not.toHaveBeenCalled();
@@ -323,7 +338,7 @@ describe.sequential("runTeam", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       repository,
-      requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
+      requestTitle: "dev(dispatch/coordination): stabilize dispatch flow",
       conventionalTitle: {
         type: "dev",
         scope: "dispatch/coordination",
@@ -361,7 +376,7 @@ describe.sequential("runTeam", () => {
     if (!result) {
       throw new Error("Expected a planning summary.");
     }
-    expect(result.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(result.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
     expect(result.requestText).toBe("Ship reliable dispatch coordination.");
     expect(result.repository).toEqual(repository);
     expect(result.handoffs).toHaveLength(1);
@@ -378,7 +393,7 @@ describe.sequential("runTeam", () => {
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
     expect(thread?.data.conventionalTitle).toEqual({
       type: "dev",
       scope: "dispatch/coordination",
@@ -462,7 +477,72 @@ describe.sequential("runTeam", () => {
     expect(thread?.data.handoffs.planner?.summary).toBe("Planner is waiting for a repository");
   });
 
-  it("generates a plain request title after planning when dispatch stays blocked", async () => {
+  it("reuses a persisted title before planning and skips regeneration when the request is unchanged", async () => {
+    await upsertTeamThreadRun({
+      threadFile: teamConfig.storage.threadFile,
+      threadId: "thread-persisted-title",
+      state: {
+        teamId: teamConfig.id,
+        teamName: teamConfig.name,
+        ownerName: teamConfig.owner.name,
+        objective: teamConfig.owner.objective,
+        selectedRepository: null,
+        workflow: [...teamConfig.workflow],
+        handoffs: {},
+        handoffCounter: 0,
+        assignmentNumber: 1,
+        requestTitle: "Persisted Title",
+        conventionalTitle: null,
+        requestText: "Plan the persisted request.",
+        latestInput: "Plan the persisted request.",
+        forceReset: false,
+      },
+      input: "Plan the persisted request.",
+    });
+
+    const requestTitleAgentMock = { run: vi.fn() };
+    const plannerAgentMock = {
+      run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        expect(input.state.requestTitle).toBe("Persisted Title");
+        expect(input.state.conventionalTitle).toBeNull();
+        expect(input.state.requestText).toBe("Plan the persisted request.");
+
+        return {
+          handoff: {
+            summary: "Planner is waiting for a repository",
+            deliverable: "Select a repository before proposal dispatch can continue.",
+            decision: "continue" as const,
+          },
+          dispatch: null,
+        };
+      }),
+    };
+    const env = createTeamRunEnv({
+      dependencies: {
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+      },
+      persistState: createPersistStateMock(),
+    });
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
+      input: "Plan the persisted request.",
+      threadId: "thread-persisted-title",
+    });
+    const result = await runTeam(env, initialState);
+
+    expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
+    expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
+    expect(result?.requestTitle).toBe("Persisted Title");
+
+    const thread = await getTeamThreadRecord(
+      teamConfig.storage.threadFile,
+      "thread-persisted-title",
+    );
+    expect(thread?.data.requestTitle).toBe("Persisted Title");
+  });
+
+  it("generates a plain request title before planning when dispatch stays blocked", async () => {
     const executorMock = vi.fn(async () => {
       throw new Error("executor should not be called");
     });
@@ -485,7 +565,7 @@ describe.sequential("runTeam", () => {
     };
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
-        expect(input.state.requestTitle).toBeNull();
+        expect(input.state.requestTitle).toBe("Planning Request");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toBeNull();
 
@@ -577,7 +657,7 @@ describe.sequential("runTeam", () => {
       },
       handoffCounter: 1,
       assignmentNumber: 1,
-      requestTitle: null,
+      requestTitle: "Dispatch Coordination",
       conventionalTitle: null,
       requestText: "Ship reliable dispatch coordination.",
       latestInput: "Ship reliable dispatch coordination.",
@@ -642,7 +722,7 @@ describe.sequential("runTeam", () => {
         shouldResetAssignment: true,
         state: stageState,
         requestMetadata: {
-          requestTitle: null,
+          requestTitle: "Dispatch Coordination",
           conventionalTitle: null,
           requestText: "Ship reliable dispatch coordination.",
         },
@@ -678,7 +758,7 @@ describe.sequential("runTeam", () => {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-replay");
     expect(thread?.dispatchAssignments).toHaveLength(1);
     expect(thread?.results).toHaveLength(1);
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
   });
 
   it("fails fast when all shared meow slots are already assigned to active threads", async () => {

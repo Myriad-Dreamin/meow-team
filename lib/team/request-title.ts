@@ -33,6 +33,14 @@ const trimTitlePunctuation = (value: string): string => {
   return value.replace(/^[`"'#*:_\-\s]+|[`"'#*:_\-\s.?!,;]+$/gu, "").trim();
 };
 
+const trimConventionalSubjectPunctuation = (value: string): string => {
+  if (/^`[^`]+`/u.test(value)) {
+    return value.replace(/["'#*:_\-\s.?!,;]+$/gu, "").trim();
+  }
+
+  return trimTitlePunctuation(value);
+};
+
 const shortenTitle = (value: string, maxLength = MAX_REQUEST_TITLE_LENGTH): string => {
   if (value.length <= maxLength) {
     return value;
@@ -86,6 +94,59 @@ const buildConventionalTitlePrefix = (metadata: ConventionalTitleMetadata): stri
 
 const resolveNonEmptyTitle = (value: string | null | undefined): string => {
   return normalizeRequestTitle(value) ?? DEFAULT_REQUEST_TITLE;
+};
+
+const normalizeConventionalSubject = (value: string | null | undefined): string => {
+  if (!value) {
+    return DEFAULT_REQUEST_TITLE;
+  }
+
+  const normalized = normalizeWhitespace(
+    value.replace(/^(request\s+title|title)\s*:\s*/iu, "").replace(/[\r\n]+/gu, " "),
+  );
+  const shortened = shortenTitle(normalized);
+  const trimmed = trimConventionalSubjectPunctuation(shortened);
+
+  return trimmed || DEFAULT_REQUEST_TITLE;
+};
+
+const stripDuplicatedConventionalVerb = ({
+  metadata,
+  subject,
+}: {
+  metadata: ConventionalTitleMetadata;
+  subject: string;
+}): string => {
+  const stripped = normalizeWhitespace(
+    subject.replace(new RegExp(`^${metadata.type}\\b(?:[\\s:._-]+)?`, "iu"), ""),
+  );
+
+  return stripped || subject;
+};
+
+const sentenceCaseScopedConventionalSubject = (subject: string): string => {
+  return subject.replace(/\b[A-Z][a-z]+\b/gu, (word) => word.toLowerCase());
+};
+
+const normalizeCanonicalConventionalSubject = ({
+  metadata,
+  subject,
+}: {
+  metadata: ConventionalTitleMetadata;
+  subject: string | null | undefined;
+}): string => {
+  const normalizedSubject = resolveNonEmptyTitle(subject);
+
+  if (!metadata.scope) {
+    return normalizedSubject;
+  }
+
+  return sentenceCaseScopedConventionalSubject(
+    stripDuplicatedConventionalVerb({
+      metadata,
+      subject: normalizedSubject,
+    }),
+  );
 };
 
 export const normalizeRequestTitle = (value: string | null | undefined): string | null => {
@@ -181,10 +242,11 @@ export const formatConventionalTitle = ({
   subject: string | null | undefined;
 }): string => {
   const prefix = buildConventionalTitlePrefix(metadata);
-  const normalizedSubject = resolveNonEmptyTitle(subject);
+  const normalizedSubject = normalizeConventionalSubject(subject);
   const availableSubjectLength = Math.max(MAX_REQUEST_TITLE_LENGTH - prefix.length, 1);
   const shortenedSubject = shortenTitle(normalizedSubject, availableSubjectLength);
-  const trimmedSubject = trimTitlePunctuation(shortenedSubject) || DEFAULT_REQUEST_TITLE;
+  const trimmedSubject =
+    trimConventionalSubjectPunctuation(shortenedSubject) || DEFAULT_REQUEST_TITLE;
 
   return `${prefix}${trimmedSubject}`;
 };
@@ -239,7 +301,15 @@ export const buildCanonicalRequestTitle = ({
     preferTaskTitle: true,
   });
 
-  return metadata ? formatConventionalTitle({ metadata, subject }) : subject;
+  return metadata
+    ? formatConventionalTitle({
+        metadata,
+        subject: normalizeCanonicalConventionalSubject({
+          metadata,
+          subject,
+        }),
+      })
+    : subject;
 };
 
 export const buildLanePullRequestTitle = ({
