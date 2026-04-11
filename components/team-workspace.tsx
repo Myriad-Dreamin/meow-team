@@ -27,9 +27,16 @@ type TeamWorkspaceProps = {
   workerCount: number;
 };
 
+type WorkspaceIconProps = {
+  className?: string;
+};
+
 type SelectedTab =
   | {
       type: "run";
+    }
+  | {
+      type: "settings";
     }
   | {
       type: "thread";
@@ -54,6 +61,22 @@ const SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY = "team-workspace.desktop-attentio
 const NO_REPOSITORY_GROUP_KEY = "__no_repository__";
 
 type NotificationPermissionState = NotificationPermission | "unsupported";
+
+const PlusIcon = ({ className }: WorkspaceIconProps) => (
+  <svg
+    aria-hidden="true"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth="1.8"
+    viewBox="0 0 16 16"
+  >
+    <path d="M8 3.25v9.5" />
+    <path d="M3.25 8h9.5" />
+  </svg>
+);
 
 const tryParseJson = (value: string): unknown => {
   try {
@@ -124,12 +147,16 @@ const fetchThreads = async (): Promise<TeamThreadSummary[]> => {
 };
 
 const serializeSelectedTab = (tab: SelectedTab): string => {
-  return tab.type === "run" ? "run" : `thread:${tab.threadId}`;
+  return tab.type === "thread" ? `thread:${tab.threadId}` : tab.type;
 };
 
 const parseStoredSelectedTab = (value: string | null): SelectedTab | null => {
-  if (!value || value === "run") {
-    return value ? { type: "run" } : null;
+  if (!value) {
+    return null;
+  }
+
+  if (value === "run" || value === "settings") {
+    return { type: value };
   }
 
   if (value.startsWith("thread:")) {
@@ -439,6 +466,12 @@ export function TeamWorkspace({
     });
   };
 
+  const handleSelectSettingsTab = () => {
+    startTransition(() => {
+      setSelectedTab({ type: "settings" });
+    });
+  };
+
   const handleSelectThreadTab = (threadId: string) => {
     startTransition(() => {
       setSelectedTab({
@@ -459,54 +492,29 @@ export function TeamWorkspace({
       <aside className="workspace-sidebar">
         <div className="workspace-sidebar-header">
           <div>
-            <p className="workspace-editor-label">Owner Harness Team</p>
             <h2>Harness Workspace</h2>
+            <p className="workspace-sidebar-copy">
+              Track living threads, launch requests, and adjust workspace settings.
+            </p>
           </div>
-
-          <section
-            aria-live="polite"
-            className={`workspace-notification-panel workspace-notification-panel-${desktopNotificationPanelState.tone}`}
-          >
-            <div className="workspace-notification-head">
-              <div>
-                <p className="workspace-notification-label">Desktop Alerts</p>
-                <p className="workspace-notification-title">
-                  {desktopNotificationPanelState.heading}
-                </p>
-              </div>
-              <span className={`status-pill ${desktopNotificationPanelState.badgeClassName}`}>
-                {desktopNotificationPanelState.badge}
-              </span>
-            </div>
-
-            <p className="workspace-notification-copy">{desktopNotificationPanelState.copy}</p>
-
-            {desktopNotificationPanelState.action ? (
-              <button
-                className="workspace-notification-action"
-                disabled={desktopNotificationPanelState.action.disabled}
-                type="button"
-                onClick={desktopNotificationPanelState.action.onClick}
-              >
-                {desktopNotificationPanelState.action.label}
-              </button>
-            ) : null}
-          </section>
         </div>
 
         <div className="workspace-nav">
-          <button
-            className={`workspace-tab-button ${resolvedSelectedTab.type === "run" ? "workspace-tab-button-active" : ""}`}
-            type="button"
-            onClick={handleSelectRunTab}
-          >
-            <span className="workspace-tab-label">Run Team</span>
-            <span className="workspace-tab-meta">Create a new request</span>
-          </button>
-
           <div className="workspace-tab-group">
             <div className="workspace-tab-group-head">
-              <p className="workspace-tab-group-label">Living Threads</p>
+              <div className="workspace-tab-group-heading">
+                <p className="workspace-tab-group-label">Living Threads</p>
+                <button
+                  aria-pressed={resolvedSelectedTab.type === "run"}
+                  className={`workspace-icon-button ${resolvedSelectedTab.type === "run" ? "workspace-icon-button-active" : ""}`}
+                  title="Run Team"
+                  type="button"
+                  onClick={handleSelectRunTab}
+                >
+                  <PlusIcon className="workspace-icon" />
+                  <span className="sr-only">Run Team</span>
+                </button>
+              </div>
               <span className="workspace-tab-group-count">{threads.length}</span>
             </div>
 
@@ -552,7 +560,7 @@ export function TeamWorkspace({
               </div>
             ) : (
               <p className="workspace-empty-state">
-                No living threads yet. Start with the Run Team tab to create the first request.
+                No living threads yet. Use the + action to create the first request.
               </p>
             )}
           </div>
@@ -564,7 +572,6 @@ export function TeamWorkspace({
           {resolvedSelectedTab.type === "run" ? (
             <>
               <div>
-                <p className="workspace-editor-label">Run Team</p>
                 <h3>New Request</h3>
               </div>
               <p className="workspace-editor-copy">
@@ -572,10 +579,18 @@ export function TeamWorkspace({
                 stream live Codex output.
               </p>
             </>
+          ) : resolvedSelectedTab.type === "settings" ? (
+            <>
+              <div>
+                <h3>Settings</h3>
+              </div>
+              <p className="workspace-editor-copy">
+                Adjust workspace-level controls without interrupting the current thread state.
+              </p>
+            </>
           ) : activeThread ? (
             <>
               <div>
-                <p className="workspace-editor-label">Living Thread</p>
                 <h3>{activeThread.requestTitle}</h3>
               </div>
               <div className="workspace-editor-meta">
@@ -589,12 +604,11 @@ export function TeamWorkspace({
           ) : (
             <>
               <div>
-                <p className="workspace-editor-label">Living Thread</p>
                 <h3>Thread Not Available</h3>
               </div>
               <p className="workspace-editor-copy">
                 This thread is no longer present in local storage. Choose another tab from the left
-                or return to Run Team.
+                or use the + action to start a new request.
               </p>
             </>
           )}
@@ -614,6 +628,38 @@ export function TeamWorkspace({
               repositories={repositories}
               workerCount={workerCount}
             />
+          ) : resolvedSelectedTab.type === "settings" ? (
+            <section className="workspace-settings-grid">
+              <section
+                aria-live="polite"
+                className={`workspace-notification-panel workspace-settings-card workspace-notification-panel-${desktopNotificationPanelState.tone}`}
+              >
+                <div className="workspace-notification-head">
+                  <div>
+                    <p className="workspace-notification-label">Desktop Alerts</p>
+                    <p className="workspace-notification-title">
+                      {desktopNotificationPanelState.heading}
+                    </p>
+                  </div>
+                  <span className={`status-pill ${desktopNotificationPanelState.badgeClassName}`}>
+                    {desktopNotificationPanelState.badge}
+                  </span>
+                </div>
+
+                <p className="workspace-notification-copy">{desktopNotificationPanelState.copy}</p>
+
+                {desktopNotificationPanelState.action ? (
+                  <button
+                    className="workspace-notification-action"
+                    disabled={desktopNotificationPanelState.action.disabled}
+                    type="button"
+                    onClick={desktopNotificationPanelState.action.onClick}
+                  >
+                    {desktopNotificationPanelState.action.label}
+                  </button>
+                ) : null}
+              </section>
+            </section>
           ) : activeThread ? (
             <ThreadDetailPanel
               initialSummary={activeThread}
@@ -634,7 +680,10 @@ export function TeamWorkspace({
         </div>
       </div>
 
-      <TeamStatusBar />
+      <TeamStatusBar
+        isSettingsSelected={resolvedSelectedTab.type === "settings"}
+        onSelectSettings={handleSelectSettingsTab}
+      />
     </section>
   );
 }
