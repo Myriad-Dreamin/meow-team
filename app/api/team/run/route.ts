@@ -1,3 +1,4 @@
+// API docs: docs/api/team/run.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";

@@ -1,13 +1,15 @@
 # dependencies
-/node_modules
+node_modules
 .pnpm-store
 
 # next.js build output
-/.next
-/out
+.next
+out
 
 # production
 /build
+.vitepress/cache
+.vitepress/dist
 
 # logs
 npm-debug.log*

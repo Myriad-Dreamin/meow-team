@@ -1,3 +1,4 @@
+// API docs: docs/api/team/approval.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { approveLaneProposal, approveLanePullRequest } from "@/lib/team/dispatch";
