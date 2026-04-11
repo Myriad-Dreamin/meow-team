@@ -1,3 +1,4 @@
+// API docs: docs/api/team/threads/threadId.md
 import { NextResponse } from "next/server";
 import { teamConfig } from "@/team.config";
 import { ensurePendingDispatchWork } from "@/lib/team/dispatch";

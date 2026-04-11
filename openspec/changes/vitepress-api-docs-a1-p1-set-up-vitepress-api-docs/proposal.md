@@ -11,9 +11,11 @@ Add a VitePress site rooted at `docs/`, create the initial API landing and endpo
 ## Capabilities
 
 ### New Capabilities
+
 - `vitepress-api-docs-a1-p1-set-up-vitepress-api-docs`: Add a VitePress site rooted at `docs/`, create the initial API landing and endpoint reference pages for the existing `app/api/team` routes, and annotate each route file with a header that points to its corresponding documentation page.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

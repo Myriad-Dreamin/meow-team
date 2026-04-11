@@ -6,4 +6,5 @@ build
 .meow-team-worktrees
 .codex
 data
+docs/.vitepress
 pnpm-lock.yaml

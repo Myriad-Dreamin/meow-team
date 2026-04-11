@@ -1,3 +1,4 @@
+// API docs: docs/api/team/status.md
 import { NextResponse } from "next/server";
 import { getTeamHostStatusSnapshot } from "@/lib/status/host";
 import { getTeamWorkspaceStatusSnapshot } from "@/lib/team/history";

@@ -1,3 +1,4 @@
+// API docs: docs/api/team/threads/index.md
 import { NextResponse } from "next/server";
 import { teamConfig } from "@/team.config";
 import { listTeamThreadSummaries } from "@/lib/team/history";

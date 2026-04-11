@@ -14,6 +14,7 @@ const config = [
       ".meow-team-worktrees/**",
       ".codex/**",
       "data/**",
+      "docs/.vitepress/**",
     ],
   },
 ];
