@@ -1,20 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  PendingDispatchAssignment,
-  TeamThreadRecord,
-} from "@/lib/team/history";
+import type { PendingDispatchAssignment, TeamThreadRecord } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
-const {
-  getTeamThreadRecordMock,
-  listPendingDispatchAssignmentsMock,
-  updateTeamThreadRecordMock,
-} = vi.hoisted(() => ({
-  getTeamThreadRecordMock: vi.fn(),
-  listPendingDispatchAssignmentsMock: vi.fn(),
-  updateTeamThreadRecordMock: vi.fn(),
-}));
+const { getTeamThreadRecordMock, listPendingDispatchAssignmentsMock, updateTeamThreadRecordMock } =
+  vi.hoisted(() => ({
+    getTeamThreadRecordMock: vi.fn(),
+    listPendingDispatchAssignmentsMock: vi.fn(),
+    updateTeamThreadRecordMock: vi.fn(),
+  }));
 
 vi.mock("@/team.config", () => ({
   teamConfig: {
@@ -49,9 +43,7 @@ vi.mock("@/team.config", () => ({
 }));
 
 vi.mock("@/lib/team/history", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/team/history")>(
-    "@/lib/team/history",
-  );
+  const actual = await vi.importActual<typeof import("@/lib/team/history")>("@/lib/team/history");
   return {
     ...actual,
     getTeamThreadRecord: getTeamThreadRecordMock,
@@ -101,6 +93,7 @@ const createLane = ({
     baseBranch: "main",
     worktreePath,
     latestImplementationCommit: null,
+    pushedCommit: null,
     latestCoderHandoff: null,
     latestReviewerHandoff: null,
     latestDecision: null,
@@ -275,11 +268,7 @@ describe("ensurePendingDispatchWork", () => {
           releasedLane.finishedAt = FIXED_TIMESTAMP;
           releasedLane.updatedAt = FIXED_TIMESTAMP;
 
-          pendingSnapshots.push(
-            buildPendingAssignmentsSnapshot(threadStore, ["thread-1"]),
-            [],
-            [],
-          );
+          pendingSnapshots.push(buildPendingAssignmentsSnapshot(threadStore, ["thread-1"]), [], []);
 
           await ensurePendingDispatchWork();
         }

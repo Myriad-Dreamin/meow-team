@@ -10,6 +10,9 @@ import {
   buildLaneBranchName,
   buildPlannerWorktreePath,
   getBranchHead,
+  normalizeGitHubRepositoryUrl,
+  pushLaneBranch,
+  resolveGitHubPushRemote,
   tryRebaseWorktreeBranch,
 } from "@/lib/team/git";
 
@@ -38,6 +41,13 @@ const createRepository = async (): Promise<string> => {
   await runGit(repositoryPath, ["init", "-b", "main"]);
   await runGit(repositoryPath, ["config", "user.name", "Test User"]);
   await runGit(repositoryPath, ["config", "user.email", "test@example.com"]);
+  return repositoryPath;
+};
+
+const createBareRepository = async (): Promise<string> => {
+  const repositoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-bare-test-"));
+  temporaryDirectories.add(repositoryPath);
+  await runGit(repositoryPath, ["init", "--bare"]);
   return repositoryPath;
 };
 
@@ -159,6 +169,104 @@ describe("buildLaneBranchName", () => {
         laneIndex: 2,
       }),
     );
+  });
+});
+
+describe("normalizeGitHubRepositoryUrl", () => {
+  it("normalizes common GitHub remote URL formats to web URLs", () => {
+    expect(normalizeGitHubRepositoryUrl("https://github.com/example/repository.git")).toBe(
+      "https://github.com/example/repository",
+    );
+    expect(normalizeGitHubRepositoryUrl("git@github.com:example/repository.git")).toBe(
+      "https://github.com/example/repository",
+    );
+    expect(normalizeGitHubRepositoryUrl("ssh://git@github.com/example/repository.git")).toBe(
+      "https://github.com/example/repository",
+    );
+  });
+
+  it("rejects non-GitHub-style repository remotes", () => {
+    expect(normalizeGitHubRepositoryUrl("/tmp/repository.git")).toBeNull();
+    expect(normalizeGitHubRepositoryUrl("file:///tmp/repository.git")).toBeNull();
+  });
+});
+
+describe("resolveGitHubPushRemote", () => {
+  it("keeps the push target and the GitHub web URL separate", async () => {
+    const repositoryPath = await createRepository();
+    const bareRemotePath = await createBareRepository();
+
+    await runGit(repositoryPath, [
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/meow-team.git",
+    ]);
+    await runGit(repositoryPath, ["remote", "set-url", "--push", "origin", bareRemotePath]);
+
+    await expect(
+      resolveGitHubPushRemote({
+        repositoryPath,
+      }),
+    ).resolves.toEqual({
+      remoteName: "origin",
+      fetchUrl: "https://github.com/example/meow-team.git",
+      pushUrl: bareRemotePath,
+      repositoryUrl: "https://github.com/example/meow-team",
+    });
+  });
+});
+
+describe("pushLaneBranch", () => {
+  it("pushes the branch head to the configured remote and returns GitHub URLs", async () => {
+    const repositoryPath = await createRepository();
+    const bareRemotePath = await createBareRepository();
+
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "README.md",
+      content: "base\n",
+    });
+    await commitAll(repositoryPath, "base");
+
+    await runGit(repositoryPath, [
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/meow-team.git",
+    ]);
+    await runGit(repositoryPath, ["remote", "set-url", "--push", "origin", bareRemotePath]);
+
+    await runGit(repositoryPath, ["checkout", "-b", "requests/example/a1-proposal-1"]);
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "feature.txt",
+      content: "feature work\n",
+    });
+    await commitAll(repositoryPath, "feature work");
+
+    const commitHash = await getBranchHead({
+      repositoryPath,
+      branchName: "requests/example/a1-proposal-1",
+    });
+    const pushedCommit = await pushLaneBranch({
+      repositoryPath,
+      branchName: "requests/example/a1-proposal-1",
+      commitHash,
+      pushedAt: "2026-04-11T10:00:00.000Z",
+    });
+
+    expect(
+      await runGit(bareRemotePath, ["rev-parse", "refs/heads/requests/example/a1-proposal-1"]),
+    ).toBe(commitHash);
+    expect(pushedCommit).toEqual({
+      remoteName: "origin",
+      repositoryUrl: "https://github.com/example/meow-team",
+      branchUrl: "https://github.com/example/meow-team/tree/requests/example/a1-proposal-1",
+      commitUrl: `https://github.com/example/meow-team/commit/${commitHash}`,
+      commitHash,
+      pushedAt: "2026-04-11T10:00:00.000Z",
+    });
   });
 });
 

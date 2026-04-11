@@ -41,6 +41,45 @@ export const formatThreadId = (threadId: string): string => {
   return threadId.slice(0, 8);
 };
 
+export const formatCommitHash = (commitHash: string, length = 12): string => {
+  return commitHash.slice(0, length);
+};
+
+export const getLaneBranchDisplay = (
+  lane: TeamWorkerLaneRecord,
+): {
+  label: string;
+  value: string;
+  href: string | null;
+} => {
+  return {
+    label: lane.pushedCommit ? "GitHub Branch" : "Branch",
+    value: lane.branchName ?? "Not allocated",
+    href: lane.pushedCommit?.branchUrl ?? null,
+  };
+};
+
+export const getLaneCommitDisplay = (
+  lane: TeamWorkerLaneRecord,
+): {
+  label: string;
+  value: string;
+  fullValue: string;
+  href: string | null;
+} | null => {
+  const commitHash = lane.pushedCommit?.commitHash ?? lane.latestImplementationCommit;
+  if (!commitHash) {
+    return null;
+  }
+
+  return {
+    label: lane.pushedCommit ? "GitHub Commit" : "Review Commit",
+    value: formatCommitHash(commitHash),
+    fullValue: commitHash,
+    href: lane.pushedCommit?.commitUrl ?? null,
+  };
+};
+
 export const buildFeedbackKey = (
   threadId: string,
   assignmentNumber: number,

@@ -43,6 +43,7 @@ const createLane = ({
     baseBranch: "main",
     worktreePath,
     latestImplementationCommit: null,
+    pushedCommit: null,
     latestCoderHandoff: null,
     latestReviewerHandoff: null,
     latestDecision: null,
@@ -174,7 +175,10 @@ describe("assignPendingDispatchWorkerSlots", () => {
 
     const occupiedSlots = pendingAssignments
       .flatMap((pending) => pending.assignment.lanes)
-      .filter((lane) => lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing")
+      .filter(
+        (lane) =>
+          lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing",
+      )
       .flatMap((lane) => (lane.workerSlot ? [lane.workerSlot] : []));
     expect(occupiedSlots).toEqual([1, 3, 2]);
     expect(new Set(occupiedSlots).size).toBe(3);

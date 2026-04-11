@@ -100,6 +100,15 @@ export type TeamPullRequestRecord = {
   url: string | null;
 };
 
+export type TeamPushedCommitRecord = {
+  remoteName: string;
+  repositoryUrl: string;
+  branchUrl: string;
+  commitUrl: string;
+  commitHash: string;
+  pushedAt: string;
+};
+
 export type TeamWorkerLaneRecord = {
   laneId: string;
   laneIndex: number;
@@ -113,6 +122,7 @@ export type TeamWorkerLaneRecord = {
   baseBranch: string | null;
   worktreePath: string | null;
   latestImplementationCommit: string | null;
+  pushedCommit: TeamPushedCommitRecord | null;
   latestCoderHandoff: TeamRoleHandoff | null;
   latestReviewerHandoff: TeamRoleHandoff | null;
   latestDecision: TeamRoleDecision | null;

@@ -5,8 +5,10 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { TeamPushedCommitRecord } from "@/lib/team/types";
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_PUSH_REMOTE_NAME = "origin";
 
 export class ExistingBranchesRequireDeleteError extends Error {
   branchNames: string[];
@@ -443,6 +445,135 @@ export const getBranchHead = async ({
 }): Promise<string> => {
   const { stdout } = await runGit(repositoryPath, ["rev-parse", branchName]);
   return stdout;
+};
+
+const trimGitSuffix = (value: string): string => {
+  return value.replace(/\.git$/iu, "");
+};
+
+export const normalizeGitHubRepositoryUrl = (remoteUrl: string): string | null => {
+  const trimmedRemoteUrl = remoteUrl.trim();
+  if (!trimmedRemoteUrl) {
+    return null;
+  }
+
+  const sshRemoteMatch = /^git@([^:]+):(.+)$/u.exec(trimmedRemoteUrl);
+  if (sshRemoteMatch) {
+    const host = sshRemoteMatch[1];
+    const repositoryPath = trimGitSuffix(sshRemoteMatch[2] ?? "")
+      .replace(/^\/+/u, "")
+      .replace(/\/+$/u, "");
+    const pathSegments = repositoryPath.split("/").filter(Boolean);
+    if (pathSegments.length !== 2) {
+      return null;
+    }
+
+    return `https://${host}/${pathSegments.join("/")}`;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(trimmedRemoteUrl);
+  } catch {
+    return null;
+  }
+
+  if (
+    parsedUrl.protocol !== "https:" &&
+    parsedUrl.protocol !== "http:" &&
+    parsedUrl.protocol !== "ssh:"
+  ) {
+    return null;
+  }
+
+  const repositoryPath = trimGitSuffix(parsedUrl.pathname)
+    .replace(/^\/+/u, "")
+    .replace(/\/+$/u, "");
+  const pathSegments = repositoryPath.split("/").filter(Boolean);
+  if (pathSegments.length !== 2) {
+    return null;
+  }
+
+  return `https://${parsedUrl.host}/${pathSegments.join("/")}`;
+};
+
+export const resolveGitHubPushRemote = async ({
+  repositoryPath,
+  remoteName = DEFAULT_PUSH_REMOTE_NAME,
+}: {
+  repositoryPath: string;
+  remoteName?: string;
+}): Promise<{
+  remoteName: string;
+  fetchUrl: string;
+  pushUrl: string;
+  repositoryUrl: string;
+}> => {
+  const { stdout: fetchUrl } = await runGit(repositoryPath, ["remote", "get-url", remoteName]);
+  const { stdout: pushUrl } = await runGit(repositoryPath, [
+    "remote",
+    "get-url",
+    "--push",
+    remoteName,
+  ]);
+  const repositoryUrl =
+    normalizeGitHubRepositoryUrl(fetchUrl) ?? normalizeGitHubRepositoryUrl(pushUrl);
+
+  if (!repositoryUrl) {
+    throw new Error(
+      `Git remote ${remoteName} does not expose a GitHub repository URL for commit publishing.`,
+    );
+  }
+
+  return {
+    remoteName,
+    fetchUrl,
+    pushUrl,
+    repositoryUrl,
+  };
+};
+
+const encodeGitHubRef = (value: string): string => {
+  return value
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+};
+
+export const pushLaneBranch = async ({
+  repositoryPath,
+  branchName,
+  commitHash,
+  remoteName = DEFAULT_PUSH_REMOTE_NAME,
+  pushedAt = new Date().toISOString(),
+}: {
+  repositoryPath: string;
+  branchName: string;
+  commitHash: string;
+  remoteName?: string;
+  pushedAt?: string;
+}): Promise<TeamPushedCommitRecord> => {
+  const remote = await resolveGitHubPushRemote({
+    repositoryPath,
+    remoteName,
+  });
+
+  await runGit(repositoryPath, [
+    "push",
+    "--force-with-lease",
+    "--set-upstream",
+    remote.remoteName,
+    `${branchName}:${branchName}`,
+  ]);
+
+  return {
+    remoteName: remote.remoteName,
+    repositoryUrl: remote.repositoryUrl,
+    branchUrl: `${remote.repositoryUrl}/tree/${encodeGitHubRef(branchName)}`,
+    commitUrl: `${remote.repositoryUrl}/commit/${commitHash}`,
+    commitHash,
+    pushedAt,
+  };
 };
 
 export const removeWorktreeDirectory = async (worktreePath: string): Promise<void> => {
