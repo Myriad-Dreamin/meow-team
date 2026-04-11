@@ -19,7 +19,7 @@ describe("meow-prompt direct imports", () => {
 
   it("renders a raw pipe with an argument", () => {
     expect(rawJsonPrompt({ payload: { ready: true, workers: 2 } })).toBe(
-      '{\n  "ready": true,\n  "workers": 2\n}\n',
+      '\n{\n  "ready": true,\n  "workers": 2\n}\n',
     );
   });
 });

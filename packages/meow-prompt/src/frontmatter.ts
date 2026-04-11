@@ -1,3 +1,36 @@
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
+
+const resolveJsYamlPackageJsonPath = (): string => {
+  const directPackagePath = path.join(process.cwd(), "node_modules", "js-yaml", "package.json");
+
+  if (fs.existsSync(directPackagePath)) {
+    return directPackagePath;
+  }
+
+  const pnpmStoreDirectory = path.join(process.cwd(), "node_modules", ".pnpm");
+
+  if (!fs.existsSync(pnpmStoreDirectory)) {
+    throw new Error("Unable to resolve js-yaml from node_modules.");
+  }
+
+  const jsYamlEntry = fs
+    .readdirSync(pnpmStoreDirectory)
+    .sort()
+    .find((entry) => entry.startsWith("js-yaml@"));
+
+  if (!jsYamlEntry) {
+    throw new Error("Unable to resolve js-yaml from node_modules.");
+  }
+
+  return path.join(pnpmStoreDirectory, jsYamlEntry, "node_modules", "js-yaml", "package.json");
+};
+
+const { load: loadYaml } = createRequire(resolveJsYamlPackageJsonPath())("js-yaml") as {
+  load: (source: string) => unknown;
+};
+
 type FrontmatterPrimitive = boolean | number | string | null;
 
 export type FrontmatterValue =
@@ -5,256 +38,115 @@ export type FrontmatterValue =
   | { [key: string]: FrontmatterValue }
   | FrontmatterValue[];
 
-type FrontmatterLine = {
-  content: string;
-  indent: number;
-  lineNumber: number;
-};
-
-const SCALAR_NUMBER_PATTERN = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
-
-const parseQuotedString = (value: string): string => {
-  if (value.length < 2) {
-    return value;
-  }
-
-  const quote = value[0];
-  if ((quote !== "'" && quote !== '"') || value[value.length - 1] !== quote) {
-    return value;
-  }
-
-  let result = "";
-
-  for (let index = 1; index < value.length - 1; index += 1) {
-    const character = value[index];
-
-    if (character !== "\\") {
-      result += character;
-      continue;
-    }
-
-    index += 1;
-
-    const escapedCharacter = value[index];
-
-    if (escapedCharacter === undefined) {
-      throw new Error("Invalid frontmatter string escape.");
-    }
-
-    switch (escapedCharacter) {
-      case "n":
-        result += "\n";
-        break;
-      case "r":
-        result += "\r";
-        break;
-      case "t":
-        result += "\t";
-        break;
-      case "\\":
-        result += "\\";
-        break;
-      case "'":
-        result += "'";
-        break;
-      case '"':
-        result += '"';
-        break;
-      default:
-        result += escapedCharacter;
-        break;
-    }
-  }
-
-  return result;
-};
-
-const parseScalarValue = (value: string): FrontmatterValue => {
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
 
-  if (value === "null") {
-    return null;
-  }
-
-  if (SCALAR_NUMBER_PATTERN.test(value)) {
-    return Number(value);
-  }
-
-  return parseQuotedString(value);
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 };
 
-const toFrontmatterLines = (rawFrontmatter: string): FrontmatterLine[] => {
-  return rawFrontmatter
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line, index) => ({ line, lineNumber: index + 1 }))
-    .filter(({ line }) => Boolean(line.trim()) && !line.trim().startsWith("#"))
-    .map(({ line, lineNumber }) => {
-      const indent = line.match(/^ */)?.[0].length ?? 0;
+const normalizeFrontmatterValue = (value: unknown, path = "frontmatter"): FrontmatterValue => {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
 
-      if (indent % 2 !== 0) {
-        throw new Error(`Frontmatter line ${lineNumber} must use two-space indentation.`);
-      }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Unsupported frontmatter number at ${path}.`);
+    }
 
-      return {
-        content: line.trim(),
-        indent,
-        lineNumber,
-      };
-    });
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => normalizeFrontmatterValue(entry, `${path}[${index}]`));
+  }
+
+  if (isPlainObject(value)) {
+    const normalizedValue: Record<string, FrontmatterValue> = {};
+
+    for (const [key, entryValue] of Object.entries(value)) {
+      normalizedValue[key] = normalizeFrontmatterValue(entryValue, `${path}.${key}`);
+    }
+
+    return normalizedValue;
+  }
+
+  throw new Error(`Unsupported frontmatter value at ${path}.`);
 };
 
-const parseFrontmatterBlock = (
-  lines: readonly FrontmatterLine[],
-  startIndex: number,
-  indent: number,
-): { nextIndex: number; value: FrontmatterValue } => {
-  const currentLine = lines[startIndex];
-
-  if (!currentLine || currentLine.indent < indent) {
-    return {
-      nextIndex: startIndex,
-      value: {},
-    };
+export const stripYamlFrontmatter = (
+  markdown: string,
+): { frontmatter: string | null; body: string } => {
+  if (!markdown.startsWith("---")) {
+    return { frontmatter: null, body: markdown };
   }
 
-  if (currentLine.indent > indent) {
-    throw new Error(
-      `Unexpected frontmatter indentation on line ${currentLine.lineNumber}; expected ${indent} spaces.`,
-    );
+  const lines = markdown.split(/\r?\n/);
+
+  if (lines[0].trim() !== "---") {
+    return { frontmatter: null, body: markdown };
   }
 
-  if (currentLine.content.startsWith("- ")) {
-    const value: FrontmatterValue[] = [];
-    let nextIndex = startIndex;
+  let end = -1;
 
-    while (nextIndex < lines.length) {
-      const line = lines[nextIndex];
-
-      if (line.indent < indent) {
-        break;
-      }
-
-      if (line.indent > indent) {
-        throw new Error(
-          `Unexpected frontmatter indentation on line ${line.lineNumber}; expected ${indent} spaces.`,
-        );
-      }
-
-      if (!line.content.startsWith("- ")) {
-        break;
-      }
-
-      const inlineValue = line.content.slice(2).trim();
-      nextIndex += 1;
-
-      if (inlineValue.length > 0) {
-        value.push(parseScalarValue(inlineValue));
-        continue;
-      }
-
-      const nestedBlock = parseFrontmatterBlock(lines, nextIndex, indent + 2);
-      value.push(nestedBlock.value);
-      nextIndex = nestedBlock.nextIndex;
-    }
-
-    return { nextIndex, value };
-  }
-
-  const value: Record<string, FrontmatterValue> = {};
-  let nextIndex = startIndex;
-
-  while (nextIndex < lines.length) {
-    const line = lines[nextIndex];
-
-    if (line.indent < indent) {
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index].trim() === "---") {
+      end = index;
       break;
     }
-
-    if (line.indent > indent) {
-      throw new Error(
-        `Unexpected frontmatter indentation on line ${line.lineNumber}; expected ${indent} spaces.`,
-      );
-    }
-
-    if (line.content.startsWith("- ")) {
-      break;
-    }
-
-    const separatorIndex = line.content.indexOf(":");
-
-    if (separatorIndex <= 0) {
-      throw new Error(`Invalid frontmatter entry on line ${line.lineNumber}.`);
-    }
-
-    const key = line.content.slice(0, separatorIndex).trim();
-    const inlineValue = line.content.slice(separatorIndex + 1).trim();
-    nextIndex += 1;
-
-    if (inlineValue.length > 0) {
-      value[key] = parseScalarValue(inlineValue);
-      continue;
-    }
-
-    if (nextIndex >= lines.length || lines[nextIndex].indent <= indent) {
-      value[key] = null;
-      continue;
-    }
-
-    const nestedBlock = parseFrontmatterBlock(lines, nextIndex, indent + 2);
-    value[key] = nestedBlock.value;
-    nextIndex = nestedBlock.nextIndex;
   }
 
-  return { nextIndex, value };
+  if (end === -1) {
+    return { frontmatter: null, body: markdown };
+  }
+
+  const frontmatter = lines.slice(1, end).join("\n");
+  const body = lines.slice(end + 1).join("\n");
+
+  return { frontmatter, body };
 };
 
 export const parseFrontmatter = (rawFrontmatter: string): Record<string, FrontmatterValue> => {
-  const lines = toFrontmatterLines(rawFrontmatter);
-
-  if (lines.length === 0) {
+  if (!rawFrontmatter.trim()) {
     return {};
   }
 
-  const { nextIndex, value } = parseFrontmatterBlock(lines, 0, 0);
+  const parsedFrontmatter = loadYaml(rawFrontmatter);
 
-  if (nextIndex !== lines.length || !value || Array.isArray(value) || typeof value !== "object") {
+  if (parsedFrontmatter === undefined || parsedFrontmatter === null) {
+    return {};
+  }
+
+  const normalizedFrontmatter = normalizeFrontmatterValue(parsedFrontmatter);
+
+  if (
+    !normalizedFrontmatter ||
+    Array.isArray(normalizedFrontmatter) ||
+    typeof normalizedFrontmatter !== "object"
+  ) {
     throw new Error("Prompt frontmatter must be a top-level mapping.");
   }
 
-  return value;
+  return normalizedFrontmatter;
 };
 
 export const extractFrontmatter = (
   source: string,
 ): { body: string; frontmatter: Record<string, FrontmatterValue> } => {
-  const normalizedSource = source.replace(/\r\n/g, "\n");
+  const { body, frontmatter } = stripYamlFrontmatter(source);
 
-  if (!normalizedSource.startsWith("---\n")) {
+  if (frontmatter === null) {
     return {
-      body: normalizedSource,
+      body,
       frontmatter: {},
     };
   }
 
-  const lines = normalizedSource.split("\n");
-  const closingMarkerIndex = lines.findIndex((line, index) => index > 0 && line === "---");
-
-  if (closingMarkerIndex === -1) {
-    throw new Error("Prompt frontmatter is missing a closing --- delimiter.");
-  }
-
-  const rawFrontmatter = lines.slice(1, closingMarkerIndex).join("\n");
-  const body = lines.slice(closingMarkerIndex + 1).join("\n");
-
   return {
-    body: body.startsWith("\n") ? body.slice(1) : body,
-    frontmatter: parseFrontmatter(rawFrontmatter),
+    body,
+    frontmatter: parseFrontmatter(frontmatter),
   };
 };

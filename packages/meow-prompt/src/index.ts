@@ -2,8 +2,14 @@ export {
   compilePromptModule,
   getPromptTemplateDeclarationPath,
   isPromptTemplatePath,
+  normalizePromptTemplatePath,
 } from "./compiler";
-export { extractFrontmatter, parseFrontmatter, type FrontmatterValue } from "./frontmatter";
+export {
+  extractFrontmatter,
+  parseFrontmatter,
+  stripYamlFrontmatter,
+  type FrontmatterValue,
+} from "./frontmatter";
 export {
   createPromptRenderer,
   renderCompiledTemplate,

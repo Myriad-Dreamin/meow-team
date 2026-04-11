@@ -4,14 +4,16 @@ import {
   compilePromptModule,
   getPromptTemplateDeclarationPath,
   isPromptTemplatePath,
-} from "../compiler";
+} from "./compiler";
 
 type SyncOptions = {
-  rootDirectory?: string;
+  rootDirectory: string;
+  runtimeModulePath: string;
 };
 
 const SKIPPED_DIRECTORIES = new Set([
   ".git",
+  ".meow-team-worktrees",
   ".next",
   ".pnpm-store",
   ".turbo",
@@ -21,8 +23,6 @@ const SKIPPED_DIRECTORIES = new Set([
   "node_modules",
   "out",
 ]);
-
-const runtimeModulePath = path.resolve(__dirname, "..", "runtime");
 
 const walkDirectory = async (directoryPath: string): Promise<string[]> => {
   const entries = await fs.readdir(directoryPath, { withFileTypes: true });
@@ -66,33 +66,40 @@ const writeFileIfChanged = async (filePath: string, contents: string): Promise<v
   await fs.writeFile(filePath, contents, "utf8");
 };
 
-export const syncPromptTemplateDeclarations = async (
-  options: SyncOptions = {},
-): Promise<string[]> => {
-  const rootDirectory = options.rootDirectory ?? process.cwd();
-  const files = await walkDirectory(rootDirectory);
+export const writePromptTemplateDeclaration = async (
+  source: string,
+  resourcePath: string,
+  runtimeModulePath: string,
+) => {
+  const compiledModule = compilePromptModule(source, {
+    resourcePath,
+    runtimeModulePath,
+  });
+
+  await writeFileIfChanged(getPromptTemplateDeclarationPath(resourcePath), compiledModule.dts);
+
+  return compiledModule;
+};
+
+export const removePromptTemplateDeclaration = async (resourcePath: string): Promise<void> => {
+  try {
+    await fs.unlink(getPromptTemplateDeclarationPath(resourcePath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+};
+
+export const syncPromptTemplateDeclarations = async (options: SyncOptions): Promise<string[]> => {
+  const files = await walkDirectory(options.rootDirectory);
   const templateFiles = files.filter((filePath) => isPromptTemplatePath(filePath)).sort();
 
   for (const templateFilePath of templateFiles) {
     const source = await fs.readFile(templateFilePath, "utf8");
-    const compiledModule = compilePromptModule(source, {
-      resourcePath: templateFilePath,
-      runtimeModulePath,
-    });
 
-    await writeFileIfChanged(
-      getPromptTemplateDeclarationPath(templateFilePath),
-      compiledModule.dts,
-    );
+    await writePromptTemplateDeclaration(source, templateFilePath, options.runtimeModulePath);
   }
 
   return templateFiles;
 };
-
-if (require.main === module) {
-  syncPromptTemplateDeclarations().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(message);
-    process.exitCode = 1;
-  });
-}
