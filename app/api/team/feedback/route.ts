@@ -4,7 +4,7 @@ import { teamConfig } from "@/team.config";
 import { prepareAssignmentReplan } from "@/lib/team/dispatch";
 import { markTeamThreadFailed } from "@/lib/team/history";
 import { runTeam } from "@/lib/team/network";
-import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
+import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
 
 export const runtime = "nodejs";
 

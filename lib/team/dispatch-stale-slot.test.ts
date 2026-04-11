@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PendingDispatchAssignment, TeamThreadRecord } from "@/lib/team/history";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const { getTeamThreadRecordMock, listPendingDispatchAssignmentsMock, updateTeamThreadRecordMock } =

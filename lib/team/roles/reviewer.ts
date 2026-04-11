@@ -1,14 +1,12 @@
 import { z } from "zod";
+import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import type { TeamRepositoryContext } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
-import type { TeamStructuredExecutor } from "@/lib/team/agent/executor";
 import { buildReviewerExecutionRules } from "@/lib/team/reviewer-guidance";
-import {
-  rolePromptSchema,
-  teamRepositoryOptionSchema,
-  teamRoleDecisionSchema,
-  teamRoleHandoffSchema,
-} from "@/lib/team/roles/schemas";
+import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
+import type { RolePrompt } from "@/lib/team/prompts";
 import type { TeamCodexEvent } from "@/lib/team/types";
+import type { TeamRoleHandoff } from "@/lib/team/types";
 
 const reviewerOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -18,43 +16,34 @@ const reviewerOutputSchema = z.object({
   pullRequestSummary: z.string().trim().min(1).nullable(),
 });
 
-const reviewerInputSchema = z.object({
-  role: rolePromptSchema,
-  input: z.string().trim().min(1),
-  state: z.object({
-    teamName: z.string().trim().min(1),
-    ownerName: z.string().trim().min(1),
-    objective: z.string().trim().min(1),
-    repository: teamRepositoryOptionSchema,
-    laneId: z.string().trim().min(1),
-    laneIndex: z.number().int().positive(),
-    taskTitle: z.string().trim().min(1),
-    taskObjective: z.string().trim().min(1),
-    planSummary: z.string().trim().min(1),
-    planDeliverable: z.string().trim().min(1),
-    branchName: z.string().trim().min(1),
-    baseBranch: z.string().trim().min(1),
-    worktreePath: z.string().trim().min(1),
-    implementationCommit: z.string().trim().min(1).nullable(),
-    conflictNote: z.string().trim().min(1).nullable(),
-    workflow: z.array(z.string().trim().min(1)).min(1),
-    handoffs: z.record(z.string(), teamRoleHandoffSchema.optional()),
-    handoffCounter: z.number().int().nonnegative(),
-    assignmentNumber: z.number().int().positive(),
-  }),
-});
+export type ReviewerRoleState = TeamRepositoryContext & {
+  teamName: string;
+  ownerName: string;
+  objective: string;
+  laneId: string;
+  laneIndex: number;
+  taskTitle: string;
+  taskObjective: string;
+  planSummary: string;
+  planDeliverable: string;
+  conflictNote: string | null;
+  workflow: string[];
+  handoffs: Partial<Record<string, TeamRoleHandoff>>;
+  handoffCounter: number;
+  assignmentNumber: number;
+};
 
-export type ReviewerRoleInput = z.infer<typeof reviewerInputSchema> & {
+export type ReviewerRoleInput = {
+  role: RolePrompt;
+  input: string;
+  state: ReviewerRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };
 
 export type ReviewerRoleOutput = z.infer<typeof reviewerOutputSchema>;
+type ReviewerPromptInput = Omit<ReviewerRoleInput, "onEvent">;
 
-const buildReviewerPrompt = ({
-  role,
-  state,
-  input,
-}: z.infer<typeof reviewerInputSchema>): string => {
+const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): string => {
   return [
     `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
     `Owner: ${state.ownerName}.`,
@@ -98,18 +87,18 @@ const buildReviewerPrompt = ({
     .join("\n\n");
 };
 
-export const runReviewerRole = async (
-  input: ReviewerRoleInput,
-  executor: TeamStructuredExecutor,
-): Promise<ReviewerRoleOutput> => {
-  const { onEvent, ...roleInput } = input;
-  const parsedInput = reviewerInputSchema.parse(roleInput);
+export class ReviewerAgent {
+  constructor(private readonly executor: TeamStructuredExecutor) {}
 
-  return executor({
-    worktreePath: parsedInput.state.worktreePath,
-    prompt: buildReviewerPrompt(parsedInput),
-    responseSchema: reviewerOutputSchema,
-    codexHomePrefix: "lane",
-    onEvent,
-  });
-};
+  async run(input: ReviewerRoleInput): Promise<ReviewerRoleOutput> {
+    const { onEvent, ...roleInput } = input;
+
+    return this.executor({
+      worktreePath: roleInput.state.worktreePath,
+      prompt: buildReviewerPrompt(roleInput),
+      responseSchema: reviewerOutputSchema,
+      codexHomePrefix: "lane",
+      onEvent,
+    });
+  }
+}

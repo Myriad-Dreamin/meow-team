@@ -1,4 +1,4 @@
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 
 export type TeamRoleDecision = "continue" | "approved" | "needs_revision";
 

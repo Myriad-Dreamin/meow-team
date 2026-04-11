@@ -21,7 +21,7 @@ import {
   resolveTeamRoleDependencies,
   type TeamRoleDependencies,
 } from "@/lib/team/roles/dependencies";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type {
   TeamCodexEvent,
   TeamCodexLogEntry,
@@ -216,14 +216,11 @@ const resolveRequestMetadata = async ({
   }
 
   try {
-    const generatedTitleResponse = await dependencies.requestTitleRole(
-      {
-        input,
-        requestText,
-        worktreePath,
-      },
-      dependencies.executor,
-    );
+    const generatedTitleResponse = await dependencies.requestTitleAgent.run({
+      input,
+      requestText,
+      worktreePath,
+    });
     const generatedTitle = normalizeRequestTitle(generatedTitleResponse.title);
 
     if (generatedTitle) {
@@ -352,15 +349,12 @@ export const runTeam = async ({
     });
 
     const plannerRole = await loadRolePrompt("planner");
-    const plannerResponse = await resolvedDependencies.plannerRole(
-      {
-        role: plannerRole,
-        worktreePath: selectedRepository?.path ?? process.cwd(),
-        state,
-        onEvent: forwardPlannerEvent,
-      },
-      resolvedDependencies.executor,
-    );
+    const plannerResponse = await resolvedDependencies.plannerAgent.run({
+      role: plannerRole,
+      worktreePath: selectedRepository?.path ?? process.cwd(),
+      state,
+      onEvent: forwardPlannerEvent,
+    });
 
     applyHandoff({
       state,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTeamHostStatusSnapshot } from "@/lib/team/host-status";
+import { getTeamHostStatusSnapshot } from "@/lib/status/host";
 import { getTeamWorkspaceStatusSnapshot } from "@/lib/team/history";
 import { teamConfig } from "@/team.config";
 

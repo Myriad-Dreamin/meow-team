@@ -7,7 +7,7 @@ import {
   mergeLogEntries,
 } from "@/components/thread-log-panel";
 import type { TeamRunSummary } from "@/lib/team/network";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 
 type TeamConsoleProps = {

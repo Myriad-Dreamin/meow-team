@@ -6,17 +6,19 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  archiveOpenSpecChangeInWorktree,
   buildCanonicalBranchName,
   buildLaneBranchName,
   buildPlannerWorktreePath,
-  getBranchHead,
-  normalizeGitHubRepositoryUrl,
   parseManagedWorktreeSlot,
   pushLaneBranch,
+} from "@/lib/team/git";
+import {
+  archiveOpenSpecChangeInWorktree,
+  getBranchHead,
+  normalizeGitHubRepositoryUrl,
   resolveGitHubPushRemote,
   tryRebaseWorktreeBranch,
-} from "@/lib/team/git";
+} from "@/lib/git/ops";
 
 const execFileAsync = promisify(execFile);
 const temporaryDirectories = new Set<string>();

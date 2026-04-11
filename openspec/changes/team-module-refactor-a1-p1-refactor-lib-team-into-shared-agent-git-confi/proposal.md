@@ -11,9 +11,11 @@ Convert request-title/planner/coder/reviewer runners into injected agent classes
 ## Capabilities
 
 ### New Capabilities
+
 - `team-module-refactor-a1-p1-refactor-lib-team-into-shared-agent-git-confi`: Convert request-title/planner/coder/reviewer runners into injected agent classes, move reusable agent/git/config/status and repository-context code out of `lib/team`, keep runtime validation only at untyped boundaries, and preserve current harness behavior with updated tests and validation.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

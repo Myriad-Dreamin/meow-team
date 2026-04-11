@@ -70,7 +70,7 @@ the environment provides a model override.
   Markdown system prompts for each role.
 - [`lib/team/network.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/network.ts):
   planner orchestration and thread state management.
-- [`lib/team/codex-cli.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/codex-cli.ts):
+- [`lib/agent/codex-cli.ts`](/home/kamiyoru/work/ts/meow-team/lib/agent/codex-cli.ts):
   structured Codex CLI execution helpers plus temporary skill exposure.
 - [`lib/team/history.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/history.ts):
   persistent thread storage for continuous runs.

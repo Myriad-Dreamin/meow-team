@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/network";
 import { resolveDisplayRequestTitle } from "@/lib/team/request-title";
 import {

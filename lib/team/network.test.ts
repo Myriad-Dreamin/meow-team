@@ -37,11 +37,11 @@ vi.mock("@/lib/team/repositories", async (importOriginal) => {
 import { teamConfig } from "@/team.config";
 import { getTeamThreadRecord } from "@/lib/team/history";
 import { runTeam } from "@/lib/team/network";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 
-type RequestTitleRoleArgs = Parameters<TeamRoleDependencies["requestTitleRole"]>;
-type PlannerRoleArgs = Parameters<TeamRoleDependencies["plannerRole"]>;
+type RequestTitleAgentArgs = Parameters<TeamRoleDependencies["requestTitleAgent"]["run"]>;
+type PlannerAgentArgs = Parameters<TeamRoleDependencies["plannerAgent"]["run"]>;
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 
 const repository: TeamRepositoryOption = {
@@ -90,10 +90,9 @@ describe.sequential("runTeam", () => {
     });
     const executor = executorMock as unknown as TeamRoleDependencies["executor"];
 
-    const requestTitleRoleMock = vi.fn(
-      async (input: RequestTitleRoleArgs[0], receivedExecutor: RequestTitleRoleArgs[1]) => {
+    const requestTitleAgentMock = {
+      run: vi.fn(async (input: RequestTitleAgentArgs[0]) => {
         callOrder.push("request-title");
-        expect(receivedExecutor).toBe(executor);
         expect(input).toMatchObject({
           input: "Ship reliable dispatch coordination.",
           requestText: "Ship reliable dispatch coordination.",
@@ -103,12 +102,11 @@ describe.sequential("runTeam", () => {
         return {
           title: "Dispatch Coordination",
         };
-      },
-    );
-    const plannerRoleMock = vi.fn(
-      async (input: PlannerRoleArgs[0], receivedExecutor: PlannerRoleArgs[1]) => {
+      }),
+    };
+    const plannerAgentMock = {
+      run: vi.fn(async (input: PlannerAgentArgs[0]) => {
         callOrder.push("planner");
-        expect(receivedExecutor).toBe(executor);
         expect(input.state.requestTitle).toBe("Dispatch Coordination");
         expect(input.state.selectedRepository).toEqual(repository);
 
@@ -130,10 +128,10 @@ describe.sequential("runTeam", () => {
             ],
           },
         };
-      },
-    );
-    const coderRoleMock = vi.fn();
-    const reviewerRoleMock = vi.fn();
+      }),
+    };
+    const coderAgentMock = { run: vi.fn() };
+    const reviewerAgentMock = { run: vi.fn() };
 
     const result = await runTeam({
       input: "Ship reliable dispatch coordination.",
@@ -141,20 +139,19 @@ describe.sequential("runTeam", () => {
       threadId: "thread-1",
       dependencies: {
         executor,
-        requestTitleRole:
-          requestTitleRoleMock as unknown as TeamRoleDependencies["requestTitleRole"],
-        plannerRole: plannerRoleMock as unknown as TeamRoleDependencies["plannerRole"],
-        coderRole: coderRoleMock as unknown as TeamRoleDependencies["coderRole"],
-        reviewerRole: reviewerRoleMock as unknown as TeamRoleDependencies["reviewerRole"],
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+        coderAgent: coderAgentMock,
+        reviewerAgent: reviewerAgentMock,
       },
     });
 
     expect(callOrder).toEqual(["request-title", "planner"]);
     expect(executorMock).not.toHaveBeenCalled();
-    expect(requestTitleRoleMock).toHaveBeenCalledTimes(1);
-    expect(plannerRoleMock).toHaveBeenCalledTimes(1);
-    expect(coderRoleMock).not.toHaveBeenCalled();
-    expect(reviewerRoleMock).not.toHaveBeenCalled();
+    expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
+    expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
+    expect(coderAgentMock.run).not.toHaveBeenCalled();
+    expect(reviewerAgentMock.run).not.toHaveBeenCalled();
     expect(createPlannerDispatchAssignmentMock).toHaveBeenCalledWith({
       threadId: "thread-1",
       assignmentNumber: 1,
@@ -176,11 +173,10 @@ describe.sequential("runTeam", () => {
       threadId: "thread-1",
       dependencies: expect.objectContaining({
         executor,
-        requestTitleRole:
-          requestTitleRoleMock as unknown as TeamRoleDependencies["requestTitleRole"],
-        plannerRole: plannerRoleMock as unknown as TeamRoleDependencies["plannerRole"],
-        coderRole: coderRoleMock as unknown as TeamRoleDependencies["coderRole"],
-        reviewerRole: reviewerRoleMock as unknown as TeamRoleDependencies["reviewerRole"],
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+        coderAgent: coderAgentMock,
+        reviewerAgent: reviewerAgentMock,
       }),
     });
     expect(result.requestTitle).toBe("Dispatch Coordination");
@@ -212,10 +208,9 @@ describe.sequential("runTeam", () => {
     });
     const executor = executorMock as unknown as TeamRoleDependencies["executor"];
 
-    const requestTitleRoleMock = vi.fn();
-    const plannerRoleMock = vi.fn(
-      async (input: PlannerRoleArgs[0], receivedExecutor: PlannerRoleArgs[1]) => {
-        expect(receivedExecutor).toBe(executor);
+    const requestTitleAgentMock = { run: vi.fn() };
+    const plannerAgentMock = {
+      run: vi.fn(async (input: PlannerAgentArgs[0]) => {
         expect(input.state.requestTitle).toBe("Human Title");
         expect(input.state.selectedRepository).toBeNull();
 
@@ -227,10 +222,10 @@ describe.sequential("runTeam", () => {
           },
           dispatch: null,
         };
-      },
-    );
-    const coderRoleMock = vi.fn();
-    const reviewerRoleMock = vi.fn();
+      }),
+    };
+    const coderAgentMock = { run: vi.fn() };
+    const reviewerAgentMock = { run: vi.fn() };
 
     const result = await runTeam({
       input: "Plan the request.",
@@ -238,16 +233,15 @@ describe.sequential("runTeam", () => {
       threadId: "thread-2",
       dependencies: {
         executor,
-        requestTitleRole:
-          requestTitleRoleMock as unknown as TeamRoleDependencies["requestTitleRole"],
-        plannerRole: plannerRoleMock as unknown as TeamRoleDependencies["plannerRole"],
-        coderRole: coderRoleMock as unknown as TeamRoleDependencies["coderRole"],
-        reviewerRole: reviewerRoleMock as unknown as TeamRoleDependencies["reviewerRole"],
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+        coderAgent: coderAgentMock,
+        reviewerAgent: reviewerAgentMock,
       },
     });
 
-    expect(requestTitleRoleMock).not.toHaveBeenCalled();
-    expect(plannerRoleMock).toHaveBeenCalledTimes(1);
+    expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
+    expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(executorMock).not.toHaveBeenCalled();
     expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
     expect(result.requestTitle).toBe("Human Title");
@@ -368,8 +362,8 @@ describe.sequential("runTeam", () => {
       "utf8",
     );
 
-    const requestTitleRoleMock = vi.fn();
-    const plannerRoleMock = vi.fn();
+    const requestTitleAgentMock = { run: vi.fn() };
+    const plannerAgentMock = { run: vi.fn() };
 
     await expect(
       runTeam({
@@ -377,17 +371,16 @@ describe.sequential("runTeam", () => {
         repositoryId: repository.id,
         threadId: "thread-over-capacity",
         dependencies: {
-          requestTitleRole:
-            requestTitleRoleMock as unknown as TeamRoleDependencies["requestTitleRole"],
-          plannerRole: plannerRoleMock as unknown as TeamRoleDependencies["plannerRole"],
+          requestTitleAgent: requestTitleAgentMock,
+          plannerAgent: plannerAgentMock,
         },
       }),
     ).rejects.toThrow(
       "All 1 shared meow worktree slot is already assigned to non-terminal threads.",
     );
 
-    expect(requestTitleRoleMock).not.toHaveBeenCalled();
-    expect(plannerRoleMock).not.toHaveBeenCalled();
+    expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
+    expect(plannerAgentMock.run).not.toHaveBeenCalled();
     expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
   });
 });

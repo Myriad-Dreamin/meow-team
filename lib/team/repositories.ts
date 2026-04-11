@@ -2,8 +2,8 @@ import "server-only";
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { TeamConfig } from "@/lib/team/config";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamConfig } from "@/lib/config/team";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 
 export type ResolvedTeamRepositoryRoot = {
   id: string;

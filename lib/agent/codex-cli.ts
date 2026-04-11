@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
-import { teamRuntimeConfig } from "@/lib/team/runtime-config";
+import { teamRuntimeConfig } from "@/lib/config/runtime";
 import type { TeamCodexEvent, TeamCodexLogSource } from "@/lib/team/types";
 
 const ERROR_OUTPUT_LINE_LIMIT = 80;

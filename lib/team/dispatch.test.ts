@@ -4,7 +4,7 @@ import {
   assignPendingDispatchWorkerSlots,
 } from "@/lib/team/dispatch";
 import type { PendingDispatchAssignment } from "@/lib/team/history";
-import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";

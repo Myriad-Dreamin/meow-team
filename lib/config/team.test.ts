@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineTeamConfig } from "./config";
+import { defineTeamConfig } from "./team";
 
 describe("defineTeamConfig", () => {
   it("parses a minimal valid team configuration", () => {
