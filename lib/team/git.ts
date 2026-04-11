@@ -269,10 +269,15 @@ export const buildLaneWorktreePath = ({
 
 export const buildPlannerWorktreePath = ({
   worktreeRoot,
+  threadId,
+  assignmentNumber,
 }: {
   worktreeRoot: string;
+  threadId: string;
+  assignmentNumber: number;
 }): string => {
-  return path.join(worktreeRoot, "planner-staging");
+  const sanitizedThreadId = sanitizeBranchSegment(threadId).replace(/\//g, "-");
+  return path.join(worktreeRoot, `planner-${sanitizedThreadId}-a${assignmentNumber}`);
 };
 
 export const resolveRepositoryBaseBranch = async (

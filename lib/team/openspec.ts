@@ -365,6 +365,8 @@ export const buildProposalPath = (proposalChangeName: string): string => {
 };
 
 export const materializeAssignmentProposals = async ({
+  threadId,
+  assignmentNumber,
   repositoryPath,
   baseBranch,
   canonicalBranchName,
@@ -374,6 +376,8 @@ export const materializeAssignmentProposals = async ({
   worktreeRoot,
   lanes,
 }: {
+  threadId: string;
+  assignmentNumber: number;
   repositoryPath: string;
   baseBranch: string;
   canonicalBranchName: string;
@@ -408,6 +412,8 @@ export const materializeAssignmentProposals = async ({
 
   const stagingWorktreePath = buildPlannerWorktreePath({
     worktreeRoot,
+    threadId,
+    assignmentNumber,
   });
   await ensureLaneWorktree({
     repositoryPath,

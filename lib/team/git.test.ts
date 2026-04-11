@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { getBranchHead, tryRebaseWorktreeBranch } from "@/lib/team/git";
+import { buildPlannerWorktreePath, getBranchHead, tryRebaseWorktreeBranch } from "@/lib/team/git";
 
 const execFileAsync = promisify(execFile);
 const temporaryDirectories = new Set<string>();
@@ -68,6 +68,34 @@ afterEach(async () => {
   );
 
   temporaryDirectories.clear();
+});
+
+describe("buildPlannerWorktreePath", () => {
+  it("derives a unique planner staging path from the thread and assignment", () => {
+    expect(
+      buildPlannerWorktreePath({
+        worktreeRoot: "/tmp/worktrees",
+        threadId: "thread/alpha",
+        assignmentNumber: 1,
+      }),
+    ).toBe("/tmp/worktrees/planner-thread-alpha-a1");
+
+    expect(
+      buildPlannerWorktreePath({
+        worktreeRoot: "/tmp/worktrees",
+        threadId: "thread/alpha",
+        assignmentNumber: 2,
+      }),
+    ).toBe("/tmp/worktrees/planner-thread-alpha-a2");
+
+    expect(
+      buildPlannerWorktreePath({
+        worktreeRoot: "/tmp/worktrees",
+        threadId: "thread/beta",
+        assignmentNumber: 1,
+      }),
+    ).toBe("/tmp/worktrees/planner-thread-beta-a1");
+  });
 });
 
 describe("tryRebaseWorktreeBranch", () => {
