@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useEffect, useState } from "react";
+import { LaneMarkdownText } from "@/components/lane-markdown";
 import {
   buildFeedbackKey,
   canRestartPlanning,
@@ -347,7 +348,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                             </span>
                           </div>
 
-                          <p className="lane-copy">{describeLane(lane)}</p>
+                          <LaneMarkdownText className="lane-copy" text={describeLane(lane)} />
 
                           <div className="lane-meta-grid">
                             <div>

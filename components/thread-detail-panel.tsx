@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useEffect, useState } from "react";
+import { LaneMarkdownText } from "@/components/lane-markdown";
 import { TeamThreadLogPanel } from "@/components/thread-log-panel";
 import type { TeamThreadDetail, TeamThreadSummary } from "@/lib/team/history";
 import {
@@ -529,7 +530,7 @@ export function ThreadDetailPanel({
                     </span>
                   </div>
 
-                  <p className="lane-copy">{describeLane(lane)}</p>
+                  <LaneMarkdownText className="lane-copy" text={describeLane(lane)} />
 
                   <div className="lane-meta-grid">
                     <div>
@@ -627,7 +628,7 @@ export function ThreadDetailPanel({
                               <span className="conversation-kind">{event.actor}</span>
                               <span>{formatTimestamp(event.createdAt)}</span>
                             </div>
-                            <p className="lane-copy">{event.message}</p>
+                            <LaneMarkdownText className="lane-copy" text={event.message} />
                           </article>
                         ))}
                     </div>
