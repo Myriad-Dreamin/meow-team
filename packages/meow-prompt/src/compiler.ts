@@ -156,7 +156,7 @@ const parsePipeExpression = (value: string, resourcePath: string): ParsedPipeExp
   if (openParenthesisIndex === -1) {
     return {
       args: [],
-      name: assertIdentifier(value.trim(), "pipe", resourcePath),
+      name: assertIdentifier(value, "pipe", resourcePath),
     };
   }
 
@@ -164,7 +164,7 @@ const parsePipeExpression = (value: string, resourcePath: string): ParsedPipeExp
     throw createError(resourcePath, `Invalid pipe expression "${value}".`);
   }
 
-  const name = assertIdentifier(value.slice(0, openParenthesisIndex).trim(), "pipe", resourcePath);
+  const name = assertIdentifier(value.slice(0, openParenthesisIndex), "pipe", resourcePath);
   const argsSource = value.slice(openParenthesisIndex + 1, -1);
   const args: PipeArgument[] = [];
   let index = 0;
@@ -206,7 +206,7 @@ const parsePipeExpression = (value: string, resourcePath: string): ParsedPipeExp
 const parsePlaceholder = (value: string, resourcePath: string): CompiledPlaceholder => {
   const separatorIndex = value.indexOf("|");
   const name = assertIdentifier(
-    (separatorIndex === -1 ? value : value.slice(0, separatorIndex)).trim(),
+    separatorIndex === -1 ? value : value.slice(0, separatorIndex),
     "parameter name",
     resourcePath,
   );
@@ -219,7 +219,7 @@ const parsePlaceholder = (value: string, resourcePath: string): CompiledPlacehol
     };
   }
 
-  const pipeExpression = parsePipeExpression(value.slice(separatorIndex + 1).trim(), resourcePath);
+  const pipeExpression = parsePipeExpression(value.slice(separatorIndex + 1), resourcePath);
 
   return {
     name,
