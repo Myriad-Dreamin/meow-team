@@ -18,7 +18,6 @@ describe("defineTeamConfig", () => {
         maxOutputTokens: 3200,
       },
       workflow: ["planner", "coder", "reviewer"],
-      maxIterations: 3,
       storage: {
         threadFile: "data/test-thread.json",
       },

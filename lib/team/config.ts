@@ -44,7 +44,6 @@ export const teamConfigSchema = z.object({
     maxOutputTokens: z.number().int().positive(),
   }),
   workflow: z.array(roleIdSchema).min(1),
-  maxIterations: z.number().int().positive(),
   storage: z.object({
     threadFile: z.string().trim().min(1),
   }),

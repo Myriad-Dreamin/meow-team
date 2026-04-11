@@ -18,7 +18,6 @@ export const teamConfig = defineTeamConfig({
     maxOutputTokens: 3200,
   },
   workflow: ["planner", "coder", "reviewer"],
-  maxIterations: 50,
   storage: {
     threadFile: "data/team-threads.json",
   },
