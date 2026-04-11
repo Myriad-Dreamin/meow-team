@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { extractFrontmatter } from "./src/frontmatter";
 
 describe("meow-prompt frontmatter review regression", () => {
   it("resolves js-yaml independently from process.cwd()", async () => {
@@ -25,5 +26,17 @@ describe("meow-prompt frontmatter review regression", () => {
       process.chdir(originalCwd);
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("keeps YAML timestamp scalars as strings", () => {
+    expect(
+      extractFrontmatter("---\ncreated: 2024-01-01\npublishedAt: 2024-01-01T12:30:00Z\n---\nBody"),
+    ).toEqual({
+      body: "Body",
+      frontmatter: {
+        created: "2024-01-01",
+        publishedAt: "2024-01-01T12:30:00Z",
+      },
+    });
   });
 });

@@ -1,17 +1,23 @@
 import { createRequire } from "node:module";
 
-type LoadYaml = (source: string) => unknown;
+type LoadYaml = (source: string, options?: { schema?: unknown }) => unknown;
+type ParseYaml = (source: string) => unknown;
+type YamlModule = {
+  load: LoadYaml;
+  JSON_SCHEMA: unknown;
+};
 
 const require = createRequire(import.meta.url);
-let loadYaml: LoadYaml | null = null;
+let parseYaml: ParseYaml | null = null;
 
-const getLoadYaml = (): LoadYaml => {
-  if (loadYaml) {
-    return loadYaml;
+const getParseYaml = (): ParseYaml => {
+  if (parseYaml) {
+    return parseYaml;
   }
 
-  ({ load: loadYaml } = require("js-yaml") as { load: LoadYaml });
-  return loadYaml;
+  const { load, JSON_SCHEMA } = require("js-yaml") as YamlModule;
+  parseYaml = (source) => load(source, { schema: JSON_SCHEMA });
+  return parseYaml;
 };
 
 type FrontmatterPrimitive = boolean | number | string | null;
@@ -97,7 +103,7 @@ export const parseFrontmatter = (rawFrontmatter: string): Record<string, Frontma
     return {};
   }
 
-  const parsedFrontmatter = getLoadYaml()(rawFrontmatter);
+  const parsedFrontmatter = getParseYaml()(rawFrontmatter);
 
   if (parsedFrontmatter === undefined || parsedFrontmatter === null) {
     return {};
