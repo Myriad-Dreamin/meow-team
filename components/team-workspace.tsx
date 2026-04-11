@@ -4,12 +4,7 @@ import { startTransition, useEffect, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
 import { TeamStatusBar } from "@/components/team-status-bar";
 import { ThreadDetailPanel } from "@/components/thread-detail-panel";
-import {
-  describeThreadProgress,
-  formatThreadId,
-  formatTimestamp,
-  threadStatusLabels,
-} from "@/components/thread-view-utils";
+import { formatThreadId, formatTimestamp, threadStatusLabels } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 
@@ -35,8 +30,16 @@ type TeamThreadsResponse = {
   threads: TeamThreadSummary[];
 };
 
+type ThreadRepositoryGroup = {
+  key: string;
+  title: string;
+  description: string;
+  threads: TeamThreadSummary[];
+};
+
 const POLL_INTERVAL_MS = 5000;
 const SELECTED_TAB_STORAGE_KEY = "team-workspace.selected-tab";
+const NO_REPOSITORY_GROUP_KEY = "__no_repository__";
 
 const tryParseJson = (value: string): unknown => {
   try {
@@ -88,6 +91,37 @@ const parseStoredSelectedTab = (value: string | null): SelectedTab | null => {
   }
 
   return null;
+};
+
+const formatRepositoryGroupDescription = (repository: TeamRepositoryOption): string => {
+  const repositoryLabel = repository.relativePath === "." ? repository.name : repository.relativePath;
+  return `${repository.rootLabel} / ${repositoryLabel}`;
+};
+
+const groupThreadsByRepository = (threads: TeamThreadSummary[]): ThreadRepositoryGroup[] => {
+  const groups = new Map<string, ThreadRepositoryGroup>();
+
+  for (const thread of threads) {
+    const repository = thread.repository;
+    const groupKey = repository?.id ?? NO_REPOSITORY_GROUP_KEY;
+    const existingGroup = groups.get(groupKey);
+
+    if (existingGroup) {
+      existingGroup.threads.push(thread);
+      continue;
+    }
+
+    groups.set(groupKey, {
+      key: groupKey,
+      title: repository?.name ?? "No Repository",
+      description: repository
+        ? formatRepositoryGroupDescription(repository)
+        : "Threads without a selected repository",
+      threads: [thread],
+    });
+  }
+
+  return Array.from(groups.values());
 };
 
 export function TeamWorkspace({
@@ -159,6 +193,7 @@ export function TeamWorkspace({
     resolvedSelectedTab.type === "thread"
       ? (threads.find((thread) => thread.threadId === resolvedSelectedTab.threadId) ?? null)
       : null;
+  const threadGroups = groupThreadsByRepository(threads);
 
   const handleSelectRunTab = () => {
     startTransition(() => {
@@ -205,28 +240,43 @@ export function TeamWorkspace({
             </div>
 
             {threads.length > 0 ? (
-              <div className="workspace-thread-tab-list">
-                {threads.map((thread) => (
-                  <button
-                    className={`workspace-tab-button ${resolvedSelectedTab.type === "thread" && resolvedSelectedTab.threadId === thread.threadId ? "workspace-tab-button-active" : ""}`}
-                    key={thread.threadId}
-                    type="button"
-                    onClick={() => handleSelectThreadTab(thread.threadId)}
-                  >
-                    <div className="workspace-thread-tab-head">
-                      <span className="workspace-tab-label">{thread.requestTitle}</span>
-                      <span className={`status-pill status-${thread.status}`}>
-                        {threadStatusLabels[thread.status]}
-                      </span>
+              <div className="workspace-thread-group-list">
+                {threadGroups.map((group) => (
+                  <section className="workspace-repository-group" key={group.key}>
+                    <div className="workspace-repository-group-head">
+                      <div>
+                        <p className="workspace-repository-group-title">{group.title}</p>
+                        <p className="workspace-repository-group-path">{group.description}</p>
+                      </div>
+                      <span className="workspace-tab-group-count">{group.threads.length}</span>
                     </div>
-                    <span className="workspace-tab-meta">
-                      Thread {formatThreadId(thread.threadId)}
-                    </span>
-                    <span className="workspace-tab-summary">{describeThreadProgress(thread)}</span>
-                    <span className="workspace-tab-meta">
-                      Updated {formatTimestamp(thread.updatedAt)}
-                    </span>
-                  </button>
+
+                    <div className="workspace-thread-tab-list">
+                      {group.threads.map((thread) => (
+                        <button
+                          className={`workspace-tab-button ${resolvedSelectedTab.type === "thread" && resolvedSelectedTab.threadId === thread.threadId ? "workspace-tab-button-active" : ""}`}
+                          key={thread.threadId}
+                          type="button"
+                          onClick={() => handleSelectThreadTab(thread.threadId)}
+                        >
+                          <div className="workspace-thread-tab-head">
+                            <span className="workspace-tab-label">{thread.requestTitle}</span>
+                            <span className={`status-pill status-${thread.status}`}>
+                              {threadStatusLabels[thread.status]}
+                            </span>
+                          </div>
+                          <div className="workspace-thread-tab-meta-row">
+                            <span className="workspace-tab-meta">
+                              Thread {formatThreadId(thread.threadId)}
+                            </span>
+                            <span className="workspace-tab-meta">
+                              Updated {formatTimestamp(thread.updatedAt)}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
                 ))}
               </div>
             ) : (
