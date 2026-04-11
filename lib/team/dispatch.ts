@@ -688,6 +688,16 @@ type PendingDispatchLaneAllocation = {
   worktreeRoot: string;
 };
 
+type LanePoolSchedulingState = Pick<
+  TeamWorkerLaneRecord,
+  "status" | "workerSlot" | "worktreePath"
+>;
+
+type PlannedLanePoolState = {
+  expected: LanePoolSchedulingState;
+  planned: Pick<TeamWorkerLaneRecord, "workerSlot" | "worktreePath">;
+};
+
 const buildLanePoolStateKey = ({
   threadId,
   assignmentNumber,
@@ -698,6 +708,27 @@ const buildLanePoolStateKey = ({
   laneId: string;
 }): string => {
   return `${threadId}:${assignmentNumber}:${laneId}`;
+};
+
+const captureLanePoolSchedulingState = (
+  lane: TeamWorkerLaneRecord,
+): LanePoolSchedulingState => {
+  return {
+    status: lane.status,
+    workerSlot: lane.workerSlot,
+    worktreePath: lane.worktreePath,
+  };
+};
+
+const lanePoolSchedulingStateMatches = (
+  lane: TeamWorkerLaneRecord,
+  expected: LanePoolSchedulingState,
+): boolean => {
+  return (
+    lane.status === expected.status &&
+    lane.workerSlot === expected.workerSlot &&
+    lane.worktreePath === expected.worktreePath
+  );
 };
 
 const comparePendingDispatchLaneAllocation = (
@@ -1293,6 +1324,19 @@ export const ensurePendingDispatchWork = async ({
   threadId?: string;
 } = {}): Promise<void> => {
   const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
+  const expectedLaneStateByKey = new Map<string, LanePoolSchedulingState>();
+  for (const pending of pendingAssignments) {
+    for (const lane of pending.assignment.lanes) {
+      expectedLaneStateByKey.set(
+        buildLanePoolStateKey({
+          threadId: pending.threadId,
+          assignmentNumber: pending.assignment.assignmentNumber,
+          laneId: lane.laneId,
+        }),
+        captureLanePoolSchedulingState(lane),
+      );
+    }
+  }
 
   assignPendingDispatchWorkerSlots({
     pendingAssignments,
@@ -1304,22 +1348,28 @@ export const ensurePendingDispatchWork = async ({
       }),
   });
 
-  const plannedLaneStateByKey = new Map<
-    string,
-    Pick<TeamWorkerLaneRecord, "workerSlot" | "worktreePath">
-  >();
+  const plannedLaneStateByKey = new Map<string, PlannedLanePoolState>();
   const pendingAssignmentsByThread = new Map<string, PendingDispatchAssignment[]>();
   for (const pending of pendingAssignments) {
     for (const lane of pending.assignment.lanes) {
+      const lanePoolStateKey = buildLanePoolStateKey({
+        threadId: pending.threadId,
+        assignmentNumber: pending.assignment.assignmentNumber,
+        laneId: lane.laneId,
+      });
+      const expectedLaneState = expectedLaneStateByKey.get(lanePoolStateKey);
+      if (!expectedLaneState) {
+        continue;
+      }
+
       plannedLaneStateByKey.set(
-        buildLanePoolStateKey({
-          threadId: pending.threadId,
-          assignmentNumber: pending.assignment.assignmentNumber,
-          laneId: lane.laneId,
-        }),
+        lanePoolStateKey,
         {
-          workerSlot: lane.workerSlot,
-          worktreePath: lane.worktreePath,
+          expected: expectedLaneState,
+          planned: {
+            workerSlot: lane.workerSlot,
+            worktreePath: lane.worktreePath,
+          },
         },
       );
     }
@@ -1360,8 +1410,13 @@ export const ensurePendingDispatchWork = async ({
               continue;
             }
 
-            lane.workerSlot = plannedLaneState.workerSlot;
-            lane.worktreePath = plannedLaneState.worktreePath;
+            // Ignore stale allocator passes that would clobber fresher slot updates.
+            if (!lanePoolSchedulingStateMatches(lane, plannedLaneState.expected)) {
+              continue;
+            }
+
+            lane.workerSlot = plannedLaneState.planned.workerSlot;
+            lane.worktreePath = plannedLaneState.planned.worktreePath;
           }
 
           synchronizeDispatchAssignment(assignment, now);
