@@ -123,14 +123,8 @@ const buildCodexExecArgs = ({
       "-c",
       `model_providers.${teamRuntimeConfig.modelProvider}.base_url=${quoteTomlString(teamRuntimeConfig.baseUrl)}`,
     );
-    args.push(
-      "-c",
-      `model_providers.${teamRuntimeConfig.modelProvider}.wire_api="responses"`,
-    );
-    args.push(
-      "-c",
-      `model_providers.${teamRuntimeConfig.modelProvider}.requires_openai_auth=true`,
-    );
+    args.push("-c", `model_providers.${teamRuntimeConfig.modelProvider}.wire_api="responses"`);
+    args.push("-c", `model_providers.${teamRuntimeConfig.modelProvider}.requires_openai_auth=true`);
   }
 
   args.push(prompt);
@@ -196,11 +190,7 @@ const linkSkillEntries = async ({
   }
 };
 
-const prepareCodexHome = async ({
-  codexHome,
-}: {
-  codexHome: string;
-}): Promise<void> => {
+const prepareCodexHome = async ({ codexHome }: { codexHome: string }): Promise<void> => {
   await fs.mkdir(codexHome, { recursive: true });
   await writeTemporaryAuthFile(codexHome);
 
@@ -422,7 +412,9 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
     }
 
     const message =
-      error instanceof Error ? error.message : "Codex CLI execution failed without any captured output.";
+      error instanceof Error
+        ? error.message
+        : "Codex CLI execution failed without any captured output.";
     throw new Error(message);
   } finally {
     await fs.rm(codexHome, {

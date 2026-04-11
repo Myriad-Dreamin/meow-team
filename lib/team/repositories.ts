@@ -94,7 +94,9 @@ const listRepositoriesForRoot = async (
   });
 };
 
-export const resolveConfiguredRepositoryRoots = (config: TeamConfig): ResolvedTeamRepositoryRoot[] => {
+export const resolveConfiguredRepositoryRoots = (
+  config: TeamConfig,
+): ResolvedTeamRepositoryRoot[] => {
   return (config.repositories?.roots ?? []).map((root) => {
     return {
       id: root.id,
@@ -110,15 +112,13 @@ export const listConfiguredRepositories = async (
   const roots = resolveConfiguredRepositoryRoots(config);
   const repositoriesByRoot = await Promise.all(roots.map((root) => listRepositoriesForRoot(root)));
 
-  return repositoriesByRoot
-    .flat()
-    .sort((left, right) => {
-      if (left.rootLabel !== right.rootLabel) {
-        return left.rootLabel.localeCompare(right.rootLabel);
-      }
+  return repositoriesByRoot.flat().sort((left, right) => {
+    if (left.rootLabel !== right.rootLabel) {
+      return left.rootLabel.localeCompare(right.rootLabel);
+    }
 
-      return left.relativePath.localeCompare(right.relativePath);
-    });
+    return left.relativePath.localeCompare(right.relativePath);
+  });
 };
 
 export const findConfiguredRepository = async (

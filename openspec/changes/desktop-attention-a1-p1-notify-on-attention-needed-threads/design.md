@@ -7,12 +7,14 @@ available coding-review worker from the shared pool.
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Add opt-in browser desktop notifications for living threads that newly transition into attention-needed states, starting with proposal approval waits and failures, using existing thread polling data and deduping repeated alerts.
 - Preserve a reviewable OpenSpec contract before coding starts.
 - Keep the proposal logical enough that any pooled worker can execute it.
 - Reuse a managed worktree from `/home/kamiyoru/work/ts/meow-team/.meow-team-worktrees/meow-N` for cache-friendly execution.
 
 **Non-Goals:**
+
 - Bind this proposal to a specific branch or worker slot before approval.
 - Expand scope beyond the approved proposal without human feedback.
 - Merge sibling proposals into a single coding pass without replanning.

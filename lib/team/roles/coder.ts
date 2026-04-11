@@ -86,7 +86,7 @@ const buildCoderPrompt = ({ role, state, input }: z.infer<typeof coderInputSchem
     "- Produce concrete repository changes before finishing.",
     '- Finish with decision "continue" after implementation exists for review.',
     "Final response requirements:",
-    '- Your final response must match the provided JSON schema exactly.',
+    "- Your final response must match the provided JSON schema exactly.",
     '- Put the concise handoff in "summary" and the detailed notes in "deliverable".',
     '- For coder, set decision to "continue" and set pullRequestTitle and pullRequestSummary to null.',
   ]

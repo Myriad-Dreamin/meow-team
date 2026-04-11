@@ -10,14 +10,19 @@ import {
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { loadRolePrompt } from "@/lib/team/prompts";
-import {
-  buildDeterministicRequestTitle,
-  normalizeRequestTitle,
-} from "@/lib/team/request-title";
+import { buildDeterministicRequestTitle, normalizeRequestTitle } from "@/lib/team/request-title";
 import { findConfiguredRepository } from "@/lib/team/repositories";
-import { resolveTeamRoleDependencies, type TeamRoleDependencies } from "@/lib/team/roles/dependencies";
+import {
+  resolveTeamRoleDependencies,
+  type TeamRoleDependencies,
+} from "@/lib/team/roles/dependencies";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
-import type { TeamCodexEvent, TeamCodexLogEntry, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
+import type {
+  TeamCodexEvent,
+  TeamCodexLogEntry,
+  TeamExecutionStep,
+  TeamRoleHandoff,
+} from "@/lib/team/types";
 
 export type TeamRunState = {
   teamId: string;
@@ -78,9 +83,7 @@ const buildInitialState = (
   };
 };
 
-const filterWorkflowHandoffs = (
-  state: TeamRunState,
-): Partial<Record<string, TeamRoleHandoff>> => {
+const filterWorkflowHandoffs = (state: TeamRunState): Partial<Record<string, TeamRoleHandoff>> => {
   return Object.fromEntries(
     Object.entries(state.handoffs).filter(([roleId]) => state.workflow.includes(roleId)),
   );
@@ -191,8 +194,9 @@ const resolveRequestMetadata = async ({
     };
   }
 
-  const preservedTitle =
-    shouldResetAssignment ? null : normalizeRequestTitle(existingThread?.data.requestTitle);
+  const preservedTitle = shouldResetAssignment
+    ? null
+    : normalizeRequestTitle(existingThread?.data.requestTitle);
   if (preservedTitle) {
     await logEvent?.({
       source: "system",

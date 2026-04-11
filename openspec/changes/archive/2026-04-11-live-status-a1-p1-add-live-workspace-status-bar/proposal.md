@@ -11,9 +11,11 @@ Implement a lightweight status snapshot API and a 1-second polling workspace sta
 ## Capabilities
 
 ### New Capabilities
+
 - `live-status-a1-p1-add-live-workspace-status-bar`: Implement a lightweight status snapshot API and a 1-second polling workspace status bar that shows active thread totals plus aggregated lane states on the left and host CPU-memory usage on the right, without affecting dispatch scheduling.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

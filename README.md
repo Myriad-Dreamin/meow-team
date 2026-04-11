@@ -125,8 +125,9 @@ role stays lightweight.
 - `pnpm start` runs the production server.
 - `pnpm lint` runs ESLint.
 - `pnpm typecheck` runs TypeScript without emitting files.
-- `pnpm format` formats the repo with Prettier.
-- `pnpm format:check` checks formatting.
+- `pnpm fmt` formats the repo with Prettier.
+- `pnpm fmt:check` checks formatting.
+- `pnpm format` and `pnpm format:check` remain available as compatibility aliases.
 
 ## Notes
 

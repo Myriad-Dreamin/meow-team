@@ -11,9 +11,11 @@ Push final machine-reviewed lane branches to the configured GitHub remote, persi
 ## Capabilities
 
 ### New Capabilities
+
 - `github-thread-commits-a1-p1-push-lane-branches-and-surface-commit-hashes`: Push final machine-reviewed lane branches to the configured GitHub remote, persist pushed commit metadata and URLs, and expose per-lane commit hashes clearly in the thread UI with regression coverage.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

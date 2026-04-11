@@ -11,9 +11,11 @@ Implement an end-to-end request title field for the harness: accept an optional 
 ## Capabilities
 
 ### New Capabilities
+
 - `request-title-a1-p1-support-mutable-request-titles-with-llm-fallback`: Implement an end-to-end request title field for the harness: accept an optional human title, generate a concise fallback title through the existing LLM execution path when absent, persist it as mutable request-group metadata separate from all canonical IDs, and display it in the active thread UI without removing the underlying request text.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

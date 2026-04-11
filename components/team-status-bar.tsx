@@ -65,7 +65,11 @@ const isStatusResponse = (value: unknown): value is TeamStatusSnapshotResponse =
     return false;
   }
 
-  if (!isRecord(value.workspace) || !isRecord(value.host) || !isRecord(value.workspace.laneCounts)) {
+  if (
+    !isRecord(value.workspace) ||
+    !isRecord(value.host) ||
+    !isRecord(value.workspace.laneCounts)
+  ) {
     return false;
   }
 

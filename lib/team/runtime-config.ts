@@ -229,7 +229,9 @@ const readCodexConfig = (): ParsedCodexConfig => {
   return {
     model: readTomlString(values, "model"),
     modelProvider,
-    baseUrl: modelProvider ? readTomlString(values, `model_providers.${modelProvider}.base_url`) : null,
+    baseUrl: modelProvider
+      ? readTomlString(values, `model_providers.${modelProvider}.base_url`)
+      : null,
     reasoningEffort: normalizeReasoningEffort(readTomlString(values, "model_reasoning_effort")),
     textVerbosity: normalizeTextVerbosity(readTomlString(values, "model_verbosity")),
   };
@@ -245,7 +247,8 @@ const readCodexAuth = (): ParsedCodexAuth => {
 
   try {
     const parsedAuth = JSON.parse(rawAuth) as { OPENAI_API_KEY?: unknown };
-    const apiKey = typeof parsedAuth.OPENAI_API_KEY === "string" ? parsedAuth.OPENAI_API_KEY.trim() : "";
+    const apiKey =
+      typeof parsedAuth.OPENAI_API_KEY === "string" ? parsedAuth.OPENAI_API_KEY.trim() : "";
 
     return {
       apiKey: apiKey || null,
@@ -274,9 +277,21 @@ export const teamRuntimeConfig = {
   baseUrl: codexConfig.baseUrl ?? envBaseUrl ?? undefined,
   hasApiKey: Boolean(codexAuth.apiKey ?? envApiKey),
   sources: {
-    apiKey: (codexAuth.apiKey ? "codex-auth" : envApiKey ? "env" : "missing") satisfies TeamRuntimeSource,
-    baseUrl: (codexConfig.baseUrl ? "codex-config" : envBaseUrl ? "env" : "default") satisfies TeamRuntimeSource,
-    model: (codexConfig.model ? "codex-config" : envModel ? "env" : "default") satisfies TeamRuntimeSource,
+    apiKey: (codexAuth.apiKey
+      ? "codex-auth"
+      : envApiKey
+        ? "env"
+        : "missing") satisfies TeamRuntimeSource,
+    baseUrl: (codexConfig.baseUrl
+      ? "codex-config"
+      : envBaseUrl
+        ? "env"
+        : "default") satisfies TeamRuntimeSource,
+    model: (codexConfig.model
+      ? "codex-config"
+      : envModel
+        ? "env"
+        : "default") satisfies TeamRuntimeSource,
   },
 } as const;
 

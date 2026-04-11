@@ -11,9 +11,11 @@ Extract the CLI executor plus request-title, planner, coder, and reviewer module
 ## Capabilities
 
 ### New Capabilities
+
 - `inject-team-roles-a1-p1-inject-executor-and-schema-first-team-role-modul`: Extract the CLI executor plus request-title, planner, coder, and reviewer modules; wire them into `runTeam` and dispatch with production defaults; and add deterministic `runTeam` tests using mock executor and mock role functions.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

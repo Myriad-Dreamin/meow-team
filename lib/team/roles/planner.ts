@@ -129,7 +129,7 @@ const buildPlannerPrompt = ({ role, state }: z.infer<typeof plannerInputSchema>)
     "- If no repository is selected, explain that dispatch is blocked and set dispatch to null.",
     "Final response requirements:",
     "- Return JSON that matches the provided schema exactly.",
-    '- Put the planner handoff in handoff.summary and handoff.deliverable.',
+    "- Put the planner handoff in handoff.summary and handoff.deliverable.",
     '- Set handoff.decision to "continue".',
     "- If dispatch is possible, fill dispatch.planSummary, dispatch.plannerDeliverable, dispatch.branchPrefix, and dispatch.tasks.",
   ].join("\n\n");

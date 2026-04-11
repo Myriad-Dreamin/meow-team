@@ -11,9 +11,11 @@ Restructure the left-side Living Threads tabs into repository sections, remove t
 ## Capabilities
 
 ### New Capabilities
+
 - `living-threads-a1-p1-group-living-threads-by-repository`: Restructure the left-side Living Threads tabs into repository sections, remove the long summary line from each tab card, preserve selection and refresh behavior, and keep threads without a repository visible in a fallback group.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

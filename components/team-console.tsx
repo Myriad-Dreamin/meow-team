@@ -206,8 +206,9 @@ export function TeamConsole({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialLogThreadId);
   const [activeLogStartedAt, setActiveLogStartedAt] = useState<string | null>(null);
   const [logEntries, setLogEntries] = useState<TeamCodexLogEntry[]>([]);
-  const [pendingBranchDeletion, setPendingBranchDeletion] =
-    useState<PendingBranchDeletion | null>(null);
+  const [pendingBranchDeletion, setPendingBranchDeletion] = useState<PendingBranchDeletion | null>(
+    null,
+  );
 
   const isRunning = runState.status === "running";
   const isAwaitingBranchDeletion = pendingBranchDeletion !== null;
@@ -619,8 +620,8 @@ export function TeamConsole({
         <div className="branch-delete-callout" role="alert">
           <p className="branch-delete-title">Existing proposal branches found</p>
           <p className="branch-delete-copy">
-            Delete these branches and any managed harness worktrees attached to them, then rerun
-            the planner for the same request?
+            Delete these branches and any managed harness worktrees attached to them, then rerun the
+            planner for the same request?
           </p>
           <ul className="branch-delete-list">
             {pendingBranchDeletion.branches.map((branchName) => (

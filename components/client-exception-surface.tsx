@@ -70,7 +70,9 @@ export function ClientExceptionSurface({
         <details className="client-exception-debug" open>
           <summary>Debug details</summary>
 
-          {details.stack ? <pre className="client-exception-debug-block">{details.stack}</pre> : null}
+          {details.stack ? (
+            <pre className="client-exception-debug-block">{details.stack}</pre>
+          ) : null}
           {details.debugValue ? (
             <pre className="client-exception-debug-block">{details.debugValue}</pre>
           ) : null}

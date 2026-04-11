@@ -39,9 +39,7 @@ export const normalizeRequestTitle = (value: string | null | undefined): string 
 
 export const buildDeterministicRequestTitle = (input: string | null | undefined): string => {
   const normalized = normalizeWhitespace(
-    (input ?? "")
-      .replace(/[\r\n]+/gu, " ")
-      .replace(/[`*_>#]/gu, ""),
+    (input ?? "").replace(/[\r\n]+/gu, " ").replace(/[`*_>#]/gu, ""),
   );
 
   if (!normalized) {

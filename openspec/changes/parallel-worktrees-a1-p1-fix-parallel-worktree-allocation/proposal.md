@@ -11,9 +11,11 @@ Implement one OpenSpec-aligned change that gives each planner assignment its own
 ## Capabilities
 
 ### New Capabilities
+
 - `parallel-worktrees-a1-p1-fix-parallel-worktree-allocation`: Implement one OpenSpec-aligned change that gives each planner assignment its own staging worktree, assigns coder/reviewer worktree slots from the shared cross-thread pool, preserves slot reuse for active lanes, and adds regression coverage for concurrent runs.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

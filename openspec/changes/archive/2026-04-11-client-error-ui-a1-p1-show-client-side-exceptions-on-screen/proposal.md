@@ -11,9 +11,11 @@ Materialize one OpenSpec change that adds App Router error fallbacks plus a root
 ## Capabilities
 
 ### New Capabilities
+
 - `client-error-ui-a1-p1-show-client-side-exceptions-on-screen`: Materialize one OpenSpec change that adds App Router error fallbacks plus a root-level client exception reporter, renders readable on-screen exception details for mobile debugging, keeps verbose stacks development-oriented, and validates the result with `pnpm lint` and `pnpm build`.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

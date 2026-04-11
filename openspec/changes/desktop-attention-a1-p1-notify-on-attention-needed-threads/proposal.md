@@ -11,9 +11,11 @@ Add opt-in browser desktop notifications for living threads that newly transitio
 ## Capabilities
 
 ### New Capabilities
+
 - `desktop-attention-a1-p1-notify-on-attention-needed-threads`: Add opt-in browser desktop notifications for living threads that newly transition into attention-needed states, starting with proposal approval waits and failures, using existing thread polling data and deduping repeated alerts.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact

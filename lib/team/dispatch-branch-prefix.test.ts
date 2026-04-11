@@ -37,8 +37,7 @@ vi.mock("@/lib/team/history", async () => {
 });
 
 vi.mock("@/lib/team/openspec", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/team/openspec")>("@/lib/team/openspec");
+  const actual = await vi.importActual<typeof import("@/lib/team/openspec")>("@/lib/team/openspec");
   return {
     ...actual,
     materializeAssignmentProposals: materializeAssignmentProposalsMock,

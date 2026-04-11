@@ -2,5 +2,8 @@ node_modules
 .next
 out
 build
+.pnpm-store
+.meow-team-worktrees
+.codex
+data
 pnpm-lock.yaml
-

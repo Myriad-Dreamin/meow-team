@@ -7,12 +7,14 @@ available coding-review worker from the shared pool.
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Implement a lightweight status snapshot API and a 1-second polling workspace status bar that shows active thread totals plus aggregated lane states on the left and host CPU-memory usage on the right, without affecting dispatch scheduling.
 - Preserve a reviewable OpenSpec contract before coding starts.
 - Keep the proposal logical enough that any pooled worker can execute it.
 - Reuse a managed worktree from `/home/kamiyoru/work/ts/meow-team/.meow-team-worktrees/meow-N` for cache-friendly execution.
 
 **Non-Goals:**
+
 - Bind this proposal to a specific branch or worker slot before approval.
 - Expand scope beyond the approved proposal without human feedback.
 - Merge sibling proposals into a single coding pass without replanning.

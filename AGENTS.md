@@ -18,5 +18,8 @@
 
 ## Validation
 
+- Keep repository formatting aligned with `prettier.config.cjs`.
+- Run `pnpm fmt` after editing files that Prettier manages.
+- CI runs `pnpm fmt:check` and should stay green before you finish.
 - Run `pnpm lint` after meaningful code changes.
 - Run `pnpm build` before finishing structural or integration work when feasible.

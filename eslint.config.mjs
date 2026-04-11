@@ -5,7 +5,16 @@ const config = [
   ...nextCoreWebVitals,
   ...nextTypeScript,
   {
-    ignores: ["node_modules/**", ".next/**", "out/**", "build/**"],
+    ignores: [
+      "node_modules/**",
+      ".next/**",
+      "out/**",
+      "build/**",
+      ".pnpm-store/**",
+      ".meow-team-worktrees/**",
+      ".codex/**",
+      "data/**",
+    ],
   },
 ];
 

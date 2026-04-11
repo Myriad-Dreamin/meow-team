@@ -90,7 +90,7 @@ const buildReviewerPrompt = ({
     "- Use Codex CLI native repository tools and shell access to inspect, edit, and validate work.",
     ...buildReviewerExecutionRules().map((rule) => `- ${rule}`),
     "Final response requirements:",
-    '- Your final response must match the provided JSON schema exactly.',
+    "- Your final response must match the provided JSON schema exactly.",
     '- Put the concise handoff in "summary" and the detailed notes in "deliverable".',
     '- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. If not approved, set both pullRequestTitle and pullRequestSummary to null.',
   ]

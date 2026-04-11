@@ -12,8 +12,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm exec next typegen && tsc -p tsconfig.typecheck.json --noEmit --incremental false",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check .",
+    "format": "pnpm fmt",
+    "format:check": "pnpm fmt:check"
   },
   "dependencies": {
     "next": "^16.0.0",

@@ -88,44 +88,44 @@ describe.sequential("runTeam", () => {
 
     const requestTitleRoleMock = vi.fn(
       async (input: RequestTitleRoleArgs[0], receivedExecutor: RequestTitleRoleArgs[1]) => {
-      callOrder.push("request-title");
-      expect(receivedExecutor).toBe(executor);
-      expect(input).toMatchObject({
-        input: "Ship reliable dispatch coordination.",
-        requestText: "Ship reliable dispatch coordination.",
-        worktreePath: repository.path,
-      });
+        callOrder.push("request-title");
+        expect(receivedExecutor).toBe(executor);
+        expect(input).toMatchObject({
+          input: "Ship reliable dispatch coordination.",
+          requestText: "Ship reliable dispatch coordination.",
+          worktreePath: repository.path,
+        });
 
-      return {
-        title: "Dispatch Coordination",
-      };
+        return {
+          title: "Dispatch Coordination",
+        };
       },
     );
     const plannerRoleMock = vi.fn(
       async (input: PlannerRoleArgs[0], receivedExecutor: PlannerRoleArgs[1]) => {
-      callOrder.push("planner");
-      expect(receivedExecutor).toBe(executor);
-      expect(input.state.requestTitle).toBe("Dispatch Coordination");
-      expect(input.state.selectedRepository).toEqual(repository);
+        callOrder.push("planner");
+        expect(receivedExecutor).toBe(executor);
+        expect(input.state.requestTitle).toBe("Dispatch Coordination");
+        expect(input.state.selectedRepository).toEqual(repository);
 
-      return {
-        handoff: {
-          summary: "Planner summary",
-          deliverable: "Planner deliverable",
-          decision: "continue",
-        },
-        dispatch: {
-          planSummary: "Plan summary",
-          plannerDeliverable: "Plan deliverable",
-          branchPrefix: "dispatch-coordination",
-          tasks: [
-            {
-              title: "Stabilize dispatch flow",
-              objective: "Inject role dependencies into the scheduler.",
-            },
-          ],
-        },
-      };
+        return {
+          handoff: {
+            summary: "Planner summary",
+            deliverable: "Planner deliverable",
+            decision: "continue",
+          },
+          dispatch: {
+            planSummary: "Plan summary",
+            plannerDeliverable: "Plan deliverable",
+            branchPrefix: "dispatch-coordination",
+            tasks: [
+              {
+                title: "Stabilize dispatch flow",
+                objective: "Inject role dependencies into the scheduler.",
+              },
+            ],
+          },
+        };
       },
     );
     const coderRoleMock = vi.fn();
@@ -211,18 +211,18 @@ describe.sequential("runTeam", () => {
     const requestTitleRoleMock = vi.fn();
     const plannerRoleMock = vi.fn(
       async (input: PlannerRoleArgs[0], receivedExecutor: PlannerRoleArgs[1]) => {
-      expect(receivedExecutor).toBe(executor);
-      expect(input.state.requestTitle).toBe("Human Title");
-      expect(input.state.selectedRepository).toBeNull();
+        expect(receivedExecutor).toBe(executor);
+        expect(input.state.requestTitle).toBe("Human Title");
+        expect(input.state.selectedRepository).toBeNull();
 
-      return {
-        handoff: {
-          summary: "Planner is waiting for a repository",
-          deliverable: "Select a repository before proposal dispatch can continue.",
-          decision: "continue",
-        },
-        dispatch: null,
-      };
+        return {
+          handoff: {
+            summary: "Planner is waiting for a repository",
+            deliverable: "Select a repository before proposal dispatch can continue.",
+            decision: "continue",
+          },
+          dispatch: null,
+        };
       },
     );
     const coderRoleMock = vi.fn();
