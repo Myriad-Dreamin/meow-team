@@ -270,7 +270,13 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     });
 
     const serializedLegacyThread = JSON.parse(JSON.stringify(legacyThread)) as typeof legacyThread;
-    delete serializedLegacyThread.dispatchAssignments[0]?.lanes[0]?.pushedCommit;
+    const serializedLegacyLane = serializedLegacyThread.dispatchAssignments[0]?.lanes[0] as
+      | Record<string, unknown>
+      | undefined;
+
+    if (serializedLegacyLane) {
+      delete serializedLegacyLane.pushedCommit;
+    }
 
     await fs.writeFile(
       storePath,

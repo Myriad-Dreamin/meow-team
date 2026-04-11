@@ -23,3 +23,10 @@
 - CI runs `pnpm fmt:check` and should stay green before you finish.
 - Run `pnpm lint` after meaningful code changes.
 - Run `pnpm build` before finishing structural or integration work when feasible.
+
+## Prompt Template Syntax
+
+- `meow-prompt` templates use double-bracket placeholders only: `[[param:name]]`.
+- Pipes stay builtin-only in `packages/meow-prompt`; custom pipe registration is out of scope for this repository.
+- Supported builtin raw forms are `[[param:name|raw]]` and `[[param:name|raw('json')]]`.
+- Keep parameter and pipe identifiers whitespace-free. Use `name|raw('json')`, not spaced variants such as `name | raw`.
