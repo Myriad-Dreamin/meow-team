@@ -279,6 +279,9 @@ describe("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.status).toBe("approved");
     expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/42");
     expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
+    expect(lane?.events.at(-2)?.message).toBe(
+      "Archived OpenSpec change to openspec/changes/archive/2026-04-11-change-1 and pushed commit [archive-comm](<https://github.com/example/meow-team/commit/archive-commit>) to GitHub via origin.",
+    );
     expect(lane?.events.at(-1)?.message).toContain("GitHub PR ready");
     expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toContain(
       "GitHub PR is ready",

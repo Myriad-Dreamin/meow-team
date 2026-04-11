@@ -35,6 +35,7 @@ import {
   updateTeamThreadRecord,
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
+import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
 import {
   buildProposalChangeName,
   buildProposalPath,
@@ -354,10 +355,6 @@ const buildCoderCommitMessage = ({
 
 const noBranchOutputMessage =
   "Coder completed without producing a new branch commit. The lane was stopped to avoid an infinite coder/reviewer loop.";
-
-const shortenCommit = (commit: string): string => {
-  return commit.slice(0, 12);
-};
 
 const summarizeGitFailure = (message: string): string => {
   return (
@@ -1225,7 +1222,9 @@ const runLaneCycle = async ({
           assignmentNumber,
         );
         const mutableLane = findLane(mutableAssignment, laneId);
-        const reviewCommit = shortenCommit(branchHeadAfterCoding);
+        const reviewCommit = formatCommitActivityReference({
+          commitHash: branchHeadAfterCoding,
+        });
         mutableLane.status = "reviewing";
         mutableLane.latestImplementationCommit = branchHeadAfterCoding;
         mutableLane.pushedCommit = null;
@@ -1569,7 +1568,10 @@ const runLaneCycle = async ({
         appendLaneEvent(
           mutableLane,
           "system",
-          `Published commit ${shortenCommit(pushedCommit.commitHash)} to GitHub via ${pushedCommit.remoteName}.`,
+          `Published commit ${formatCommitActivityReference({
+            commitHash: pushedCommit.commitHash,
+            commitUrl: pushedCommit.commitUrl,
+          })} to GitHub via ${pushedCommit.remoteName}.`,
           mutableNow,
         );
         appendLaneEvent(
@@ -2107,8 +2109,18 @@ export const approveLanePullRequest = async ({
           mutableLane,
           "system",
           archiveCreated
-            ? `Archived OpenSpec change to ${archivedProposalPath} and pushed commit ${shortenCommit(finalizedCommitHash)} to GitHub via ${finalizedPushedCommit.remoteName}.`
-            : `Verified archived OpenSpec change at ${archivedProposalPath} and refreshed commit ${shortenCommit(finalizedCommitHash)} on GitHub via ${finalizedPushedCommit.remoteName}.`,
+            ? `Archived OpenSpec change to ${archivedProposalPath} and pushed commit ${formatCommitActivityReference(
+                {
+                  commitHash: finalizedCommitHash,
+                  commitUrl: finalizedPushedCommit.commitUrl,
+                },
+              )} to GitHub via ${finalizedPushedCommit.remoteName}.`
+            : `Verified archived OpenSpec change at ${archivedProposalPath} and refreshed commit ${formatCommitActivityReference(
+                {
+                  commitHash: finalizedCommitHash,
+                  commitUrl: finalizedPushedCommit.commitUrl,
+                },
+              )} on GitHub via ${finalizedPushedCommit.remoteName}.`,
           now,
         );
         appendLaneEvent(mutableLane, "system", `GitHub PR ready: ${gitHubPullRequest.url}`, now);
