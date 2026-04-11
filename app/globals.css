@@ -564,6 +564,41 @@ main {
   gap: 10px;
 }
 
+.workspace-thread-group-list {
+  display: grid;
+  gap: 16px;
+}
+
+.workspace-repository-group {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(7, 18, 33, 0.42);
+}
+
+.workspace-repository-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.workspace-repository-group-title {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.workspace-repository-group-path {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 .workspace-tab-button {
   width: 100%;
   display: grid;
@@ -604,9 +639,12 @@ main {
   text-transform: uppercase;
 }
 
-.workspace-tab-summary {
-  color: var(--muted);
-  line-height: 1.55;
+.workspace-thread-tab-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .workspace-empty-state {
@@ -1455,6 +1493,8 @@ main {
   }
 
   .workspace-thread-tab-head,
+  .workspace-repository-group-head,
+  .workspace-thread-tab-meta-row,
   .workspace-editor-header,
   .thread-detail-hero,
   .thread-card-head,
