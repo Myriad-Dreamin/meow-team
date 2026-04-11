@@ -11,9 +11,11 @@ Introduce the `docs/roadmap` structure, a repo-local roadmap skill with alias-aw
 ## Capabilities
 
 ### New Capabilities
+
 - `roadmap-concept-a1-p1-add-roadmap-concept-and-archive-linking`: Introduce the `docs/roadmap` structure, a repo-local roadmap skill with alias-aware guidance, docs navigation updates, and deterministic final-archive updates that append archived OpenSpec spec links into the matching roadmap topic's `## Related Specs` section.
 
 ### Modified Capabilities
+
 - None.
 
 ## Conventional Title
@@ -21,7 +23,6 @@ Introduce the `docs/roadmap` structure, a repo-local roadmap skill with alias-aw
 - Canonical request/PR title: `feat(roadmap): Add Roadmap Concept and Archive Linking`
 - Conventional title metadata: `feat(roadmap)`
 - Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter `branchPrefix` or OpenSpec change paths.
-
 
 ## Impact
 

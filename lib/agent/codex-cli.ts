@@ -11,7 +11,10 @@ import type { TeamCodexEvent, TeamCodexLogSource } from "@/lib/team/types";
 
 const ERROR_OUTPUT_LINE_LIMIT = 80;
 const GLOBAL_CODEX_SKILLS_ROOT = path.join(homedir(), ".codex", "skills");
-const REPOSITORY_CODEX_SKILLS_ROOT = path.join(process.cwd(), ".codex", "skills");
+const REPOSITORY_CODEX_SKILLS_ROOTS = [
+  path.join(process.cwd(), ".codex", "skills"),
+  path.join(process.cwd(), "skills"),
+];
 
 export const codexLaneResponseSchema = z.object({
   summary: z.string().trim().min(1),
@@ -200,11 +203,13 @@ const prepareCodexHome = async ({ codexHome }: { codexHome: string }): Promise<v
     targetRoot: skillsRoot,
     overwrite: false,
   });
-  await linkSkillEntries({
-    sourceRoot: REPOSITORY_CODEX_SKILLS_ROOT,
-    targetRoot: skillsRoot,
-    overwrite: true,
-  });
+  for (const sourceRoot of REPOSITORY_CODEX_SKILLS_ROOTS) {
+    await linkSkillEntries({
+      sourceRoot,
+      targetRoot: skillsRoot,
+      overwrite: true,
+    });
+  }
 };
 
 export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({

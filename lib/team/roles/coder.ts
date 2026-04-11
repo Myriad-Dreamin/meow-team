@@ -76,6 +76,8 @@ const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
       "- `.codex/skills/team-harness-workflow/SKILL.md`",
       "- `.codex/skills/team-harness-workflow/references/lanes.md`",
       "- `.codex/skills/openspec-apply-change/SKILL.md`",
+      "- `skills/roadmap-maintainer/SKILL.md`",
+      "- `docs/roadmap/index.md`",
     ].join("\n"),
     "Repository instructions: read INSTRUCTIONS.md and AGENTS.md before changing code, use pnpm for scripts, and keep project text in English.",
     "Your role prompt is below:",
