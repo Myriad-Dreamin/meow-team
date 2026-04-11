@@ -93,9 +93,15 @@ main {
   right: 18px;
   bottom: 18px;
   z-index: 9999;
+  display: grid;
+  align-content: end;
   width: min(560px, calc(100vw - 36px));
   max-height: calc(100dvh - 36px);
-  pointer-events: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  pointer-events: auto;
 }
 
 .client-exception-surface {
@@ -122,6 +128,10 @@ main {
   height: 140px;
   background: linear-gradient(90deg, transparent, rgba(255, 143, 143, 0.18), transparent);
   filter: blur(24px);
+}
+
+.client-exception-surface-overlay::after {
+  display: none;
 }
 
 .client-exception-surface-page {
