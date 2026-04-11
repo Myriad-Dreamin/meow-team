@@ -330,4 +330,42 @@ describe("approveLanePullRequest", () => {
     expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
     expect(thread?.run?.status).toBe("failed");
   });
+
+  it("keeps the proposal unarchived when the archive commit fails", async () => {
+    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+      createdArchive: true,
+    });
+    commitWorktreeChangesMock.mockRejectedValue(new Error("git user identity missing"));
+
+    await writeThreadStore(createLane());
+
+    await expect(
+      approveLanePullRequest({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+      }),
+    ).rejects.toThrow("git user identity missing");
+
+    const thread = await getTeamThreadRecord(threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(pushLaneBranchMock).not.toHaveBeenCalled();
+    expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
+    expect(lane?.proposalPath).toBe("openspec/changes/change-1");
+    expect(lane?.latestImplementationCommit).toBe("review-commit");
+    expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
+    expect(lane?.pullRequest?.status).toBe("failed");
+    expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
+    expect(lane?.latestActivity).toBe(
+      "Final human approval failed before the OpenSpec archive and GitHub PR delivery could complete.",
+    );
+    expect(lane?.lastError).toContain("git user identity missing");
+    expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toBe(
+      "Final approval for proposal 1 failed: git user identity missing",
+    );
+    expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
+    expect(thread?.run?.status).toBe("failed");
+  });
 });

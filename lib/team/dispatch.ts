@@ -1659,6 +1659,8 @@ export const approveLanePullRequest = async ({
   let updatedPushedCommit = lane.pushedCommit;
   let archivedProposalPath = lane.proposalPath;
   let archiveCreated = false;
+  let archivePersistedToBranch =
+    lane.proposalPath?.startsWith("openspec/changes/archive/") ?? false;
 
   try {
     await ensureLaneWorktree({
@@ -1681,6 +1683,7 @@ export const approveLanePullRequest = async ({
         message: `system: archive ${lane.proposalChangeName}`,
       });
     }
+    archivePersistedToBranch = true;
 
     latestImplementationCommit = await getBranchHead({
       repositoryPath: assignment.repository.path,
@@ -1778,11 +1781,14 @@ export const approveLanePullRequest = async ({
           throw new Error("This reviewed branch no longer has pull request metadata.");
         }
 
-        mutableLane.proposalPath = archivedProposalPath;
+        if (archivePersistedToBranch) {
+          mutableLane.proposalPath = archivedProposalPath;
+        }
         mutableLane.latestImplementationCommit = latestImplementationCommit;
         mutableLane.pushedCommit = updatedPushedCommit;
-        mutableLane.latestActivity =
-          "Final human approval failed before the OpenSpec archive and GitHub PR delivery could complete.";
+        mutableLane.latestActivity = archivePersistedToBranch
+          ? "Final human approval archived the OpenSpec change, but GitHub PR delivery did not complete."
+          : "Final human approval failed before the OpenSpec archive and GitHub PR delivery could complete.";
         mutableLane.lastError = errorSummary;
         mutableLane.pullRequest = {
           ...mutablePullRequest,
@@ -1796,7 +1802,9 @@ export const approveLanePullRequest = async ({
         appendLaneEvent(mutableLane, "system", errorSummary, now);
         appendPlannerNote(
           mutableAssignment,
-          archivedProposalPath && archivedProposalPath !== lane.proposalPath
+          archivePersistedToBranch &&
+            archivedProposalPath &&
+            archivedProposalPath !== lane.proposalPath
             ? `Final approval for proposal ${mutableLane.laneIndex} failed after archiving ${archivedProposalPath}: ${errorSummary}`
             : `Final approval for proposal ${mutableLane.laneIndex} failed: ${errorSummary}`,
           now,
