@@ -75,6 +75,8 @@ type LaneRunState = TeamRoleState &
     laneIndex: number;
     taskTitle: string;
     taskObjective: string;
+    requestTitle: string;
+    conventionalTitle: TeamDispatchAssignment["conventionalTitle"];
     planSummary: string;
     planDeliverable: string;
     conflictNote: string | null;
