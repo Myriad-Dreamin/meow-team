@@ -937,11 +937,9 @@ export const assignPendingDispatchThreadSlots = ({
 
 export const assignPendingDispatchWorkerSlots = ({
   pendingAssignments,
-  workerCount,
   resolveAssignmentWorktreeRoot,
 }: {
   pendingAssignments: PendingDispatchAssignment[];
-  workerCount: number;
   resolveAssignmentWorktreeRoot: (pending: PendingDispatchAssignment) => string;
 }): void => {
   for (const pending of pendingAssignments) {
@@ -993,7 +991,7 @@ export const assignPendingDispatchWorkerSlots = ({
     }
 
     const threadSlot = pending.assignment.threadSlot ?? null;
-    if (!threadSlot || threadSlot < 1 || threadSlot > workerCount) {
+    if (!threadSlot || threadSlot < 1) {
       continue;
     }
 
@@ -1691,7 +1689,6 @@ export const ensurePendingDispatchWork = async ({
 
   assignPendingDispatchWorkerSlots({
     pendingAssignments,
-    workerCount: teamConfig.dispatch.workerCount,
     resolveAssignmentWorktreeRoot: (pending) =>
       resolveWorktreeRoot({
         repositoryPath: pending.assignment.repository?.path ?? "",

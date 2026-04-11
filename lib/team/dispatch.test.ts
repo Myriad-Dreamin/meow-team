@@ -297,7 +297,6 @@ describe("assignPendingDispatchWorkerSlots", () => {
 
     assignPendingDispatchWorkerSlots({
       pendingAssignments,
-      workerCount: 2,
       resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
     });
 
@@ -342,11 +341,50 @@ describe("assignPendingDispatchWorkerSlots", () => {
 
     assignPendingDispatchWorkerSlots({
       pendingAssignments,
-      workerCount: 2,
       resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
     });
 
     expect(pendingAssignments[1].assignment.lanes[0].workerSlot).toBe(2);
     expect(pendingAssignments[1].assignment.lanes[0].worktreePath).toBe("/tmp/worktrees/meow-2");
+  });
+
+  it("reuses a preserved thread slot for queued work after worker count shrinks", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        threadSlot: 1,
+        plannerWorktreePath: "/tmp/worktrees/meow-1",
+        lanes: [
+          createLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-2",
+        assignmentNumber: 1,
+        threadSlot: 3,
+        plannerWorktreePath: "/tmp/worktrees/meow-3",
+        lanes: [
+          createLane({
+            laneId: "thread-2-lane-1",
+            laneIndex: 1,
+            status: "queued",
+            queuedAt: "2026-04-11T08:01:00.000Z",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchWorkerSlots({
+      pendingAssignments,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[1].assignment.lanes[0].workerSlot).toBe(3);
+    expect(pendingAssignments[1].assignment.lanes[0].worktreePath).toBe("/tmp/worktrees/meow-3");
   });
 });
