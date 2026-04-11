@@ -1,6 +1,7 @@
-import { access, mkdir, mkdtemp, realpath, rm, rmdir, symlink } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, rmdir, symlink } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,10 +78,42 @@ const cleanupDirectory = async (directoryPath) => {
   await rm(directoryPath, { force: true, recursive: true });
 };
 
+const resolvePackageJsonPath = async (specifier, originPaths) => {
+  for (const originPath of originPaths) {
+    try {
+      return createRequire(originPath).resolve(specifier);
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(`Unable to resolve \`${specifier}\` for the VitePress runner.`);
+};
+
 const binaryPath = await resolveBinaryPath();
 const realBinaryPath = await realpath(binaryPath);
-const vitepressPackageRoot = path.resolve(path.dirname(realBinaryPath), "..");
-const vuePackagePath = path.join(vitepressPackageRoot, "node_modules", "vue");
+const vitepressPackageJsonPath = await resolvePackageJsonPath("vitepress/package.json", [
+  path.join(rootDirectory, "package.json"),
+  realBinaryPath,
+  binaryPath,
+]);
+const vitepressPackageRoot = path.dirname(vitepressPackageJsonPath);
+const vitepressPackageJson = JSON.parse(await readFile(vitepressPackageJsonPath, "utf8"));
+const vitepressBinPath =
+  typeof vitepressPackageJson.bin === "string"
+    ? vitepressPackageJson.bin
+    : vitepressPackageJson.bin?.vitepress;
+
+if (typeof vitepressBinPath !== "string") {
+  throw new Error("Unable to determine the VitePress CLI entrypoint.");
+}
+
+const vitepressEntryPath = path.resolve(vitepressPackageRoot, vitepressBinPath);
+const vuePackageJsonPath = await resolvePackageJsonPath("vue/package.json", [
+  vitepressEntryPath,
+  vitepressPackageJsonPath,
+]);
+const vuePackagePath = path.dirname(vuePackageJsonPath);
 
 await access(vuePackagePath);
 
@@ -100,7 +133,7 @@ if (!(await pathExists(docsVueLinkPath))) {
   createdDocsVueLink = true;
 }
 
-const child = spawn(process.execPath, [realBinaryPath, command, docsDirectory, ...extraArgs], {
+const child = spawn(process.execPath, [vitepressEntryPath, command, docsDirectory, ...extraArgs], {
   cwd: tempRoot,
   stdio: "inherit",
 });
