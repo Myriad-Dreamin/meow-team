@@ -6,6 +6,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { commitWorktreeChanges, ensureBranchRef, hasWorktreeChanges } from "@/lib/git/ops";
 import { ensureLaneWorktree, sanitizeBranchSegment } from "@/lib/team/git";
+import {
+  describeConventionalTitleMetadata,
+  type ConventionalTitleMetadata,
+} from "@/lib/team/request-title";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const execFileAsync = promisify(execFile);
@@ -63,6 +67,21 @@ const buildCapabilityName = (changeName: string): string => {
   return sanitizeBranchSegment(changeName).replace(/\//g, "-");
 };
 
+const buildConventionalTitleSection = ({
+  requestTitle,
+  conventionalTitle,
+}: {
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
+}): string => {
+  return `## Conventional Title
+
+- Canonical request/PR title: \`${requestTitle}\`
+- Conventional title metadata: \`${describeConventionalTitleMetadata(conventionalTitle)}\`
+- Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter \`branchPrefix\` or OpenSpec change paths.
+`;
+};
+
 const buildProposalWhy = ({
   taskObjective,
   requestInput,
@@ -86,6 +105,8 @@ const buildProposalWhy = ({
 const buildProposalMarkdown = ({
   repositoryPath,
   proposalChangeName,
+  requestTitle,
+  conventionalTitle,
   taskTitle,
   taskObjective,
   plannerSummary,
@@ -95,6 +116,8 @@ const buildProposalMarkdown = ({
 }: {
   repositoryPath: string;
   proposalChangeName: string;
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   taskTitle: string;
   taskObjective: string;
   plannerSummary: string | null;
@@ -126,6 +149,11 @@ ${buildProposalWhy({
 ### Modified Capabilities
 - None.
 
+${buildConventionalTitleSection({
+  requestTitle,
+  conventionalTitle,
+})}
+
 ## Impact
 
 - Affected repository: \`${path.basename(repositoryPath)}\`
@@ -136,12 +164,16 @@ ${buildProposalWhy({
 
 const buildDesignMarkdown = ({
   proposalChangeName,
+  requestTitle,
+  conventionalTitle,
   taskTitle,
   taskObjective,
   plannerDeliverable,
   worktreeRoot,
 }: {
   proposalChangeName: string;
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   taskTitle: string;
   taskObjective: string;
   plannerDeliverable: string | null;
@@ -172,6 +204,13 @@ available coding-review worker from the shared pool.
 - Let the pooled coding-review runtime allocate execution branches and worktrees after approval.
 - Use planner output as the starting point for reviewer validation and follow-up tasks.
 - Prefer incremental implementation that can be requeued after machine review feedback.
+- Keep the canonical request/PR title as \`${requestTitle}\`.
+- Keep slash-delimited roadmap/topic scope in conventional-title metadata \`${describeConventionalTitleMetadata(conventionalTitle)}\` instead of \`branchPrefix\` or OpenSpec change paths.
+
+${buildConventionalTitleSection({
+  requestTitle,
+  conventionalTitle,
+})}
 
 ## Risks / Trade-offs
 
@@ -186,11 +225,15 @@ ${plannerDeliverable ? `Planner deliverable reference: ${normalizeSentence(plann
 
 const buildSpecMarkdown = ({
   proposalChangeName,
+  requestTitle,
+  conventionalTitle,
   taskTitle,
   taskObjective,
   worktreeRoot,
 }: {
   proposalChangeName: string;
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   taskTitle: string;
   taskObjective: string;
   worktreeRoot: string;
@@ -213,22 +256,35 @@ request-group replanning.
 #### Scenario: Dedicated execution workspace
 - **WHEN** the coder starts work on this proposal
 - **THEN** the system SHALL provide a dedicated implementation branch and a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\`
+
+### Requirement: Conventional title metadata stays explicit
+The system SHALL carry the canonical request/PR title \`${requestTitle}\` and conventional-title metadata \`${describeConventionalTitleMetadata(conventionalTitle)}\`
+through the materialized OpenSpec artifacts without encoding slash-delimited roadmap/topic scope into \`branchPrefix\` or OpenSpec change paths.
+
+#### Scenario: Materialized artifacts mirror the approved scope
+- **WHEN** planner materializes this proposal
+- **THEN** the generated proposal, design, spec, and tasks SHALL reference the canonical request/PR title \`${requestTitle}\`
+- **AND** the slash-delimited roadmap/topic scope SHALL remain metadata instead of changing the proposal change path \`${proposalChangeName}\`
 `;
 };
 
 const buildTasksMarkdown = ({
+  requestTitle,
+  conventionalTitle,
   taskTitle,
   taskObjective,
   worktreeRoot,
 }: {
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   taskTitle: string;
   taskObjective: string;
   worktreeRoot: string;
 }): string => {
   return `## 1. Proposal Alignment
 
-- [ ] 1.1 Review the approved OpenSpec artifacts for "${taskTitle}"
-- [ ] 1.2 Confirm the proposal is ready for pooled execution and a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\` can be claimed
+- [ ] 1.1 Review the approved OpenSpec artifacts for "${taskTitle}" and confirm the canonical request/PR title is \`${requestTitle}\`
+- [ ] 1.2 Confirm the proposal is ready for pooled execution, the reusable worktree from \`${describeWorktreePool(worktreeRoot)}\` can be claimed, and conventional-title metadata \`${describeConventionalTitleMetadata(conventionalTitle)}\` stays separate from \`branchPrefix\` and change paths
 
 ## 2. Implementation
 
@@ -264,6 +320,8 @@ const writeProposalArtifacts = async ({
   repositoryPath,
   proposalChangeName,
   proposalPath,
+  requestTitle,
+  conventionalTitle,
   taskTitle,
   taskObjective,
   plannerSummary,
@@ -275,6 +333,8 @@ const writeProposalArtifacts = async ({
   repositoryPath: string;
   proposalChangeName: string;
   proposalPath: string;
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   taskTitle: string;
   taskObjective: string;
   plannerSummary: string | null;
@@ -294,6 +354,8 @@ const writeProposalArtifacts = async ({
     buildProposalMarkdown({
       repositoryPath,
       proposalChangeName,
+      requestTitle,
+      conventionalTitle,
       taskTitle,
       taskObjective,
       plannerSummary,
@@ -307,6 +369,8 @@ const writeProposalArtifacts = async ({
     path.join(proposalRoot, "design.md"),
     buildDesignMarkdown({
       proposalChangeName,
+      requestTitle,
+      conventionalTitle,
       taskTitle,
       taskObjective,
       plannerDeliverable,
@@ -318,6 +382,8 @@ const writeProposalArtifacts = async ({
     path.join(specDirectory, "spec.md"),
     buildSpecMarkdown({
       proposalChangeName,
+      requestTitle,
+      conventionalTitle,
       taskTitle,
       taskObjective,
       worktreeRoot,
@@ -327,6 +393,8 @@ const writeProposalArtifacts = async ({
   await fs.writeFile(
     path.join(proposalRoot, "tasks.md"),
     buildTasksMarkdown({
+      requestTitle,
+      conventionalTitle,
       taskTitle,
       taskObjective,
       worktreeRoot,
@@ -362,6 +430,8 @@ export const materializeAssignmentProposals = async ({
   repositoryPath,
   baseBranch,
   canonicalBranchName,
+  requestTitle,
+  conventionalTitle,
   plannerSummary,
   plannerDeliverable,
   requestInput,
@@ -372,6 +442,8 @@ export const materializeAssignmentProposals = async ({
   repositoryPath: string;
   baseBranch: string;
   canonicalBranchName: string;
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   plannerSummary: string | null;
   plannerDeliverable: string | null;
   requestInput: string | null;
@@ -419,6 +491,8 @@ export const materializeAssignmentProposals = async ({
       repositoryPath,
       proposalChangeName: lane.proposalChangeName,
       proposalPath: lane.proposalPath,
+      requestTitle,
+      conventionalTitle,
       taskTitle: lane.taskTitle,
       taskObjective: lane.taskObjective,
       plannerSummary,

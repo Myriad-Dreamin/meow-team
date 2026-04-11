@@ -42,6 +42,7 @@ import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 
 type RequestTitleAgentArgs = Parameters<TeamRoleDependencies["requestTitleAgent"]["run"]>;
 type PlannerAgentArgs = Parameters<TeamRoleDependencies["plannerAgent"]["run"]>;
+type PlannerAgentResult = Awaited<ReturnType<TeamRoleDependencies["plannerAgent"]["run"]>>;
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 
 const repository: TeamRepositoryOption = {
@@ -108,9 +109,10 @@ describe.sequential("runTeam", () => {
       run: vi.fn(async (input: PlannerAgentArgs[0]) => {
         callOrder.push("planner");
         expect(input.state.requestTitle).toBe("Dispatch Coordination");
+        expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toEqual(repository);
 
-        return {
+        const response = {
           handoff: {
             summary: "Planner summary",
             deliverable: "Planner deliverable",
@@ -120,6 +122,10 @@ describe.sequential("runTeam", () => {
             planSummary: "Plan summary",
             plannerDeliverable: "Plan deliverable",
             branchPrefix: "dispatch-coordination",
+            conventionalTitle: {
+              type: "dev",
+              scope: "dispatch/coordination",
+            },
             tasks: [
               {
                 title: "Stabilize dispatch flow",
@@ -127,7 +133,9 @@ describe.sequential("runTeam", () => {
               },
             ],
           },
-        };
+        } satisfies PlannerAgentResult;
+
+        return response;
       }),
     };
     const coderAgentMock = { run: vi.fn() };
@@ -156,7 +164,11 @@ describe.sequential("runTeam", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       repository,
-      requestTitle: "Dispatch Coordination",
+      requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
+      conventionalTitle: {
+        type: "dev",
+        scope: "dispatch/coordination",
+      },
       requestText: "Ship reliable dispatch coordination.",
       plannerSummary: "Plan summary",
       plannerDeliverable: "Plan deliverable",
@@ -179,7 +191,7 @@ describe.sequential("runTeam", () => {
         reviewerAgent: reviewerAgentMock,
       }),
     });
-    expect(result.requestTitle).toBe("Dispatch Coordination");
+    expect(result.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
     expect(result.requestText).toBe("Ship reliable dispatch coordination.");
     expect(result.repository).toEqual(repository);
     expect(result.handoffs).toHaveLength(1);
@@ -196,7 +208,11 @@ describe.sequential("runTeam", () => {
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
-    expect(thread?.data.requestTitle).toBe("Dispatch Coordination");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(thread?.data.conventionalTitle).toEqual({
+      type: "dev",
+      scope: "dispatch/coordination",
+    });
     expect(thread?.data.requestText).toBe("Ship reliable dispatch coordination.");
     expect(thread?.data.handoffs.planner?.summary).toBe("Planner summary");
     expect(thread?.results).toHaveLength(1);
@@ -212,16 +228,19 @@ describe.sequential("runTeam", () => {
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]) => {
         expect(input.state.requestTitle).toBe("Human Title");
+        expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toBeNull();
 
-        return {
+        const response = {
           handoff: {
             summary: "Planner is waiting for a repository",
             deliverable: "Select a repository before proposal dispatch can continue.",
             decision: "continue",
           },
           dispatch: null,
-        };
+        } satisfies PlannerAgentResult;
+
+        return response;
       }),
     };
     const coderAgentMock = { run: vi.fn() };
@@ -279,6 +298,7 @@ describe.sequential("runTeam", () => {
                 handoffCounter: 0,
                 assignmentNumber: 1,
                 requestTitle: "Existing request",
+                conventionalTitle: null,
                 requestText: "Keep the current slot busy.",
                 latestInput: "Keep the current slot busy.",
                 forceReset: false,
@@ -291,6 +311,7 @@ describe.sequential("runTeam", () => {
                   status: "running",
                   repository,
                   requestTitle: "Existing request",
+                  conventionalTitle: null,
                   requestText: "Keep the current slot busy.",
                   requestedAt: FIXED_TIMESTAMP,
                   startedAt: FIXED_TIMESTAMP,

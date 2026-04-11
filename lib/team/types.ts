@@ -1,4 +1,5 @@
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
 
 export type TeamRoleDecision = "continue" | "approved" | "needs_revision";
 
@@ -158,6 +159,7 @@ export type TeamDispatchAssignment = {
   status: TeamDispatchAssignmentStatus;
   repository: TeamRepositoryOption | null;
   requestTitle: string | null;
+  conventionalTitle: ConventionalTitleMetadata | null;
   requestText: string | null;
   requestedAt: string;
   startedAt: string | null;

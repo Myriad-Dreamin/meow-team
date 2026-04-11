@@ -15,10 +15,11 @@ export type RequestTitleRoleOutput = z.infer<typeof requestTitleOutputSchema>;
 
 const buildRequestTitlePrompt = ({ input, requestText }: RequestTitleRoleInput): string => {
   return [
-    "Create a concise title for an engineering request.",
+    "Create a concise subject for an engineering request.",
     "Rules:",
     "- Keep it plain English and specific.",
     "- Prefer 2 to 8 words when possible.",
+    "- Return only the subject text. Do not add a Conventional Commit type or scope prefix.",
     "- Do not include quotes, markdown, IDs, or trailing punctuation.",
     `Raw request text:\n${requestText}`,
     input !== requestText ? `Current planning input:\n${input}` : null,

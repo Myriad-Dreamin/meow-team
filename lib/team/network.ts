@@ -15,7 +15,14 @@ import {
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { loadRolePrompt } from "@/lib/team/prompts";
-import { buildDeterministicRequestTitle, normalizeRequestTitle } from "@/lib/team/request-title";
+import {
+  buildCanonicalRequestTitle,
+  buildDeterministicRequestTitle,
+  normalizeConventionalTitleMetadata,
+  normalizeRequestTitle,
+  parseConventionalTitle,
+  type ConventionalTitleMetadata,
+} from "@/lib/team/request-title";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import {
   resolveTeamRoleDependencies,
@@ -40,6 +47,7 @@ export type TeamRunState = {
   handoffCounter: number;
   assignmentNumber: number;
   requestTitle: string | null;
+  conventionalTitle: ConventionalTitleMetadata | null;
   requestText: string | null;
   latestInput: string | null;
   forceReset: boolean;
@@ -59,6 +67,7 @@ export type TeamRunSummary = {
 
 type ResolvedRequestMetadata = {
   requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   requestText: string;
 };
 
@@ -82,6 +91,7 @@ const buildInitialState = (
     handoffCounter: 0,
     assignmentNumber: 1,
     requestTitle: null,
+    conventionalTitle: null,
     requestText: null,
     latestInput: null,
     forceReset,
@@ -185,6 +195,7 @@ const resolveRequestMetadata = async ({
     (shouldResetAssignment ? null : normalizeRequestText(existingThread?.data.requestText)) ??
     input.trim();
   const humanTitle = normalizeRequestTitle(providedTitle);
+  const humanConventionalTitle = parseConventionalTitle(humanTitle)?.metadata ?? null;
 
   if (humanTitle) {
     await logEvent?.({
@@ -195,6 +206,7 @@ const resolveRequestMetadata = async ({
 
     return {
       requestTitle: humanTitle,
+      conventionalTitle: humanConventionalTitle,
       requestText,
     };
   }
@@ -202,6 +214,11 @@ const resolveRequestMetadata = async ({
   const preservedTitle = shouldResetAssignment
     ? null
     : normalizeRequestTitle(existingThread?.data.requestTitle);
+  const preservedConventionalTitle = shouldResetAssignment
+    ? null
+    : (normalizeConventionalTitleMetadata(existingThread?.data.conventionalTitle) ??
+      parseConventionalTitle(existingThread?.data.requestTitle)?.metadata ??
+      null);
   if (preservedTitle) {
     await logEvent?.({
       source: "system",
@@ -211,6 +228,7 @@ const resolveRequestMetadata = async ({
 
     return {
       requestTitle: preservedTitle,
+      conventionalTitle: preservedConventionalTitle,
       requestText,
     };
   }
@@ -232,6 +250,7 @@ const resolveRequestMetadata = async ({
 
       return {
         requestTitle: generatedTitle,
+        conventionalTitle: null,
         requestText,
       };
     }
@@ -254,6 +273,7 @@ const resolveRequestMetadata = async ({
 
   return {
     requestTitle: fallbackTitle,
+    conventionalTitle: null,
     requestText,
   };
 };
@@ -338,6 +358,7 @@ export const runTeam = async ({
     logEvent: forwardPlannerEvent,
   });
   state.requestTitle = requestMetadata.requestTitle;
+  state.conventionalTitle = requestMetadata.conventionalTitle;
   state.requestText = requestMetadata.requestText;
 
   try {
@@ -373,11 +394,33 @@ export const runTeam = async ({
     }
 
     if (selectedRepository && plannerResponse.dispatch) {
+      const conventionalTitle = normalizeConventionalTitleMetadata(
+        plannerResponse.dispatch.conventionalTitle,
+      );
+      const canonicalRequestTitle = buildCanonicalRequestTitle({
+        requestTitle: requestMetadata.requestTitle,
+        taskTitle: plannerResponse.dispatch.tasks[0]?.title ?? null,
+        taskCount: plannerResponse.dispatch.tasks.length,
+        conventionalTitle,
+      });
+
+      state.requestTitle = canonicalRequestTitle;
+      state.conventionalTitle = conventionalTitle;
+
+      if (canonicalRequestTitle !== requestMetadata.requestTitle) {
+        await forwardPlannerEvent({
+          source: "system",
+          message: `Normalized canonical request title: ${canonicalRequestTitle}`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
       await createPlannerDispatchAssignment({
         threadId: resolvedThreadId,
         assignmentNumber: state.assignmentNumber,
         repository: selectedRepository,
-        requestTitle: requestMetadata.requestTitle,
+        requestTitle: canonicalRequestTitle,
+        conventionalTitle,
         requestText: requestMetadata.requestText,
         plannerSummary: plannerResponse.dispatch.planSummary,
         plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
@@ -406,7 +449,7 @@ export const runTeam = async ({
     return {
       threadId: resolvedThreadId,
       assignmentNumber: state.assignmentNumber,
-      requestTitle: requestMetadata.requestTitle,
+      requestTitle: state.requestTitle ?? requestMetadata.requestTitle,
       requestText: requestMetadata.requestText,
       approved: false,
       repository: selectedRepository,

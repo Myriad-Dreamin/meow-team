@@ -1,12 +1,16 @@
 import { z } from "zod";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
-import type { TeamRepositoryContext } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
+import { describeConventionalTitleMetadata } from "@/lib/team/request-title";
 import { buildReviewerExecutionRules } from "@/lib/team/reviewer-guidance";
-import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
-import type { RolePrompt } from "@/lib/team/prompts";
+import {
+  rolePromptSchema,
+  teamConventionalTitleSchema,
+  teamRepositoryOptionSchema,
+  teamRoleDecisionSchema,
+  teamRoleHandoffSchema,
+} from "@/lib/team/roles/schemas";
 import type { TeamCodexEvent } from "@/lib/team/types";
-import type { TeamRoleHandoff } from "@/lib/team/types";
 
 const reviewerOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -16,32 +20,42 @@ const reviewerOutputSchema = z.object({
   pullRequestSummary: z.string().trim().min(1).nullable(),
 });
 
-export type ReviewerRoleState = TeamRepositoryContext & {
-  teamName: string;
-  ownerName: string;
-  objective: string;
-  laneId: string;
-  laneIndex: number;
-  taskTitle: string;
-  taskObjective: string;
-  planSummary: string;
-  planDeliverable: string;
-  conflictNote: string | null;
-  workflow: string[];
-  handoffs: Partial<Record<string, TeamRoleHandoff>>;
-  handoffCounter: number;
-  assignmentNumber: number;
-};
+const reviewerInputSchema = z.object({
+  role: rolePromptSchema,
+  input: z.string().trim().min(1),
+  state: z.object({
+    teamName: z.string().trim().min(1),
+    ownerName: z.string().trim().min(1),
+    objective: z.string().trim().min(1),
+    repository: teamRepositoryOptionSchema,
+    laneId: z.string().trim().min(1),
+    laneIndex: z.number().int().positive(),
+    taskTitle: z.string().trim().min(1),
+    taskObjective: z.string().trim().min(1),
+    requestTitle: z.string().trim().min(1),
+    conventionalTitle: teamConventionalTitleSchema.nullable(),
+    planSummary: z.string().trim().min(1),
+    planDeliverable: z.string().trim().min(1),
+    branchName: z.string().trim().min(1),
+    baseBranch: z.string().trim().min(1),
+    worktreePath: z.string().trim().min(1),
+    implementationCommit: z.string().trim().min(1).nullable(),
+    conflictNote: z.string().trim().min(1).nullable(),
+    workflow: z.array(z.string().trim().min(1)).min(1),
+    handoffs: z.record(z.string(), teamRoleHandoffSchema.optional()),
+    handoffCounter: z.number().int().nonnegative(),
+    assignmentNumber: z.number().int().positive(),
+  }),
+});
 
-export type ReviewerRoleInput = {
-  role: RolePrompt;
-  input: string;
-  state: ReviewerRoleState;
+export type ReviewerRoleState = z.infer<typeof reviewerInputSchema>["state"];
+
+export type ReviewerRoleInput = z.infer<typeof reviewerInputSchema> & {
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };
 
 export type ReviewerRoleOutput = z.infer<typeof reviewerOutputSchema>;
-type ReviewerPromptInput = Omit<ReviewerRoleInput, "onEvent">;
+type ReviewerPromptInput = z.infer<typeof reviewerInputSchema>;
 
 const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): string => {
   return [
@@ -58,6 +72,8 @@ const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): strin
     `Lane index: ${state.laneIndex}.`,
     `Task title: ${state.taskTitle}.`,
     `Task objective: ${state.taskObjective}`,
+    `Canonical request title: ${state.requestTitle}.`,
+    `Conventional title metadata: ${describeConventionalTitleMetadata(state.conventionalTitle)}.`,
     `Planner summary: ${state.planSummary}`,
     `Planner deliverable: ${state.planDeliverable}`,
     state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
@@ -81,7 +97,7 @@ const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): strin
     "Final response requirements:",
     "- Your final response must match the provided JSON schema exactly.",
     '- Put the concise handoff in "summary" and the detailed notes in "deliverable".',
-    '- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. If not approved, set both pullRequestTitle and pullRequestSummary to null.',
+    '- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. The harness will normalize the final PR title to the shared conventional format. If not approved, set both pullRequestTitle and pullRequestSummary to null.',
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -92,10 +108,11 @@ export class ReviewerAgent {
 
   async run(input: ReviewerRoleInput): Promise<ReviewerRoleOutput> {
     const { onEvent, ...roleInput } = input;
+    const parsedInput = reviewerInputSchema.parse(roleInput);
 
     return this.executor({
-      worktreePath: roleInput.state.worktreePath,
-      prompt: buildReviewerPrompt(roleInput),
+      worktreePath: parsedInput.state.worktreePath,
+      prompt: buildReviewerPrompt(parsedInput),
       responseSchema: reviewerOutputSchema,
       codexHomePrefix: "lane",
       onEvent,
