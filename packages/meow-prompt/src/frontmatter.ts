@@ -1,34 +1,17 @@
-import fs from "node:fs";
-import path from "node:path";
 import { createRequire } from "node:module";
 
-const resolveJsYamlPackageJsonPath = (): string => {
-  const directPackagePath = path.join(process.cwd(), "node_modules", "js-yaml", "package.json");
+type LoadYaml = (source: string) => unknown;
 
-  if (fs.existsSync(directPackagePath)) {
-    return directPackagePath;
+const require = createRequire(import.meta.url);
+let loadYaml: LoadYaml | null = null;
+
+const getLoadYaml = (): LoadYaml => {
+  if (loadYaml) {
+    return loadYaml;
   }
 
-  const pnpmStoreDirectory = path.join(process.cwd(), "node_modules", ".pnpm");
-
-  if (!fs.existsSync(pnpmStoreDirectory)) {
-    throw new Error("Unable to resolve js-yaml from node_modules.");
-  }
-
-  const jsYamlEntry = fs
-    .readdirSync(pnpmStoreDirectory)
-    .sort()
-    .find((entry) => entry.startsWith("js-yaml@"));
-
-  if (!jsYamlEntry) {
-    throw new Error("Unable to resolve js-yaml from node_modules.");
-  }
-
-  return path.join(pnpmStoreDirectory, jsYamlEntry, "node_modules", "js-yaml", "package.json");
-};
-
-const { load: loadYaml } = createRequire(resolveJsYamlPackageJsonPath())("js-yaml") as {
-  load: (source: string) => unknown;
+  ({ load: loadYaml } = require("js-yaml") as { load: LoadYaml });
+  return loadYaml;
 };
 
 type FrontmatterPrimitive = boolean | number | string | null;
@@ -114,7 +97,7 @@ export const parseFrontmatter = (rawFrontmatter: string): Record<string, Frontma
     return {};
   }
 
-  const parsedFrontmatter = loadYaml(rawFrontmatter);
+  const parsedFrontmatter = getLoadYaml()(rawFrontmatter);
 
   if (parsedFrontmatter === undefined || parsedFrontmatter === null) {
     return {};
