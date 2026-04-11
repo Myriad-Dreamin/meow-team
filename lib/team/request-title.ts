@@ -189,6 +189,37 @@ export const formatConventionalTitle = ({
   return `${prefix}${trimmedSubject}`;
 };
 
+const resolveTaskAwareTitleSubject = ({
+  requestTitle,
+  taskTitle,
+  taskCount = 1,
+  preferTaskTitle,
+}: {
+  requestTitle: string | null | undefined;
+  taskTitle: string | null | undefined;
+  taskCount?: number;
+  preferTaskTitle: boolean;
+}): string => {
+  const requestSubject = resolveRequestTitleSubject(requestTitle);
+  const taskSubject = resolveRequestTitleSubject(taskTitle);
+
+  if (taskCount === 1) {
+    return (
+      (preferTaskTitle ? taskSubject : requestSubject) ??
+      requestSubject ??
+      taskSubject ??
+      DEFAULT_REQUEST_TITLE
+    );
+  }
+
+  return (
+    (preferTaskTitle ? requestSubject : taskSubject) ??
+    taskSubject ??
+    requestSubject ??
+    DEFAULT_REQUEST_TITLE
+  );
+};
+
 export const buildCanonicalRequestTitle = ({
   requestTitle,
   taskTitle,
@@ -201,11 +232,12 @@ export const buildCanonicalRequestTitle = ({
   conventionalTitle: ConventionalTitleMetadata | null | undefined;
 }): string => {
   const metadata = normalizeConventionalTitleMetadata(conventionalTitle);
-  const subject =
-    (taskCount === 1 ? resolveRequestTitleSubject(taskTitle) : null) ??
-    resolveRequestTitleSubject(requestTitle) ??
-    resolveRequestTitleSubject(taskTitle) ??
-    DEFAULT_REQUEST_TITLE;
+  const subject = resolveTaskAwareTitleSubject({
+    requestTitle,
+    taskTitle,
+    taskCount,
+    preferTaskTitle: true,
+  });
 
   return metadata ? formatConventionalTitle({ metadata, subject }) : subject;
 };
@@ -222,11 +254,12 @@ export const buildLanePullRequestTitle = ({
   conventionalTitle: ConventionalTitleMetadata | null | undefined;
 }): string => {
   const metadata = normalizeConventionalTitleMetadata(conventionalTitle);
-  const subject =
-    (taskCount === 1 ? resolveRequestTitleSubject(requestTitle) : null) ??
-    resolveRequestTitleSubject(taskTitle) ??
-    resolveRequestTitleSubject(requestTitle) ??
-    DEFAULT_REQUEST_TITLE;
+  const subject = resolveTaskAwareTitleSubject({
+    requestTitle,
+    taskTitle,
+    taskCount,
+    preferTaskTitle: false,
+  });
 
   return metadata ? formatConventionalTitle({ metadata, subject }) : subject;
 };

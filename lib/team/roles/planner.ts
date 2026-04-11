@@ -6,8 +6,6 @@ import { summarizeHandoffs } from "@/lib/team/agent-helpers";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import type { RolePrompt } from "@/lib/team/prompts";
 import {
-  CONVENTIONAL_TITLE_SCOPE_PATTERN,
-  CONVENTIONAL_TITLE_TYPES,
   describeConventionalTitleMetadata,
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
@@ -24,10 +22,6 @@ const plannerDispatchSchema = z
     planSummary: z.string().trim().min(1),
     plannerDeliverable: z.string().trim().min(1),
     branchPrefix: z.string().trim().min(1),
-    conventionalTitle: z.object({
-      type: z.enum(CONVENTIONAL_TITLE_TYPES),
-      scope: z.string().trim().regex(CONVENTIONAL_TITLE_SCOPE_PATTERN).nullable(),
-    }),
     tasks: z.array(plannerTaskSchema).min(1).max(teamConfig.dispatch.maxProposalCount),
   })
   .nullable();
@@ -139,15 +133,12 @@ const buildPlannerPrompt = ({ role, state }: PlannerPromptInput): string => {
     "- Keep proposals logical and implementation-focused. Do not describe them as tied to a specific branch or worker slot.",
     "- Align each proposal with the local OpenSpec flow so the backend can materialize a real OpenSpec change for it.",
     "- Use branchPrefix as a short, git-friendly theme for the request group.",
-    `- Fill dispatch.conventionalTitle.type with one of: ${CONVENTIONAL_TITLE_TYPES.join(", ")}.`,
-    "- Fill dispatch.conventionalTitle.scope with a slash-delimited roadmap/topic scope when it materially clarifies the work, otherwise set it to null.",
-    "- Keep slash-delimited roadmap/topic scope metadata separate from branchPrefix and OpenSpec change names.",
     "- If no repository is selected, explain that dispatch is blocked and set dispatch to null.",
     "Final response requirements:",
     "- Return JSON that matches the provided schema exactly.",
     "- Put the planner handoff in handoff.summary and handoff.deliverable.",
     '- Set handoff.decision to "continue".',
-    "- If dispatch is possible, fill dispatch.planSummary, dispatch.plannerDeliverable, dispatch.branchPrefix, dispatch.conventionalTitle, and dispatch.tasks.",
+    "- If dispatch is possible, fill dispatch.planSummary, dispatch.plannerDeliverable, dispatch.branchPrefix, and dispatch.tasks.",
   ].join("\n\n");
 };
 

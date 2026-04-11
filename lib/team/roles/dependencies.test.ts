@@ -7,6 +7,7 @@ describe("resolveTeamRoleDependencies", () => {
     const executor = vi.fn(async () => {
       return {
         title: "Injected Title",
+        conventionalTitle: null,
       };
     }) as unknown as TeamRoleDependencies["executor"];
 
@@ -22,6 +23,7 @@ describe("resolveTeamRoleDependencies", () => {
       }),
     ).resolves.toEqual({
       title: "Injected Title",
+      conventionalTitle: null,
     });
 
     expect(executor).toHaveBeenCalledWith(

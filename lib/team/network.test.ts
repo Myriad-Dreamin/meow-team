@@ -98,17 +98,27 @@ describe.sequential("runTeam", () => {
           input: "Ship reliable dispatch coordination.",
           requestText: "Ship reliable dispatch coordination.",
           worktreePath: repository.path,
+          tasks: [
+            {
+              title: "Stabilize dispatch flow",
+              objective: "Inject role dependencies into the scheduler.",
+            },
+          ],
         });
 
         return {
           title: "Dispatch Coordination",
+          conventionalTitle: {
+            type: "dev" as const,
+            scope: "dispatch/coordination",
+          },
         };
       }),
     };
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         callOrder.push("planner");
-        expect(input.state.requestTitle).toBe("Dispatch Coordination");
+        expect(input.state.requestTitle).toBeNull();
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toEqual(repository);
 
@@ -122,10 +132,6 @@ describe.sequential("runTeam", () => {
             planSummary: "Plan summary",
             plannerDeliverable: "Plan deliverable",
             branchPrefix: "dispatch-coordination",
-            conventionalTitle: {
-              type: "dev" as const,
-              scope: "dispatch/coordination",
-            },
             tasks: [
               {
                 title: "Stabilize dispatch flow",
@@ -154,7 +160,7 @@ describe.sequential("runTeam", () => {
       },
     });
 
-    expect(callOrder).toEqual(["request-title", "planner"]);
+    expect(callOrder).toEqual(["planner", "request-title"]);
     expect(executorMock).not.toHaveBeenCalled();
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
@@ -274,6 +280,64 @@ describe.sequential("runTeam", () => {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-2");
     expect(thread?.data.requestTitle).toBe("Human Title");
     expect(thread?.data.handoffs.planner?.summary).toBe("Planner is waiting for a repository");
+  });
+
+  it("generates a plain request title after planning when dispatch stays blocked", async () => {
+    const executorMock = vi.fn(async () => {
+      throw new Error("executor should not be called");
+    });
+    const executor = executorMock as unknown as TeamRoleDependencies["executor"];
+
+    const requestTitleAgentMock = {
+      run: vi.fn(async (input: RequestTitleAgentArgs[0]) => {
+        expect(input).toMatchObject({
+          input: "Plan the request.",
+          requestText: "Plan the request.",
+          worktreePath: process.cwd(),
+          tasks: null,
+        });
+
+        return {
+          title: "Planning Request",
+          conventionalTitle: null,
+        };
+      }),
+    };
+    const plannerAgentMock = {
+      run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        expect(input.state.requestTitle).toBeNull();
+        expect(input.state.conventionalTitle).toBeNull();
+        expect(input.state.selectedRepository).toBeNull();
+
+        return {
+          handoff: {
+            summary: "Planner is waiting for a repository",
+            deliverable: "Select a repository before proposal dispatch can continue.",
+            decision: "continue" as const,
+          },
+          dispatch: null,
+        };
+      }),
+    };
+
+    const result = await runTeam({
+      input: "Plan the request.",
+      threadId: "thread-3",
+      dependencies: {
+        executor,
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+      },
+    });
+
+    expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
+    expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
+    expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
+    expect(result.requestTitle).toBe("Planning Request");
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-3");
+    expect(thread?.data.requestTitle).toBe("Planning Request");
+    expect(thread?.data.conventionalTitle).toBeNull();
   });
 
   it("fails fast when all shared meow slots are already assigned to active threads", async () => {
