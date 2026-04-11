@@ -1,8 +1,7 @@
 import "server-only";
 
 import { teamConfig } from "@/team.config";
-import { applyHandoff, summarizeHandoffs, type TeamRoleState } from "@/lib/team/agent-helpers";
-import { runCodexLaneRole } from "@/lib/team/codex-cli";
+import { applyHandoff, type TeamRoleState } from "@/lib/team/agent-helpers";
 import {
   buildCanonicalBranchName,
   buildLaneBranchName,
@@ -33,16 +32,18 @@ import {
   buildProposalPath,
   materializeAssignmentProposals,
 } from "@/lib/team/openspec";
-import { loadRolePrompt, type RolePrompt } from "@/lib/team/prompts";
-import { buildReviewerExecutionRules } from "@/lib/team/reviewer-guidance";
+import { loadRolePrompt } from "@/lib/team/prompts";
 import type { TeamRepositoryOption } from "@/lib/team/repository-types";
+import {
+  resolveTeamRoleDependencies,
+  type TeamRoleDependencies,
+} from "@/lib/team/roles/dependencies";
 import type {
   TeamDispatchAssignment,
   TeamHumanFeedbackScope,
   TeamPlannerNote,
   TeamPullRequestRecord,
   TeamRoleHandoff,
-  TeamCodexEvent,
   TeamWorkerEventActor,
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
@@ -303,67 +304,6 @@ const buildLaneInitialState = ({
   };
 };
 
-const buildLanePrompt = ({
-  role,
-  state,
-  input,
-}: {
-  role: RolePrompt;
-  state: LaneRunState;
-  input: string;
-}): string => {
-  return [
-    `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
-    `Owner: ${state.ownerName}.`,
-    `Shared objective: ${state.objective}`,
-    `Repository: ${state.repository.name} at ${state.repository.path}.`,
-    `Dedicated branch: ${state.branchName}.`,
-    `Base branch: ${state.baseBranch}.`,
-    `Dedicated worktree: ${state.worktreePath}.`,
-    state.implementationCommit
-      ? `Implementation commit ready for review: ${state.implementationCommit}.`
-      : role.id === "reviewer"
-        ? "Implementation commit ready for review: none."
-        : null,
-    `Lane index: ${state.laneIndex}.`,
-    `Task title: ${state.taskTitle}.`,
-    `Task objective: ${state.taskObjective}`,
-    `Planner summary: ${state.planSummary}`,
-    `Planner deliverable: ${state.planDeliverable}`,
-    state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
-    `Workflow context: ${state.workflow.join(" -> ")}`,
-    `Current handoffs:`,
-    summarizeHandoffs(state),
-    `Current assignment input: ${input}`,
-    `Codex skill context:`,
-    [
-      "- `.codex/skills/team-harness-workflow/SKILL.md`",
-      "- `.codex/skills/team-harness-workflow/references/lanes.md`",
-      "- `.codex/skills/openspec-apply-change/SKILL.md`",
-    ].join("\n"),
-    `Repository instructions: read INSTRUCTIONS.md and AGENTS.md before changing code, use pnpm for scripts, and keep project text in English.`,
-    `Your role prompt is below:`,
-    role.prompt.trim(),
-    `Execution rules:`,
-    `- Operate only inside the dedicated worktree and branch for this lane.`,
-    `- Use Codex CLI native repository tools and shell access to inspect, edit, and validate work.`,
-    ...(role.id === "reviewer"
-      ? buildReviewerExecutionRules().map((rule) => `- ${rule}`)
-      : [
-          `- Produce concrete repository changes before finishing.`,
-          `- Finish with decision "continue" after implementation exists for review.`,
-        ]),
-    `Final response requirements:`,
-    `- Your final response must match the provided JSON schema exactly.`,
-    `- Put the concise handoff in "summary" and the detailed notes in "deliverable".`,
-    role.id === "reviewer"
-      ? `- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. If not approved, set both pullRequestTitle and pullRequestSummary to null.`
-      : `- For coder, set decision to "continue" and set pullRequestTitle and pullRequestSummary to null.`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-};
-
 const buildCoderCommitMessage = ({
   lane,
 }: {
@@ -396,48 +336,6 @@ const summarizeGitFailure = (message: string): string => {
       .map((line) => line.trim())
       .find((line) => line.length > 0) ?? "Git operation failed."
   );
-};
-
-const runRoleWithCodexCli = async ({
-  role,
-  state,
-  input,
-  onEvent,
-}: {
-  role: RolePrompt;
-  state: LaneRunState;
-  input: string;
-  onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
-}): Promise<LaneRunState> => {
-  const response = await runCodexLaneRole({
-    worktreePath: state.worktreePath,
-    prompt: buildLanePrompt({
-      role,
-      state,
-      input,
-    }),
-    onEvent,
-  });
-
-  applyHandoff({
-    state,
-    role,
-    summary: response.summary,
-    deliverable: response.deliverable,
-    decision: response.decision,
-  });
-
-  if (role.id === "reviewer") {
-    state.pullRequestDraft =
-      response.pullRequestTitle && response.pullRequestSummary
-        ? {
-            title: response.pullRequestTitle,
-            summary: response.pullRequestSummary,
-          }
-        : null;
-  }
-
-  return state;
 };
 
 const createPullRequestRecord = ({
@@ -807,10 +705,12 @@ const runLaneCycle = async ({
   threadId,
   assignmentNumber,
   laneId,
+  dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  dependencies: TeamRoleDependencies;
 }): Promise<void> => {
   while (true) {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
@@ -876,37 +776,46 @@ const runLaneCycle = async ({
     });
 
     const coderRole = await loadRolePrompt("coder");
-    const reviewerRole = await loadRolePrompt("reviewer");
-    const coderState = await runRoleWithCodexCli({
-      role: coderRole,
-      state: buildLaneInitialState({
-        repository: assignment.repository,
+    const coderState = buildLaneInitialState({
+      repository: assignment.repository,
+      lane,
+      assignment,
+      workflow: getLaneWorkflow(),
+      handoffs: buildLanePersistedHandoffs({
         lane,
-        assignment,
-        workflow: getLaneWorkflow(),
-        handoffs: buildLanePersistedHandoffs({
-          lane,
-          assignmentNumber,
-        }),
+        assignmentNumber,
       }),
-      input:
-        lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
-      onEvent: async (event) => {
-        await appendTeamCodexLogEvent({
-          threadFile: teamConfig.storage.threadFile,
-          threadId,
-          assignmentNumber,
-          roleId: coderRole.id,
-          laneId,
-          event,
-        });
-      },
     });
+    const coderResponse = await dependencies.coderRole(
+      {
+        role: coderRole,
+        state: coderState,
+        input:
+          lane.taskObjective ??
+          lane.taskTitle ??
+          assignment.plannerSummary ??
+          "Implement the task.",
+        onEvent: async (event) => {
+          await appendTeamCodexLogEvent({
+            threadFile: teamConfig.storage.threadFile,
+            threadId,
+            assignmentNumber,
+            roleId: coderRole.id,
+            laneId,
+            event,
+          });
+        },
+      },
+      dependencies.executor,
+    );
 
-    const coderHandoff = coderState.handoffs.coder;
-    if (!coderHandoff) {
-      throw new Error(`Coder lane ${lane.laneIndex} completed without saving a handoff.`);
-    }
+    const coderHandoff = applyHandoff({
+      state: coderState,
+      role: coderRole,
+      summary: coderResponse.summary,
+      deliverable: coderResponse.deliverable,
+      decision: coderResponse.decision,
+    });
 
     if (await hasWorktreeChanges(lane.worktreePath)) {
       await commitWorktreeChanges({
@@ -1011,42 +920,56 @@ const runLaneCycle = async ({
       latestDecision: coderHandoff.decision,
     };
 
-    const reviewerState = await runRoleWithCodexCli({
-      role: reviewerRole,
-      state: buildLaneInitialState({
-        repository: assignment.repository,
-        lane: reviewerLane,
-        assignment,
-        workflow: getLaneWorkflow(),
-        handoffs: {
-          ...buildLanePersistedHandoffs({
-            lane: reviewerLane,
-            assignmentNumber,
-          }),
-          coder: coderHandoff,
-        },
-      }),
-      input:
-        lane.taskObjective ??
-        lane.taskTitle ??
-        assignment.plannerSummary ??
-        "Review the lane output.",
-      onEvent: async (event) => {
-        await appendTeamCodexLogEvent({
-          threadFile: teamConfig.storage.threadFile,
-          threadId,
+    const reviewerRole = await loadRolePrompt("reviewer");
+    const reviewerState = buildLaneInitialState({
+      repository: assignment.repository,
+      lane: reviewerLane,
+      assignment,
+      workflow: getLaneWorkflow(),
+      handoffs: {
+        ...buildLanePersistedHandoffs({
+          lane: reviewerLane,
           assignmentNumber,
-          roleId: reviewerRole.id,
-          laneId,
-          event,
-        });
+        }),
+        coder: coderHandoff,
       },
     });
-
-    const reviewerHandoff = reviewerState.handoffs.reviewer;
-    if (!reviewerHandoff) {
-      throw new Error(`Reviewer lane ${lane.laneIndex} completed without saving a handoff.`);
-    }
+    const reviewerResponse = await dependencies.reviewerRole(
+      {
+        role: reviewerRole,
+        state: reviewerState,
+        input:
+          lane.taskObjective ??
+          lane.taskTitle ??
+          assignment.plannerSummary ??
+          "Review the lane output.",
+        onEvent: async (event) => {
+          await appendTeamCodexLogEvent({
+            threadFile: teamConfig.storage.threadFile,
+            threadId,
+            assignmentNumber,
+            roleId: reviewerRole.id,
+            laneId,
+            event,
+          });
+        },
+      },
+      dependencies.executor,
+    );
+    const reviewerHandoff = applyHandoff({
+      state: reviewerState,
+      role: reviewerRole,
+      summary: reviewerResponse.summary,
+      deliverable: reviewerResponse.deliverable,
+      decision: reviewerResponse.decision,
+    });
+    reviewerState.pullRequestDraft =
+      reviewerResponse.pullRequestTitle && reviewerResponse.pullRequestSummary
+        ? {
+            title: reviewerResponse.pullRequestTitle,
+            summary: reviewerResponse.pullRequestSummary,
+          }
+        : null;
 
     if (reviewerHandoff.decision === "needs_revision") {
       await updateTeamThreadRecord({
@@ -1338,10 +1261,12 @@ const ensureLaneRun = ({
   threadId,
   assignmentNumber,
   laneId,
+  dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  dependencies: TeamRoleDependencies;
 }): void => {
   const key = laneRunKey(threadId, assignmentNumber, laneId);
   if (activeLaneRuns.has(key)) {
@@ -1354,6 +1279,7 @@ const ensureLaneRun = ({
         threadId,
         assignmentNumber,
         laneId,
+        dependencies,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Background lane execution failed.";
@@ -1392,7 +1318,7 @@ const ensureLaneRun = ({
       });
     } finally {
       activeLaneRuns.delete(key);
-      void ensurePendingDispatchWork({ threadId });
+      void ensurePendingDispatchWork({ threadId, dependencies });
     }
   })();
 
@@ -1413,9 +1339,12 @@ const prioritizeThreadIds = (threadIds: string[], prioritizedThreadId?: string):
 
 export const ensurePendingDispatchWork = async ({
   threadId,
+  dependencies,
 }: {
   threadId?: string;
+  dependencies?: Partial<TeamRoleDependencies>;
 } = {}): Promise<void> => {
+  const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
   const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
   const expectedLaneStateByKey = new Map<string, LanePoolSchedulingState>();
   for (const pending of pendingAssignments) {
@@ -1527,6 +1456,7 @@ export const ensurePendingDispatchWork = async ({
           threadId: pending.threadId,
           assignmentNumber: pending.assignment.assignmentNumber,
           laneId: lane.laneId,
+          dependencies: resolvedDependencies,
         });
       }
     }
@@ -1537,10 +1467,12 @@ export const approveLaneProposal = async ({
   threadId,
   assignmentNumber,
   laneId,
+  dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  dependencies?: Partial<TeamRoleDependencies>;
 }): Promise<void> => {
   await updateTeamThreadRecord({
     threadFile: teamConfig.storage.threadFile,
@@ -1575,7 +1507,7 @@ export const approveLaneProposal = async ({
     },
   });
 
-  void ensurePendingDispatchWork({ threadId });
+  void ensurePendingDispatchWork({ threadId, dependencies });
 };
 
 export const approveLanePullRequest = approveLaneProposal;
