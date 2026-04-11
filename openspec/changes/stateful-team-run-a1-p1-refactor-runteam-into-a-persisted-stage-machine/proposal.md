@@ -11,9 +11,11 @@ Introduce `{ stage: 'init', args }` state initialization, add `env.persistState`
 ## Capabilities
 
 ### New Capabilities
+
 - `stateful-team-run-a1-p1-refactor-runteam-into-a-persisted-stage-machine`: Introduce `{ stage: 'init', args }` state initialization, add `env.persistState` and `env.deps`, inline `ensurePendingDispatchWork` into staged `runTeam` orchestration, and thread metadata-generation, planning, coding, reviewing, and archiving through the same resumable state model.
 
 ### Modified Capabilities
+
 - None.
 
 ## Conventional Title
@@ -21,7 +23,6 @@ Introduce `{ stage: 'init', args }` state initialization, add `env.persistState`
 - Canonical request/PR title: `refactor(team/runteam): Refactor `runTeam` into a persisted stage machine`
 - Conventional title metadata: `refactor(team/runteam)`
 - Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter `branchPrefix` or OpenSpec change paths.
-
 
 ## Impact
 

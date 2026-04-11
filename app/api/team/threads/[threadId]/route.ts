@@ -1,8 +1,13 @@
 // API docs: docs/api/team/threads/threadId.md
 import { NextResponse } from "next/server";
 import { teamConfig } from "@/team.config";
-import { ensurePendingDispatchWork } from "@/lib/team/dispatch";
 import { getTeamThreadDetail } from "@/lib/team/history";
+import {
+  createInitialTeamRunState,
+  createTeamRunEnv,
+  persistTeamRunState,
+  runTeam,
+} from "@/lib/team/network";
 
 export const runtime = "nodejs";
 
@@ -16,7 +21,13 @@ export async function GET(_request: Request, context: RouteContext) {
   try {
     const { threadId } = await context.params;
 
-    await ensurePendingDispatchWork({ threadId });
+    const env = createTeamRunEnv();
+    const initialState = createInitialTeamRunState({
+      kind: "dispatch",
+      threadId,
+    });
+    await persistTeamRunState(env, initialState);
+    await runTeam(env, initialState);
     const thread = await getTeamThreadDetail(teamConfig.storage.threadFile, threadId);
 
     if (!thread) {

@@ -2,13 +2,23 @@
 import { NextResponse } from "next/server";
 import { teamConfig } from "@/team.config";
 import { listTeamThreadSummaries } from "@/lib/team/history";
-import { ensurePendingDispatchWork } from "@/lib/team/dispatch";
+import {
+  createInitialTeamRunState,
+  createTeamRunEnv,
+  persistTeamRunState,
+  runTeam,
+} from "@/lib/team/network";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    await ensurePendingDispatchWork();
+    const env = createTeamRunEnv();
+    const initialState = createInitialTeamRunState({
+      kind: "dispatch",
+    });
+    await persistTeamRunState(env, initialState);
+    await runTeam(env, initialState);
     const threads = await listTeamThreadSummaries(teamConfig.storage.threadFile);
     return NextResponse.json({
       threads,

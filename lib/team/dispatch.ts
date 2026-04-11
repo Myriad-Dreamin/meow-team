@@ -1845,16 +1845,14 @@ export const ensurePendingDispatchWork = async ({
   }
 };
 
-export const approveLaneProposal = async ({
+export const queueLaneProposalForExecution = async ({
   threadId,
   assignmentNumber,
   laneId,
-  dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
-  dependencies?: Partial<TeamRoleDependencies>;
 }): Promise<void> => {
   await updateTeamThreadRecord({
     threadFile: teamConfig.storage.threadFile,
@@ -1887,6 +1885,24 @@ export const approveLaneProposal = async ({
       );
       synchronizeDispatchAssignment(assignment, now);
     },
+  });
+};
+
+export const approveLaneProposal = async ({
+  threadId,
+  assignmentNumber,
+  laneId,
+  dependencies,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+  dependencies?: Partial<TeamRoleDependencies>;
+}): Promise<void> => {
+  await queueLaneProposalForExecution({
+    threadId,
+    assignmentNumber,
+    laneId,
   });
 
   void ensurePendingDispatchWork({ threadId, dependencies });

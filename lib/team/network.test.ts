@@ -4,14 +4,18 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  approveLanePullRequestMock,
   createPlannerDispatchAssignmentMock,
   ensurePendingDispatchWorkMock,
   findConfiguredRepositoryMock,
+  queueLaneProposalForExecutionMock,
 } = vi.hoisted(() => {
   return {
+    approveLanePullRequestMock: vi.fn(),
     createPlannerDispatchAssignmentMock: vi.fn(),
     ensurePendingDispatchWorkMock: vi.fn(),
     findConfiguredRepositoryMock: vi.fn(),
+    queueLaneProposalForExecutionMock: vi.fn(),
   };
 });
 
@@ -20,8 +24,10 @@ vi.mock("@/lib/team/dispatch", async (importOriginal) => {
 
   return {
     ...actual,
+    approveLanePullRequest: approveLanePullRequestMock,
     createPlannerDispatchAssignment: createPlannerDispatchAssignmentMock,
     ensurePendingDispatchWork: ensurePendingDispatchWorkMock,
+    queueLaneProposalForExecution: queueLaneProposalForExecutionMock,
   };
 });
 
@@ -36,7 +42,12 @@ vi.mock("@/lib/team/repositories", async (importOriginal) => {
 
 import { teamConfig } from "@/team.config";
 import { getTeamThreadRecord } from "@/lib/team/history";
-import { runTeam } from "@/lib/team/network";
+import {
+  createInitialTeamRunState,
+  createTeamRunEnv,
+  persistTeamRunState,
+  runTeam,
+} from "@/lib/team/network";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 
@@ -54,6 +65,8 @@ const repository: TeamRepositoryOption = {
   relativePath: ".",
 };
 
+const createPersistStateMock = () => vi.fn(async () => undefined);
+
 describe.sequential("runTeam", () => {
   let originalThreadFile: string;
   let originalWorkerCount: number;
@@ -67,10 +80,14 @@ describe.sequential("runTeam", () => {
 
     createPlannerDispatchAssignmentMock.mockReset();
     createPlannerDispatchAssignmentMock.mockResolvedValue({} as never);
+    approveLanePullRequestMock.mockReset();
+    approveLanePullRequestMock.mockResolvedValue(undefined);
     ensurePendingDispatchWorkMock.mockReset();
     ensurePendingDispatchWorkMock.mockResolvedValue(undefined);
     findConfiguredRepositoryMock.mockReset();
     findConfiguredRepositoryMock.mockResolvedValue(null);
+    queueLaneProposalForExecutionMock.mockReset();
+    queueLaneProposalForExecutionMock.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
@@ -146,11 +163,8 @@ describe.sequential("runTeam", () => {
     };
     const coderAgentMock = { run: vi.fn() };
     const reviewerAgentMock = { run: vi.fn() };
-
-    const result = await runTeam({
-      input: "Ship reliable dispatch coordination.",
-      repositoryId: repository.id,
-      threadId: "thread-1",
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
       dependencies: {
         executor,
         requestTitleAgent: requestTitleAgentMock,
@@ -158,7 +172,16 @@ describe.sequential("runTeam", () => {
         coderAgent: coderAgentMock,
         reviewerAgent: reviewerAgentMock,
       },
+      persistState: persistStateMock,
     });
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
+      input: "Ship reliable dispatch coordination.",
+      repositoryId: repository.id,
+      threadId: "thread-1",
+    });
+    await persistTeamRunState(env, initialState);
+    const result = await runTeam(env, initialState);
 
     expect(callOrder).toEqual(["planner", "request-title"]);
     expect(executorMock).not.toHaveBeenCalled();
@@ -197,6 +220,17 @@ describe.sequential("runTeam", () => {
         reviewerAgent: reviewerAgentMock,
       }),
     });
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "init",
+      "planning",
+      "metadata-generation",
+      "reviewing",
+      "completed",
+    ]);
+    expect(result).not.toBeNull();
+    if (!result) {
+      throw new Error("Expected a planning summary.");
+    }
     expect(result.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
     expect(result.requestText).toBe("Ship reliable dispatch coordination.");
     expect(result.repository).toEqual(repository);
@@ -251,11 +285,8 @@ describe.sequential("runTeam", () => {
     };
     const coderAgentMock = { run: vi.fn() };
     const reviewerAgentMock = { run: vi.fn() };
-
-    const result = await runTeam({
-      input: "Plan the request.",
-      title: "Human Title",
-      threadId: "thread-2",
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
       dependencies: {
         executor,
         requestTitleAgent: requestTitleAgentMock,
@@ -263,12 +294,31 @@ describe.sequential("runTeam", () => {
         coderAgent: coderAgentMock,
         reviewerAgent: reviewerAgentMock,
       },
+      persistState: persistStateMock,
     });
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
+      input: "Plan the request.",
+      title: "Human Title",
+      threadId: "thread-2",
+    });
+    await persistTeamRunState(env, initialState);
+    const result = await runTeam(env, initialState);
 
     expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(executorMock).not.toHaveBeenCalled();
     expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "init",
+      "planning",
+      "metadata-generation",
+      "completed",
+    ]);
+    expect(result).not.toBeNull();
+    if (!result) {
+      throw new Error("Expected a planning summary.");
+    }
     expect(result.requestTitle).toBe("Human Title");
     expect(result.repository).toBeNull();
     expect(result.handoffs[0]).toMatchObject({
@@ -319,20 +369,36 @@ describe.sequential("runTeam", () => {
         };
       }),
     };
-
-    const result = await runTeam({
-      input: "Plan the request.",
-      threadId: "thread-3",
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
       dependencies: {
         executor,
         requestTitleAgent: requestTitleAgentMock,
         plannerAgent: plannerAgentMock,
       },
+      persistState: persistStateMock,
     });
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
+      input: "Plan the request.",
+      threadId: "thread-3",
+    });
+    await persistTeamRunState(env, initialState);
+    const result = await runTeam(env, initialState);
 
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "init",
+      "planning",
+      "metadata-generation",
+      "completed",
+    ]);
+    expect(result).not.toBeNull();
+    if (!result) {
+      throw new Error("Expected a planning summary.");
+    }
     expect(result.requestTitle).toBe("Planning Request");
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-3");
@@ -449,23 +515,127 @@ describe.sequential("runTeam", () => {
 
     const requestTitleAgentMock = { run: vi.fn() };
     const plannerAgentMock = { run: vi.fn() };
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
+      dependencies: {
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+      },
+      persistState: persistStateMock,
+    });
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
+      input: "Start another request.",
+      repositoryId: repository.id,
+      threadId: "thread-over-capacity",
+    });
+    await persistTeamRunState(env, initialState);
 
-    await expect(
-      runTeam({
-        input: "Start another request.",
-        repositoryId: repository.id,
-        threadId: "thread-over-capacity",
-        dependencies: {
-          requestTitleAgent: requestTitleAgentMock,
-          plannerAgent: plannerAgentMock,
-        },
-      }),
-    ).rejects.toThrow(
+    await expect(runTeam(env, initialState)).rejects.toThrow(
       "All 1 shared meow worktree slot is already assigned to non-terminal threads.",
     );
 
     expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
     expect(plannerAgentMock.run).not.toHaveBeenCalled();
     expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual(["init"]);
+  });
+
+  it("routes proposal approval through coding and reviewing stages", async () => {
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
+      persistState: persistStateMock,
+    });
+    const initialState = createInitialTeamRunState({
+      kind: "proposal-approval",
+      threadId: "thread-approval",
+      assignmentNumber: 2,
+      laneId: "lane-3",
+    });
+    await persistTeamRunState(env, initialState);
+
+    const result = await runTeam(env, initialState);
+
+    expect(result).toBeNull();
+    expect(queueLaneProposalForExecutionMock).toHaveBeenCalledWith({
+      threadId: "thread-approval",
+      assignmentNumber: 2,
+      laneId: "lane-3",
+    });
+    expect(ensurePendingDispatchWorkMock).toHaveBeenCalledWith({
+      threadId: "thread-approval",
+      dependencies: expect.objectContaining({
+        requestTitleAgent: expect.any(Object),
+        plannerAgent: expect.any(Object),
+        coderAgent: expect.any(Object),
+        reviewerAgent: expect.any(Object),
+      }),
+    });
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "init",
+      "coding",
+      "reviewing",
+      "completed",
+    ]);
+  });
+
+  it("routes final approval through the archiving stage", async () => {
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
+      persistState: persistStateMock,
+    });
+    const initialState = createInitialTeamRunState({
+      kind: "pull-request-approval",
+      threadId: "thread-finalize",
+      assignmentNumber: 4,
+      laneId: "lane-2",
+    });
+    await persistTeamRunState(env, initialState);
+
+    const result = await runTeam(env, initialState);
+
+    expect(result).toBeNull();
+    expect(approveLanePullRequestMock).toHaveBeenCalledWith({
+      threadId: "thread-finalize",
+      assignmentNumber: 4,
+      laneId: "lane-2",
+    });
+    expect(queueLaneProposalForExecutionMock).not.toHaveBeenCalled();
+    expect(ensurePendingDispatchWorkMock).not.toHaveBeenCalled();
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "init",
+      "archiving",
+      "completed",
+    ]);
+  });
+
+  it("resumes pending dispatch work through the reviewing stage", async () => {
+    const persistStateMock = createPersistStateMock();
+    const env = createTeamRunEnv({
+      persistState: persistStateMock,
+    });
+    const initialState = createInitialTeamRunState({
+      kind: "dispatch",
+      threadId: "thread-dispatch",
+    });
+    await persistTeamRunState(env, initialState);
+
+    const result = await runTeam(env, initialState);
+
+    expect(result).toBeNull();
+    expect(ensurePendingDispatchWorkMock).toHaveBeenCalledWith({
+      threadId: "thread-dispatch",
+      dependencies: expect.objectContaining({
+        requestTitleAgent: expect.any(Object),
+        plannerAgent: expect.any(Object),
+        coderAgent: expect.any(Object),
+        reviewerAgent: expect.any(Object),
+      }),
+    });
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "init",
+      "reviewing",
+      "completed",
+    ]);
   });
 });
