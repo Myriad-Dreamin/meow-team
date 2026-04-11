@@ -11,7 +11,13 @@ import {
 } from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
-import { runTeam, type TeamRunSummary } from "@/lib/team/network";
+import {
+  createInitialTeamRunState,
+  createTeamRunEnv,
+  persistTeamRunState,
+  runTeam,
+  type TeamRunSummary,
+} from "@/lib/team/network";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 
 export const runtime = "nodejs";
@@ -138,17 +144,13 @@ export async function POST(request: Request) {
         });
 
         void (async () => {
-          writeEvent({
-            type: "accepted",
-            threadId,
-            startedAt,
-            status: "running",
-          });
-
           try {
-            const result = await runTeam({
+            const initialState = createInitialTeamRunState({
+              kind: "planning",
               ...body,
               threadId,
+            });
+            const env = createTeamRunEnv({
               onPlannerLogEntry: async (entry) => {
                 writeEvent({
                   type: "codex_event",
@@ -156,10 +158,23 @@ export async function POST(request: Request) {
                 });
               },
             });
+            await persistTeamRunState(env, initialState);
+
+            writeEvent({
+              type: "accepted",
+              threadId,
+              startedAt,
+              status: "running",
+            });
+
+            const result = await runTeam(env, initialState);
+            if (!result) {
+              throw new Error("Planning completed without a team run summary.");
+            }
 
             writeEvent({
               type: "result",
-              result,
+              result: result as TeamRunSummary,
             });
           } catch (error) {
             const message = error instanceof Error ? error.message : "Unknown error.";

@@ -1,9 +1,11 @@
 import { teamConfig } from "@/team.config";
 import { applyHandoff } from "@/lib/team/agent-helpers";
 import {
+  approveLanePullRequest,
   createPlannerDispatchAssignment,
   DispatchThreadCapacityError,
   ensurePendingDispatchWork,
+  queueLaneProposalForExecution,
 } from "@/lib/team/dispatch";
 import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
 import {
@@ -65,6 +67,59 @@ export type TeamRunSummary = {
   steps: TeamExecutionStep[];
 };
 
+export type TeamPlanningRunArgs = {
+  kind: "planning";
+  input: string;
+  threadId: string;
+  title?: string;
+  requestText?: string;
+  repositoryId?: string;
+  reset?: boolean;
+  deleteExistingBranches?: boolean;
+};
+
+export type TeamDispatchRunArgs = {
+  kind: "dispatch";
+  threadId?: string;
+};
+
+export type TeamProposalApprovalRunArgs = {
+  kind: "proposal-approval";
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+};
+
+export type TeamPullRequestApprovalRunArgs = {
+  kind: "pull-request-approval";
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+};
+
+export type TeamRunArgs =
+  | TeamPlanningRunArgs
+  | TeamDispatchRunArgs
+  | TeamProposalApprovalRunArgs
+  | TeamPullRequestApprovalRunArgs;
+
+export type TeamRunStage =
+  | "init"
+  | "planning"
+  | "metadata-generation"
+  | "coding"
+  | "reviewing"
+  | "archiving"
+  | "completed";
+
+export type TeamRunResult = TeamRunSummary | null;
+
+export type TeamRunEnv = {
+  deps: TeamRoleDependencies;
+  persistState: (state: TeamRunMachineState) => Promise<void> | void;
+  onPlannerLogEntry?: (entry: TeamCodexLogEntry) => Promise<void> | void;
+};
+
 type ResolvedRequestMetadata = {
   requestTitle: string;
   conventionalTitle: ConventionalTitleMetadata | null;
@@ -76,6 +131,69 @@ type InitialRequestMetadata = {
   conventionalTitle: ConventionalTitleMetadata | null;
   requestText: string;
 };
+
+type PlannerAgentResult = Awaited<ReturnType<TeamRoleDependencies["plannerAgent"]["run"]>>;
+type PersistedTeamThread = NonNullable<Awaited<ReturnType<typeof getTeamThreadRecord>>>;
+
+type TeamRunPlanningContext = {
+  threadId: string;
+  selectedRepository: TeamRepositoryOption | null;
+  existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  shouldResetAssignment: boolean;
+  state: TeamRunState;
+  requestMetadata: InitialRequestMetadata;
+};
+
+type TeamRunInitState = {
+  stage: "init";
+  args: TeamRunArgs;
+};
+
+type TeamRunPlanningStageState = {
+  stage: "planning";
+  args: TeamPlanningRunArgs;
+  context: TeamRunPlanningContext;
+};
+
+type TeamRunMetadataGenerationStageState = {
+  stage: "metadata-generation";
+  args: TeamPlanningRunArgs;
+  context: TeamRunPlanningContext;
+  plannerResponse: PlannerAgentResult;
+  plannerRoleName: string;
+};
+
+type TeamRunCodingStageState = {
+  stage: "coding";
+  args: TeamProposalApprovalRunArgs;
+};
+
+type TeamRunReviewingStageState = {
+  stage: "reviewing";
+  args: TeamRunArgs;
+  threadId?: string;
+  result: TeamRunResult;
+};
+
+type TeamRunArchivingStageState = {
+  stage: "archiving";
+  args: TeamPullRequestApprovalRunArgs;
+};
+
+type TeamRunCompletedState = {
+  stage: "completed";
+  args: TeamRunArgs;
+  result: TeamRunResult;
+};
+
+export type TeamRunMachineState =
+  | TeamRunInitState
+  | TeamRunPlanningStageState
+  | TeamRunMetadataGenerationStageState
+  | TeamRunCodingStageState
+  | TeamRunReviewingStageState
+  | TeamRunArchivingStageState
+  | TeamRunCompletedState;
 
 const normalizeRequestText = (value: string | null | undefined): string | null => {
   const normalized = value?.trim();
@@ -128,6 +246,117 @@ const createPlannerStep = ({
     createdAt: new Date().toISOString(),
     text: deliverable,
   };
+};
+
+const findPersistedAssignment = (
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>,
+  assignmentNumber: number,
+): PersistedTeamThread["dispatchAssignments"][number] | null => {
+  return (
+    thread?.dispatchAssignments.find(
+      (candidate) => candidate.assignmentNumber === assignmentNumber,
+    ) ?? null
+  );
+};
+
+const findPersistedLane = (
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>,
+  assignmentNumber: number,
+  laneId: string,
+): PersistedTeamThread["dispatchAssignments"][number]["lanes"][number] | null => {
+  return (
+    findPersistedAssignment(thread, assignmentNumber)?.lanes.find(
+      (candidate) => candidate.laneId === laneId,
+    ) ?? null
+  );
+};
+
+const getPersistedPlannerStep = ({
+  thread,
+  assignmentNumber,
+}: {
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  assignmentNumber: number;
+}): TeamExecutionStep | null => {
+  const plannerHandoff = thread?.data.handoffs.planner;
+  if (!plannerHandoff || plannerHandoff.assignmentNumber !== assignmentNumber) {
+    return null;
+  }
+
+  return thread.results.at(-1) ?? null;
+};
+
+const resolvePersistedRequestMetadata = ({
+  thread,
+  assignment,
+  fallbackRequestText,
+}: {
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  assignment: PersistedTeamThread["dispatchAssignments"][number] | null;
+  fallbackRequestText: string;
+}): ResolvedRequestMetadata => {
+  const requestText =
+    normalizeRequestText(assignment?.requestText ?? thread?.data.requestText) ??
+    fallbackRequestText;
+  const requestTitle =
+    normalizeRequestTitle(assignment?.requestTitle ?? thread?.data.requestTitle) ??
+    buildDeterministicRequestTitle(requestText);
+  const conventionalTitle =
+    normalizeConventionalTitleMetadata(
+      assignment?.conventionalTitle ?? thread?.data.conventionalTitle,
+    ) ?? null;
+
+  return {
+    requestTitle,
+    conventionalTitle,
+    requestText,
+  };
+};
+
+const buildPlanningResult = ({
+  threadId,
+  state,
+  selectedRepository,
+  requestMetadata,
+  step,
+}: {
+  threadId: string;
+  state: TeamRunState;
+  selectedRepository: TeamRepositoryOption | null;
+  requestMetadata: ResolvedRequestMetadata;
+  step: TeamExecutionStep;
+}): TeamRunSummary => {
+  return {
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+    requestTitle: state.requestTitle ?? requestMetadata.requestTitle,
+    requestText: requestMetadata.requestText,
+    approved: false,
+    repository: selectedRepository,
+    workflow: state.workflow,
+    handoffs: getOrderedHandoffs(state),
+    steps: [step],
+  };
+};
+
+const isLaneQueuedForExecution = (
+  lane: PersistedTeamThread["dispatchAssignments"][number]["lanes"][number],
+): boolean => {
+  return (
+    lane.status === "queued" ||
+    lane.status === "coding" ||
+    lane.status === "reviewing" ||
+    lane.status === "approved" ||
+    lane.status === "failed" ||
+    lane.approvalGrantedAt !== null ||
+    lane.queuedAt !== null
+  );
+};
+
+const isLanePullRequestFinalized = (
+  lane: PersistedTeamThread["dispatchAssignments"][number]["lanes"][number],
+): boolean => {
+  return lane.status === "approved" && lane.pullRequest?.status === "approved";
 };
 
 const buildRunState = ({
@@ -354,31 +583,76 @@ const finalizeRequestMetadata = async ({
   };
 };
 
-export const runTeam = async ({
-  input,
-  threadId,
-  title,
-  requestText,
-  repositoryId,
-  reset,
-  deleteExistingBranches,
-  onPlannerLogEntry,
-  dependencies,
-}: {
-  input: string;
-  threadId?: string;
-  title?: string;
-  requestText?: string;
-  repositoryId?: string;
-  reset?: boolean;
-  deleteExistingBranches?: boolean;
-  onPlannerLogEntry?: (entry: TeamCodexLogEntry) => Promise<void> | void;
-  dependencies?: Partial<TeamRoleDependencies>;
-}): Promise<TeamRunSummary> => {
-  const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
-  const selectedRepository = await findConfiguredRepository(teamConfig, repositoryId);
+const noopPersistState: TeamRunEnv["persistState"] = async () => undefined;
 
-  if (repositoryId && !selectedRepository) {
+export const createInitialTeamRunState = (args: TeamRunArgs): TeamRunMachineState => {
+  return {
+    stage: "init",
+    args,
+  };
+};
+
+export const createTeamRunEnv = ({
+  dependencies,
+  persistState,
+  onPlannerLogEntry,
+}: {
+  dependencies?: Partial<TeamRoleDependencies>;
+  persistState?: TeamRunEnv["persistState"];
+  onPlannerLogEntry?: TeamRunEnv["onPlannerLogEntry"];
+} = {}): TeamRunEnv => {
+  return {
+    deps: resolveTeamRoleDependencies(dependencies),
+    persistState: persistState ?? noopPersistState,
+    onPlannerLogEntry,
+  };
+};
+
+export const persistTeamRunState = async (
+  env: TeamRunEnv,
+  state: TeamRunMachineState,
+): Promise<void> => {
+  await env.persistState(state);
+};
+
+const createPlannerEventForwarder = ({
+  env,
+  threadId,
+  assignmentNumber,
+}: {
+  env: TeamRunEnv;
+  threadId: string;
+  assignmentNumber: number;
+}) => {
+  return async (event: TeamCodexEvent): Promise<void> => {
+    const entry = await appendTeamCodexLogEvent({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      assignmentNumber,
+      roleId: "planner",
+      laneId: null,
+      event,
+    });
+
+    try {
+      await env.onPlannerLogEntry?.(entry);
+    } catch (error) {
+      console.error(
+        `[team-run:${threadId}] Unable to forward planner log entry: ${
+          error instanceof Error ? error.message : "Unknown error."
+        }`,
+      );
+    }
+  };
+};
+
+const buildPlanningStageState = async (
+  env: TeamRunEnv,
+  args: TeamPlanningRunArgs,
+): Promise<TeamRunPlanningStageState> => {
+  const selectedRepository = await findConfiguredRepository(teamConfig, args.repositoryId);
+
+  if (args.repositoryId && !selectedRepository) {
     throw new Error(
       "Selected repository is not available. Only repositories discovered from directories listed in team.config.ts can be used.",
     );
@@ -393,40 +667,23 @@ export const runTeam = async ({
     }
   }
 
-  const resolvedThreadId = threadId ?? crypto.randomUUID();
-  const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, resolvedThreadId);
+  const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, args.threadId);
   const { state, shouldResetAssignment } = buildRunState({
-    input,
-    reset: Boolean(reset),
+    input: args.input,
+    reset: Boolean(args.reset),
     selectedRepository,
     existingThread,
   });
-
-  const forwardPlannerEvent = async (event: TeamCodexEvent): Promise<void> => {
-    const entry = await appendTeamCodexLogEvent({
-      threadFile: teamConfig.storage.threadFile,
-      threadId: resolvedThreadId,
-      assignmentNumber: state.assignmentNumber,
-      roleId: "planner",
-      laneId: null,
-      event,
-    });
-
-    try {
-      await onPlannerLogEntry?.(entry);
-    } catch (error) {
-      console.error(
-        `[team-run:${resolvedThreadId}] Unable to forward planner log entry: ${
-          error instanceof Error ? error.message : "Unknown error."
-        }`,
-      );
-    }
-  };
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId: args.threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
 
   const requestMetadata = await resolveRequestMetadata({
-    input,
-    providedTitle: title,
-    providedRequestText: requestText,
+    input: args.input,
+    providedTitle: args.title,
+    providedRequestText: args.requestText,
     existingThread,
     shouldResetAssignment,
     logEvent: forwardPlannerEvent,
@@ -435,68 +692,138 @@ export const runTeam = async ({
   state.conventionalTitle = requestMetadata.conventionalTitle;
   state.requestText = requestMetadata.requestText;
 
-  try {
-    await upsertTeamThreadRun({
-      threadFile: teamConfig.storage.threadFile,
-      threadId: resolvedThreadId,
+  return {
+    stage: "planning",
+    args,
+    context: {
+      threadId: args.threadId,
+      selectedRepository,
+      existingThread,
+      shouldResetAssignment,
       state,
-      input,
-    });
+      requestMetadata,
+    },
+  };
+};
 
-    const plannerRole = await loadRolePrompt("planner");
-    const plannerResponse = await resolvedDependencies.plannerAgent.run({
-      role: plannerRole,
-      worktreePath: selectedRepository?.path ?? process.cwd(),
-      state,
-      onEvent: forwardPlannerEvent,
-    });
+const runPlanningStage = async (
+  env: TeamRunEnv,
+  currentState: TeamRunPlanningStageState,
+): Promise<TeamRunMetadataGenerationStageState> => {
+  const {
+    args,
+    context: { threadId, selectedRepository, state },
+  } = currentState;
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
 
-    applyHandoff({
-      state,
-      role: plannerRole,
-      summary: plannerResponse.handoff.summary,
-      deliverable: plannerResponse.handoff.deliverable,
-      decision: plannerResponse.handoff.decision,
-    });
+  await upsertTeamThreadRun({
+    threadFile: teamConfig.storage.threadFile,
+    threadId,
+    state,
+    input: args.input,
+  });
 
-    if (!selectedRepository && plannerResponse.dispatch) {
-      throw new Error("Planner produced dispatch proposals without a selected repository.");
-    }
+  const plannerRole = await loadRolePrompt("planner");
+  const plannerResponse = await env.deps.plannerAgent.run({
+    role: plannerRole,
+    worktreePath: selectedRepository?.path ?? process.cwd(),
+    state,
+    onEvent: forwardPlannerEvent,
+  });
 
-    if (selectedRepository && !plannerResponse.dispatch) {
-      throw new Error("Planner completed without dispatch proposals.");
-    }
+  applyHandoff({
+    state,
+    role: plannerRole,
+    summary: plannerResponse.handoff.summary,
+    deliverable: plannerResponse.handoff.deliverable,
+    decision: plannerResponse.handoff.decision,
+  });
 
-    const finalizedRequestMetadata = await finalizeRequestMetadata({
-      initialMetadata: requestMetadata,
-      input,
-      tasks: plannerResponse.dispatch?.tasks ?? null,
-      worktreePath: selectedRepository?.path ?? process.cwd(),
-      dependencies: resolvedDependencies,
-      logEvent: forwardPlannerEvent,
-    });
+  if (!selectedRepository && plannerResponse.dispatch) {
+    throw new Error("Planner produced dispatch proposals without a selected repository.");
+  }
 
-    if (selectedRepository && plannerResponse.dispatch) {
-      const canonicalRequestTitle = buildCanonicalRequestTitle({
+  if (selectedRepository && !plannerResponse.dispatch) {
+    throw new Error("Planner completed without dispatch proposals.");
+  }
+
+  return {
+    stage: "metadata-generation",
+    args,
+    context: currentState.context,
+    plannerResponse,
+    plannerRoleName: plannerRole.name,
+  };
+};
+
+const runMetadataGenerationStage = async (
+  env: TeamRunEnv,
+  currentState: TeamRunMetadataGenerationStageState,
+): Promise<TeamRunReviewingStageState | TeamRunCompletedState> => {
+  const {
+    args,
+    context: { threadId, selectedRepository, requestMetadata, state },
+    plannerResponse,
+    plannerRoleName,
+  } = currentState;
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
+  const persistedThread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  const persistedAssignment = findPersistedAssignment(persistedThread, state.assignmentNumber);
+  const persistedPlannerStep = getPersistedPlannerStep({
+    thread: persistedThread,
+    assignmentNumber: state.assignmentNumber,
+  });
+  const finalizedRequestMetadata =
+    persistedAssignment || persistedPlannerStep
+      ? resolvePersistedRequestMetadata({
+          thread: persistedThread,
+          assignment: persistedAssignment,
+          fallbackRequestText: requestMetadata.requestText,
+        })
+      : await finalizeRequestMetadata({
+          initialMetadata: requestMetadata,
+          input: args.input,
+          tasks: plannerResponse.dispatch?.tasks ?? null,
+          worktreePath: selectedRepository?.path ?? process.cwd(),
+          dependencies: env.deps,
+          logEvent: forwardPlannerEvent,
+        });
+  state.requestText = finalizedRequestMetadata.requestText;
+
+  if (selectedRepository && plannerResponse.dispatch) {
+    const canonicalRequestTitle =
+      normalizeRequestTitle(persistedAssignment?.requestTitle) ??
+      buildCanonicalRequestTitle({
         requestTitle: finalizedRequestMetadata.requestTitle,
         taskTitle: plannerResponse.dispatch.tasks[0]?.title ?? null,
         taskCount: plannerResponse.dispatch.tasks.length,
         conventionalTitle: finalizedRequestMetadata.conventionalTitle,
       });
 
-      state.requestTitle = canonicalRequestTitle;
-      state.conventionalTitle = finalizedRequestMetadata.conventionalTitle;
+    state.requestTitle = canonicalRequestTitle;
+    state.conventionalTitle =
+      normalizeConventionalTitleMetadata(persistedAssignment?.conventionalTitle) ??
+      finalizedRequestMetadata.conventionalTitle;
 
-      if (canonicalRequestTitle !== finalizedRequestMetadata.requestTitle) {
-        await forwardPlannerEvent({
-          source: "system",
-          message: `Normalized canonical request title: ${canonicalRequestTitle}`,
-          createdAt: new Date().toISOString(),
-        });
-      }
+    if (!persistedAssignment && canonicalRequestTitle !== finalizedRequestMetadata.requestTitle) {
+      await forwardPlannerEvent({
+        source: "system",
+        message: `Normalized canonical request title: ${canonicalRequestTitle}`,
+        createdAt: new Date().toISOString(),
+      });
+    }
 
+    if (!persistedAssignment) {
       await createPlannerDispatchAssignment({
-        threadId: resolvedThreadId,
+        threadId,
         assignmentNumber: state.assignmentNumber,
         repository: selectedRepository,
         requestTitle: canonicalRequestTitle,
@@ -506,72 +833,251 @@ export const runTeam = async ({
         plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
         branchPrefix: plannerResponse.dispatch.branchPrefix,
         tasks: plannerResponse.dispatch.tasks,
-        deleteExistingBranches,
+        deleteExistingBranches: args.deleteExistingBranches,
       });
-    } else {
-      state.requestTitle = finalizedRequestMetadata.requestTitle;
-      state.conventionalTitle = finalizedRequestMetadata.conventionalTitle;
     }
+  } else {
+    state.requestTitle =
+      normalizeRequestTitle(persistedThread?.data.requestTitle) ??
+      finalizedRequestMetadata.requestTitle;
+    state.conventionalTitle =
+      normalizeConventionalTitleMetadata(persistedThread?.data.conventionalTitle) ??
+      finalizedRequestMetadata.conventionalTitle;
+  }
 
-    const step = createPlannerStep({
-      agentName: plannerRole.name,
+  const step =
+    persistedPlannerStep ??
+    createPlannerStep({
+      agentName: plannerRoleName,
       deliverable: plannerResponse.handoff.deliverable,
     });
+  if (!persistedPlannerStep) {
     await appendTeamExecutionStep({
       threadFile: teamConfig.storage.threadFile,
-      threadId: resolvedThreadId,
+      threadId,
       state,
       step,
     });
+  }
 
-    void ensurePendingDispatchWork({
-      threadId: resolvedThreadId,
-      dependencies: resolvedDependencies,
-    });
+  const result = buildPlanningResult({
+    threadId,
+    state,
+    selectedRepository,
+    requestMetadata: finalizedRequestMetadata,
+    step,
+  });
 
+  if (selectedRepository && plannerResponse.dispatch) {
     return {
-      threadId: resolvedThreadId,
-      assignmentNumber: state.assignmentNumber,
-      requestTitle: state.requestTitle ?? finalizedRequestMetadata.requestTitle,
-      requestText: finalizedRequestMetadata.requestText,
-      approved: false,
-      repository: selectedRepository,
-      workflow: state.workflow,
-      handoffs: getOrderedHandoffs(state),
-      steps: [step],
+      stage: "reviewing",
+      args,
+      threadId,
+      result,
     };
-  } catch (error) {
-    if (error instanceof ExistingBranchesRequireDeleteError) {
-      try {
-        await updateTeamThreadRecord({
-          threadFile: teamConfig.storage.threadFile,
-          threadId: resolvedThreadId,
-          updater: (thread, now) => {
-            thread.run = {
-              status: "completed",
-              startedAt: thread.run?.startedAt ?? thread.createdAt,
-              finishedAt: now,
-              lastError: error.message,
-            };
-          },
-        });
-      } catch {
-        // The thread may not have been created yet.
-      }
+  }
 
-      await forwardPlannerEvent({
-        source: "system",
-        message: error.message,
-        createdAt: new Date().toISOString(),
+  return {
+    stage: "completed",
+    args,
+    result,
+  };
+};
+
+const runCodingStage = async (
+  currentState: TeamRunCodingStageState,
+): Promise<TeamRunReviewingStageState> => {
+  const persistedThread = await getTeamThreadRecord(
+    teamConfig.storage.threadFile,
+    currentState.args.threadId,
+  );
+  const persistedLane = findPersistedLane(
+    persistedThread,
+    currentState.args.assignmentNumber,
+    currentState.args.laneId,
+  );
+
+  if (!persistedLane || persistedLane.status === "awaiting_human_approval") {
+    await queueLaneProposalForExecution({
+      threadId: currentState.args.threadId,
+      assignmentNumber: currentState.args.assignmentNumber,
+      laneId: currentState.args.laneId,
+    });
+  } else if (!isLaneQueuedForExecution(persistedLane)) {
+    throw new Error("This proposal is not waiting for human approval.");
+  }
+
+  return {
+    stage: "reviewing",
+    args: currentState.args,
+    threadId: currentState.args.threadId,
+    result: null,
+  };
+};
+
+const runReviewingStage = async (
+  env: TeamRunEnv,
+  currentState: TeamRunReviewingStageState,
+): Promise<TeamRunCompletedState> => {
+  await ensurePendingDispatchWork({
+    threadId: currentState.threadId,
+    dependencies: env.deps,
+  });
+
+  return {
+    stage: "completed",
+    args: currentState.args,
+    result: currentState.result,
+  };
+};
+
+const runArchivingStage = async (
+  currentState: TeamRunArchivingStageState,
+): Promise<TeamRunCompletedState> => {
+  const persistedThread = await getTeamThreadRecord(
+    teamConfig.storage.threadFile,
+    currentState.args.threadId,
+  );
+  const persistedLane = findPersistedLane(
+    persistedThread,
+    currentState.args.assignmentNumber,
+    currentState.args.laneId,
+  );
+
+  if (!persistedLane || !isLanePullRequestFinalized(persistedLane)) {
+    await approveLanePullRequest({
+      threadId: currentState.args.threadId,
+      assignmentNumber: currentState.args.assignmentNumber,
+      laneId: currentState.args.laneId,
+    });
+  }
+
+  return {
+    stage: "completed",
+    args: currentState.args,
+    result: null,
+  };
+};
+
+const advanceTeamRunState = async (
+  env: TeamRunEnv,
+  currentState: TeamRunMachineState,
+): Promise<TeamRunMachineState> => {
+  switch (currentState.stage) {
+    case "init":
+      switch (currentState.args.kind) {
+        case "planning":
+          return buildPlanningStageState(env, currentState.args);
+        case "proposal-approval":
+          return {
+            stage: "coding",
+            args: currentState.args,
+          };
+        case "dispatch":
+          return {
+            stage: "reviewing",
+            args: currentState.args,
+            threadId: currentState.args.threadId,
+            result: null,
+          };
+        case "pull-request-approval":
+          return {
+            stage: "archiving",
+            args: currentState.args,
+          };
+      }
+    case "planning":
+      return runPlanningStage(env, currentState);
+    case "metadata-generation":
+      return runMetadataGenerationStage(env, currentState);
+    case "coding":
+      return runCodingStage(currentState);
+    case "reviewing":
+      return runReviewingStage(env, currentState);
+    case "archiving":
+      return runArchivingStage(currentState);
+    case "completed":
+      return currentState;
+  }
+};
+
+const isPlanningMachineState = (
+  state: TeamRunMachineState,
+): state is TeamRunPlanningStageState | TeamRunMetadataGenerationStageState => {
+  return state.stage === "planning" || state.stage === "metadata-generation";
+};
+
+const handlePlanningStageError = async ({
+  env,
+  currentState,
+  error,
+}: {
+  env: TeamRunEnv;
+  currentState: TeamRunPlanningStageState | TeamRunMetadataGenerationStageState;
+  error: unknown;
+}): Promise<void> => {
+  const { threadId, state } = currentState.context;
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
+
+  if (error instanceof ExistingBranchesRequireDeleteError) {
+    try {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (thread, now) => {
+          thread.run = {
+            status: "completed",
+            startedAt: thread.run?.startedAt ?? thread.createdAt,
+            finishedAt: now,
+            lastError: error.message,
+          };
+        },
       });
-      throw error;
+    } catch {
+      // The thread may not have been created yet.
     }
 
     await forwardPlannerEvent({
       source: "system",
-      message: `Planner run failed: ${error instanceof Error ? error.message : "Unknown error."}`,
+      message: error.message,
       createdAt: new Date().toISOString(),
     });
-    throw error;
+    return;
   }
+
+  await forwardPlannerEvent({
+    source: "system",
+    message: `Planner run failed: ${error instanceof Error ? error.message : "Unknown error."}`,
+    createdAt: new Date().toISOString(),
+  });
+};
+
+export const runTeam = async (
+  env: TeamRunEnv,
+  initialState: TeamRunMachineState,
+): Promise<TeamRunResult> => {
+  let currentState = initialState;
+
+  while (currentState.stage !== "completed") {
+    try {
+      currentState = await advanceTeamRunState(env, currentState);
+      await env.persistState(currentState);
+    } catch (error) {
+      if (isPlanningMachineState(currentState)) {
+        await handlePlanningStageError({
+          env,
+          currentState,
+          error,
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  return currentState.result;
 };

@@ -331,6 +331,67 @@ describe("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.title).toBe("dev(vsc/command): Ship the feature");
   });
 
+  it("resumes an interrupted final approval without duplicating the human approval event", async () => {
+    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+      createdArchive: false,
+    });
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
+      commitHash: "archive-commit",
+    });
+    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/88",
+    });
+
+    await writeThreadStore(
+      createLane({
+        latestActivity:
+          "Human approved the machine-reviewed branch. Archiving the OpenSpec change and refreshing the GitHub PR.",
+        pullRequest: {
+          id: "pr-1",
+          provider: "local-ci",
+          title: "Ship the feature",
+          summary: "Machine review approved the branch.",
+          branchName: "requests/example/a1-proposal-1",
+          baseBranch: "main",
+          status: "awaiting_human_approval",
+          requestedAt: FIXED_TIMESTAMP,
+          humanApprovalRequestedAt: FIXED_TIMESTAMP,
+          humanApprovedAt: FIXED_TIMESTAMP,
+          machineReviewedAt: FIXED_TIMESTAMP,
+          updatedAt: FIXED_TIMESTAMP,
+          url: null,
+        },
+        events: [
+          {
+            id: "event-1",
+            actor: "human",
+            message: "Human approved the machine-reviewed branch for GitHub PR delivery.",
+            createdAt: FIXED_TIMESTAMP,
+          },
+        ],
+      }),
+    );
+
+    await approveLanePullRequest({
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+    });
+
+    const thread = await getTeamThreadRecord(threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(lane?.events.filter((event) => event.actor === "human")).toHaveLength(1);
+    expect(lane?.pullRequest?.status).toBe("approved");
+    expect(lane?.pullRequest?.humanApprovedAt).toBe(FIXED_TIMESTAMP);
+    expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/88");
+  });
+
   it("records an archive failure as a blocking finalization error", async () => {
     archiveOpenSpecChangeInWorktreeMock.mockRejectedValue(new Error("OpenSpec change not found."));
 

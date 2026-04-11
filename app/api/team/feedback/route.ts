@@ -4,7 +4,12 @@ import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import { prepareAssignmentReplan } from "@/lib/team/dispatch";
 import { markTeamThreadFailed } from "@/lib/team/history";
-import { runTeam } from "@/lib/team/network";
+import {
+  createInitialTeamRunState,
+  createTeamRunEnv,
+  persistTeamRunState,
+  runTeam,
+} from "@/lib/team/network";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
 
 export const runtime = "nodejs";
@@ -42,15 +47,19 @@ export async function POST(request: Request) {
 
     const nextRun = await prepareAssignmentReplan(body);
     const startedAt = new Date().toISOString();
-
-    void runTeam({
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
       input: nextRun.input,
       threadId: body.threadId,
       title: nextRun.title,
       requestText: nextRun.requestText,
       repositoryId: nextRun.repositoryId,
       reset: true,
-    }).catch(async (error) => {
+    });
+    const env = createTeamRunEnv();
+    await persistTeamRunState(env, initialState);
+
+    void runTeam(env, initialState).catch(async (error) => {
       const message = error instanceof Error ? error.message : "Unknown error.";
       console.error(`[team-feedback:${body.threadId}] ${message}`);
       await markTeamThreadFailed({
