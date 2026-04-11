@@ -5,5 +5,8 @@
   "type": "module",
   "dependencies": {
     "js-yaml": "4.1.1"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
   }
 }

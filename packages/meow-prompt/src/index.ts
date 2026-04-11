@@ -17,4 +17,8 @@ export {
   type CompiledTemplate,
   type PipeArgument,
 } from "./runtime";
-export { createMeowPromptVitePlugin } from "./vite-plugin";
+export {
+  createMeowPromptVitePlugin,
+  createMeowPromptViteSyncConfig,
+  meowPromptBootstrapModuleId,
+} from "./vite-plugin";

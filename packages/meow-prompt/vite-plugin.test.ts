@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { build } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
-import { createMeowPromptVitePlugin } from "./src/vite-plugin";
+import { createMeowPromptViteSyncConfig } from "./src/vite-plugin";
 
 describe("meow-prompt vite plugin", () => {
   let temporaryDirectory: string | null = null;
@@ -20,24 +21,22 @@ describe("meow-prompt vite plugin", () => {
     temporaryDirectory = null;
   });
 
-  it("syncs prompt declarations during the Vite lifecycle", async () => {
+  it("loads app prompts through the Vite bootstrap and tolerates a missing docs directory", async () => {
     temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "meow-prompt-"));
 
-    const promptPath = path.join(temporaryDirectory, "example.prompt.md");
-    const declarationPath = path.join(temporaryDirectory, "example.prompt.d.md.ts");
-    const plugin = createMeowPromptVitePlugin();
+    const appDirectory = path.join(temporaryDirectory, "app");
+    const promptPath = path.join(appDirectory, "example.prompt.md");
+    const declarationPath = path.join(appDirectory, "example.prompt.d.md.ts");
+
+    await mkdir(appDirectory, { recursive: true });
 
     await writeFile(promptPath, "---\ntitle: Example\n---\nHello [[param:name]].\n", "utf8");
-
-    plugin.configResolved({
-      root: temporaryDirectory,
-    });
-
-    await plugin.buildStart();
+    await build(createMeowPromptViteSyncConfig(temporaryDirectory));
 
     expect(await readFile(declarationPath, "utf8")).toContain('readonly title: "Example";');
 
-    await plugin.transform("---\ntitle: Updated\n---\nHello [[param:team]].\n", promptPath);
+    await writeFile(promptPath, "---\ntitle: Updated\n---\nHello [[param:team]].\n", "utf8");
+    await build(createMeowPromptViteSyncConfig(temporaryDirectory));
 
     const updatedDeclaration = await readFile(declarationPath, "utf8");
 

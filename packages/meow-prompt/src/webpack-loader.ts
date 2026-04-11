@@ -25,7 +25,7 @@ type LoaderContext = {
   resourcePath: string;
 };
 
-export default function meowPromptTurbopackLoader(this: LoaderContext, source: string): string {
+export default function meowPromptWebpackLoader(this: LoaderContext, source: string): string {
   this.cacheable?.(true);
 
   const compiledModule = compilePromptModule(source, {

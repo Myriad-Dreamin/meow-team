@@ -1,21 +1,50 @@
+import path from "node:path";
+import type { InlineConfig, Plugin } from "vite";
 import { isPromptTemplatePath, normalizePromptTemplatePath } from "./compiler";
 import {
+  createPromptTemplateBootstrapModule,
   removePromptTemplateDeclaration,
-  syncPromptTemplateDeclarations,
   writePromptTemplateDeclaration,
 } from "./declaration-sync";
 
-export const createMeowPromptVitePlugin = () => {
-  let rootDirectory = process.cwd();
+export const meowPromptBootstrapModuleId = "virtual:meow-prompt/bootstrap";
 
+const resolvedMeowPromptBootstrapModuleId = `\0${meowPromptBootstrapModuleId}`;
+
+export const createMeowPromptViteSyncConfig = (rootDirectory: string): InlineConfig => {
+  return {
+    appType: "custom",
+    build: {
+      emptyOutDir: false,
+      outDir: path.join(rootDirectory, ".meow-prompt-vite-sync"),
+      rollupOptions: {
+        input: meowPromptBootstrapModuleId,
+      },
+      write: false,
+    },
+    logLevel: "silent",
+    plugins: [createMeowPromptVitePlugin()],
+    root: rootDirectory,
+  };
+};
+
+export const createMeowPromptVitePlugin = (): Plugin => {
   return {
     enforce: "pre" as const,
     name: "meow-prompt",
-    configResolved(config: { root: string }) {
-      rootDirectory = config.root;
+    load(id) {
+      if (id !== resolvedMeowPromptBootstrapModuleId) {
+        return null;
+      }
+
+      return createPromptTemplateBootstrapModule();
     },
-    async buildStart() {
-      await syncPromptTemplateDeclarations({ rootDirectory });
+    resolveId(id) {
+      if (id !== meowPromptBootstrapModuleId) {
+        return null;
+      }
+
+      return resolvedMeowPromptBootstrapModuleId;
     },
     async transform(source: string, id: string) {
       const resourcePath = normalizePromptTemplatePath(id);
