@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getTeamWorkspaceStatusSnapshot } from "@/lib/team/history";
+import { getTeamThreadRecord, getTeamWorkspaceStatusSnapshot } from "@/lib/team/history";
 import type { TeamRunState } from "@/lib/team/network";
 import type {
   TeamDispatchAssignment,
@@ -53,6 +53,7 @@ const createLane = ({
     baseBranch: null,
     worktreePath: null,
     latestImplementationCommit: null,
+    pushedCommit: null,
     latestCoderHandoff: null,
     latestReviewerHandoff: null,
     latestDecision: null,
@@ -242,5 +243,46 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
         failed: 0,
       },
     });
+  });
+
+  it("normalizes older lane records that do not yet include pushed commit metadata", async () => {
+    const storePath = path.join(os.tmpdir(), `team-history-legacy-${crypto.randomUUID()}.json`);
+    temporaryFiles.add(storePath);
+
+    const legacyThread = createStoredThread({
+      threadId: "legacy-thread",
+      status: "approved",
+      dispatchAssignments: [
+        createAssignment({
+          status: "approved",
+          lanes: [
+            {
+              ...createLane({
+                laneId: "legacy-thread-lane-1",
+                laneIndex: 1,
+                status: "approved",
+              }),
+              latestImplementationCommit: "1234567890abcdef1234567890abcdef12345678",
+            },
+          ],
+        }),
+      ],
+    });
+
+    const serializedLegacyThread = JSON.parse(JSON.stringify(legacyThread)) as typeof legacyThread;
+    delete serializedLegacyThread.dispatchAssignments[0]?.lanes[0]?.pushedCommit;
+
+    await fs.writeFile(
+      storePath,
+      JSON.stringify({ threads: { "legacy-thread": serializedLegacyThread } }, null, 2),
+      "utf8",
+    );
+
+    const thread = await getTeamThreadRecord(storePath, "legacy-thread");
+
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.pushedCommit).toBeNull();
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.latestImplementationCommit).toBe(
+      "1234567890abcdef1234567890abcdef12345678",
+    );
   });
 });

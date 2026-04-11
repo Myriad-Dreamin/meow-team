@@ -1,13 +1,23 @@
 "use client";
 
 import { startTransition, useEffect, useState } from "react";
+import {
+  buildFeedbackKey,
+  canRestartPlanning,
+  describeLane,
+  describeThreadProgress,
+  formatFeedbackLabel,
+  formatThreadId,
+  formatTimestamp,
+  getLaneBranchDisplay,
+  getLaneCommitDisplay,
+  getLaneStatusClassName,
+  getLaneStatusLabel,
+  pullRequestStatusLabels,
+  threadStatusLabels,
+} from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
-import type {
-  TeamHumanFeedbackScope,
-  TeamPullRequestStatus,
-  TeamThreadStatus,
-  TeamWorkerLaneRecord,
-} from "@/lib/team/types";
+import type { TeamHumanFeedbackScope } from "@/lib/team/types";
 
 type ThreadStatusBoardProps = {
   initialThreads: TeamThreadSummary[];
@@ -18,24 +28,6 @@ type TeamThreadsResponse = {
 };
 
 const POLL_INTERVAL_MS = 5000;
-
-const threadStatusLabels: Record<TeamThreadStatus, string> = {
-  planning: "Planning",
-  running: "Coding / Reviewing",
-  awaiting_human_approval: "Awaiting Proposal Approval",
-  completed: "Completed",
-  approved: "Machine Reviewed",
-  needs_revision: "Needs Revision",
-  failed: "Failed",
-};
-
-const pullRequestStatusLabels: Record<TeamPullRequestStatus, string> = {
-  draft: "Draft PR",
-  awaiting_human_approval: "Awaiting Approval",
-  approved: "Machine Reviewed",
-  conflict: "Conflict",
-  failed: "Failed",
-};
 
 const tryParseJson = (value: string): unknown => {
   try {
@@ -65,137 +57,6 @@ const fetchThreads = async (): Promise<TeamThreadSummary[]> => {
   }
 
   return payload.threads;
-};
-
-const formatTimestamp = (value: string | null): string => {
-  if (!value) {
-    return "Not recorded";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) {
-    return value;
-  }
-
-  return date.toLocaleString();
-};
-
-const formatThreadId = (threadId: string): string => {
-  return threadId.slice(0, 8);
-};
-
-const buildFeedbackKey = (
-  threadId: string,
-  assignmentNumber: number,
-  scope: TeamHumanFeedbackScope,
-  laneId?: string,
-): string => {
-  return `${threadId}:${assignmentNumber}:${scope}:${laneId ?? "request-group"}`;
-};
-
-const canRestartPlanning = (thread: TeamThreadSummary): boolean => {
-  return (
-    thread.workerCounts.queued === 0 &&
-    thread.workerCounts.coding === 0 &&
-    thread.workerCounts.reviewing === 0
-  );
-};
-
-const describeThreadProgress = (thread: TeamThreadSummary): string => {
-  if (thread.lastError) {
-    return thread.lastError;
-  }
-
-  if (thread.latestPlanSummary) {
-    return thread.latestPlanSummary;
-  }
-
-  if (thread.latestInput && thread.latestInput !== thread.requestText) {
-    return thread.status === "planning"
-      ? "Planner is refreshing the proposal set with the latest feedback."
-      : "This thread includes additional planning context beyond the raw request text.";
-  }
-
-  return "No planner summary recorded yet.";
-};
-
-const describeLane = (lane: TeamWorkerLaneRecord): string => {
-  if (lane.status === "idle") {
-    return "Idle and waiting for planner work.";
-  }
-
-  if (lane.status === "awaiting_human_approval") {
-    return "Planner proposed this work and is waiting for human approval before coding and review begin.";
-  }
-
-  if (lane.pullRequest?.status === "conflict") {
-    return "Planner detected a pull request conflict and requeued this proposal.";
-  }
-
-  if (lane.requeueReason === "reviewer_requested_changes") {
-    return "Reviewer requested changes; the approved proposal is queued for another coding pass.";
-  }
-
-  if (lane.requeueReason === "planner_detected_conflict") {
-    return "Planner detected a conflict; the proposal is queued for conflict resolution.";
-  }
-
-  if (lane.status === "approved") {
-    return "Coding and machine review are complete. Human feedback can start a fresh planning pass from this proposal or the whole request group.";
-  }
-
-  return lane.latestActivity ?? "Proposal work is active.";
-};
-
-const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
-  switch (lane.status) {
-    case "idle":
-      return "Idle";
-    case "queued":
-      return lane.pullRequest?.status === "conflict" ? "Queued for Conflict Fix" : "Queued";
-    case "coding":
-      return "Coding";
-    case "reviewing":
-      return "Reviewing";
-    case "awaiting_human_approval":
-      return "Awaiting Approval";
-    case "approved":
-      return "Machine Reviewed";
-    case "failed":
-      return "Failed";
-  }
-};
-
-const getLaneStatusClassName = (lane: TeamWorkerLaneRecord): string => {
-  if (lane.status === "queued" && lane.pullRequest?.status === "conflict") {
-    return "status-conflict";
-  }
-
-  switch (lane.status) {
-    case "idle":
-      return "status-idle";
-    case "queued":
-      return "status-queued";
-    case "coding":
-      return "status-coding";
-    case "reviewing":
-      return "status-reviewing";
-    case "awaiting_human_approval":
-      return "status-awaiting_human_approval";
-    case "approved":
-      return "status-approved";
-    case "failed":
-      return "status-failed";
-  }
-};
-
-const formatFeedbackLabel = (thread: TeamThreadSummary, laneId: string | null): string => {
-  if (!laneId) {
-    return "Request-group feedback";
-  }
-
-  const lane = thread.workerLanes.find((candidate) => candidate.laneId === laneId);
-  return lane ? `Proposal ${lane.laneIndex} feedback` : "Proposal feedback";
 };
 
 export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
@@ -465,6 +326,8 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                       const canApprove = lane.status === "awaiting_human_approval";
                       const canSendLaneFeedback =
                         canRestart && lane.status !== "idle" && lane.status !== "failed";
+                      const branchDisplay = getLaneBranchDisplay(lane);
+                      const commitDisplay = getLaneCommitDisplay(lane);
 
                       return (
                         <article className="lane-card" key={`${thread.threadId}-${lane.laneId}`}>
@@ -482,19 +345,48 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
 
                           <div className="lane-meta-grid">
                             <div>
-                              <span className="meta-label">Branch</span>
-                              <p>{lane.branchName ?? "Not allocated"}</p>
+                              <span className="meta-label">{branchDisplay.label}</span>
+                              <p>
+                                {branchDisplay.href ? (
+                                  <a
+                                    className="lane-meta-link"
+                                    href={branchDisplay.href}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    {branchDisplay.value}
+                                  </a>
+                                ) : (
+                                  branchDisplay.value
+                                )}
+                              </p>
                             </div>
                             <div>
                               <span className="meta-label">Worktree</span>
                               <p>{lane.worktreePath ?? "Not allocated"}</p>
                             </div>
                             <div>
-                              <span className="meta-label">Review Commit</span>
+                              <span className="meta-label">
+                                {commitDisplay?.label ?? "Review Commit"}
+                              </span>
                               <p>
-                                {lane.latestImplementationCommit
-                                  ? lane.latestImplementationCommit.slice(0, 12)
-                                  : "Not requested"}
+                                {commitDisplay ? (
+                                  commitDisplay.href ? (
+                                    <a
+                                      className="lane-meta-link"
+                                      href={commitDisplay.href}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                      title={commitDisplay.fullValue}
+                                    >
+                                      {commitDisplay.value}
+                                    </a>
+                                  ) : (
+                                    commitDisplay.value
+                                  )
+                                ) : (
+                                  "Not requested"
+                                )}
                               </p>
                             </div>
                             <div>

@@ -1433,6 +1433,12 @@ main {
   word-break: break-word;
 }
 
+.lane-meta-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .lane-pr-strip {
   display: flex;
   flex-wrap: wrap;

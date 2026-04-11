@@ -1,11 +1,7 @@
 import "server-only";
 
 import { teamConfig } from "@/team.config";
-import {
-  applyHandoff,
-  summarizeHandoffs,
-  type TeamRoleState,
-} from "@/lib/team/agent-helpers";
+import { applyHandoff, summarizeHandoffs, type TeamRoleState } from "@/lib/team/agent-helpers";
 import { runCodexLaneRole } from "@/lib/team/codex-cli";
 import {
   buildCanonicalBranchName,
@@ -19,6 +15,7 @@ import {
   getBranchHead,
   hasWorktreeChanges,
   listExistingBranches,
+  pushLaneBranch,
   resolveRepositoryBaseBranch,
   tryRebaseWorktreeBranch,
   resolveWorktreeRoot,
@@ -167,9 +164,7 @@ const getLaneWorkflow = (): string[] => {
   return teamConfig.workflow.filter((roleId) => roleId === "coder" || roleId === "reviewer");
 };
 
-const getHighestHandoffSequence = (
-  handoffs: Partial<Record<string, TeamRoleHandoff>>,
-): number => {
+const getHighestHandoffSequence = (handoffs: Partial<Record<string, TeamRoleHandoff>>): number => {
   return Object.values(handoffs).reduce((highestSequence, handoff) => {
     return handoff ? Math.max(highestSequence, handoff.sequence) : highestSequence;
   }, 0);
@@ -518,6 +513,7 @@ const createProposalLane = ({
     baseBranch,
     worktreePath: null,
     latestImplementationCommit: null,
+    pushedCommit: null,
     latestCoderHandoff: null,
     latestReviewerHandoff: null,
     latestDecision: null,
@@ -688,10 +684,7 @@ type PendingDispatchLaneAllocation = {
   worktreeRoot: string;
 };
 
-type LanePoolSchedulingState = Pick<
-  TeamWorkerLaneRecord,
-  "status" | "workerSlot" | "worktreePath"
->;
+type LanePoolSchedulingState = Pick<TeamWorkerLaneRecord, "status" | "workerSlot" | "worktreePath">;
 
 type PlannedLanePoolState = {
   expected: LanePoolSchedulingState;
@@ -710,9 +703,7 @@ const buildLanePoolStateKey = ({
   return `${threadId}:${assignmentNumber}:${laneId}`;
 };
 
-const captureLanePoolSchedulingState = (
-  lane: TeamWorkerLaneRecord,
-): LanePoolSchedulingState => {
+const captureLanePoolSchedulingState = (lane: TeamWorkerLaneRecord): LanePoolSchedulingState => {
   return {
     status: lane.status,
     workerSlot: lane.workerSlot,
@@ -853,6 +844,7 @@ const runLaneCycle = async ({
         mutableLane.status = "coding";
         mutableLane.lastError = null;
         mutableLane.latestImplementationCommit = null;
+        mutableLane.pushedCommit = null;
         mutableLane.startedAt = mutableLane.startedAt ?? now;
         mutableLane.finishedAt = null;
         mutableLane.latestActivity =
@@ -942,6 +934,7 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "failed";
           mutableLane.latestImplementationCommit = null;
+          mutableLane.pushedCommit = null;
           mutableLane.latestCoderHandoff = coderHandoff;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestDecision = coderHandoff.decision;
@@ -991,6 +984,7 @@ const runLaneCycle = async ({
         const reviewCommit = shortenCommit(branchHeadAfterCoding);
         mutableLane.status = "reviewing";
         mutableLane.latestImplementationCommit = branchHeadAfterCoding;
+        mutableLane.pushedCommit = null;
         mutableLane.latestCoderHandoff = coderHandoff;
         mutableLane.latestCoderSummary = coderHandoff.summary;
         mutableLane.latestDecision = coderHandoff.decision;
@@ -1011,6 +1005,7 @@ const runLaneCycle = async ({
       ...lane,
       status: "reviewing",
       latestImplementationCommit: branchHeadAfterCoding,
+      pushedCommit: null,
       latestCoderHandoff: coderHandoff,
       latestCoderSummary: coderHandoff.summary,
       latestDecision: coderHandoff.decision,
@@ -1064,6 +1059,7 @@ const runLaneCycle = async ({
           );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
+          mutableLane.pushedCommit = null;
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderHandoff = coderHandoff;
           mutableLane.latestReviewerHandoff = reviewerHandoff;
@@ -1140,6 +1136,7 @@ const runLaneCycle = async ({
           );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
+          mutableLane.pushedCommit = null;
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderHandoff = coderHandoff;
           mutableLane.latestReviewerHandoff = reviewerHandoff;
@@ -1179,6 +1176,94 @@ const runLaneCycle = async ({
       continue;
     }
 
+    let pushedCommit: Awaited<ReturnType<typeof pushLaneBranch>> | null = null;
+    try {
+      pushedCommit = await pushLaneBranch({
+        repositoryPath: assignment.repository.path,
+        branchName: lane.branchName,
+        commitHash: latestImplementationCommit,
+      });
+    } catch (error) {
+      const pushErrorSummary = summarizeGitFailure(
+        error instanceof Error ? error.message : "Git push failed.",
+      );
+      const pushErrorMessage = `GitHub push failed for ${lane.branchName}: ${pushErrorSummary}`;
+
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (mutableThread, mutableNow) => {
+          const mutableAssignment = findAssignment(
+            mutableThread.dispatchAssignments,
+            assignmentNumber,
+          );
+          const mutableLane = findLane(mutableAssignment, laneId);
+          mutableLane.status = "failed";
+          mutableLane.latestImplementationCommit = latestImplementationCommit;
+          mutableLane.pushedCommit = null;
+          mutableLane.latestDecision = reviewerHandoff.decision;
+          mutableLane.latestCoderHandoff = coderHandoff;
+          mutableLane.latestReviewerHandoff = reviewerHandoff;
+          mutableLane.latestCoderSummary = coderHandoff.summary;
+          mutableLane.latestReviewerSummary = reviewerHandoff.summary;
+          mutableLane.latestActivity =
+            "Machine review approved the proposal, but publishing the lane branch to GitHub failed.";
+          mutableLane.runCount += 1;
+          mutableLane.workerSlot = null;
+          mutableLane.requeueReason = null;
+          mutableLane.lastError = pushErrorMessage;
+          mutableLane.pullRequest = {
+            ...pullRequest,
+            status: "failed",
+            updatedAt: mutableNow,
+            machineReviewedAt: mutableNow,
+          };
+          mutableLane.updatedAt = mutableNow;
+          mutableLane.finishedAt = mutableNow;
+          if (hasConflict) {
+            appendLaneEvent(
+              mutableLane,
+              "planner",
+              `Planner rebased the lane onto ${mutableLane.baseBranch ?? lane.baseBranch} before final approval.`,
+              mutableNow,
+            );
+          }
+          appendLaneEvent(
+            mutableLane,
+            "reviewer",
+            `Reviewer completed machine review: ${reviewerHandoff.summary}`,
+            mutableNow,
+          );
+          appendLaneEvent(mutableLane, "system", pushErrorMessage, mutableNow);
+          appendPlannerNote(
+            mutableAssignment,
+            `Proposal ${mutableLane.laneIndex} passed machine review, but publishing ${mutableLane.branchName ?? lane.branchName} to GitHub failed (${pushErrorSummary}).`,
+            mutableNow,
+          );
+          synchronizeDispatchAssignment(mutableAssignment, mutableNow);
+        },
+      });
+
+      await appendTeamCodexLogEvent({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        assignmentNumber,
+        roleId: null,
+        laneId,
+        event: {
+          source: "system",
+          message: pushErrorMessage,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      return;
+    }
+
+    if (!pushedCommit) {
+      return;
+    }
+
     await updateTeamThreadRecord({
       threadFile: teamConfig.storage.threadFile,
       threadId,
@@ -1190,12 +1275,14 @@ const runLaneCycle = async ({
         const mutableLane = findLane(mutableAssignment, laneId);
         mutableLane.status = "approved";
         mutableLane.latestImplementationCommit = latestImplementationCommit;
+        mutableLane.pushedCommit = pushedCommit;
         mutableLane.latestDecision = reviewerHandoff.decision;
         mutableLane.latestCoderHandoff = coderHandoff;
         mutableLane.latestReviewerHandoff = reviewerHandoff;
         mutableLane.latestCoderSummary = coderHandoff.summary;
         mutableLane.latestReviewerSummary = reviewerHandoff.summary;
-        mutableLane.latestActivity = "Reviewer completed machine review for the approved proposal.";
+        mutableLane.latestActivity =
+          "Reviewer completed machine review and the lane branch was pushed to GitHub.";
         mutableLane.runCount += 1;
         mutableLane.workerSlot = null;
         mutableLane.requeueReason = null;
@@ -1223,14 +1310,20 @@ const runLaneCycle = async ({
         appendLaneEvent(
           mutableLane,
           "system",
+          `Published commit ${shortenCommit(pushedCommit.commitHash)} to GitHub via ${pushedCommit.remoteName}.`,
+          mutableNow,
+        );
+        appendLaneEvent(
+          mutableLane,
+          "system",
           "Machine review completed. Human feedback can now refine this proposal or the full request group.",
           mutableNow,
         );
         appendPlannerNote(
           mutableAssignment,
           hasConflict
-            ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch} and completed coding and machine review.`
-            : `Proposal ${mutableLane.laneIndex} completed coding and machine review.`,
+            ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch}, pushed to GitHub, and completed coding and machine review.`
+            : `Proposal ${mutableLane.laneIndex} was pushed to GitHub and completed coding and machine review.`,
           mutableNow,
         );
         synchronizeDispatchAssignment(mutableAssignment, mutableNow);
@@ -1362,16 +1455,13 @@ export const ensurePendingDispatchWork = async ({
         continue;
       }
 
-      plannedLaneStateByKey.set(
-        lanePoolStateKey,
-        {
-          expected: expectedLaneState,
-          planned: {
-            workerSlot: lane.workerSlot,
-            worktreePath: lane.worktreePath,
-          },
+      plannedLaneStateByKey.set(lanePoolStateKey, {
+        expected: expectedLaneState,
+        planned: {
+          workerSlot: lane.workerSlot,
+          worktreePath: lane.worktreePath,
         },
-      );
+      });
     }
 
     const pendingForThread = pendingAssignmentsByThread.get(pending.threadId) ?? [];
@@ -1582,7 +1672,8 @@ export const prepareAssignmentReplan = async ({
   }
 
   const targetLane = scope === "proposal" ? findLane(assignment, laneId ?? "") : null;
-  const originalRequest = assignment.requestText ?? thread.data.requestText ?? thread.data.latestInput;
+  const originalRequest =
+    assignment.requestText ?? thread.data.requestText ?? thread.data.latestInput;
   if (!originalRequest) {
     throw new Error("The original request could not be recovered for replanning.");
   }

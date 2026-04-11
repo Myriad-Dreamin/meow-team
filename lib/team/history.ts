@@ -162,10 +162,7 @@ const readThreadStore = async (storePath: string): Promise<ThreadStore> => {
         return emptyStore();
       }
 
-      if (
-        isUnexpectedEndOfJsonError(error) &&
-        attempt < THREAD_STORE_READ_RETRY_COUNT
-      ) {
+      if (isUnexpectedEndOfJsonError(error) && attempt < THREAD_STORE_READ_RETRY_COUNT) {
         await sleep(THREAD_STORE_READ_RETRY_DELAY_MS);
         continue;
       }
@@ -249,6 +246,23 @@ const normalizeExecutionStep = (
   };
 };
 
+const normalizePushedCommit = (
+  pushedCommit: TeamWorkerLaneRecord["pushedCommit"] | undefined,
+): TeamWorkerLaneRecord["pushedCommit"] => {
+  if (!pushedCommit) {
+    return null;
+  }
+
+  return {
+    remoteName: pushedCommit.remoteName,
+    repositoryUrl: pushedCommit.repositoryUrl,
+    branchUrl: pushedCommit.branchUrl,
+    commitUrl: pushedCommit.commitUrl,
+    commitHash: pushedCommit.commitHash,
+    pushedAt: pushedCommit.pushedAt,
+  };
+};
+
 const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord => {
   return {
     ...lane,
@@ -256,6 +270,7 @@ const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord =
     proposalPath: lane.proposalPath ?? null,
     workerSlot: lane.workerSlot ?? null,
     latestImplementationCommit: lane.latestImplementationCommit ?? null,
+    pushedCommit: normalizePushedCommit(lane.pushedCommit),
     latestCoderHandoff: lane.latestCoderHandoff ?? null,
     latestReviewerHandoff: lane.latestReviewerHandoff ?? null,
     approvalRequestedAt: lane.approvalRequestedAt ?? null,
@@ -341,36 +356,33 @@ const deriveLegacyThreadStatus = (thread: TeamThreadRecord): TeamThreadStatus =>
 };
 
 const countWorkerLanes = (lanes: TeamWorkerLaneRecord[]): TeamWorkerLaneCounts => {
-  return lanes.reduce<TeamWorkerLaneCounts>(
-    (counts, lane) => {
-      switch (lane.status) {
-        case "idle":
-          counts.idle += 1;
-          break;
-        case "queued":
-          counts.queued += 1;
-          break;
-        case "coding":
-          counts.coding += 1;
-          break;
-        case "reviewing":
-          counts.reviewing += 1;
-          break;
-        case "awaiting_human_approval":
-          counts.awaitingHumanApproval += 1;
-          break;
-        case "approved":
-          counts.approved += 1;
-          break;
-        case "failed":
-          counts.failed += 1;
-          break;
-      }
+  return lanes.reduce<TeamWorkerLaneCounts>((counts, lane) => {
+    switch (lane.status) {
+      case "idle":
+        counts.idle += 1;
+        break;
+      case "queued":
+        counts.queued += 1;
+        break;
+      case "coding":
+        counts.coding += 1;
+        break;
+      case "reviewing":
+        counts.reviewing += 1;
+        break;
+      case "awaiting_human_approval":
+        counts.awaitingHumanApproval += 1;
+        break;
+      case "approved":
+        counts.approved += 1;
+        break;
+      case "failed":
+        counts.failed += 1;
+        break;
+    }
 
-      return counts;
-    },
-    createEmptyWorkerLaneCounts(),
-  );
+    return counts;
+  }, createEmptyWorkerLaneCounts());
 };
 
 const hasAssignedTask = (lane: TeamWorkerLaneRecord): boolean => {

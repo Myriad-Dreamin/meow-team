@@ -10,6 +10,8 @@ import {
   describeThreadProgress,
   formatFeedbackLabel,
   formatTimestamp,
+  getLaneBranchDisplay,
+  getLaneCommitDisplay,
   getLaneStatusClassName,
   getLaneStatusLabel,
   pullRequestStatusLabels,
@@ -507,6 +509,8 @@ export function ThreadDetailPanel({
               const canApprove = lane.status === "awaiting_human_approval";
               const canSendLaneFeedback =
                 canRestart && lane.status !== "idle" && lane.status !== "failed";
+              const branchDisplay = getLaneBranchDisplay(lane);
+              const commitDisplay = getLaneCommitDisplay(lane);
 
               return (
                 <article className="lane-card" key={`${thread.threadId}-${lane.laneId}`}>
@@ -524,19 +528,46 @@ export function ThreadDetailPanel({
 
                   <div className="lane-meta-grid">
                     <div>
-                      <span className="meta-label">Branch</span>
-                      <p>{lane.branchName ?? "Not allocated"}</p>
+                      <span className="meta-label">{branchDisplay.label}</span>
+                      <p>
+                        {branchDisplay.href ? (
+                          <a
+                            className="lane-meta-link"
+                            href={branchDisplay.href}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {branchDisplay.value}
+                          </a>
+                        ) : (
+                          branchDisplay.value
+                        )}
+                      </p>
                     </div>
                     <div>
                       <span className="meta-label">Worktree</span>
                       <p>{lane.worktreePath ?? "Not allocated"}</p>
                     </div>
                     <div>
-                      <span className="meta-label">Review Commit</span>
+                      <span className="meta-label">{commitDisplay?.label ?? "Review Commit"}</span>
                       <p>
-                        {lane.latestImplementationCommit
-                          ? lane.latestImplementationCommit.slice(0, 12)
-                          : "Not requested"}
+                        {commitDisplay ? (
+                          commitDisplay.href ? (
+                            <a
+                              className="lane-meta-link"
+                              href={commitDisplay.href}
+                              rel="noreferrer"
+                              target="_blank"
+                              title={commitDisplay.fullValue}
+                            >
+                              {commitDisplay.value}
+                            </a>
+                          ) : (
+                            commitDisplay.value
+                          )
+                        ) : (
+                          "Not requested"
+                        )}
                       </p>
                     </div>
                     <div>
