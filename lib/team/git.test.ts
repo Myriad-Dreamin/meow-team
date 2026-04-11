@@ -12,6 +12,7 @@ import {
   buildPlannerWorktreePath,
   getBranchHead,
   normalizeGitHubRepositoryUrl,
+  parseManagedWorktreeSlot,
   pushLaneBranch,
   resolveGitHubPushRemote,
   tryRebaseWorktreeBranch,
@@ -88,47 +89,46 @@ afterEach(async () => {
 });
 
 describe("buildPlannerWorktreePath", () => {
-  it("derives a unique planner staging path from the raw thread identity and assignment", () => {
+  it("reuses the shared meow-N slot path for planner staging", () => {
     expect(
       buildPlannerWorktreePath({
         worktreeRoot: "/tmp/worktrees",
-        threadId: "thread/alpha",
-        assignmentNumber: 1,
+        threadSlot: 1,
       }),
-    ).toBe("/tmp/worktrees/planner-7468726561642f616c706861-a1");
+    ).toBe("/tmp/worktrees/meow-1");
 
     expect(
       buildPlannerWorktreePath({
         worktreeRoot: "/tmp/worktrees",
-        threadId: "thread/alpha",
-        assignmentNumber: 2,
+        threadSlot: 2,
       }),
-    ).toBe("/tmp/worktrees/planner-7468726561642f616c706861-a2");
+    ).toBe("/tmp/worktrees/meow-2");
+  });
+});
 
+describe("parseManagedWorktreeSlot", () => {
+  it("extracts a meow-N slot from a managed worktree path", () => {
     expect(
-      buildPlannerWorktreePath({
+      parseManagedWorktreeSlot({
         worktreeRoot: "/tmp/worktrees",
-        threadId: "thread/beta",
-        assignmentNumber: 1,
+        worktreePath: "/tmp/worktrees/meow-2",
       }),
-    ).toBe("/tmp/worktrees/planner-7468726561642f62657461-a1");
+    ).toBe(2);
   });
 
-  it("does not collide when different thread ids sanitize to the same slug", () => {
-    const slashThreadPath = buildPlannerWorktreePath({
-      worktreeRoot: "/tmp/worktrees",
-      threadId: "thread/alpha",
-      assignmentNumber: 1,
-    });
-    const dashThreadPath = buildPlannerWorktreePath({
-      worktreeRoot: "/tmp/worktrees",
-      threadId: "thread-alpha",
-      assignmentNumber: 1,
-    });
-
-    expect(slashThreadPath).toBe("/tmp/worktrees/planner-7468726561642f616c706861-a1");
-    expect(dashThreadPath).toBe("/tmp/worktrees/planner-7468726561642d616c706861-a1");
-    expect(slashThreadPath).not.toBe(dashThreadPath);
+  it("returns null for legacy planner paths and nested paths", () => {
+    expect(
+      parseManagedWorktreeSlot({
+        worktreeRoot: "/tmp/worktrees",
+        worktreePath: "/tmp/worktrees/planner-legacy-a1",
+      }),
+    ).toBeNull();
+    expect(
+      parseManagedWorktreeSlot({
+        worktreeRoot: "/tmp/worktrees",
+        worktreePath: "/tmp/worktrees/nested/meow-2",
+      }),
+    ).toBeNull();
   });
 });
 

@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
+import { DispatchThreadCapacityError } from "@/lib/team/dispatch";
 import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
-import { markTeamThreadFailed, threadHasActiveDispatchAssignment } from "@/lib/team/history";
+import {
+  countActiveDispatchThreads,
+  markTeamThreadFailed,
+  threadHasActiveDispatchAssignment,
+} from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/team/runtime-config";
 import { runTeam, type TeamRunSummary } from "@/lib/team/network";
@@ -85,6 +90,21 @@ export async function POST(request: Request) {
         },
         { status: 400 },
       );
+    }
+
+    if (selectedRepository) {
+      const activeDispatchThreadCount = await countActiveDispatchThreads(
+        teamConfig.storage.threadFile,
+      );
+      if (activeDispatchThreadCount >= teamConfig.dispatch.workerCount) {
+        const capacityError = new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
+        return NextResponse.json(
+          {
+            error: capacityError.message,
+          },
+          { status: 409 },
+        );
+      }
     }
 
     const threadId = body.threadId ?? crypto.randomUUID();

@@ -256,11 +256,6 @@ export const sanitizeBranchSegment = (value: string): string => {
   );
 };
 
-const encodeWorktreePathSegment = (value: string): string => {
-  // Hex keeps the raw identity reversible while remaining safe on case-insensitive filesystems.
-  return Buffer.from(value, "utf8").toString("hex") || "assignment";
-};
-
 const buildThreadBranchSegment = (threadId: string): string => {
   const readableSegment = sanitizeBranchSegment(threadId).replace(/\//g, "-").slice(0, 24);
   const threadHash = createHash("sha256").update(threadId).digest("hex").slice(0, 16);
@@ -305,6 +300,16 @@ export const resolveWorktreeRoot = ({
   return path.isAbsolute(worktreeRoot) ? worktreeRoot : path.join(repositoryPath, worktreeRoot);
 };
 
+const buildManagedWorktreePath = ({
+  worktreeRoot,
+  slot,
+}: {
+  worktreeRoot: string;
+  slot: number;
+}): string => {
+  return path.join(worktreeRoot, `meow-${slot}`);
+};
+
 export const buildLaneWorktreePath = ({
   worktreeRoot,
   laneIndex,
@@ -312,20 +317,45 @@ export const buildLaneWorktreePath = ({
   worktreeRoot: string;
   laneIndex: number;
 }): string => {
-  return path.join(worktreeRoot, `meow-${laneIndex}`);
+  return buildManagedWorktreePath({
+    worktreeRoot,
+    slot: laneIndex,
+  });
 };
 
 export const buildPlannerWorktreePath = ({
   worktreeRoot,
-  threadId,
-  assignmentNumber,
+  threadSlot,
 }: {
   worktreeRoot: string;
-  threadId: string;
-  assignmentNumber: number;
+  threadSlot: number;
 }): string => {
-  const encodedThreadId = encodeWorktreePathSegment(threadId);
-  return path.join(worktreeRoot, `planner-${encodedThreadId}-a${assignmentNumber}`);
+  return buildManagedWorktreePath({
+    worktreeRoot,
+    slot: threadSlot,
+  });
+};
+
+export const parseManagedWorktreeSlot = ({
+  worktreeRoot,
+  worktreePath,
+}: {
+  worktreeRoot: string;
+  worktreePath: string;
+}): number | null => {
+  const relativePath = path.relative(worktreeRoot, worktreePath);
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return null;
+  }
+
+  const normalizedRelativePath = relativePath.split(path.sep).join("/");
+  const match = /^meow-(\d+)$/u.exec(normalizedRelativePath);
+  if (!match) {
+    return null;
+  }
+
+  const slot = Number.parseInt(match[1] ?? "", 10);
+  return Number.isSafeInteger(slot) && slot > 0 ? slot : null;
 };
 
 export const resolveRepositoryBaseBranch = async (

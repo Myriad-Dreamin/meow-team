@@ -8,6 +8,7 @@ import {
   buildCanonicalBranchName,
   buildLaneBranchName,
   buildLaneWorktreePath,
+  buildPlannerWorktreePath,
   commitWorktreeChanges,
   createOrUpdateGitHubPullRequest,
   deleteManagedBranches,
@@ -17,6 +18,7 @@ import {
   getBranchHead,
   hasWorktreeChanges,
   listExistingBranches,
+  parseManagedWorktreeSlot,
   pushLaneBranch,
   resolveRepositoryBaseBranch,
   tryRebaseWorktreeBranch,
@@ -80,7 +82,29 @@ type LaneRunState = TeamRoleState & {
   pullRequestDraft: LanePullRequestDraft | null;
 };
 
+export class DispatchThreadCapacityError extends Error {
+  workerCount: number;
+
+  constructor(workerCount: number) {
+    super(
+      `All ${workerCount} shared meow worktree slot${workerCount === 1 ? " is" : "s are"} already assigned to non-terminal threads. Wait for an active request group to finish before starting a new one.`,
+    );
+    this.name = "DispatchThreadCapacityError";
+    this.workerCount = workerCount;
+  }
+}
+
 const activeLaneRuns = new Map<string, Promise<void>>();
+let plannerDispatchQueue = Promise.resolve();
+
+const queuePlannerDispatchMaterialization = async <T>(task: () => Promise<T>): Promise<T> => {
+  const queuedTask = plannerDispatchQueue.catch(() => undefined).then(task);
+  plannerDispatchQueue = queuedTask.then(
+    () => undefined,
+    () => undefined,
+  );
+  return queuedTask;
+};
 
 const laneRunKey = (threadId: string, assignmentNumber: number, laneId: string): string => {
   return `${threadId}:${assignmentNumber}:${laneId}`;
@@ -486,116 +510,167 @@ export const createPlannerDispatchAssignment = async ({
     throw new Error("Dispatching coder and reviewer lanes requires a selected repository.");
   }
 
-  const now = new Date().toISOString();
-  const resolvedBaseBranch = await resolveRepositoryBaseBranch(
-    repository.path,
-    teamConfig.dispatch.baseBranch,
-  );
-  const resolvedWorktreeRoot = resolveWorktreeRoot({
-    repositoryPath: repository.path,
-    worktreeRoot: teamConfig.dispatch.worktreeRoot,
-  });
-  const canonicalBranchName = buildCanonicalBranchName({
-    threadId,
-    branchPrefix,
-    assignmentNumber,
-  });
-
-  const assignment: TeamDispatchAssignment = synchronizeDispatchAssignment(
-    {
-      assignmentNumber,
-      status: "planning",
-      repository,
-      requestTitle,
-      requestText,
-      requestedAt: now,
-      startedAt: now,
-      finishedAt: null,
-      updatedAt: now,
-      plannerSummary,
-      plannerDeliverable,
+  return queuePlannerDispatchMaterialization(async () => {
+    const now = new Date().toISOString();
+    const resolvedBaseBranch = await resolveRepositoryBaseBranch(
+      repository.path,
+      teamConfig.dispatch.baseBranch,
+    );
+    const resolvedWorktreeRoot = resolveWorktreeRoot({
+      repositoryPath: repository.path,
+      worktreeRoot: teamConfig.dispatch.worktreeRoot,
+    });
+    const canonicalBranchName = buildCanonicalBranchName({
+      threadId,
       branchPrefix,
-      canonicalBranchName,
-      baseBranch: resolvedBaseBranch,
-      workerCount: teamConfig.dispatch.workerCount,
-      lanes: tasks.map((task, index) =>
-        createProposalLane({
-          threadId,
-          laneIndex: index + 1,
-          task,
-          branchPrefix,
-          assignmentNumber,
-          baseBranch: resolvedBaseBranch,
-        }),
-      ),
-      plannerNotes: [
-        createPlannerNote(
-          `Planner created ${tasks.length} proposal${tasks.length === 1 ? "" : "s"} and is waiting for human approval before the coding-review queue starts.`,
-          now,
+      assignmentNumber,
+    });
+
+    const assignment: TeamDispatchAssignment = synchronizeDispatchAssignment(
+      {
+        assignmentNumber,
+        status: "planning",
+        repository,
+        requestTitle,
+        requestText,
+        requestedAt: now,
+        startedAt: now,
+        finishedAt: null,
+        updatedAt: now,
+        plannerSummary,
+        plannerDeliverable,
+        branchPrefix,
+        canonicalBranchName,
+        baseBranch: resolvedBaseBranch,
+        threadSlot: null,
+        plannerWorktreePath: null,
+        workerCount: teamConfig.dispatch.workerCount,
+        lanes: tasks.map((task, index) =>
+          createProposalLane({
+            threadId,
+            laneIndex: index + 1,
+            task,
+            branchPrefix,
+            assignmentNumber,
+            baseBranch: resolvedBaseBranch,
+          }),
         ),
+        plannerNotes: [
+          createPlannerNote(
+            `Planner created ${tasks.length} proposal${tasks.length === 1 ? "" : "s"} and is waiting for human approval before the coding-review queue starts.`,
+            now,
+          ),
+        ],
+        humanFeedback: [],
+        supersededAt: null,
+        supersededReason: null,
+      },
+      now,
+    );
+
+    const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
+    assignPendingDispatchThreadSlots({
+      pendingAssignments: [
+        ...pendingAssignments,
+        {
+          threadId,
+          assignment,
+        },
       ],
-      humanFeedback: [],
-      supersededAt: null,
-      supersededReason: null,
-    },
-    now,
-  );
+      workerCount: teamConfig.dispatch.workerCount,
+      resolveAssignmentWorktreeRoot: (pending) =>
+        resolveWorktreeRoot({
+          repositoryPath: pending.assignment.repository?.path ?? "",
+          worktreeRoot: teamConfig.dispatch.worktreeRoot,
+        }),
+    });
 
-  const targetBranchNames = [
-    canonicalBranchName,
-    ...assignment.lanes.flatMap((lane) => (lane.branchName ? [lane.branchName] : [])),
-  ];
-  const existingBranches = await listExistingBranches({
-    repositoryPath: repository.path,
-    branchNames: targetBranchNames,
-  });
-
-  if (existingBranches.length > 0) {
-    if (!deleteExistingBranches) {
-      throw new ExistingBranchesRequireDeleteError(existingBranches);
+    if (!assignment.threadSlot || !assignment.plannerWorktreePath) {
+      throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
     }
 
-    await deleteManagedBranches({
-      repositoryPath: repository.path,
-      worktreeRoot: resolvedWorktreeRoot,
-      branchNames: existingBranches,
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (thread) => {
+        thread.dispatchAssignments = [
+          ...thread.dispatchAssignments.filter(
+            (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
+          ),
+          assignment,
+        ].sort((left, right) => left.assignmentNumber - right.assignmentNumber);
+      },
     });
-    assignment.plannerNotes = [
-      createPlannerNote(
-        `Human confirmed deletion of existing branches before rematerializing proposals: ${existingBranches.join(", ")}.`,
-        now,
-      ),
-      ...assignment.plannerNotes,
-    ];
-  }
 
-  await materializeAssignmentProposals({
-    threadId,
-    assignmentNumber,
-    repositoryPath: repository.path,
-    baseBranch: resolvedBaseBranch,
-    canonicalBranchName,
-    plannerSummary,
-    plannerDeliverable,
-    requestInput: requestText,
-    worktreeRoot: resolvedWorktreeRoot,
-    lanes: assignment.lanes,
+    try {
+      const targetBranchNames = [
+        canonicalBranchName,
+        ...assignment.lanes.flatMap((lane) => (lane.branchName ? [lane.branchName] : [])),
+      ];
+      const existingBranches = await listExistingBranches({
+        repositoryPath: repository.path,
+        branchNames: targetBranchNames,
+      });
+
+      if (existingBranches.length > 0) {
+        if (!deleteExistingBranches) {
+          throw new ExistingBranchesRequireDeleteError(existingBranches);
+        }
+
+        await deleteManagedBranches({
+          repositoryPath: repository.path,
+          worktreeRoot: resolvedWorktreeRoot,
+          branchNames: existingBranches,
+        });
+        assignment.plannerNotes = [
+          createPlannerNote(
+            `Human confirmed deletion of existing branches before rematerializing proposals: ${existingBranches.join(", ")}.`,
+            now,
+          ),
+          ...assignment.plannerNotes,
+        ];
+      }
+
+      await materializeAssignmentProposals({
+        repositoryPath: repository.path,
+        baseBranch: resolvedBaseBranch,
+        canonicalBranchName,
+        plannerSummary,
+        plannerDeliverable,
+        requestInput: requestText,
+        worktreeRoot: resolvedWorktreeRoot,
+        plannerWorktreePath: assignment.plannerWorktreePath,
+        lanes: assignment.lanes,
+      });
+
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (thread) => {
+          thread.dispatchAssignments = [
+            ...thread.dispatchAssignments.filter(
+              (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
+            ),
+            assignment,
+          ].sort((left, right) => left.assignmentNumber - right.assignmentNumber);
+        },
+      });
+
+      return assignment;
+    } catch (error) {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (thread) => {
+          thread.dispatchAssignments = thread.dispatchAssignments.filter(
+            (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
+          );
+        },
+      });
+
+      throw error;
+    }
   });
-
-  await updateTeamThreadRecord({
-    threadFile: teamConfig.storage.threadFile,
-    threadId,
-    updater: (thread) => {
-      thread.dispatchAssignments = [
-        ...thread.dispatchAssignments.filter(
-          (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
-        ),
-        assignment,
-      ].sort((left, right) => left.assignmentNumber - right.assignmentNumber);
-    },
-  });
-
-  return assignment;
 };
 
 const isPoolOccupyingLaneStatus = (status: TeamWorkerLaneRecord["status"]): boolean => {
@@ -608,11 +683,36 @@ type PendingDispatchLaneAllocation = {
   worktreeRoot: string;
 };
 
+type PendingDispatchAssignmentAllocation = {
+  pending: PendingDispatchAssignment;
+  worktreeRoot: string;
+};
+
+type AssignmentThreadSchedulingState = Pick<
+  TeamDispatchAssignment,
+  "status" | "threadSlot" | "plannerWorktreePath"
+>;
+
 type LanePoolSchedulingState = Pick<TeamWorkerLaneRecord, "status" | "workerSlot" | "worktreePath">;
+
+type PlannedAssignmentThreadState = {
+  expected: AssignmentThreadSchedulingState;
+  planned: Pick<TeamDispatchAssignment, "threadSlot" | "plannerWorktreePath">;
+};
 
 type PlannedLanePoolState = {
   expected: LanePoolSchedulingState;
   planned: Pick<TeamWorkerLaneRecord, "workerSlot" | "worktreePath">;
+};
+
+const buildAssignmentThreadPoolStateKey = ({
+  threadId,
+  assignmentNumber,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+}): string => {
+  return `${threadId}:${assignmentNumber}`;
 };
 
 const buildLanePoolStateKey = ({
@@ -627,12 +727,33 @@ const buildLanePoolStateKey = ({
   return `${threadId}:${assignmentNumber}:${laneId}`;
 };
 
+const captureAssignmentThreadSchedulingState = (
+  assignment: TeamDispatchAssignment,
+): AssignmentThreadSchedulingState => {
+  return {
+    status: assignment.status,
+    threadSlot: assignment.threadSlot ?? null,
+    plannerWorktreePath: assignment.plannerWorktreePath ?? null,
+  };
+};
+
 const captureLanePoolSchedulingState = (lane: TeamWorkerLaneRecord): LanePoolSchedulingState => {
   return {
     status: lane.status,
     workerSlot: lane.workerSlot,
     worktreePath: lane.worktreePath,
   };
+};
+
+const assignmentThreadSchedulingStateMatches = (
+  assignment: TeamDispatchAssignment,
+  expected: AssignmentThreadSchedulingState,
+): boolean => {
+  return (
+    assignment.status === expected.status &&
+    (assignment.threadSlot ?? null) === expected.threadSlot &&
+    (assignment.plannerWorktreePath ?? null) === expected.plannerWorktreePath
+  );
 };
 
 const lanePoolSchedulingStateMatches = (
@@ -643,6 +764,26 @@ const lanePoolSchedulingStateMatches = (
     lane.status === expected.status &&
     lane.workerSlot === expected.workerSlot &&
     lane.worktreePath === expected.worktreePath
+  );
+};
+
+const comparePendingDispatchAssignmentAllocation = (
+  left: PendingDispatchAssignmentAllocation,
+  right: PendingDispatchAssignmentAllocation,
+): number => {
+  const leftRequestedAt =
+    left.pending.assignment.startedAt ??
+    left.pending.assignment.requestedAt ??
+    left.pending.assignment.updatedAt;
+  const rightRequestedAt =
+    right.pending.assignment.startedAt ??
+    right.pending.assignment.requestedAt ??
+    right.pending.assignment.updatedAt;
+
+  return (
+    leftRequestedAt.localeCompare(rightRequestedAt) ||
+    left.pending.threadId.localeCompare(right.pending.threadId) ||
+    left.pending.assignment.assignmentNumber - right.pending.assignment.assignmentNumber
   );
 };
 
@@ -661,7 +802,71 @@ const comparePendingDispatchLaneAllocation = (
   );
 };
 
-export const assignPendingDispatchWorkerSlots = ({
+const applyAssignmentThreadSlot = ({
+  assignment,
+  worktreeRoot,
+  threadSlot,
+}: {
+  assignment: TeamDispatchAssignment;
+  worktreeRoot: string;
+  threadSlot: number | null;
+}): void => {
+  assignment.threadSlot = threadSlot;
+  assignment.plannerWorktreePath = threadSlot
+    ? buildPlannerWorktreePath({
+        worktreeRoot,
+        threadSlot,
+      })
+    : null;
+};
+
+const resolvePreservedAssignmentThreadSlot = ({
+  assignment,
+  worktreeRoot,
+}: {
+  assignment: TeamDispatchAssignment;
+  worktreeRoot: string;
+}): number | null => {
+  if (assignment.threadSlot) {
+    return assignment.threadSlot;
+  }
+
+  if (assignment.plannerWorktreePath) {
+    const plannerSlot = parseManagedWorktreeSlot({
+      worktreeRoot,
+      worktreePath: assignment.plannerWorktreePath,
+    });
+    if (plannerSlot) {
+      return plannerSlot;
+    }
+  }
+
+  for (const lane of assignment.lanes) {
+    if (!isPoolOccupyingLaneStatus(lane.status)) {
+      continue;
+    }
+
+    if (lane.workerSlot) {
+      return lane.workerSlot;
+    }
+
+    if (!lane.worktreePath) {
+      continue;
+    }
+
+    const laneSlot = parseManagedWorktreeSlot({
+      worktreeRoot,
+      worktreePath: lane.worktreePath,
+    });
+    if (laneSlot) {
+      return laneSlot;
+    }
+  }
+
+  return null;
+};
+
+export const assignPendingDispatchThreadSlots = ({
   pendingAssignments,
   workerCount,
   resolveAssignmentWorktreeRoot,
@@ -671,8 +876,8 @@ export const assignPendingDispatchWorkerSlots = ({
   resolveAssignmentWorktreeRoot: (pending: PendingDispatchAssignment) => string;
 }): void => {
   const occupiedSlots = new Set<number>();
-  let preservedLaneCount = 0;
-  const queuedLanes: PendingDispatchLaneAllocation[] = [];
+  let preservedAssignmentCount = 0;
+  const unassignedAssignments: PendingDispatchAssignmentAllocation[] = [];
 
   for (const pending of pendingAssignments) {
     if (!pending.assignment.repository) {
@@ -680,50 +885,130 @@ export const assignPendingDispatchWorkerSlots = ({
     }
 
     const worktreeRoot = resolveAssignmentWorktreeRoot(pending);
+    const preservedThreadSlot = resolvePreservedAssignmentThreadSlot({
+      assignment: pending.assignment,
+      worktreeRoot,
+    });
+
+    if (!preservedThreadSlot) {
+      applyAssignmentThreadSlot({
+        assignment: pending.assignment,
+        worktreeRoot,
+        threadSlot: null,
+      });
+      unassignedAssignments.push({
+        pending,
+        worktreeRoot,
+      });
+      continue;
+    }
+
+    preservedAssignmentCount += 1;
+    if (preservedThreadSlot >= 1 && preservedThreadSlot <= workerCount) {
+      occupiedSlots.add(preservedThreadSlot);
+    }
+    applyAssignmentThreadSlot({
+      assignment: pending.assignment,
+      worktreeRoot,
+      threadSlot: preservedThreadSlot,
+    });
+  }
+
+  const remainingCapacity = Math.max(0, workerCount - preservedAssignmentCount);
+  const availableSlots = Array.from({ length: workerCount }, (_, index) => index + 1)
+    .filter((slot) => !occupiedSlots.has(slot))
+    .slice(0, remainingCapacity);
+
+  for (const { pending, worktreeRoot } of unassignedAssignments.sort(
+    comparePendingDispatchAssignmentAllocation,
+  )) {
+    const threadSlot = availableSlots.shift();
+    if (!threadSlot) {
+      break;
+    }
+
+    applyAssignmentThreadSlot({
+      assignment: pending.assignment,
+      worktreeRoot,
+      threadSlot,
+    });
+  }
+};
+
+export const assignPendingDispatchWorkerSlots = ({
+  pendingAssignments,
+  workerCount,
+  resolveAssignmentWorktreeRoot,
+}: {
+  pendingAssignments: PendingDispatchAssignment[];
+  workerCount: number;
+  resolveAssignmentWorktreeRoot: (pending: PendingDispatchAssignment) => string;
+}): void => {
+  for (const pending of pendingAssignments) {
+    if (!pending.assignment.repository) {
+      continue;
+    }
+
+    const worktreeRoot = resolveAssignmentWorktreeRoot(pending);
+    let hasAssignedLane = false;
+    const slotlessQueuedLanes: PendingDispatchLaneAllocation[] = [];
 
     for (const lane of pending.assignment.lanes) {
       if (!isPoolOccupyingLaneStatus(lane.status)) {
         continue;
       }
 
-      if (lane.workerSlot) {
-        preservedLaneCount += 1;
-        if (lane.workerSlot >= 1 && lane.workerSlot <= workerCount) {
-          occupiedSlots.add(lane.workerSlot);
-        }
+      const preservedLaneSlot =
+        lane.workerSlot ??
+        (lane.worktreePath
+          ? parseManagedWorktreeSlot({
+              worktreeRoot,
+              worktreePath: lane.worktreePath,
+            })
+          : null);
+
+      if (preservedLaneSlot) {
+        lane.workerSlot = preservedLaneSlot;
         lane.worktreePath ??= buildLaneWorktreePath({
           worktreeRoot,
-          laneIndex: lane.workerSlot,
+          laneIndex: preservedLaneSlot,
         });
+        hasAssignedLane = true;
         continue;
       }
 
       if (lane.status === "queued") {
-        queuedLanes.push({
+        lane.workerSlot = null;
+        lane.worktreePath = null;
+        slotlessQueuedLanes.push({
           pending,
           lane,
           worktreeRoot,
         });
       }
     }
-  }
 
-  const remainingCapacity = Math.max(0, workerCount - preservedLaneCount);
-  const availableSlots = Array.from({ length: workerCount }, (_, index) => index + 1)
-    .filter((slot) => !occupiedSlots.has(slot))
-    .slice(0, remainingCapacity);
-
-  for (const { lane, worktreeRoot } of queuedLanes.sort(comparePendingDispatchLaneAllocation)) {
-    const slot = availableSlots.shift();
-    if (!slot) {
-      break;
+    if (hasAssignedLane) {
+      continue;
     }
 
-    lane.workerSlot = slot;
-    lane.worktreePath = buildLaneWorktreePath({
-      worktreeRoot,
-      laneIndex: slot,
-    });
+    const threadSlot = pending.assignment.threadSlot ?? null;
+    if (!threadSlot || threadSlot < 1 || threadSlot > workerCount) {
+      continue;
+    }
+
+    const nextQueuedLane = slotlessQueuedLanes.sort(comparePendingDispatchLaneAllocation)[0];
+    if (!nextQueuedLane) {
+      continue;
+    }
+
+    nextQueuedLane.lane.workerSlot = threadSlot;
+    nextQueuedLane.lane.worktreePath =
+      pending.assignment.plannerWorktreePath ??
+      buildLaneWorktreePath({
+        worktreeRoot,
+        laneIndex: threadSlot,
+      });
   }
 };
 
@@ -1372,8 +1657,16 @@ export const ensurePendingDispatchWork = async ({
 } = {}): Promise<void> => {
   const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
   const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
+  const expectedAssignmentStateByKey = new Map<string, AssignmentThreadSchedulingState>();
   const expectedLaneStateByKey = new Map<string, LanePoolSchedulingState>();
   for (const pending of pendingAssignments) {
+    expectedAssignmentStateByKey.set(
+      buildAssignmentThreadPoolStateKey({
+        threadId: pending.threadId,
+        assignmentNumber: pending.assignment.assignmentNumber,
+      }),
+      captureAssignmentThreadSchedulingState(pending.assignment),
+    );
     for (const lane of pending.assignment.lanes) {
       expectedLaneStateByKey.set(
         buildLanePoolStateKey({
@@ -1386,6 +1679,16 @@ export const ensurePendingDispatchWork = async ({
     }
   }
 
+  assignPendingDispatchThreadSlots({
+    pendingAssignments,
+    workerCount: teamConfig.dispatch.workerCount,
+    resolveAssignmentWorktreeRoot: (pending) =>
+      resolveWorktreeRoot({
+        repositoryPath: pending.assignment.repository?.path ?? "",
+        worktreeRoot: teamConfig.dispatch.worktreeRoot,
+      }),
+  });
+
   assignPendingDispatchWorkerSlots({
     pendingAssignments,
     workerCount: teamConfig.dispatch.workerCount,
@@ -1396,9 +1699,25 @@ export const ensurePendingDispatchWork = async ({
       }),
   });
 
+  const plannedAssignmentStateByKey = new Map<string, PlannedAssignmentThreadState>();
   const plannedLaneStateByKey = new Map<string, PlannedLanePoolState>();
   const pendingAssignmentsByThread = new Map<string, PendingDispatchAssignment[]>();
   for (const pending of pendingAssignments) {
+    const assignmentThreadPoolStateKey = buildAssignmentThreadPoolStateKey({
+      threadId: pending.threadId,
+      assignmentNumber: pending.assignment.assignmentNumber,
+    });
+    const expectedAssignmentState = expectedAssignmentStateByKey.get(assignmentThreadPoolStateKey);
+    if (expectedAssignmentState) {
+      plannedAssignmentStateByKey.set(assignmentThreadPoolStateKey, {
+        expected: expectedAssignmentState,
+        planned: {
+          threadSlot: pending.assignment.threadSlot ?? null,
+          plannerWorktreePath: pending.assignment.plannerWorktreePath ?? null,
+        },
+      });
+    }
+
     for (const lane of pending.assignment.lanes) {
       const lanePoolStateKey = buildLanePoolStateKey({
         threadId: pending.threadId,
@@ -1442,6 +1761,19 @@ export const ensurePendingDispatchWork = async ({
             thread.dispatchAssignments,
             pending.assignment.assignmentNumber,
           );
+          const plannedAssignmentState = plannedAssignmentStateByKey.get(
+            buildAssignmentThreadPoolStateKey({
+              threadId: currentThreadId,
+              assignmentNumber: assignment.assignmentNumber,
+            }),
+          );
+          if (
+            plannedAssignmentState &&
+            assignmentThreadSchedulingStateMatches(assignment, plannedAssignmentState.expected)
+          ) {
+            assignment.threadSlot = plannedAssignmentState.planned.threadSlot;
+            assignment.plannerWorktreePath = plannedAssignmentState.planned.plannerWorktreePath;
+          }
 
           for (const lane of assignment.lanes) {
             const plannedLaneState = plannedLaneStateByKey.get(

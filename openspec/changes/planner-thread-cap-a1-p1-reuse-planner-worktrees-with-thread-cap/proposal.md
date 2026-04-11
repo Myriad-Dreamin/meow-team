@@ -11,9 +11,11 @@ Replace hashed planner staging worktree paths with a shared `meow-N` slot alloca
 ## Capabilities
 
 ### New Capabilities
+
 - `planner-thread-cap-a1-p1-reuse-planner-worktrees-with-thread-cap`: Replace hashed planner staging worktree paths with a shared `meow-N` slot allocation model, enforce a matching cap on concurrently active non-terminal threads, and cover slot assignment, reuse, release, legacy-state compatibility, and planner/lane collision behavior with tests.
 
 ### Modified Capabilities
+
 - None.
 
 ## Impact
