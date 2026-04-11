@@ -19,7 +19,7 @@ export const teamConfig = defineTeamConfig({
   },
   workflow: ["planner", "coder", "reviewer"],
   storage: {
-    threadFile: "data/team-threads.json",
+    threadFile: "data/team-threads.sqlite",
   },
   dispatch: {
     workerCount: 8,

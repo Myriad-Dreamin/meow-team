@@ -2,8 +2,13 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getTeamThreadRecord, getTeamWorkspaceStatusSnapshot } from "@/lib/team/history";
+import {
+  getTeamThreadRecord,
+  getTeamWorkspaceStatusSnapshot,
+  updateTeamThreadRecord,
+} from "@/lib/team/history";
 import type { TeamRunState } from "@/lib/team/network";
+import { resolveTeamThreadStorageLocation } from "@/lib/team/storage";
 import type {
   TeamDispatchAssignment,
   TeamThreadStatus,
@@ -12,6 +17,14 @@ import type {
 
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 const temporaryFiles = new Set<string>();
+
+const trackTemporaryStore = (storePath: string): void => {
+  const { sqlitePath } = resolveTeamThreadStorageLocation(storePath);
+  temporaryFiles.add(storePath);
+  temporaryFiles.add(sqlitePath);
+  temporaryFiles.add(`${sqlitePath}-shm`);
+  temporaryFiles.add(`${sqlitePath}-wal`);
+};
 
 const createRunState = (): TeamRunState => {
   return {
@@ -155,7 +168,7 @@ afterEach(async () => {
 describe("getTeamWorkspaceStatusSnapshot", () => {
   it("counts active threads and lane states across the full store", async () => {
     const storePath = path.join(os.tmpdir(), `team-history-status-${crypto.randomUUID()}.json`);
-    temporaryFiles.add(storePath);
+    trackTemporaryStore(storePath);
 
     const activeCodingThreads = Array.from({ length: 24 }, (_, index) => {
       const threadId = `coding-${index + 1}`;
@@ -248,9 +261,47 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     });
   });
 
+  it("imports a legacy JSON store once and persists later updates in SQLite", async () => {
+    const storePath = path.join(os.tmpdir(), `team-history-import-${crypto.randomUUID()}.json`);
+    trackTemporaryStore(storePath);
+
+    await fs.writeFile(
+      storePath,
+      JSON.stringify(
+        {
+          threads: {
+            "imported-thread": createStoredThread({
+              threadId: "imported-thread",
+              status: "running",
+            }),
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const importedThread = await getTeamThreadRecord(storePath, "imported-thread");
+    expect(importedThread?.threadId).toBe("imported-thread");
+
+    await fs.rm(storePath, { force: true });
+
+    await updateTeamThreadRecord({
+      threadFile: storePath,
+      threadId: "imported-thread",
+      updater: (thread) => {
+        thread.data.requestTitle = "Imported Title";
+      },
+    });
+
+    const migratedThread = await getTeamThreadRecord(storePath, "imported-thread");
+    expect(migratedThread?.data.requestTitle).toBe("Imported Title");
+  });
+
   it("normalizes older lane records that do not yet include pushed commit metadata", async () => {
     const storePath = path.join(os.tmpdir(), `team-history-legacy-${crypto.randomUUID()}.json`);
-    temporaryFiles.add(storePath);
+    trackTemporaryStore(storePath);
 
     const legacyThread = createStoredThread({
       threadId: "legacy-thread",
@@ -297,7 +348,7 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
 
   it("marks fully finalized machine-reviewed lanes as completed once GitHub delivery is ready", async () => {
     const storePath = path.join(os.tmpdir(), `team-history-completed-${crypto.randomUUID()}.json`);
-    temporaryFiles.add(storePath);
+    trackTemporaryStore(storePath);
 
     const finalizedThread = createStoredThread({
       threadId: "finalized-thread",

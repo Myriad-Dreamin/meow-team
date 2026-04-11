@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getTeamThreadRecord, type TeamThreadRecord } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
+import { resolveTeamThreadStorageLocation } from "@/lib/team/storage";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const {
@@ -93,6 +94,18 @@ vi.mock("@/lib/team/roadmap", async () => {
 import { approveLanePullRequest } from "@/lib/team/dispatch";
 
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
+const storageLocation = resolveTeamThreadStorageLocation(threadFile);
+
+const cleanupThreadStore = async () => {
+  await Promise.all(
+    [
+      threadFile,
+      storageLocation.sqlitePath,
+      `${storageLocation.sqlitePath}-shm`,
+      `${storageLocation.sqlitePath}-wal`,
+    ].map((filePath) => fs.rm(filePath, { force: true })),
+  );
+};
 
 const repository: TeamRepositoryOption = {
   id: "repo-1",
@@ -269,7 +282,7 @@ const createArchiveDependencies = ({
 describe("approveLanePullRequest", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    await fs.rm(threadFile, { force: true });
+    await cleanupThreadStore();
     await fs.rm(worktreeRoot, { recursive: true, force: true });
     appendArchivedOpenSpecLinksToRoadmapTopicMock.mockResolvedValue({
       updated: false,
@@ -291,7 +304,7 @@ describe("approveLanePullRequest", () => {
   });
 
   afterEach(async () => {
-    await fs.rm(threadFile, { force: true });
+    await cleanupThreadStore();
     await fs.rm(worktreeRoot, { recursive: true, force: true });
   });
 
