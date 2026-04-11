@@ -71,14 +71,14 @@ afterEach(async () => {
 });
 
 describe("buildPlannerWorktreePath", () => {
-  it("derives a unique planner staging path from the thread and assignment", () => {
+  it("derives a unique planner staging path from the raw thread identity and assignment", () => {
     expect(
       buildPlannerWorktreePath({
         worktreeRoot: "/tmp/worktrees",
         threadId: "thread/alpha",
         assignmentNumber: 1,
       }),
-    ).toBe("/tmp/worktrees/planner-thread-alpha-a1");
+    ).toBe("/tmp/worktrees/planner-7468726561642f616c706861-a1");
 
     expect(
       buildPlannerWorktreePath({
@@ -86,7 +86,7 @@ describe("buildPlannerWorktreePath", () => {
         threadId: "thread/alpha",
         assignmentNumber: 2,
       }),
-    ).toBe("/tmp/worktrees/planner-thread-alpha-a2");
+    ).toBe("/tmp/worktrees/planner-7468726561642f616c706861-a2");
 
     expect(
       buildPlannerWorktreePath({
@@ -94,7 +94,24 @@ describe("buildPlannerWorktreePath", () => {
         threadId: "thread/beta",
         assignmentNumber: 1,
       }),
-    ).toBe("/tmp/worktrees/planner-thread-beta-a1");
+    ).toBe("/tmp/worktrees/planner-7468726561642f62657461-a1");
+  });
+
+  it("does not collide when different thread ids sanitize to the same slug", () => {
+    const slashThreadPath = buildPlannerWorktreePath({
+      worktreeRoot: "/tmp/worktrees",
+      threadId: "thread/alpha",
+      assignmentNumber: 1,
+    });
+    const dashThreadPath = buildPlannerWorktreePath({
+      worktreeRoot: "/tmp/worktrees",
+      threadId: "thread-alpha",
+      assignmentNumber: 1,
+    });
+
+    expect(slashThreadPath).toBe("/tmp/worktrees/planner-7468726561642f616c706861-a1");
+    expect(dashThreadPath).toBe("/tmp/worktrees/planner-7468726561642d616c706861-a1");
+    expect(slashThreadPath).not.toBe(dashThreadPath);
   });
 });
 

@@ -223,6 +223,11 @@ export const sanitizeBranchSegment = (value: string): string => {
   );
 };
 
+const encodeWorktreePathSegment = (value: string): string => {
+  // Hex keeps the raw identity reversible while remaining safe on case-insensitive filesystems.
+  return Buffer.from(value, "utf8").toString("hex") || "assignment";
+};
+
 export const buildCanonicalBranchName = ({
   branchPrefix,
   assignmentNumber,
@@ -276,8 +281,8 @@ export const buildPlannerWorktreePath = ({
   threadId: string;
   assignmentNumber: number;
 }): string => {
-  const sanitizedThreadId = sanitizeBranchSegment(threadId).replace(/\//g, "-");
-  return path.join(worktreeRoot, `planner-${sanitizedThreadId}-a${assignmentNumber}`);
+  const encodedThreadId = encodeWorktreePathSegment(threadId);
+  return path.join(worktreeRoot, `planner-${encodedThreadId}-a${assignmentNumber}`);
 };
 
 export const resolveRepositoryBaseBranch = async (
