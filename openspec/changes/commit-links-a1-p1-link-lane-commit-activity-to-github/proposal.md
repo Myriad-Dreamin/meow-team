@@ -11,9 +11,11 @@ Update dispatch commit-related activity/event messages to emit explicit markdown
 ## Capabilities
 
 ### New Capabilities
+
 - `commit-links-a1-p1-link-lane-commit-activity-to-github`: Update dispatch commit-related activity/event messages to emit explicit markdown links when a GitHub commit URL exists, render those messages safely in the thread UI with `markdown-it`, and cover the behavior with regression tests without regex-based auto-linking.
 
 ### Modified Capabilities
+
 - None.
 
 ## Conventional Title
@@ -21,7 +23,6 @@ Update dispatch commit-related activity/event messages to emit explicit markdown
 - Canonical request/PR title: `feat(lane/commits): Link lane commit activity to GitHub`
 - Conventional title metadata: `feat(lane/commits)`
 - Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter `branchPrefix` or OpenSpec change paths.
-
 
 ## Impact
 

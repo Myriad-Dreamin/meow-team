@@ -6,4 +6,4 @@
 ## 2. Implementation
 
 - [x] 2.1 Implement the approved objective: Update dispatch commit-related activity/event messages to emit explicit markdown links when a GitHub commit URL exists, render those messages safely in the thread UI with `markdown-it`, and cover the behavior with regression tests without regex-based auto-linking.
-- [ ] 2.2 Run validation and capture reviewer findings for "Link lane commit activity to GitHub"
+- [x] 2.2 Run validation and capture reviewer findings for "Link lane commit activity to GitHub"
