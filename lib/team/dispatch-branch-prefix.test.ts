@@ -3,6 +3,7 @@ import type { TeamRepositoryOption } from "@/lib/team/repository-types";
 
 const {
   deleteManagedBranchesMock,
+  listPendingDispatchAssignmentsMock,
   listExistingBranchesMock,
   materializeAssignmentProposalsMock,
   resolveRepositoryBaseBranchMock,
@@ -10,6 +11,7 @@ const {
   updateTeamThreadRecordMock,
 } = vi.hoisted(() => ({
   deleteManagedBranchesMock: vi.fn(),
+  listPendingDispatchAssignmentsMock: vi.fn(),
   listExistingBranchesMock: vi.fn(),
   materializeAssignmentProposalsMock: vi.fn(),
   resolveRepositoryBaseBranchMock: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock("@/lib/team/history", async () => {
   const actual = await vi.importActual<typeof import("@/lib/team/history")>("@/lib/team/history");
   return {
     ...actual,
+    listPendingDispatchAssignments: listPendingDispatchAssignmentsMock,
     synchronizeDispatchAssignment: synchronizeDispatchAssignmentMock,
     updateTeamThreadRecord: updateTeamThreadRecordMock,
   };
@@ -55,6 +58,8 @@ const repository: TeamRepositoryOption = {
   relativePath: ".",
 };
 
+const plannerWorktreeRoot = `${repository.path}/.meow-team-worktrees`;
+
 const plannerInput = {
   assignmentNumber: 1,
   repository,
@@ -75,6 +80,7 @@ describe("createPlannerDispatchAssignment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     deleteManagedBranchesMock.mockResolvedValue(undefined);
+    listPendingDispatchAssignmentsMock.mockResolvedValue([]);
     listExistingBranchesMock.mockResolvedValue([]);
     materializeAssignmentProposalsMock.mockResolvedValue(undefined);
     resolveRepositoryBaseBranchMock.mockResolvedValue("main");
@@ -83,10 +89,17 @@ describe("createPlannerDispatchAssignment", () => {
   });
 
   it("isolates canonical and lane branches when different threads reuse the same prefix", async () => {
+    listPendingDispatchAssignmentsMock.mockResolvedValueOnce([]);
     const alphaAssignment = await createPlannerDispatchAssignment({
       threadId: "thread-alpha",
       ...plannerInput,
     });
+    listPendingDispatchAssignmentsMock.mockResolvedValueOnce([
+      {
+        threadId: "thread-alpha",
+        assignment: structuredClone(alphaAssignment),
+      },
+    ]);
     const betaAssignment = await createPlannerDispatchAssignment({
       threadId: "thread-beta",
       ...plannerInput,
@@ -100,15 +113,33 @@ describe("createPlannerDispatchAssignment", () => {
     expect(materializeAssignmentProposalsMock).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        threadId: "thread-alpha",
+        repositoryPath: repository.path,
+        baseBranch: "main",
         canonicalBranchName: alphaAssignment.canonicalBranchName,
+        worktreeRoot: plannerWorktreeRoot,
+        plannerWorktreePath: `${plannerWorktreeRoot}/meow-1`,
+        lanes: expect.arrayContaining([
+          expect.objectContaining({
+            branchName: alphaAssignment.lanes[0]?.branchName,
+            proposalChangeName: alphaAssignment.lanes[0]?.proposalChangeName,
+          }),
+        ]),
       }),
     );
     expect(materializeAssignmentProposalsMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        threadId: "thread-beta",
+        repositoryPath: repository.path,
+        baseBranch: "main",
         canonicalBranchName: betaAssignment.canonicalBranchName,
+        worktreeRoot: plannerWorktreeRoot,
+        plannerWorktreePath: `${plannerWorktreeRoot}/meow-2`,
+        lanes: expect.arrayContaining([
+          expect.objectContaining({
+            branchName: betaAssignment.lanes[0]?.branchName,
+            proposalChangeName: betaAssignment.lanes[0]?.proposalChangeName,
+          }),
+        ]),
       }),
     );
   });
