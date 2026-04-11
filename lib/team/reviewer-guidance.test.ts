@@ -12,7 +12,7 @@ describe("buildReviewerExecutionRules", () => {
         "Approve only when the implementation is genuinely review-ready.",
         "When you give any suggestion or request changes, include one concrete follow-up artifact with the feedback.",
         `Preferred follow-up artifact: ${reviewerSuggestionFollowUpOptions.proofOfConceptTest}`,
-        `Fallback follow-up artifact: ${reviewerSuggestionFollowUpOptions.openSpecTodo}`,
+        `Fallback follow-up artifact: ${reviewerSuggestionFollowUpOptions.reviewerTodo}`,
       ]),
     );
   });
