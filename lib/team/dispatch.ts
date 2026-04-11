@@ -41,6 +41,7 @@ import {
   materializeAssignmentProposals,
 } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
+import { buildLanePullRequestTitle } from "@/lib/team/request-title";
 import {
   resolveTeamRoleDependencies,
   type TeamRoleDependencies,
@@ -306,6 +307,8 @@ const buildLaneInitialState = ({
     taskTitle: lane.taskTitle ?? `Lane ${lane.laneIndex} task`,
     taskObjective:
       lane.taskObjective ?? assignment.plannerSummary ?? "Implement the assigned task.",
+    requestTitle: assignment.requestTitle ?? lane.taskTitle ?? `Proposal ${lane.laneIndex}`,
+    conventionalTitle: assignment.conventionalTitle ?? null,
     planSummary: assignment.plannerSummary ?? "No planner summary provided.",
     planDeliverable: assignment.plannerDeliverable ?? "No planner deliverable provided.",
     branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
@@ -326,7 +329,7 @@ const buildLaneInitialState = ({
     handoffCounter: getHighestHandoffSequence(handoffs),
     assignmentNumber: assignment.assignmentNumber,
     pullRequestDraft: null,
-  };
+  } as LaneRunState;
 };
 
 const buildCoderCommitMessage = ({
@@ -361,6 +364,30 @@ const summarizeGitFailure = (message: string): string => {
       .map((line) => line.trim())
       .find((line) => line.length > 0) ?? "Git operation failed."
   );
+};
+
+const countAssignedLaneTasks = (assignment: Pick<TeamDispatchAssignment, "lanes">): number => {
+  return assignment.lanes.filter((lane) => lane.taskTitle || lane.taskObjective).length || 1;
+};
+
+const buildCanonicalLanePullRequestDraft = ({
+  assignment,
+  lane,
+  summary,
+}: {
+  assignment: Pick<TeamDispatchAssignment, "conventionalTitle" | "lanes" | "requestTitle">;
+  lane: Pick<TeamWorkerLaneRecord, "laneIndex" | "taskTitle">;
+  summary: string;
+}): LanePullRequestDraft => {
+  return {
+    title: buildLanePullRequestTitle({
+      requestTitle: assignment.requestTitle,
+      taskTitle: lane.taskTitle ?? `Proposal ${lane.laneIndex}`,
+      taskCount: countAssignedLaneTasks(assignment),
+      conventionalTitle: assignment.conventionalTitle,
+    }),
+    summary,
+  };
 };
 
 const createPullRequestRecord = ({
@@ -486,6 +513,7 @@ export const createPlannerDispatchAssignment = async ({
   assignmentNumber,
   repository,
   requestTitle,
+  conventionalTitle,
   requestText,
   plannerSummary,
   plannerDeliverable,
@@ -497,6 +525,7 @@ export const createPlannerDispatchAssignment = async ({
   assignmentNumber: number;
   repository: TeamRepositoryOption | null;
   requestTitle: string;
+  conventionalTitle: TeamDispatchAssignment["conventionalTitle"];
   requestText: string;
   plannerSummary: string;
   plannerDeliverable: string;
@@ -530,6 +559,7 @@ export const createPlannerDispatchAssignment = async ({
         status: "planning",
         repository,
         requestTitle,
+        conventionalTitle,
         requestText,
         requestedAt: now,
         startedAt: now,
@@ -633,6 +663,8 @@ export const createPlannerDispatchAssignment = async ({
         repositoryPath: repository.path,
         baseBranch: resolvedBaseBranch,
         canonicalBranchName,
+        requestTitle,
+        conventionalTitle,
         plannerSummary,
         plannerDeliverable,
         requestInput: requestText,
@@ -1263,10 +1295,11 @@ const runLaneCycle = async ({
     });
     reviewerState.pullRequestDraft =
       reviewerResponse.pullRequestTitle && reviewerResponse.pullRequestSummary
-        ? {
-            title: reviewerResponse.pullRequestTitle,
+        ? buildCanonicalLanePullRequestDraft({
+            assignment,
+            lane,
             summary: reviewerResponse.pullRequestSummary,
-          }
+          })
         : null;
 
     if (reviewerHandoff.decision === "needs_revision") {
@@ -1312,10 +1345,13 @@ const runLaneCycle = async ({
       threadId,
       assignmentNumber,
       lane,
-      draft: reviewerState.pullRequestDraft ?? {
-        title: `Lane ${lane.laneIndex}: ${lane.taskTitle ?? "Ready for review"}`,
-        summary: reviewerHandoff.summary,
-      },
+      draft:
+        reviewerState.pullRequestDraft ??
+        buildCanonicalLanePullRequestDraft({
+          assignment,
+          lane,
+          summary: reviewerHandoff.summary,
+        }),
       now,
     });
 
@@ -1900,12 +1936,15 @@ export const approveLanePullRequest = async ({
     );
   }
 
-  const pullRequestTitle =
-    pullRequest.title.trim() || `Lane ${lane.laneIndex}: ${lane.taskTitle ?? "Ready for review"}`;
   const pullRequestSummary =
     pullRequest.summary?.trim() ||
     lane.latestReviewerSummary?.trim() ||
     `Proposal ${lane.laneIndex} passed machine review.`;
+  const pullRequestTitle = buildCanonicalLanePullRequestDraft({
+    assignment,
+    lane,
+    summary: pullRequestSummary,
+  }).title;
   const finalizationWorktreePath = buildLaneFinalizationWorktreePath({
     repositoryPath: assignment.repository.path,
     threadId,

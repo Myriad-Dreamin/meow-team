@@ -70,7 +70,11 @@ const plannerWorktreeRoot = `${repository.path}/.meow-team-worktrees`;
 const plannerInput = {
   assignmentNumber: 1,
   repository,
-  requestTitle: "Fix Parallel Worktree Allocation",
+  requestTitle: "dev(vsc/command): Fix Parallel Worktree Allocation",
+  conventionalTitle: {
+    type: "dev" as const,
+    scope: "vsc/command",
+  },
   requestText: "Isolate planner staging worktrees and shared lane slots across threads.",
   plannerSummary: "Planner summary",
   plannerDeliverable: "Planner deliverable",
@@ -123,6 +127,8 @@ describe("createPlannerDispatchAssignment", () => {
         repositoryPath: repository.path,
         baseBranch: "main",
         canonicalBranchName: alphaAssignment.canonicalBranchName,
+        requestTitle: plannerInput.requestTitle,
+        conventionalTitle: plannerInput.conventionalTitle,
         worktreeRoot: plannerWorktreeRoot,
         plannerWorktreePath: `${plannerWorktreeRoot}/meow-1`,
         lanes: expect.arrayContaining([
@@ -139,6 +145,8 @@ describe("createPlannerDispatchAssignment", () => {
         repositoryPath: repository.path,
         baseBranch: "main",
         canonicalBranchName: betaAssignment.canonicalBranchName,
+        requestTitle: plannerInput.requestTitle,
+        conventionalTitle: plannerInput.conventionalTitle,
         worktreeRoot: plannerWorktreeRoot,
         plannerWorktreePath: `${plannerWorktreeRoot}/meow-2`,
         lanes: expect.arrayContaining([
@@ -163,5 +171,17 @@ describe("createPlannerDispatchAssignment", () => {
 
     expect(firstAssignment.canonicalBranchName).toBe(secondAssignment.canonicalBranchName);
     expect(firstAssignment.lanes[0]?.branchName).toBe(secondAssignment.lanes[0]?.branchName);
+  });
+
+  it("keeps slash-delimited conventional scope metadata out of branch namespaces", async () => {
+    const assignment = await createPlannerDispatchAssignment({
+      threadId: "thread-scope",
+      ...plannerInput,
+    });
+
+    expect(assignment.canonicalBranchName).toContain("parallel-worktrees");
+    expect(assignment.canonicalBranchName).not.toContain("vsc/command");
+    expect(assignment.lanes[0]?.proposalChangeName).not.toContain("vsc/command");
+    expect(assignment.conventionalTitle).toEqual(plannerInput.conventionalTitle);
   });
 });

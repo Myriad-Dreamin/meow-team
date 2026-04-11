@@ -2,7 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/network";
-import { resolveDisplayRequestTitle } from "@/lib/team/request-title";
+import {
+  normalizeConventionalTitleMetadata,
+  parseConventionalTitle,
+  resolveDisplayRequestTitle,
+} from "@/lib/team/request-title";
 import {
   createEmptyWorkerLaneCounts,
   mergeWorkerLaneCounts,
@@ -294,6 +298,10 @@ const normalizeDispatchAssignment = (
   return {
     ...assignment,
     requestTitle: assignment.requestTitle ?? null,
+    conventionalTitle:
+      normalizeConventionalTitleMetadata(assignment.conventionalTitle) ??
+      parseConventionalTitle(assignment.requestTitle)?.metadata ??
+      null,
     requestText: assignment.requestText ?? null,
     canonicalBranchName: assignment.canonicalBranchName ?? null,
     threadSlot: assignment.threadSlot ?? null,
@@ -310,6 +318,10 @@ const normalizeRunState = (state: TeamRunState): TeamRunState => {
   return {
     ...state,
     requestTitle: state.requestTitle ?? null,
+    conventionalTitle:
+      normalizeConventionalTitleMetadata(state.conventionalTitle) ??
+      parseConventionalTitle(state.requestTitle)?.metadata ??
+      null,
     requestText: state.requestText ?? null,
     latestInput: state.latestInput ?? null,
   };

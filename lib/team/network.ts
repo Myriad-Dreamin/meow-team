@@ -15,7 +15,14 @@ import {
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { loadRolePrompt } from "@/lib/team/prompts";
-import { buildDeterministicRequestTitle, normalizeRequestTitle } from "@/lib/team/request-title";
+import {
+  buildCanonicalRequestTitle,
+  buildDeterministicRequestTitle,
+  normalizeConventionalTitleMetadata,
+  normalizeRequestTitle,
+  parseConventionalTitle,
+  type ConventionalTitleMetadata,
+} from "@/lib/team/request-title";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import {
   resolveTeamRoleDependencies,
@@ -40,6 +47,7 @@ export type TeamRunState = {
   handoffCounter: number;
   assignmentNumber: number;
   requestTitle: string | null;
+  conventionalTitle: ConventionalTitleMetadata | null;
   requestText: string | null;
   latestInput: string | null;
   forceReset: boolean;
@@ -59,6 +67,13 @@ export type TeamRunSummary = {
 
 type ResolvedRequestMetadata = {
   requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
+  requestText: string;
+};
+
+type InitialRequestMetadata = {
+  requestTitle: string | null;
+  conventionalTitle: ConventionalTitleMetadata | null;
   requestText: string;
 };
 
@@ -82,6 +97,7 @@ const buildInitialState = (
     handoffCounter: 0,
     assignmentNumber: 1,
     requestTitle: null,
+    conventionalTitle: null,
     requestText: null,
     latestInput: null,
     forceReset,
@@ -167,8 +183,6 @@ const resolveRequestMetadata = async ({
   providedRequestText,
   existingThread,
   shouldResetAssignment,
-  worktreePath,
-  dependencies,
   logEvent,
 }: {
   input: string;
@@ -176,15 +190,14 @@ const resolveRequestMetadata = async ({
   providedRequestText?: string;
   existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
   shouldResetAssignment: boolean;
-  worktreePath: string;
-  dependencies: TeamRoleDependencies;
   logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
-}): Promise<ResolvedRequestMetadata> => {
+}): Promise<InitialRequestMetadata> => {
   const requestText =
     normalizeRequestText(providedRequestText) ??
     (shouldResetAssignment ? null : normalizeRequestText(existingThread?.data.requestText)) ??
     input.trim();
   const humanTitle = normalizeRequestTitle(providedTitle);
+  const humanConventionalTitle = parseConventionalTitle(humanTitle)?.metadata ?? null;
 
   if (humanTitle) {
     await logEvent?.({
@@ -195,6 +208,7 @@ const resolveRequestMetadata = async ({
 
     return {
       requestTitle: humanTitle,
+      conventionalTitle: humanConventionalTitle,
       requestText,
     };
   }
@@ -202,6 +216,11 @@ const resolveRequestMetadata = async ({
   const preservedTitle = shouldResetAssignment
     ? null
     : normalizeRequestTitle(existingThread?.data.requestTitle);
+  const preservedConventionalTitle = shouldResetAssignment
+    ? null
+    : (normalizeConventionalTitleMetadata(existingThread?.data.conventionalTitle) ??
+      parseConventionalTitle(existingThread?.data.requestTitle)?.metadata ??
+      null);
   if (preservedTitle) {
     await logEvent?.({
       source: "system",
@@ -211,28 +230,61 @@ const resolveRequestMetadata = async ({
 
     return {
       requestTitle: preservedTitle,
+      conventionalTitle: preservedConventionalTitle,
       requestText,
     };
   }
 
+  return {
+    requestTitle: null,
+    conventionalTitle: null,
+    requestText,
+  };
+};
+
+const generateRequestMetadata = async ({
+  input,
+  requestText,
+  tasks,
+  worktreePath,
+  dependencies,
+  logEvent,
+}: {
+  input: string;
+  requestText: string;
+  tasks?: Array<{
+    title: string;
+    objective: string;
+  }> | null;
+  worktreePath: string;
+  dependencies: TeamRoleDependencies;
+  logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
+}): Promise<{
+  requestTitle: string | null;
+  conventionalTitle: ConventionalTitleMetadata | null;
+} | null> => {
   try {
     const generatedTitleResponse = await dependencies.requestTitleAgent.run({
       input,
       requestText,
       worktreePath,
+      tasks,
     });
     const generatedTitle = normalizeRequestTitle(generatedTitleResponse.title);
+    const generatedConventionalTitle = normalizeConventionalTitleMetadata(
+      generatedTitleResponse.conventionalTitle,
+    );
 
-    if (generatedTitle) {
+    if (generatedTitle || generatedConventionalTitle) {
       await logEvent?.({
         source: "system",
-        message: `Generated request title: ${generatedTitle}`,
+        message: `Generated request title: ${generatedTitle ?? "Untitled Request"}`,
         createdAt: new Date().toISOString(),
       });
 
       return {
         requestTitle: generatedTitle,
-        requestText,
+        conventionalTitle: generatedConventionalTitle,
       };
     }
   } catch (error) {
@@ -245,16 +297,60 @@ const resolveRequestMetadata = async ({
     });
   }
 
-  const fallbackTitle = buildDeterministicRequestTitle(requestText);
-  await logEvent?.({
-    source: "system",
-    message: `Using deterministic request title fallback: ${fallbackTitle}`,
-    createdAt: new Date().toISOString(),
-  });
+  return null;
+};
+
+const finalizeRequestMetadata = async ({
+  initialMetadata,
+  input,
+  tasks,
+  worktreePath,
+  dependencies,
+  logEvent,
+}: {
+  initialMetadata: InitialRequestMetadata;
+  input: string;
+  tasks?: Array<{
+    title: string;
+    objective: string;
+  }> | null;
+  worktreePath: string;
+  dependencies: TeamRoleDependencies;
+  logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
+}): Promise<ResolvedRequestMetadata> => {
+  const shouldGenerate =
+    !initialMetadata.requestTitle || (Boolean(tasks?.length) && !initialMetadata.conventionalTitle);
+  const generatedMetadata = shouldGenerate
+    ? await generateRequestMetadata({
+        input,
+        requestText: initialMetadata.requestText,
+        tasks,
+        worktreePath,
+        dependencies,
+        logEvent,
+      })
+    : null;
+
+  const requestTitle =
+    initialMetadata.requestTitle ??
+    generatedMetadata?.requestTitle ??
+    buildDeterministicRequestTitle(initialMetadata.requestText);
+  const conventionalTitle =
+    initialMetadata.conventionalTitle ??
+    (tasks?.length ? (generatedMetadata?.conventionalTitle ?? null) : null);
+
+  if (!initialMetadata.requestTitle && !generatedMetadata?.requestTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Using deterministic request title fallback: ${requestTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
 
   return {
-    requestTitle: fallbackTitle,
-    requestText,
+    requestTitle,
+    conventionalTitle,
+    requestText: initialMetadata.requestText,
   };
 };
 
@@ -333,11 +429,10 @@ export const runTeam = async ({
     providedRequestText: requestText,
     existingThread,
     shouldResetAssignment,
-    worktreePath: selectedRepository?.path ?? process.cwd(),
-    dependencies: resolvedDependencies,
     logEvent: forwardPlannerEvent,
   });
   state.requestTitle = requestMetadata.requestTitle;
+  state.conventionalTitle = requestMetadata.conventionalTitle;
   state.requestText = requestMetadata.requestText;
 
   try {
@@ -372,19 +467,50 @@ export const runTeam = async ({
       throw new Error("Planner completed without dispatch proposals.");
     }
 
+    const finalizedRequestMetadata = await finalizeRequestMetadata({
+      initialMetadata: requestMetadata,
+      input,
+      tasks: plannerResponse.dispatch?.tasks ?? null,
+      worktreePath: selectedRepository?.path ?? process.cwd(),
+      dependencies: resolvedDependencies,
+      logEvent: forwardPlannerEvent,
+    });
+
     if (selectedRepository && plannerResponse.dispatch) {
+      const canonicalRequestTitle = buildCanonicalRequestTitle({
+        requestTitle: finalizedRequestMetadata.requestTitle,
+        taskTitle: plannerResponse.dispatch.tasks[0]?.title ?? null,
+        taskCount: plannerResponse.dispatch.tasks.length,
+        conventionalTitle: finalizedRequestMetadata.conventionalTitle,
+      });
+
+      state.requestTitle = canonicalRequestTitle;
+      state.conventionalTitle = finalizedRequestMetadata.conventionalTitle;
+
+      if (canonicalRequestTitle !== finalizedRequestMetadata.requestTitle) {
+        await forwardPlannerEvent({
+          source: "system",
+          message: `Normalized canonical request title: ${canonicalRequestTitle}`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
       await createPlannerDispatchAssignment({
         threadId: resolvedThreadId,
         assignmentNumber: state.assignmentNumber,
         repository: selectedRepository,
-        requestTitle: requestMetadata.requestTitle,
-        requestText: requestMetadata.requestText,
+        requestTitle: canonicalRequestTitle,
+        conventionalTitle: finalizedRequestMetadata.conventionalTitle,
+        requestText: finalizedRequestMetadata.requestText,
         plannerSummary: plannerResponse.dispatch.planSummary,
         plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
         branchPrefix: plannerResponse.dispatch.branchPrefix,
         tasks: plannerResponse.dispatch.tasks,
         deleteExistingBranches,
       });
+    } else {
+      state.requestTitle = finalizedRequestMetadata.requestTitle;
+      state.conventionalTitle = finalizedRequestMetadata.conventionalTitle;
     }
 
     const step = createPlannerStep({
@@ -406,8 +532,8 @@ export const runTeam = async ({
     return {
       threadId: resolvedThreadId,
       assignmentNumber: state.assignmentNumber,
-      requestTitle: requestMetadata.requestTitle,
-      requestText: requestMetadata.requestText,
+      requestTitle: state.requestTitle ?? finalizedRequestMetadata.requestTitle,
+      requestText: finalizedRequestMetadata.requestText,
       approved: false,
       repository: selectedRepository,
       workflow: state.workflow,

@@ -147,11 +147,15 @@ const createLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLa
   ...overrides,
 });
 
-const createAssignment = (lane: TeamWorkerLaneRecord): TeamDispatchAssignment => ({
+const createAssignment = (
+  lane: TeamWorkerLaneRecord,
+  overrides: Partial<TeamDispatchAssignment> = {},
+): TeamDispatchAssignment => ({
   assignmentNumber: 1,
   status: "approved",
   repository,
   requestTitle: "Ship the feature",
+  conventionalTitle: null,
   requestText: "Finalize the reviewed branch.",
   requestedAt: FIXED_TIMESTAMP,
   startedAt: FIXED_TIMESTAMP,
@@ -168,9 +172,13 @@ const createAssignment = (lane: TeamWorkerLaneRecord): TeamDispatchAssignment =>
   humanFeedback: [],
   supersededAt: null,
   supersededReason: null,
+  ...overrides,
 });
 
-const createThread = (lane: TeamWorkerLaneRecord): TeamThreadRecord => ({
+const createThread = (
+  lane: TeamWorkerLaneRecord,
+  assignmentOverrides: Partial<TeamDispatchAssignment> = {},
+): TeamThreadRecord => ({
   threadId: "thread-1",
   data: {
     teamId: "test-team",
@@ -182,14 +190,15 @@ const createThread = (lane: TeamWorkerLaneRecord): TeamThreadRecord => ({
     handoffs: {},
     handoffCounter: 0,
     assignmentNumber: 1,
-    requestTitle: "Ship the feature",
-    requestText: "Finalize the reviewed branch.",
-    latestInput: "Finalize the reviewed branch.",
+    requestTitle: assignmentOverrides.requestTitle ?? "Ship the feature",
+    conventionalTitle: assignmentOverrides.conventionalTitle ?? null,
+    requestText: assignmentOverrides.requestText ?? "Finalize the reviewed branch.",
+    latestInput: assignmentOverrides.requestText ?? "Finalize the reviewed branch.",
     forceReset: false,
   },
   results: [],
   userMessages: [],
-  dispatchAssignments: [createAssignment(lane)],
+  dispatchAssignments: [createAssignment(lane, assignmentOverrides)],
   run: {
     status: "approved",
     startedAt: FIXED_TIMESTAMP,
@@ -200,11 +209,14 @@ const createThread = (lane: TeamWorkerLaneRecord): TeamThreadRecord => ({
   updatedAt: FIXED_TIMESTAMP,
 });
 
-const writeThreadStore = async (lane: TeamWorkerLaneRecord) => {
+const writeThreadStore = async (
+  lane: TeamWorkerLaneRecord,
+  assignmentOverrides: Partial<TeamDispatchAssignment> = {},
+) => {
   await fs.mkdir(worktreeRoot, { recursive: true });
   await fs.writeFile(
     threadFile,
-    JSON.stringify({ threads: { "thread-1": createThread(lane) } }, null, 2),
+    JSON.stringify({ threads: { "thread-1": createThread(lane, assignmentOverrides) } }, null, 2),
     "utf8",
   );
 };
@@ -273,6 +285,47 @@ describe("approveLanePullRequest", () => {
     );
     expect(thread?.dispatchAssignments[0]?.status).toBe("completed");
     expect(thread?.run?.status).toBe("completed");
+  });
+
+  it("normalizes the final GitHub PR title from stored conventional metadata", async () => {
+    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+      createdArchive: true,
+    });
+    commitWorktreeChangesMock.mockResolvedValue(undefined);
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
+      commitHash: "archive-commit",
+    });
+    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/77",
+    });
+
+    await writeThreadStore(createLane(), {
+      requestTitle: "dev(vsc/command): Ship the feature",
+      conventionalTitle: {
+        type: "dev",
+        scope: "vsc/command",
+      },
+    });
+
+    await approveLanePullRequest({
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+    });
+
+    const thread = await getTeamThreadRecord(threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(createOrUpdateGitHubPullRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "dev(vsc/command): Ship the feature",
+      }),
+    );
+    expect(lane?.pullRequest?.title).toBe("dev(vsc/command): Ship the feature");
   });
 
   it("records an archive failure as a blocking finalization error", async () => {

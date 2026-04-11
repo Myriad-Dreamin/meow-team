@@ -3,10 +3,13 @@ import type { TeamStructuredExecutor } from "@/lib/agent/executor";
 import type { TeamRepositoryContext } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
 import { buildReviewerExecutionRules } from "@/lib/team/reviewer-guidance";
+import {
+  describeConventionalTitleMetadata,
+  type ConventionalTitleMetadata,
+} from "@/lib/team/request-title";
 import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
 import type { RolePrompt } from "@/lib/team/prompts";
-import type { TeamCodexEvent } from "@/lib/team/types";
-import type { TeamRoleHandoff } from "@/lib/team/types";
+import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
 
 const reviewerOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -24,6 +27,8 @@ export type ReviewerRoleState = TeamRepositoryContext & {
   laneIndex: number;
   taskTitle: string;
   taskObjective: string;
+  requestTitle: string;
+  conventionalTitle: ConventionalTitleMetadata | null;
   planSummary: string;
   planDeliverable: string;
   conflictNote: string | null;
@@ -58,6 +63,8 @@ const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): strin
     `Lane index: ${state.laneIndex}.`,
     `Task title: ${state.taskTitle}.`,
     `Task objective: ${state.taskObjective}`,
+    `Canonical request title: ${state.requestTitle}.`,
+    `Conventional title metadata: ${describeConventionalTitleMetadata(state.conventionalTitle)}.`,
     `Planner summary: ${state.planSummary}`,
     `Planner deliverable: ${state.planDeliverable}`,
     state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
@@ -81,7 +88,7 @@ const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): strin
     "Final response requirements:",
     "- Your final response must match the provided JSON schema exactly.",
     '- Put the concise handoff in "summary" and the detailed notes in "deliverable".',
-    '- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. If not approved, set both pullRequestTitle and pullRequestSummary to null.',
+    '- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. The harness will normalize the final PR title to the shared conventional format. If not approved, set both pullRequestTitle and pullRequestSummary to null.',
   ]
     .filter(Boolean)
     .join("\n\n");

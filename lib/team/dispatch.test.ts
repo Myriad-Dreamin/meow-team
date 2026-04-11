@@ -88,6 +88,7 @@ const createPendingAssignment = ({
     status,
     repository,
     requestTitle: "Request",
+    conventionalTitle: null,
     requestText: "Implement the request.",
     requestedAt: FIXED_TIMESTAMP,
     startedAt: FIXED_TIMESTAMP,

@@ -24,6 +24,7 @@ describe("readTeamRuntimeConfig", () => {
   it("prefers Codex config and auth values over environment fallbacks", () => {
     const config = readTeamRuntimeConfig({
       env: {
+        NODE_ENV: "test",
         OPENAI_API_KEY: "env-key",
         OPENAI_BASE_URL: "https://env.example.invalid",
         OPENAI_MODEL: "env-model",
@@ -66,6 +67,7 @@ base_url = "https://codex.example.invalid"
   it("falls back to environment values when Codex files are missing or invalid", () => {
     const config = readTeamRuntimeConfig({
       env: {
+        NODE_ENV: "test",
         OPENAI_API_KEY: "env-key",
         OPENAI_BASE_URL: "https://env.example.invalid",
         OPENAI_MODEL: "env-model",
