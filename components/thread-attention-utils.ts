@@ -126,29 +126,28 @@ export const collectThreadAttentionNotifications = (
   return notifications;
 };
 
-export const buildAttentionFingerprintSet = (
-  notifications: ThreadAttentionNotification[],
-): Set<string> => new Set(notifications.map((notification) => notification.fingerprint));
-
-export const selectFreshAttentionNotifications = ({
+export const selectUndeliveredAttentionNotifications = ({
   nextNotifications,
-  previousFingerprints,
-  seenFingerprints,
+  deliveredFingerprints,
+  deliveryAvailable,
 }: {
   nextNotifications: ThreadAttentionNotification[];
-  previousFingerprints: ReadonlySet<string>;
-  seenFingerprints: ReadonlySet<string>;
-}): ThreadAttentionNotification[] =>
-  nextNotifications.filter(
-    (notification) =>
-      !previousFingerprints.has(notification.fingerprint) &&
-      !seenFingerprints.has(notification.fingerprint),
+  deliveredFingerprints: ReadonlySet<string>;
+  deliveryAvailable: boolean;
+}): ThreadAttentionNotification[] => {
+  if (!deliveryAvailable) {
+    return [];
+  }
+
+  return nextNotifications.filter(
+    (notification) => !deliveredFingerprints.has(notification.fingerprint),
   );
+};
 
 export const mergeStoredAttentionFingerprints = (
-  seenFingerprints: Iterable<string>,
-  activeFingerprints: Iterable<string>,
+  storedFingerprints: Iterable<string>,
+  nextFingerprints: Iterable<string>,
 ): string[] =>
-  Array.from(new Set([...seenFingerprints, ...activeFingerprints])).slice(
+  Array.from(new Set([...storedFingerprints, ...nextFingerprints])).slice(
     -MAX_STORED_ATTENTION_FINGERPRINTS,
   );
