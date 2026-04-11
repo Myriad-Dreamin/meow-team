@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ClientExceptionReporter } from "@/components/client-exception-reporter";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,10 @@ type RootLayoutProps = Readonly<{
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ClientExceptionReporter />
+        {children}
+      </body>
     </html>
   );
 }
