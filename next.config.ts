@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+import { syncPromptTemplateDeclarationsSync } from "./packages/meow-prompt/src/declaration-sync";
 
 const rootDirectory = path.dirname(fileURLToPath(import.meta.url));
 const meowPromptTurbopackLoader = path.join(
@@ -38,6 +39,12 @@ const resolveTurbopackRoot = (): string => {
     return rootDirectory;
   }
 };
+
+export const syncMeowPromptDeclarationsForNext = (): string[] => {
+  return syncPromptTemplateDeclarationsSync({ rootDirectory });
+};
+
+syncMeowPromptDeclarationsForNext();
 
 const nextConfig: NextConfig = {
   turbopack: {

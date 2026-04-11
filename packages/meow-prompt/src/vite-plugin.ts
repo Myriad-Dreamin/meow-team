@@ -1,12 +1,9 @@
-import { fileURLToPath } from "node:url";
 import { isPromptTemplatePath, normalizePromptTemplatePath } from "./compiler";
 import {
   removePromptTemplateDeclaration,
   syncPromptTemplateDeclarations,
   writePromptTemplateDeclaration,
 } from "./declaration-sync";
-
-const runtimeModulePath = fileURLToPath(new URL("./runtime", import.meta.url));
 
 export const createMeowPromptVitePlugin = () => {
   let rootDirectory = process.cwd();
@@ -18,10 +15,7 @@ export const createMeowPromptVitePlugin = () => {
       rootDirectory = config.root;
     },
     async buildStart() {
-      await syncPromptTemplateDeclarations({
-        rootDirectory,
-        runtimeModulePath,
-      });
+      await syncPromptTemplateDeclarations({ rootDirectory });
     },
     async transform(source: string, id: string) {
       const resourcePath = normalizePromptTemplatePath(id);
@@ -30,11 +24,7 @@ export const createMeowPromptVitePlugin = () => {
         return null;
       }
 
-      const compiledModule = await writePromptTemplateDeclaration(
-        source,
-        resourcePath,
-        runtimeModulePath,
-      );
+      const compiledModule = await writePromptTemplateDeclaration(source, resourcePath);
 
       return {
         code: compiledModule.code,
