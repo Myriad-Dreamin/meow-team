@@ -1,5 +1,7 @@
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type {
+  TeamCodexLogCursorEntry,
+  TeamCodexLogSource,
   TeamHumanFeedbackScope,
   TeamPullRequestStatus,
   TeamThreadStatus,
@@ -32,6 +34,19 @@ export type LaneApprovalAction = {
   errorFallback: string;
 };
 
+export type ThreadLogGroup = {
+  id: string;
+  source: TeamCodexLogSource;
+  contextEntry: TeamCodexLogCursorEntry;
+  startedAt: string;
+  endedAt: string;
+  message: string;
+  preview: string;
+  lineCount: number;
+  startCursor: number;
+  endCursor: number;
+};
+
 export const formatTimestamp = (value: string | null): string => {
   if (!value) {
     return "Not recorded";
@@ -51,6 +66,53 @@ export const formatThreadId = (threadId: string): string => {
 
 export const formatCommitHash = (commitHash: string, length = 12): string => {
   return commitHash.slice(0, length);
+};
+
+export const formatPoolSlot = (workerSlot: number | null): string => {
+  return workerSlot ? `meow-${workerSlot}` : "Waiting for pool";
+};
+
+const compareLanesByFreshness = (
+  left: TeamWorkerLaneRecord,
+  right: TeamWorkerLaneRecord,
+): number => {
+  if (left.updatedAt !== right.updatedAt) {
+    return right.updatedAt.localeCompare(left.updatedAt);
+  }
+
+  if (left.laneIndex !== right.laneIndex) {
+    return right.laneIndex - left.laneIndex;
+  }
+
+  return right.laneId.localeCompare(left.laneId);
+};
+
+const hasMeaningfulLaneHeaderData = (lane: TeamWorkerLaneRecord): boolean => {
+  return Boolean(lane.branchName || lane.pullRequest || lane.pushedCommit);
+};
+
+const isAssignedLane = (lane: TeamWorkerLaneRecord): boolean => {
+  return (
+    lane.status !== "idle" ||
+    lane.taskTitle !== null ||
+    lane.taskObjective !== null ||
+    lane.proposalChangeName !== null ||
+    lane.branchName !== null ||
+    lane.pullRequest !== null ||
+    lane.workerSlot !== null
+  );
+};
+
+export const selectPrimaryLane = (lanes: TeamWorkerLaneRecord[]): TeamWorkerLaneRecord | null => {
+  const meaningfulLane = lanes
+    .filter((lane) => lane.status !== "idle" && hasMeaningfulLaneHeaderData(lane))
+    .sort(compareLanesByFreshness)[0];
+  if (meaningfulLane) {
+    return meaningfulLane;
+  }
+
+  const assignedLane = lanes.filter(isAssignedLane).sort(compareLanesByFreshness)[0];
+  return assignedLane ?? null;
 };
 
 export const getLaneBranchDisplay = (
@@ -177,6 +239,139 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
   }
 
   return lane.latestActivity ?? "Proposal work is active.";
+};
+
+export const describeLogEntryContext = (entry: TeamCodexLogCursorEntry): string => {
+  const parts = [
+    entry.roleId ?? "system",
+    entry.laneId ?? null,
+    entry.assignmentNumber ? `Assignment #${entry.assignmentNumber}` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return parts.join(" | ");
+};
+
+const shareLogContext = (
+  left: TeamCodexLogCursorEntry,
+  right: TeamCodexLogCursorEntry,
+): boolean => {
+  return (
+    left.source === right.source &&
+    left.roleId === right.roleId &&
+    left.laneId === right.laneId &&
+    left.assignmentNumber === right.assignmentNumber
+  );
+};
+
+const summarizeLogPreview = (message: string): string => {
+  const firstLine =
+    message
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) ?? "";
+  if (firstLine.length <= 120) {
+    return firstLine;
+  }
+
+  return `${firstLine.slice(0, 117)}...`;
+};
+
+const mergeLogGroupPair = (left: ThreadLogGroup, right: ThreadLogGroup): ThreadLogGroup => {
+  return {
+    ...left,
+    endedAt: right.endedAt,
+    lineCount: left.lineCount + right.lineCount,
+    message: `${left.message}\n${right.message}`,
+    preview: left.preview,
+    endCursor: right.endCursor,
+  };
+};
+
+export const groupThreadLogEntries = (entries: TeamCodexLogCursorEntry[]): ThreadLogGroup[] => {
+  const groups: ThreadLogGroup[] = [];
+
+  for (const entry of entries) {
+    const previousGroup = groups.at(-1);
+    if (previousGroup && shareLogContext(previousGroup.contextEntry, entry)) {
+      groups[groups.length - 1] = mergeLogGroupPair(previousGroup, {
+        contextEntry: entry,
+        endCursor: entry.endCursor,
+        endedAt: entry.createdAt,
+        id: entry.id,
+        lineCount: 1,
+        message: entry.message,
+        preview: summarizeLogPreview(entry.message),
+        source: entry.source,
+        startCursor: entry.startCursor,
+        startedAt: entry.createdAt,
+      });
+      continue;
+    }
+
+    groups.push({
+      contextEntry: entry,
+      endCursor: entry.endCursor,
+      endedAt: entry.createdAt,
+      id: entry.id,
+      lineCount: 1,
+      message: entry.message,
+      preview: summarizeLogPreview(entry.message),
+      source: entry.source,
+      startCursor: entry.startCursor,
+      startedAt: entry.createdAt,
+    });
+  }
+
+  return groups;
+};
+
+export const mergeThreadLogGroups = (
+  currentGroups: ThreadLogGroup[],
+  nextGroups: ThreadLogGroup[],
+  position: "prepend" | "append",
+): ThreadLogGroup[] => {
+  if (currentGroups.length === 0) {
+    return nextGroups;
+  }
+
+  if (nextGroups.length === 0) {
+    return currentGroups;
+  }
+
+  if (position === "append") {
+    const lastCurrentGroup = currentGroups.at(-1);
+    const firstNextGroup = nextGroups[0];
+
+    if (
+      lastCurrentGroup &&
+      firstNextGroup &&
+      shareLogContext(lastCurrentGroup.contextEntry, firstNextGroup.contextEntry)
+    ) {
+      return [
+        ...currentGroups.slice(0, -1),
+        mergeLogGroupPair(lastCurrentGroup, firstNextGroup),
+        ...nextGroups.slice(1),
+      ];
+    }
+
+    return [...currentGroups, ...nextGroups];
+  }
+
+  const lastNextGroup = nextGroups.at(-1);
+  const firstCurrentGroup = currentGroups[0];
+  if (
+    lastNextGroup &&
+    firstCurrentGroup &&
+    shareLogContext(lastNextGroup.contextEntry, firstCurrentGroup.contextEntry)
+  ) {
+    return [
+      ...nextGroups.slice(0, -1),
+      mergeLogGroupPair(lastNextGroup, firstCurrentGroup),
+      ...currentGroups.slice(1),
+    ];
+  }
+
+  return [...nextGroups, ...currentGroups];
 };
 
 export const getLaneApprovalAction = (lane: TeamWorkerLaneRecord): LaneApprovalAction | null => {
