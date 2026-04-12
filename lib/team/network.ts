@@ -43,7 +43,6 @@ import {
   buildProposalPath,
   materializeAssignmentProposals,
 } from "@/lib/team/openspec";
-import { loadRolePrompt } from "@/lib/team/prompts";
 import {
   buildCanonicalRequestTitle,
   buildDeterministicRequestTitle,
@@ -59,6 +58,9 @@ import {
   resolveTeamRoleDependencies,
   type TeamRoleDependencies,
 } from "@/lib/team/roles/dependencies";
+import { coderRole } from "@/lib/team/roles/coder";
+import { plannerRole } from "@/lib/team/roles/planner";
+import { reviewerRole } from "@/lib/team/roles/reviewer";
 import type {
   TeamCodexEvent,
   TeamCodexLogEntry,
@@ -1372,7 +1374,6 @@ const runFinalArchiveCycle = async ({
     }
 
     if (preArchiveState.sourceExists) {
-      const coderRole = await loadRolePrompt("coder");
       const coderState = buildLaneInitialState({
         repository: assignment.repository,
         lane,
@@ -1384,7 +1385,6 @@ const runFinalArchiveCycle = async ({
         }),
       });
       const coderResponse = await dependencies.coderAgent.run({
-        role: coderRole,
         state: coderState,
         input: buildFinalArchiveInput({
           lane,
@@ -1713,7 +1713,6 @@ const runLaneCycle = async ({
       branchName: lane.branchName,
     });
 
-    const coderRole = await loadRolePrompt("coder");
     const coderState = buildLaneInitialState({
       repository: assignment.repository,
       lane,
@@ -1725,7 +1724,6 @@ const runLaneCycle = async ({
       }),
     });
     const coderResponse = await dependencies.coderAgent.run({
-      role: coderRole,
       state: coderState,
       input:
         lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
@@ -1857,7 +1855,6 @@ const runLaneCycle = async ({
       latestDecision: coderHandoff.decision,
     };
 
-    const reviewerRole = await loadRolePrompt("reviewer");
     const reviewerState = buildLaneInitialState({
       repository: assignment.repository,
       lane: reviewerLane,
@@ -1872,7 +1869,6 @@ const runLaneCycle = async ({
       },
     });
     const reviewerResponse = await dependencies.reviewerAgent.run({
-      role: reviewerRole,
       state: reviewerState,
       input:
         lane.taskObjective ??
@@ -3457,9 +3453,7 @@ const runPlanningStage = async (
     input: args.input,
   });
 
-  const plannerRole = await loadRolePrompt("planner");
   const plannerResponse = await env.deps.plannerAgent.run({
-    role: plannerRole,
     worktreePath: selectedRepository?.path ?? process.cwd(),
     state,
     onEvent: forwardPlannerEvent,

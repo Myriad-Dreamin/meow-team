@@ -4,14 +4,18 @@ import type { TeamStructuredExecutor } from "@/lib/agent/executor";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
-import type { RolePrompt } from "@/lib/team/prompts";
 import {
   describeConventionalTitleMetadata,
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
 import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
 import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
-import { prompt as renderPlannerPrompt, type Args as PlannerPromptArgs } from "./planner.prompt.md";
+import {
+  frontmatter as plannerFrontmatter,
+  prompt as renderPlannerPrompt,
+  type Args as PlannerPromptArgs,
+} from "./planner.prompt.md";
+import { createTeamRoleDefinition } from "./metadata";
 
 const plannerTaskSchema = z.object({
   title: z.string().trim().min(1),
@@ -52,7 +56,6 @@ export type PlannerRoleState = {
 };
 
 export type PlannerRoleInput = {
-  role: RolePrompt;
   worktreePath: string;
   state: PlannerRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
@@ -60,6 +63,12 @@ export type PlannerRoleInput = {
 
 export type PlannerRoleOutput = z.infer<typeof plannerOutputSchema>;
 type PlannerPromptInput = Omit<PlannerRoleInput, "onEvent">;
+
+export const plannerRole = createTeamRoleDefinition({
+  roleId: "planner",
+  filePath: "lib/team/roles/planner.prompt.md",
+  frontmatter: plannerFrontmatter,
+});
 
 const buildLocalSkillReference = (): string => {
   return [
@@ -105,7 +114,7 @@ const buildPlannerRequestContext = (input: PlannerRoleState): string => {
   return sections.join("\n\n");
 };
 
-const buildPlannerPrompt = ({ role, state }: PlannerPromptInput): string => {
+const buildPlannerPrompt = ({ state }: PlannerPromptInput): string => {
   const repositoryContext = state.selectedRepository
     ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
     : "Selected repository: none. Proposal dispatch is blocked until a repository is selected.";
@@ -121,7 +130,6 @@ const buildPlannerPrompt = ({ role, state }: PlannerPromptInput): string => {
     ownerName: state.ownerName,
     repositoryContext,
     requestContext: buildPlannerRequestContext(state),
-    rolePrompt: role.prompt.trim(),
     teamName: state.teamName,
     workerCount: teamConfig.dispatch.workerCount,
     workflow: state.workflow.join(" -> "),

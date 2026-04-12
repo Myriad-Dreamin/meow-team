@@ -1,15 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
-import type { RolePrompt } from "@/lib/team/prompts";
-import { CoderAgent, type CoderRoleOutput } from "@/lib/team/roles/coder";
-
-const coderRolePrompt: RolePrompt = {
-  id: "coder",
-  name: "Coder",
-  summary: "Implement the approved plan.",
-  prompt: "# Coder\n\nImplement the approved plan directly.",
-  filePath: "/tmp/coder.md",
-};
+import { CoderAgent, coderRole, type CoderRoleOutput } from "@/lib/team/roles/coder";
 
 describe("CoderAgent", () => {
   it("renders the extracted template with archive context and role instructions", async () => {
@@ -26,7 +17,6 @@ describe("CoderAgent", () => {
     const agent = new CoderAgent(executor);
 
     await agent.run({
-      role: coderRolePrompt,
       input: "Extract the role prompts into meow-prompt templates.",
       state: {
         repository: {
@@ -56,7 +46,7 @@ describe("CoderAgent", () => {
         },
         planSummary: "Extract the inline lane prompts without changing harness behavior.",
         planDeliverable: "Proposal: Extract harness role prompt templates",
-        conflictNote: "Preserve prompts/roles as the separate system-prompt layer.",
+        conflictNote: "Keep the workflow behavior stable while consolidating prompt ownership.",
         archiveCommand:
           "pnpm exec openspec archive role-prompts-a1-p1-extract-harness-role-prompt-templates --yes",
         archivePathContext: "Archive under openspec/changes/archive after coder validation passes.",
@@ -69,7 +59,12 @@ describe("CoderAgent", () => {
 
     expect(executor).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: expect.stringContaining(coderRolePrompt.prompt.trim()),
+        prompt: expect.stringContaining("# Coder"),
+      }),
+    );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(coderRole.summary),
       }),
     );
     expect(executor).toHaveBeenCalledWith(
