@@ -2,7 +2,11 @@
 
 import { startTransition, useEffect, useState } from "react";
 import { ThreadDetailTimeline } from "@/components/thread-detail-timeline";
-import type { LaneApprovalAction } from "@/components/thread-view-utils";
+import {
+  canArchiveThread,
+  formatTimestamp,
+  type LaneApprovalAction,
+} from "@/components/thread-view-utils";
 import type { TeamThreadDetail, TeamThreadSummary } from "@/lib/team/history";
 import type { TeamHumanFeedbackScope } from "@/lib/team/types";
 
@@ -87,6 +91,7 @@ export function ThreadDetailPanel({
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [approvalKey, setApprovalKey] = useState<string | null>(null);
+  const [archivePending, setArchivePending] = useState(false);
   const [feedbackKey, setFeedbackKey] = useState<string | null>(null);
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({});
 
@@ -135,6 +140,8 @@ export function ThreadDetailPanel({
   }, [threadId]);
 
   const thread = detail?.summary ?? initialSummary;
+  const isThreadArchived = Boolean(thread?.archivedAt);
+  const archiveEnabled = thread ? canArchiveThread(thread) : false;
 
   const refreshAll = async () => {
     const [nextDetail] = await Promise.all([
@@ -183,6 +190,40 @@ export function ThreadDetailPanel({
           setActionNotice(null);
         } finally {
           setApprovalKey((current) => (current === nextApprovalKey ? null : current));
+        }
+      })();
+    });
+  };
+
+  const handleArchive = () => {
+    if (!thread || !archiveEnabled) {
+      return;
+    }
+
+    startTransition(() => {
+      setArchivePending(true);
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/team/threads/${encodeURIComponent(threadId)}/archive`,
+            {
+              method: "POST",
+            },
+          );
+          const rawPayload = await response.text();
+          const payload = tryParseJson(rawPayload);
+
+          if (!response.ok) {
+            throw new Error(readErrorMessage(payload) ?? "Unable to archive this thread.");
+          }
+
+          await refreshAll();
+          setActionNotice("Thread archived. It now appears in Archived Threads.");
+        } catch (error) {
+          setRefreshError(error instanceof Error ? error.message : "Unable to archive this thread.");
+          setActionNotice(null);
+        } finally {
+          setArchivePending(false);
         }
       })();
     });
@@ -261,7 +302,7 @@ export function ThreadDetailPanel({
     return (
       <section className="thread-detail-panel">
         <div className="section-header compact">
-          <p className="eyebrow">Living Thread</p>
+          <p className="eyebrow">Thread</p>
           <h2>Thread Not Found</h2>
           <p className="section-copy">
             This thread is no longer available in local storage. Pick another tab or start a new
@@ -277,6 +318,34 @@ export function ThreadDetailPanel({
       {actionNotice ? <p className="info-callout">{actionNotice}</p> : null}
       {refreshError ? <p className="error-callout">{refreshError}</p> : null}
       {thread.lastError ? <p className="error-callout">{thread.lastError}</p> : null}
+
+      <section className="thread-detail-actions">
+        <div className="thread-detail-actions-copy">
+          <p className="workspace-notification-label">Thread Visibility</p>
+          <p className="workspace-notification-copy">
+            {isThreadArchived
+              ? `Archived ${formatTimestamp(thread.archivedAt)}. This thread stays available from Archived Threads.`
+              : archiveEnabled
+                ? "Archive hides this inactive thread from Living Threads and moves it into Archived Threads."
+                : "Only inactive threads can be archived. Active planning, coding, and approval flows stay in Living Threads."}
+          </p>
+        </div>
+
+        {isThreadArchived ? (
+          <span className="status-pill status-completed">Archived</span>
+        ) : archiveEnabled ? (
+          <button
+            className="workspace-notification-action"
+            disabled={archivePending}
+            type="button"
+            onClick={handleArchive}
+          >
+            {archivePending ? "Archiving..." : "Archive Thread"}
+          </button>
+        ) : (
+          <p className="thread-detail-action-note">Archive becomes available after the thread is inactive.</p>
+        )}
+      </section>
 
       <ThreadDetailTimeline
         approvalKey={approvalKey}

@@ -160,9 +160,6 @@ const buildLaneEventAnchorId = (
   eventId: string,
 ): string => `thread-anchor-assignment-${assignmentNumber}-${laneId}-event-${eventId}`;
 
-const buildLaneAnchorKey = (assignmentNumber: number, laneId: string): string =>
-  `${assignmentNumber}:${laneId}`;
-
 const EMPTY_PAGE_INFO: TeamCodexLogPageInfo = {
   beforeCursor: null,
   afterCursor: null,

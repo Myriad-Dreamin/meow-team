@@ -47,6 +47,7 @@ const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSum
   threadId: "thread-12345678",
   assignmentNumber: 1,
   status: "running",
+  archivedAt: null,
   requestTitle: "Desktop attention alerts",
   requestText: "Add desktop attention alerts.",
   latestInput: "Add desktop attention alerts.",

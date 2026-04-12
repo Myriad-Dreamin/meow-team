@@ -108,12 +108,14 @@ export const buildThreadRepositoryGroups = (
 };
 
 export const formatThreadSidebarMetadata = (
-  thread: Pick<TeamThreadSummary, "threadId" | "status" | "updatedAt">,
+  thread: Pick<TeamThreadSummary, "threadId" | "status" | "updatedAt" | "archivedAt">,
 ): ThreadSidebarMetadata => {
   return {
     statusClassName: `status-${thread.status}`,
     statusLabel: threadStatusLabels[thread.status],
     threadLine: `Thread ${formatThreadId(thread.threadId)}`,
-    updatedLine: `Updated ${formatTimestamp(thread.updatedAt)}`,
+    updatedLine: thread.archivedAt
+      ? `Archived ${formatTimestamp(thread.archivedAt)}`
+      : `Updated ${formatTimestamp(thread.updatedAt)}`,
   };
 };

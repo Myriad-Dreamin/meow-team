@@ -167,6 +167,17 @@ export const canRestartPlanning = (thread: TeamThreadSummary): boolean => {
   );
 };
 
+export const canArchiveThread = (thread: TeamThreadSummary): boolean => {
+  return (
+    !thread.archivedAt &&
+    thread.latestAssignmentStatus !== "approved" &&
+    (thread.status === "completed" ||
+      thread.status === "approved" ||
+      thread.status === "needs_revision" ||
+      thread.status === "failed")
+  );
+};
+
 export const describeThreadProgress = (thread: TeamThreadSummary): string => {
   if (thread.lastError) {
     return thread.lastError;

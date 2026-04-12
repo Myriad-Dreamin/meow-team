@@ -7,6 +7,7 @@ import {
   buildThreadRepositoryGroups,
   formatThreadSidebarMetadata,
   getThreadRepositoryGroupKey,
+  type ThreadRepositoryGroup,
 } from "@/components/team-workspace-sidebar";
 import {
   collectThreadAttentionNotifications,
@@ -21,6 +22,7 @@ import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
 
 type TeamWorkspaceProps = {
   disabled: boolean;
+  initialArchivedThreads: TeamThreadSummary[];
   initialPrompt: string;
   initialLogThreadId: string | null;
   initialRepositoryPicker: TeamRepositoryPickerModel;
@@ -45,6 +47,7 @@ type SelectedTab =
     };
 
 type TeamWorkspaceResponse = {
+  archivedThreads: TeamThreadSummary[];
   threads: TeamThreadSummary[];
   repositoryPicker: TeamRepositoryPickerModel;
 };
@@ -127,6 +130,7 @@ const isRepositoryPickerModel = (value: unknown): value is TeamRepositoryPickerM
 const isWorkspaceResponse = (value: unknown): value is TeamWorkspaceResponse => {
   return (
     isRecord(value) &&
+    Array.isArray(value.archivedThreads) &&
     Array.isArray(value.threads) &&
     isRepositoryPickerModel(value.repositoryPicker)
   );
@@ -178,7 +182,7 @@ const fetchWorkspaceState = async (): Promise<TeamWorkspaceResponse> => {
   const payload = tryParseJson(rawPayload);
 
   if (!response.ok || !isWorkspaceResponse(payload)) {
-    throw new Error("Unable to refresh living threads.");
+    throw new Error("Unable to refresh workspace threads.");
   }
 
   return payload;
@@ -210,8 +214,16 @@ const parseStoredSelectedTab = (value: string | null): SelectedTab | null => {
   return null;
 };
 
+const getScopedThreadGroupKey = (
+  scope: "living" | "archived",
+  thread: Pick<TeamThreadSummary, "repository">,
+): string => {
+  return `${scope}:${getThreadRepositoryGroupKey(thread)}`;
+};
+
 export function TeamWorkspace({
   disabled,
+  initialArchivedThreads,
   initialPrompt,
   initialLogThreadId,
   initialRepositoryPicker,
@@ -219,6 +231,7 @@ export function TeamWorkspace({
   workerCount,
 }: TeamWorkspaceProps) {
   const [threads, setThreads] = useState(initialThreads);
+  const [archivedThreads, setArchivedThreads] = useState(initialArchivedThreads);
   const [repositoryPicker, setRepositoryPicker] = useState(initialRepositoryPicker);
   const [selectedTab, setSelectedTab] = useState<SelectedTab>(() => {
     if (typeof window === "undefined") {
@@ -232,6 +245,7 @@ export function TeamWorkspace({
     );
   });
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [showArchivedThreads, setShowArchivedThreads] = useState(false);
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(() =>
     readStoredNotificationPreference(),
   );
@@ -253,6 +267,7 @@ export function TeamWorkspace({
       try {
         const nextState = await fetchWorkspaceState();
         if (!isCancelled) {
+          setArchivedThreads(nextState.archivedThreads);
           setThreads(nextState.threads);
           setRepositoryPicker(nextState.repositoryPicker);
           setRefreshError(null);
@@ -260,7 +275,7 @@ export function TeamWorkspace({
       } catch (error) {
         if (!isCancelled) {
           setRefreshError(
-            error instanceof Error ? error.message : "Unable to refresh living threads.",
+            error instanceof Error ? error.message : "Unable to refresh workspace threads.",
           );
         }
       }
@@ -279,9 +294,12 @@ export function TeamWorkspace({
     };
   }, []);
 
+  const selectedThreadStillExists =
+    selectedTab.type !== "thread" ||
+    threads.some((thread) => thread.threadId === selectedTab.threadId) ||
+    archivedThreads.some((thread) => thread.threadId === selectedTab.threadId);
   const resolvedSelectedTab =
-    selectedTab.type === "thread" &&
-    !threads.some((thread) => thread.threadId === selectedTab.threadId)
+    selectedTab.type === "thread" && !selectedThreadStillExists
       ? ({ type: "run" } as const)
       : selectedTab;
   const persistedSelectedTab = serializeSelectedTab(resolvedSelectedTab);
@@ -362,12 +380,21 @@ export function TeamWorkspace({
     persistDeliveredAttentionFingerprints(nextDeliveredFingerprints);
   }, [desktopNotificationsEnabled, notificationPermission, threads]);
 
-  const activeThread =
+  const selectedLivingThread =
     resolvedSelectedTab.type === "thread"
       ? (threads.find((thread) => thread.threadId === resolvedSelectedTab.threadId) ?? null)
       : null;
-  const activeThreadGroupKey = activeThread ? getThreadRepositoryGroupKey(activeThread) : null;
+  const selectedArchivedThread =
+    resolvedSelectedTab.type === "thread"
+      ? (archivedThreads.find((thread) => thread.threadId === resolvedSelectedTab.threadId) ?? null)
+      : null;
+  const isArchivedThreadsRevealed = showArchivedThreads || Boolean(selectedArchivedThread);
+  const activeThread = selectedLivingThread ?? selectedArchivedThread;
+  const activeThreadGroupKey = activeThread
+    ? getScopedThreadGroupKey(selectedArchivedThread ? "archived" : "living", activeThread)
+    : null;
   const threadGroups = buildThreadRepositoryGroups(threads);
+  const archivedThreadGroups = buildThreadRepositoryGroups(archivedThreads);
 
   const handleEnableDesktopNotifications = () => {
     if (!isNotificationSupported()) {
@@ -492,6 +519,12 @@ export function TeamWorkspace({
     });
   };
 
+  const handleToggleArchivedThreads = () => {
+    startTransition(() => {
+      setShowArchivedThreads((current) => !current);
+    });
+  };
+
   const handleToggleThreadGroup = (groupKey: string) => {
     setCollapsedThreadGroupKeys((current) => {
       const next = new Set(current);
@@ -507,9 +540,92 @@ export function TeamWorkspace({
 
   const handleRefreshThreads = async () => {
     const nextState = await fetchWorkspaceState();
+    setArchivedThreads(nextState.archivedThreads);
     setThreads(nextState.threads);
     setRepositoryPicker(nextState.repositoryPicker);
     setRefreshError(null);
+  };
+
+  const renderThreadGroupList = ({
+    emptyState,
+    groups,
+    scope,
+  }: {
+    emptyState: string;
+    groups: ThreadRepositoryGroup[];
+    scope: "living" | "archived";
+  }) => {
+    if (groups.length === 0) {
+      return <p className="workspace-empty-state">{emptyState}</p>;
+    }
+
+    return (
+      <div className="workspace-thread-group-list">
+        {groups.map((group) => {
+          const scopedGroupKey = `${scope}:${group.key}`;
+          const groupPanelId = `workspace-thread-group-${scope}-${encodeURIComponent(group.key)}`;
+          const isGroupCollapsed =
+            collapsedThreadGroupKeys.has(scopedGroupKey) && scopedGroupKey !== activeThreadGroupKey;
+
+          return (
+            <section className="workspace-repository-group" key={scopedGroupKey}>
+              <div className="workspace-repository-group-head">
+                <button
+                  aria-controls={groupPanelId}
+                  aria-expanded={!isGroupCollapsed}
+                  className="workspace-repository-group-toggle"
+                  type="button"
+                  onClick={() => handleToggleThreadGroup(scopedGroupKey)}
+                >
+                  <ChevronIcon
+                    className={`workspace-repository-group-chevron ${isGroupCollapsed ? "workspace-repository-group-chevron-collapsed" : ""}`}
+                  />
+                  <div className="workspace-repository-group-copy">
+                    <p className="workspace-repository-group-title">{group.title}</p>
+                    <p className="workspace-repository-group-path">{group.description}</p>
+                  </div>
+                </button>
+                <span className="workspace-tab-group-count">{group.threads.length}</span>
+              </div>
+
+              {!isGroupCollapsed ? (
+                <div className="workspace-thread-tab-list" id={groupPanelId}>
+                  {group.threads.map((thread) => {
+                    const sidebarMetadata = formatThreadSidebarMetadata(thread);
+
+                    return (
+                      <button
+                        className={`workspace-tab-button ${resolvedSelectedTab.type === "thread" && resolvedSelectedTab.threadId === thread.threadId ? "workspace-tab-button-active" : ""}`}
+                        key={thread.threadId}
+                        type="button"
+                        onClick={() => handleSelectThreadTab(thread.threadId)}
+                      >
+                        <div className="workspace-thread-tab-body">
+                          <span className="workspace-tab-label">{thread.requestTitle}</span>
+                          <span className="workspace-thread-tab-meta-row">
+                            <span className="workspace-thread-tab-meta">
+                              {sidebarMetadata.threadLine}
+                            </span>
+                            <span
+                              className={`workspace-thread-tab-status ${sidebarMetadata.statusClassName}`}
+                            >
+                              {sidebarMetadata.statusLabel}
+                            </span>
+                          </span>
+                          <span className="workspace-thread-tab-meta">
+                            {sidebarMetadata.updatedLine}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </section>
+          );
+        })}
+      </div>
+    );
   };
 
   return (
@@ -537,77 +653,29 @@ export function TeamWorkspace({
               </button>
             </div>
 
-            {threads.length > 0 ? (
-              <div className="workspace-thread-group-list">
-                {threadGroups.map((group) => {
-                  const groupPanelId = `workspace-thread-group-${encodeURIComponent(group.key)}`;
-                  const isGroupCollapsed =
-                    collapsedThreadGroupKeys.has(group.key) && group.key !== activeThreadGroupKey;
-
-                  return (
-                    <section className="workspace-repository-group" key={group.key}>
-                      <div className="workspace-repository-group-head">
-                        <button
-                          aria-controls={groupPanelId}
-                          aria-expanded={!isGroupCollapsed}
-                          className="workspace-repository-group-toggle"
-                          type="button"
-                          onClick={() => handleToggleThreadGroup(group.key)}
-                        >
-                          <ChevronIcon
-                            className={`workspace-repository-group-chevron ${isGroupCollapsed ? "workspace-repository-group-chevron-collapsed" : ""}`}
-                          />
-                          <div className="workspace-repository-group-copy">
-                            <p className="workspace-repository-group-title">{group.title}</p>
-                            <p className="workspace-repository-group-path">{group.description}</p>
-                          </div>
-                        </button>
-                        <span className="workspace-tab-group-count">{group.threads.length}</span>
-                      </div>
-
-                      {!isGroupCollapsed ? (
-                        <div className="workspace-thread-tab-list" id={groupPanelId}>
-                          {group.threads.map((thread) => {
-                            const sidebarMetadata = formatThreadSidebarMetadata(thread);
-
-                            return (
-                              <button
-                                className={`workspace-tab-button ${resolvedSelectedTab.type === "thread" && resolvedSelectedTab.threadId === thread.threadId ? "workspace-tab-button-active" : ""}`}
-                                key={thread.threadId}
-                                type="button"
-                                onClick={() => handleSelectThreadTab(thread.threadId)}
-                              >
-                                <div className="workspace-thread-tab-body">
-                                  <span className="workspace-tab-label">{thread.requestTitle}</span>
-                                  <span className="workspace-thread-tab-meta-row">
-                                    <span className="workspace-thread-tab-meta">
-                                      {sidebarMetadata.threadLine}
-                                    </span>
-                                    <span
-                                      className={`workspace-thread-tab-status ${sidebarMetadata.statusClassName}`}
-                                    >
-                                      {sidebarMetadata.statusLabel}
-                                    </span>
-                                  </span>
-                                  <span className="workspace-thread-tab-meta">
-                                    {sidebarMetadata.updatedLine}
-                                  </span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </section>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="workspace-empty-state">
-                No living threads yet. Use the + action to create the first request.
-              </p>
-            )}
+            {renderThreadGroupList({
+              emptyState: "No living threads yet. Use the + action to create the first request.",
+              groups: threadGroups,
+              scope: "living",
+            })}
           </div>
+
+          {isArchivedThreadsRevealed ? (
+            <div className="workspace-tab-group">
+              <div className="workspace-tab-group-head">
+                <div className="workspace-tab-group-heading">
+                  <p className="workspace-tab-group-label">Archived Threads</p>
+                </div>
+                <span className="workspace-tab-group-count">{archivedThreads.length}</span>
+              </div>
+
+              {renderThreadGroupList({
+                emptyState: "No archived threads yet.",
+                groups: archivedThreadGroups,
+                scope: "archived",
+              })}
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -637,6 +705,9 @@ export function TeamWorkspace({
                 <span className={`status-pill status-${activeThread.status}`}>
                   {threadStatusLabels[activeThread.status]}
                 </span>
+                {activeThread.archivedAt ? (
+                  <span className="status-pill status-completed">Archived</span>
+                ) : null}
                 <span>Thread {formatThreadId(activeThread.threadId)}</span>
                 <span>{activeThread.repository?.name ?? "No repository selected"}</span>
               </div>
@@ -709,7 +780,7 @@ export function TeamWorkspace({
           ) : (
             <section className="thread-detail-panel">
               <div className="section-header compact">
-                <p className="eyebrow">Living Thread</p>
+                <p className="eyebrow">Thread</p>
                 <h2>Thread Not Available</h2>
                 <p className="section-copy">
                   The selected thread could not be found in the latest thread summary list.
@@ -721,7 +792,9 @@ export function TeamWorkspace({
       </div>
 
       <TeamStatusBar
+        isArchivedThreadsRevealed={isArchivedThreadsRevealed}
         isSettingsSelected={resolvedSelectedTab.type === "settings"}
+        onToggleArchivedThreads={handleToggleArchivedThreads}
         onSelectSettings={handleSelectSettingsTab}
       />
     </section>

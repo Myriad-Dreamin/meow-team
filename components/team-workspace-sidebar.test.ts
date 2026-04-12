@@ -23,6 +23,7 @@ const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSum
   threadId: "1234567890abcdef",
   assignmentNumber: 1,
   status: "running",
+  archivedAt: null,
   requestTitle: "Alpha Thread",
   requestText: "Ship the alpha thread.",
   latestInput: "Ship the alpha thread.",
@@ -141,6 +142,22 @@ describe("formatThreadSidebarMetadata", () => {
       statusLabel: "Awaiting Proposal Approval",
       threadLine: "Thread abcdef12",
       updatedLine: `Updated ${formatTimestamp(FIXED_TIMESTAMP)}`,
+    });
+  });
+
+  it("switches the last metadata line to Archived once a thread is archived", () => {
+    expect(
+      formatThreadSidebarMetadata(
+        createThread({
+          archivedAt: FIXED_TIMESTAMP,
+          updatedAt: "2026-04-12T11:00:00.000Z",
+        }),
+      ),
+    ).toEqual({
+      statusClassName: "status-running",
+      statusLabel: "Coding / Reviewing",
+      threadLine: "Thread 12345678",
+      updatedLine: `Archived ${formatTimestamp(FIXED_TIMESTAMP)}`,
     });
   });
 });

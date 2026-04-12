@@ -13,9 +13,9 @@ Returns a fully expanded thread record for one thread ID.
 
 ## Path parameters
 
-| Name       | Type   | Required | Notes                                                                                             |
-| ---------- | ------ | -------- | ------------------------------------------------------------------------------------------------- |
-| `threadId` | string | Yes      | Taken from the route segment and used to refresh pending dispatch work before loading the record. |
+| Name       | Type   | Required | Notes                                                                                                                                                           |
+| ---------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `threadId` | string | Yes      | Taken from the route segment and used to load the stored thread detail. Living threads refresh pending dispatch work first; archived threads are read directly. |
 
 ## Success response
 
@@ -41,6 +41,10 @@ top-level sections:
 | `steps`               | Planner and execution step history.        |
 | `handoffs`            | Ordered role handoffs across the workflow. |
 | `dispatchAssignments` | Assignment history, newest first.          |
+
+Archived threads continue to load through this route so archived detail polling
+stays stable after the thread disappears from the living sidebar. When a thread
+is archived, `thread.summary.archivedAt` contains the archive timestamp.
 
 ## Failure modes
 
