@@ -16,13 +16,14 @@ import {
 } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
 
 type TeamWorkspaceProps = {
   disabled: boolean;
   initialPrompt: string;
   initialLogThreadId: string | null;
+  initialRepositoryPicker: TeamRepositoryPickerModel;
   initialThreads: TeamThreadSummary[];
-  repositories: TeamRepositoryOption[];
   workerCount: number;
 };
 
@@ -42,8 +43,9 @@ type SelectedTab =
       threadId: string;
     };
 
-type TeamThreadsResponse = {
+type TeamWorkspaceResponse = {
   threads: TeamThreadSummary[];
+  repositoryPicker: TeamRepositoryPickerModel;
 };
 
 type ThreadRepositoryGroup = {
@@ -90,8 +92,32 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null;
 };
 
-const isThreadsResponse = (value: unknown): value is TeamThreadsResponse => {
-  return isRecord(value) && Array.isArray(value.threads);
+const isRepositoryOption = (value: unknown): value is TeamRepositoryOption => {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.rootId === "string" &&
+    typeof value.rootLabel === "string" &&
+    typeof value.path === "string" &&
+    typeof value.relativePath === "string"
+  );
+};
+
+const isRepositoryPickerModel = (value: unknown): value is TeamRepositoryPickerModel => {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.suggestedRepositories) &&
+    value.suggestedRepositories.every(isRepositoryOption) &&
+    Array.isArray(value.remainingRepositories) &&
+    value.remainingRepositories.every(isRepositoryOption) &&
+    Array.isArray(value.orderedRepositories) &&
+    value.orderedRepositories.every(isRepositoryOption)
+  );
+};
+
+const isWorkspaceResponse = (value: unknown): value is TeamWorkspaceResponse => {
+  return isRecord(value) && Array.isArray(value.threads) && isRepositoryPickerModel(value.repositoryPicker);
 };
 
 const isNotificationSupported = (): boolean =>
@@ -132,18 +158,18 @@ const persistDeliveredAttentionFingerprints = (fingerprints: Iterable<string>) =
   );
 };
 
-const fetchThreads = async (): Promise<TeamThreadSummary[]> => {
+const fetchWorkspaceState = async (): Promise<TeamWorkspaceResponse> => {
   const response = await fetch("/api/team/threads", {
     cache: "no-store",
   });
   const rawPayload = await response.text();
   const payload = tryParseJson(rawPayload);
 
-  if (!response.ok || !isThreadsResponse(payload)) {
+  if (!response.ok || !isWorkspaceResponse(payload)) {
     throw new Error("Unable to refresh living threads.");
   }
 
-  return payload.threads;
+  return payload;
 };
 
 const serializeSelectedTab = (tab: SelectedTab): string => {
@@ -208,11 +234,12 @@ export function TeamWorkspace({
   disabled,
   initialPrompt,
   initialLogThreadId,
+  initialRepositoryPicker,
   initialThreads,
-  repositories,
   workerCount,
 }: TeamWorkspaceProps) {
   const [threads, setThreads] = useState(initialThreads);
+  const [repositoryPicker, setRepositoryPicker] = useState(initialRepositoryPicker);
   const [selectedTab, setSelectedTab] = useState<SelectedTab>(() => {
     if (typeof window === "undefined") {
       return { type: "run" };
@@ -241,9 +268,10 @@ export function TeamWorkspace({
 
     const load = async () => {
       try {
-        const nextThreads = await fetchThreads();
+        const nextState = await fetchWorkspaceState();
         if (!isCancelled) {
-          setThreads(nextThreads);
+          setThreads(nextState.threads);
+          setRepositoryPicker(nextState.repositoryPicker);
           setRefreshError(null);
         }
       } catch (error) {
@@ -481,8 +509,9 @@ export function TeamWorkspace({
   };
 
   const handleRefreshThreads = async () => {
-    const nextThreads = await fetchThreads();
-    setThreads(nextThreads);
+    const nextState = await fetchWorkspaceState();
+    setThreads(nextState.threads);
+    setRepositoryPicker(nextState.repositoryPicker);
     setRefreshError(null);
   };
 
@@ -624,7 +653,7 @@ export function TeamWorkspace({
               onThreadActivity={() => {
                 void handleRefreshThreads();
               }}
-              repositories={repositories}
+              repositoryPicker={repositoryPicker}
               workerCount={workerCount}
             />
           ) : resolvedSelectedTab.type === "settings" ? (

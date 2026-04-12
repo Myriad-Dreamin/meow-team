@@ -3,10 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  getTeamRepositoryPickerModel,
   getTeamThreadRecord,
   getTeamWorkspaceStatusSnapshot,
   updateTeamThreadRecord,
 } from "@/lib/team/history";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/network";
 import {
   resetTeamThreadStorageStateCacheForTests,
@@ -45,6 +47,17 @@ const createRunState = (): TeamRunState => {
     requestText: "Implement the request.",
     latestInput: "Implement the request.",
     forceReset: false,
+  };
+};
+
+const createRepository = (id: string): TeamRepositoryOption => {
+  return {
+    id,
+    name: id.split(":").at(-1) ?? id,
+    rootId: "workspace",
+    rootLabel: "Workspace",
+    path: `/repos/${id}`,
+    relativePath: id.split(":").at(-1) ?? ".",
   };
 };
 
@@ -95,22 +108,26 @@ const createLane = ({
 
 const createAssignment = ({
   lanes,
+  repository = null,
   status,
+  timestamp = FIXED_TIMESTAMP,
 }: {
   lanes: TeamWorkerLaneRecord[];
+  repository?: TeamRepositoryOption | null;
   status: TeamDispatchAssignment["status"];
+  timestamp?: string;
 }): TeamDispatchAssignment => {
   return {
     assignmentNumber: 1,
     status,
-    repository: null,
+    repository,
     requestTitle: "Request",
     conventionalTitle: null,
     requestText: "Implement the request.",
-    requestedAt: FIXED_TIMESTAMP,
-    startedAt: FIXED_TIMESTAMP,
-    finishedAt: status === "approved" ? FIXED_TIMESTAMP : null,
-    updatedAt: FIXED_TIMESTAMP,
+    requestedAt: timestamp,
+    startedAt: timestamp,
+    finishedAt: status === "approved" ? timestamp : null,
+    updatedAt: timestamp,
     plannerSummary: null,
     plannerDeliverable: null,
     branchPrefix: null,
@@ -129,32 +146,39 @@ const createStoredThread = ({
   threadId,
   status,
   dispatchAssignments = [],
+  repository = null,
+  timestamp = FIXED_TIMESTAMP,
 }: {
   threadId: string;
   status: TeamThreadStatus;
   dispatchAssignments?: TeamDispatchAssignment[];
+  repository?: TeamRepositoryOption | null;
+  timestamp?: string;
 }) => {
+  const state = createRunState();
+  state.selectedRepository = repository;
+
   return {
     threadId,
-    data: createRunState(),
+    data: state,
     results: [],
     userMessages: [
       {
         id: `${threadId}-message`,
         role: "user" as const,
         content: "Implement the request.",
-        timestamp: FIXED_TIMESTAMP,
+        timestamp,
       },
     ],
     dispatchAssignments,
     run: {
       status,
-      startedAt: FIXED_TIMESTAMP,
-      finishedAt: status === "approved" ? FIXED_TIMESTAMP : null,
+      startedAt: timestamp,
+      finishedAt: status === "approved" ? timestamp : null,
       lastError: null,
     },
-    createdAt: FIXED_TIMESTAMP,
-    updatedAt: FIXED_TIMESTAMP,
+    createdAt: timestamp,
+    updatedAt: timestamp,
   };
 };
 
@@ -399,5 +423,72 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
 
     expect(thread?.dispatchAssignments[0]?.status).toBe("completed");
     expect(thread?.run?.status).toBe("completed");
+  });
+});
+
+describe("getTeamRepositoryPickerModel", () => {
+  it("reads the full stored history instead of only the latest thread summary window", async () => {
+    const storePath = path.join(
+      os.tmpdir(),
+      `team-history-repository-picker-${crypto.randomUUID()}.json`,
+    );
+    trackTemporaryStore(storePath);
+
+    const alphaRepository = createRepository("workspace:alpha");
+    const betaRepository = createRepository("workspace:beta");
+    const gammaRepository = createRepository("workspace:gamma");
+
+    const alphaThreads = Array.from({ length: 24 }, (_, index) => {
+      const threadId = `alpha-${index + 1}`;
+      const day = String(24 - index).padStart(2, "0");
+
+      return [
+        threadId,
+        createStoredThread({
+          threadId,
+          status: "completed",
+          repository: alphaRepository,
+          timestamp: `2026-04-${day}T08:00:00.000Z`,
+        }),
+      ] as const;
+    });
+
+    await fs.writeFile(
+      storePath,
+      JSON.stringify(
+        {
+          threads: Object.fromEntries([
+            ...alphaThreads,
+            [
+              "beta-history-thread",
+              createStoredThread({
+                threadId: "beta-history-thread",
+                status: "completed",
+                repository: betaRepository,
+                timestamp: "2026-03-31T08:00:00.000Z",
+              }),
+            ],
+          ]),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const picker = await getTeamRepositoryPickerModel({
+      threadFile: storePath,
+      repositories: [alphaRepository, betaRepository, gammaRepository],
+    });
+
+    expect(picker.suggestedRepositories.map((repository) => repository.id)).toEqual([
+      alphaRepository.id,
+      betaRepository.id,
+    ]);
+    expect(picker.orderedRepositories.map((repository) => repository.id)).toEqual([
+      alphaRepository.id,
+      betaRepository.id,
+      gammaRepository.id,
+    ]);
   });
 });

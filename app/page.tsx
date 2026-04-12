@@ -1,5 +1,5 @@
 import { TeamWorkspace } from "@/components/team-workspace";
-import { listTeamThreadSummaries } from "@/lib/team/history";
+import { getTeamRepositoryPickerModel, listTeamThreadSummaries } from "@/lib/team/history";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
 import { getTeamServerState } from "@/lib/team/server-state";
 import { teamConfig } from "@/team.config";
@@ -13,6 +13,10 @@ export default async function HomePage() {
     listConfiguredRepositories(teamConfig),
     listTeamThreadSummaries(serverState.threadStorage),
   ]);
+  const repositoryPicker = await getTeamRepositoryPickerModel({
+    threadFile: serverState.threadStorage,
+    repositories: availableRepositories,
+  });
 
   const hasApiKey = teamRuntimeConfig.hasApiKey;
 
@@ -24,8 +28,8 @@ export default async function HomePage() {
           "Create multiple implementation proposals for a new onboarding flow, wait for human approval, and then queue coding plus machine review for the approved proposals."
         }
         initialLogThreadId={threadSummaries[0]?.threadId ?? null}
+        initialRepositoryPicker={repositoryPicker}
         initialThreads={threadSummaries}
-        repositories={availableRepositories}
         workerCount={teamConfig.dispatch.workerCount}
       />
     </main>
