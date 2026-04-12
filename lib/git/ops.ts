@@ -523,12 +523,14 @@ type GitHubPullRequestView = {
   number: number;
   url: string;
   state: "OPEN" | "CLOSED" | "MERGED";
+  isDraft: boolean;
 };
 
 const gitHubPullRequestViewSchema = z.object({
   number: z.number().int().positive(),
   url: z.string().trim().min(1),
   state: z.enum(["OPEN", "CLOSED", "MERGED"]),
+  isDraft: z.boolean().optional().default(false),
 });
 
 const listGitHubPullRequests = async ({
@@ -554,7 +556,7 @@ const listGitHubPullRequests = async ({
     "--state",
     "all",
     "--json",
-    "number,url,state",
+    "number,url,state,isDraft",
   ]);
 
   return z.array(gitHubPullRequestViewSchema).parse(JSON.parse(stdout || "[]"));
@@ -566,6 +568,7 @@ export const createOrUpdateGitHubPullRequest = async ({
   baseBranch,
   title,
   body,
+  draft = false,
   remoteName = DEFAULT_PUSH_REMOTE_NAME,
 }: {
   repositoryPath: string;
@@ -573,6 +576,7 @@ export const createOrUpdateGitHubPullRequest = async ({
   baseBranch: string;
   title: string;
   body: string;
+  draft?: boolean;
   remoteName?: string;
 }): Promise<{
   url: string;
@@ -643,6 +647,16 @@ export const createOrUpdateGitHubPullRequest = async ({
       baseBranch,
     ]);
 
+    if (!draft && existingPullRequest.isDraft) {
+      await runGh(repositoryPath, [
+        "pr",
+        "ready",
+        existingPullRequest.number.toString(),
+        "--repo",
+        baseRepositorySlug,
+      ]);
+    }
+
     const refreshedPullRequest = (
       await listGitHubPullRequests({
         repositoryPath,
@@ -676,6 +690,7 @@ export const createOrUpdateGitHubPullRequest = async ({
     title,
     "--body",
     body,
+    ...(draft ? ["--draft"] : []),
   ]);
 
   const createdPullRequest = (

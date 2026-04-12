@@ -23,7 +23,7 @@ export const pullRequestStatusLabels: Record<TeamPullRequestStatus, string> = {
   awaiting_human_approval: "Awaiting Final Approval",
   approved: "GitHub PR Ready",
   conflict: "Conflict",
-  failed: "Finalization Failed",
+  failed: "PR Sync Failed",
 };
 
 export type LaneApprovalAction = {
@@ -202,6 +202,13 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
   }
 
   if (lane.status === "awaiting_human_approval") {
+    if (lane.pullRequest?.status === "failed") {
+      return (
+        lane.latestActivity ??
+        "Draft PR setup failed before coding could be queued. Retry the proposal approval after fixing GitHub access."
+      );
+    }
+
     return "Planner proposed this work and is waiting for human approval before coding and review begin.";
   }
 
@@ -221,7 +228,7 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
     if (lane.pullRequest?.status === "awaiting_human_approval") {
       return lane.pullRequest.humanApprovedAt
         ? "Final human approval was recorded. The dedicated archive continuation is preparing the archived OpenSpec change and GitHub PR."
-        : "Coding and machine review are complete. Human approval can now archive this OpenSpec change and open or refresh the GitHub PR.";
+        : "Coding, machine review, and GitHub PR prep are complete. Human approval can now archive this OpenSpec change and refresh the existing GitHub PR.";
     }
 
     if (lane.pullRequest?.status === "approved") {
@@ -231,7 +238,7 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
     if (lane.pullRequest?.status === "failed") {
       return (
         lane.latestActivity ??
-        "Machine review is complete, but final approval failed before the OpenSpec archive and GitHub PR delivery could finish."
+        "Machine review is complete, but the OpenSpec archive or GitHub PR refresh still needs another approval pass."
       );
     }
 
@@ -380,7 +387,8 @@ export const getLaneApprovalAction = (lane: TeamWorkerLaneRecord): LaneApprovalA
       target: "proposal",
       buttonLabel: "Approve Proposal",
       pendingLabel: "Queueing proposal...",
-      successNotice: "Proposal approval recorded. The coding-review queue is refreshing.",
+      successNotice:
+        "Proposal approval recorded. The draft GitHub PR is synced and the coding-review queue is refreshing.",
       errorFallback: "Unable to approve this proposal.",
     };
   }
@@ -392,7 +400,7 @@ export const getLaneApprovalAction = (lane: TeamWorkerLaneRecord): LaneApprovalA
   if (lane.pullRequest.status === "awaiting_human_approval" && !lane.pullRequest.humanApprovedAt) {
     return {
       target: "pull_request",
-      buttonLabel: "Approve and Open PR",
+      buttonLabel: "Approve and Archive",
       pendingLabel: "Queueing archive pass...",
       successNotice:
         "Final approval recorded. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
