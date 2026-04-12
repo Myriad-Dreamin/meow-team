@@ -2,29 +2,76 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
-import { listTeamCodexLogEntries } from "@/lib/team/logs";
+import { expandTeamCodexStderrBlock, listTeamCodexLogWindow } from "@/lib/team/logs";
 
 export const runtime = "nodejs";
 
-const logsQuerySchema = z.object({
+const windowQuerySchema = z
+  .object({
+    mode: z.literal("window").optional(),
+    threadId: z.string().trim().min(1),
+    limit: z.coerce.number().int().positive().max(500).optional().default(200),
+    beforeCursor: z.coerce.number().int().nonnegative().optional(),
+    afterCursor: z.coerce.number().int().nonnegative().optional(),
+    source: z.enum(["stdout", "stderr", "system"]).optional(),
+  })
+  .refine((value) => !(value.beforeCursor !== undefined && value.afterCursor !== undefined), {
+    message: "Specify at most one cursor boundary per request.",
+    path: ["beforeCursor"],
+  });
+
+const stderrBlockQuerySchema = z
+  .object({
+    mode: z.literal("stderr-block"),
+    threadId: z.string().trim().min(1),
+    startCursor: z.coerce.number().int().nonnegative(),
+    endCursor: z.coerce.number().int().nonnegative(),
+    scanLimit: z.coerce.number().int().positive().max(500).optional().default(200),
+  })
+  .refine((value) => value.startCursor < value.endCursor, {
+    message: "startCursor must be less than endCursor.",
+    path: ["startCursor"],
+  });
+
+const defaultQuerySchema = z.object({
+  mode: z.enum(["window", "stderr-block"]).optional().default("window"),
   threadId: z.string().trim().min(1),
-  limit: z.coerce.number().int().positive().max(500).optional().default(200),
 });
 
 export async function GET(request: Request) {
   try {
-    const parsed = logsQuerySchema.parse(
-      Object.fromEntries(new URL(request.url).searchParams.entries()),
-    );
+    const params = Object.fromEntries(new URL(request.url).searchParams.entries());
+    const mode = defaultQuerySchema.parse(params).mode;
 
-    const entries = await listTeamCodexLogEntries({
+    if (mode === "stderr-block") {
+      const parsed = stderrBlockQuerySchema.parse(params);
+      const result = await expandTeamCodexStderrBlock({
+        endCursor: parsed.endCursor,
+        scanLimit: parsed.scanLimit,
+        startCursor: parsed.startCursor,
+        threadFile: teamConfig.storage.threadFile,
+        threadId: parsed.threadId,
+      });
+
+      return NextResponse.json({
+        mode: "stderr-block",
+        ...result,
+      });
+    }
+
+    const parsed = windowQuerySchema.parse(params);
+    const result = await listTeamCodexLogWindow({
+      afterCursor: parsed.afterCursor ?? null,
+      beforeCursor: parsed.beforeCursor ?? null,
+      limit: parsed.limit,
+      source: parsed.source ?? null,
       threadFile: teamConfig.storage.threadFile,
       threadId: parsed.threadId,
-      limit: parsed.limit,
     });
 
     return NextResponse.json({
-      entries,
+      mode: "window",
+      ...result,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

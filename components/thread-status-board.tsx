@@ -8,6 +8,7 @@ import {
   describeLane,
   describeThreadProgress,
   formatFeedbackLabel,
+  formatPoolSlot,
   formatThreadId,
   formatTimestamp,
   getLaneApprovalAction,
@@ -398,9 +399,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                             </div>
                             <div>
                               <span className="meta-label">Pool Slot</span>
-                              <p>
-                                {lane.workerSlot ? `moew-${lane.workerSlot}` : "Waiting for pool"}
-                              </p>
+                              <p>{formatPoolSlot(lane.workerSlot)}</p>
                             </div>
                             <div>
                               <span className="meta-label">OpenSpec Change</span>

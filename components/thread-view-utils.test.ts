@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   describeLane,
+  formatPoolSlot,
   formatCommitHash,
+  groupThreadLogEntries,
   getLaneApprovalAction,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
   getLaneStatusClassName,
   getLaneStatusLabel,
+  mergeThreadLogGroups,
+  selectPrimaryLane,
 } from "@/components/thread-view-utils";
-import type { TeamWorkerLaneRecord } from "@/lib/team/types";
+import type { TeamCodexLogCursorEntry, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 
@@ -46,6 +50,25 @@ const createLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLa
     startedAt: FIXED_TIMESTAMP,
     finishedAt: FIXED_TIMESTAMP,
     updatedAt: FIXED_TIMESTAMP,
+    ...overrides,
+  };
+};
+
+const createLogEntry = (
+  index: number,
+  overrides: Partial<TeamCodexLogCursorEntry> = {},
+): TeamCodexLogCursorEntry => {
+  return {
+    id: `entry-${index}`,
+    threadId: "thread-1",
+    assignmentNumber: 1,
+    roleId: "coder",
+    laneId: "lane-1",
+    source: "stdout",
+    message: `line ${index}`,
+    createdAt: `2026-04-11T08:00:0${index}.000Z`,
+    startCursor: index * 10,
+    endCursor: index * 10 + 9,
     ...overrides,
   };
 };
@@ -217,5 +240,103 @@ describe("thread view approval helpers", () => {
     expect(getLaneStatusLabel(lane)).toBe("Archiving");
     expect(describeLane(lane)).toContain("/opsx:archive");
     expect(getLaneApprovalAction(lane)).toBeNull();
+  });
+});
+
+describe("thread view primary lane helpers", () => {
+  it("formats pool slots with the corrected meow label", () => {
+    expect(formatPoolSlot(4)).toBe("meow-4");
+    expect(formatPoolSlot(null)).toBe("Waiting for pool");
+  });
+
+  it("prefers the freshest non-idle lane with branch or PR data for the header strip", () => {
+    const primaryLane = selectPrimaryLane([
+      createLane({
+        laneId: "idle-lane",
+        laneIndex: 1,
+        status: "idle",
+        updatedAt: "2026-04-11T12:00:00.000Z",
+      }),
+      createLane({
+        laneId: "assigned-no-branch",
+        laneIndex: 2,
+        status: "queued",
+        branchName: null,
+        updatedAt: "2026-04-11T12:30:00.000Z",
+      }),
+      createLane({
+        laneId: "coding-branch",
+        laneIndex: 3,
+        status: "coding",
+        branchName: "requests/example/a1-proposal-3",
+        updatedAt: "2026-04-11T13:00:00.000Z",
+      }),
+    ]);
+
+    expect(primaryLane?.laneId).toBe("coding-branch");
+  });
+
+  it("falls back to the newest assigned lane when no branch or PR metadata exists", () => {
+    const primaryLane = selectPrimaryLane([
+      createLane({
+        laneId: "idle-lane",
+        laneIndex: 1,
+        status: "idle",
+        taskTitle: null,
+        taskObjective: null,
+      }),
+      createLane({
+        laneId: "queued-lane",
+        laneIndex: 2,
+        status: "queued",
+        branchName: null,
+        pullRequest: null,
+        updatedAt: "2026-04-11T13:00:00.000Z",
+      }),
+    ]);
+
+    expect(primaryLane?.laneId).toBe("queued-lane");
+  });
+});
+
+describe("thread log grouping helpers", () => {
+  it("groups consecutive log entries that share the same source and lane context", () => {
+    const groupedEntries = groupThreadLogEntries([
+      createLogEntry(1, { message: "alpha", source: "stdout" }),
+      createLogEntry(2, { message: "beta", source: "stdout" }),
+      createLogEntry(3, { message: "stderr", source: "stderr" }),
+    ]);
+
+    expect(groupedEntries).toHaveLength(2);
+    expect(groupedEntries[0]).toMatchObject({
+      lineCount: 2,
+      message: "alpha\nbeta",
+      preview: "alpha",
+      source: "stdout",
+    });
+    expect(groupedEntries[1]).toMatchObject({
+      lineCount: 1,
+      message: "stderr",
+      source: "stderr",
+    });
+  });
+
+  it("merges boundary groups when paged log windows split one contiguous block", () => {
+    const currentGroups = groupThreadLogEntries([
+      createLogEntry(3, { message: "tail 1", source: "stderr" }),
+      createLogEntry(4, { message: "tail 2", source: "stderr" }),
+    ]);
+    const olderGroups = groupThreadLogEntries([
+      createLogEntry(1, { message: "head 1", source: "stderr" }),
+      createLogEntry(2, { message: "head 2", source: "stderr" }),
+    ]);
+
+    expect(mergeThreadLogGroups(currentGroups, olderGroups, "prepend")).toEqual([
+      expect.objectContaining({
+        lineCount: 4,
+        message: "head 1\nhead 2\ntail 1\ntail 2",
+        source: "stderr",
+      }),
+    ]);
   });
 });

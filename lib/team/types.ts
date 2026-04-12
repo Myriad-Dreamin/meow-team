@@ -19,6 +19,18 @@ export type TeamCodexLogEntry = TeamCodexEvent & {
   laneId: string | null;
 };
 
+export type TeamCodexLogCursorEntry = TeamCodexLogEntry & {
+  startCursor: number;
+  endCursor: number;
+};
+
+export type TeamCodexLogPageInfo = {
+  beforeCursor: number | null;
+  afterCursor: number | null;
+  hasOlder: boolean;
+  hasNewer: boolean;
+};
+
 export type TeamRoleHandoff = {
   roleId: string;
   roleName: string;
