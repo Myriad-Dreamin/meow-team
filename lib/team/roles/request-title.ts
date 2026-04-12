@@ -45,6 +45,8 @@ const buildRequestTitlePrompt = ({ input, requestText, tasks }: RequestTitleRole
     "- Do not include quotes, markdown, IDs, or trailing punctuation.",
     `- When tasks are provided, infer conventional title metadata from them. Use one of: ${CONVENTIONAL_TITLE_TYPES.join(", ")}.`,
     "- When tasks are provided, set conventionalTitle.scope to a short slash-delimited roadmap/topic scope only when it materially clarifies the work. Otherwise set it to null.",
+    "- When conventionalTitle.scope is not null, title must start with a lowercased verb phrase so the harness can prefix it directly as `type(scope): title`.",
+    "- When conventionalTitle.scope is not null, do not repeat the same leading verb as conventionalTitle.type in title.",
     "- When tasks are not provided, set conventionalTitle to null.",
     `Raw request text:\n${requestText}`,
     input !== requestText ? `Current planning input:\n${input}` : null,

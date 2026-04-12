@@ -12,7 +12,7 @@ the older `--experimental-sqlite` flag requirement.
 
 ## Default location
 
-- Primary store: `data/team-threads.sqlite`
+- Primary store: `data/meow-team.sqlite`
 - Legacy source: `data/team-threads.json`
 - Log files: `data/codex-logs/<thread-id>.jsonl`
 

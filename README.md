@@ -131,7 +131,7 @@ role stays lightweight.
 
 ## Notes
 
-- Thread history is stored locally in `data/team-threads.sqlite`.
+- Thread history is stored locally in `data/meow-team.sqlite`.
 - Existing `data/team-threads.json` stores are imported on first access. See
   `docs/storage.md` for the migration and runtime details.
 - A legacy `.env` from the previous copied project may still exist locally.

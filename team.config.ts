@@ -19,7 +19,7 @@ export const teamConfig = defineTeamConfig({
   },
   workflow: ["planner", "coder", "reviewer"],
   storage: {
-    threadFile: "data/team-threads.sqlite",
+    threadFile: "data/meow-team.sqlite",
   },
   dispatch: {
     workerCount: 8,

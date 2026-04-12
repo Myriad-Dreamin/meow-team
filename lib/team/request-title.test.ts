@@ -20,7 +20,7 @@ describe("request-title conventional formatting", () => {
     });
   });
 
-  it("builds a canonical request title from planner metadata and the single proposal title", () => {
+  it("preserves the single proposal title when building a canonical request title", () => {
     expect(
       buildCanonicalRequestTitle({
         requestTitle: "Dispatch Coordination",
@@ -31,7 +31,7 @@ describe("request-title conventional formatting", () => {
           scope: "vsc/command",
         },
       }),
-    ).toBe("dev(vsc/command): standardize conventional request and PR titles");
+    ).toBe("dev(vsc/command): Standardize Conventional Request and PR Titles");
   });
 
   it("uses the lane task title when multiple proposals share one request group", () => {
@@ -48,7 +48,7 @@ describe("request-title conventional formatting", () => {
     ).toBe("dev(planner/dispatch): Repair reviewer finalization flow");
   });
 
-  it("lowercases scoped canonical request title subjects", () => {
+  it("preserves scoped canonical request title subject casing", () => {
     expect(
       buildCanonicalRequestTitle({
         requestTitle: "feat(lane/commits): Link lane commit activity to GitHub",
@@ -59,10 +59,10 @@ describe("request-title conventional formatting", () => {
           scope: "lane/commits",
         },
       }),
-    ).toBe("feat(lane/commits): link lane commit activity to GitHub");
+    ).toBe("feat(lane/commits): Link lane commit activity to GitHub");
   });
 
-  it("removes duplicated leading conventional verbs from scoped canonical subjects", () => {
+  it("preserves duplicated leading conventional verbs in scoped canonical subjects", () => {
     expect(
       buildCanonicalRequestTitle({
         requestTitle: "refactor(team/runteam): Refactor `runTeam` into a persisted stage machine",
@@ -73,7 +73,7 @@ describe("request-title conventional formatting", () => {
           scope: "team/runteam",
         },
       }),
-    ).toBe("refactor(team/runteam): `runTeam` into a persisted stage machine");
+    ).toBe("refactor(team/runteam): Refactor `runTeam` into a persisted stage machine");
   });
 
   it("parses canonical titles and preserves the subject when reformatting", () => {

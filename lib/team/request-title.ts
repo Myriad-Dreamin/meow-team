@@ -92,10 +92,6 @@ const buildConventionalTitlePrefix = (metadata: ConventionalTitleMetadata): stri
   return metadata.scope ? `${metadata.type}(${metadata.scope}): ` : `${metadata.type}: `;
 };
 
-const resolveNonEmptyTitle = (value: string | null | undefined): string => {
-  return normalizeRequestTitle(value) ?? DEFAULT_REQUEST_TITLE;
-};
-
 const normalizeConventionalSubject = (value: string | null | undefined): string => {
   if (!value) {
     return DEFAULT_REQUEST_TITLE;
@@ -108,45 +104,6 @@ const normalizeConventionalSubject = (value: string | null | undefined): string 
   const trimmed = trimConventionalSubjectPunctuation(shortened);
 
   return trimmed || DEFAULT_REQUEST_TITLE;
-};
-
-const stripDuplicatedConventionalVerb = ({
-  metadata,
-  subject,
-}: {
-  metadata: ConventionalTitleMetadata;
-  subject: string;
-}): string => {
-  const stripped = normalizeWhitespace(
-    subject.replace(new RegExp(`^${metadata.type}\\b(?:[\\s:._-]+)?`, "iu"), ""),
-  );
-
-  return stripped || subject;
-};
-
-const sentenceCaseScopedConventionalSubject = (subject: string): string => {
-  return subject.replace(/\b[A-Z][a-z]+\b/gu, (word) => word.toLowerCase());
-};
-
-const normalizeCanonicalConventionalSubject = ({
-  metadata,
-  subject,
-}: {
-  metadata: ConventionalTitleMetadata;
-  subject: string | null | undefined;
-}): string => {
-  const normalizedSubject = resolveNonEmptyTitle(subject);
-
-  if (!metadata.scope) {
-    return normalizedSubject;
-  }
-
-  return sentenceCaseScopedConventionalSubject(
-    stripDuplicatedConventionalVerb({
-      metadata,
-      subject: normalizedSubject,
-    }),
-  );
 };
 
 export const normalizeRequestTitle = (value: string | null | undefined): string | null => {
@@ -304,10 +261,7 @@ export const buildCanonicalRequestTitle = ({
   return metadata
     ? formatConventionalTitle({
         metadata,
-        subject: normalizeCanonicalConventionalSubject({
-          metadata,
-          subject,
-        }),
+        subject,
       })
     : subject;
 };
