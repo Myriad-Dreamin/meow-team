@@ -221,4 +221,79 @@ Track command surface changes here.
       "Roadmap topic docs/roadmap/vscode-extension/command-palette.md is missing a ## Related Specs section.",
     );
   });
+
+  it("scaffolds a missing roadmap and topic, then records one TODO item without retry duplicates", async () => {
+    const worktreePath = await createWorktree();
+    const archivedChangePath = "openspec/changes/archive/2026-04-11-change-1";
+
+    await writeWorktreeFile({
+      worktreePath,
+      relativePath: "docs/roadmap/index.md",
+      content: "# Roadmaps\n",
+    });
+    await seedArchivedSpec({
+      worktreePath,
+      archivedChangePath,
+    });
+
+    await expect(
+      appendArchivedOpenSpecLinksToRoadmapTopic({
+        worktreePath,
+        changeName: "change-1",
+        archivedChangePath,
+        conventionalTitle: {
+          type: "feat",
+          scope: "archive/workflow",
+        },
+      }),
+    ).resolves.toEqual({
+      updated: true,
+      topicPath: "docs/roadmap/archive/workflow.md",
+      linkedSpecs: ["openspec/changes/archive/2026-04-11-change-1/specs/command/spec.md"],
+    });
+
+    const rootRoadmapIndexPath = path.join(worktreePath, "docs/roadmap/index.md");
+    const roadmapIndexPath = path.join(worktreePath, "docs/roadmap/archive/index.md");
+    const topicPath = path.join(worktreePath, "docs/roadmap/archive/workflow.md");
+    const todoPath = path.join(worktreePath, "TODO.md");
+
+    const rootRoadmapIndexContent = await fs.readFile(rootRoadmapIndexPath, "utf8");
+    const roadmapIndexContent = await fs.readFile(roadmapIndexPath, "utf8");
+    const topicContent = await fs.readFile(topicPath, "utf8");
+    const todoContent = await fs.readFile(todoPath, "utf8");
+
+    expect(rootRoadmapIndexContent).toContain("## Available Roadmaps");
+    expect(rootRoadmapIndexContent).toContain("- [Archive](/roadmap/archive/)");
+    expect(roadmapIndexContent).toContain("# Archive");
+    expect(roadmapIndexContent).toContain("- [Workflow](/roadmap/archive/workflow)");
+    expect(topicContent).toContain("# Workflow");
+    expect(topicContent).toContain("## Planned Work");
+    expect(topicContent).toContain(
+      "- [change-1](../../../openspec/changes/archive/2026-04-11-change-1/specs/command/spec.md)",
+    );
+    expect(todoContent).toContain("## Items");
+    expect(todoContent).toContain("[Archive roadmap](docs/roadmap/archive/index.md)");
+    expect(todoContent).toContain("[Workflow topic](docs/roadmap/archive/workflow.md)");
+
+    await expect(
+      appendArchivedOpenSpecLinksToRoadmapTopic({
+        worktreePath,
+        changeName: "change-1",
+        archivedChangePath,
+        conventionalTitle: {
+          type: "feat",
+          scope: "archive/workflow",
+        },
+      }),
+    ).resolves.toEqual({
+      updated: false,
+      topicPath: "docs/roadmap/archive/workflow.md",
+      linkedSpecs: ["openspec/changes/archive/2026-04-11-change-1/specs/command/spec.md"],
+    });
+
+    await expect(fs.readFile(rootRoadmapIndexPath, "utf8")).resolves.toBe(rootRoadmapIndexContent);
+    await expect(fs.readFile(roadmapIndexPath, "utf8")).resolves.toBe(roadmapIndexContent);
+    await expect(fs.readFile(topicPath, "utf8")).resolves.toBe(topicContent);
+    await expect(fs.readFile(todoPath, "utf8")).resolves.toBe(todoContent);
+  });
 });
