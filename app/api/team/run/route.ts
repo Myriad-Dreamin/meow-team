@@ -2,7 +2,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
-import { DispatchThreadCapacityError } from "@/lib/team/dispatch";
 import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
 import {
   countActiveDispatchThreads,
@@ -14,6 +13,7 @@ import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runt
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
+  DispatchThreadCapacityError,
   persistTeamRunState,
   runTeam,
   type TeamRunSummary,
