@@ -263,6 +263,9 @@ const fetchStderrBlock = async ({
 const buildLogGroupState = (
   group: ThreadLogGroup,
   mode: TimelineLogGroup["expandedMode"],
+  options?: {
+    preserveCollapsedMessage?: boolean;
+  },
 ): TimelineLogGroup => {
   if (group.source !== "stderr") {
     return {
@@ -280,10 +283,23 @@ const buildLogGroupState = (
     fullMessage,
     group: {
       ...group,
-      message: fullMessage ?? group.preview,
+      message:
+        fullMessage ?? (options?.preserveCollapsedMessage ? group.message : group.preview),
     },
     isLoading: false,
   };
+};
+
+const getLogGroupExpandedMode = (
+  group: ThreadLogGroup,
+  latestTailStderrId: string | null,
+  strategy: "history" | "tail",
+): TimelineLogGroup["expandedMode"] => {
+  if (group.source !== "stderr") {
+    return "manual";
+  }
+
+  return strategy === "tail" && group.id === latestTailStderrId ? "live" : "collapsed";
 };
 
 const materializeLogGroups = (
@@ -296,12 +312,17 @@ const materializeLogGroups = (
       : null;
 
   return groups.map((group) => {
-    if (group.source !== "stderr") {
-      return buildLogGroupState(group, "manual");
-    }
-
-    return buildLogGroupState(group, group.id === latestTailStderrId ? "live" : "collapsed");
+    return buildLogGroupState(group, getLogGroupExpandedMode(group, latestTailStderrId, strategy));
   });
+};
+
+const canMergeLogGroupContext = (left: ThreadLogGroup, right: ThreadLogGroup): boolean => {
+  return (
+    left.source === right.source &&
+    left.contextEntry.roleId === right.contextEntry.roleId &&
+    left.contextEntry.laneId === right.contextEntry.laneId &&
+    left.contextEntry.assignmentNumber === right.contextEntry.assignmentNumber
+  );
 };
 
 export const mergeTimelineLogGroupPair = (
@@ -352,35 +373,46 @@ export const mergeTimelineLogGroupPair = (
   };
 };
 
-const mergeTimelineLogGroups = (
+export const mergeTimelineLogGroups = (
   currentGroups: TimelineLogGroup[],
-  nextGroups: TimelineLogGroup[],
+  nextSourceGroups: ThreadLogGroup[],
   position: "prepend" | "append",
+  strategy: "history" | "tail",
 ): TimelineLogGroup[] => {
+  const nextGroups = materializeLogGroups(nextSourceGroups, strategy);
+
   if (currentGroups.length === 0) {
     return nextGroups;
   }
 
-  if (nextGroups.length === 0) {
+  if (nextSourceGroups.length === 0) {
     return currentGroups;
   }
 
+  const latestTailStderrId =
+    strategy === "tail"
+      ? (nextSourceGroups.filter((group) => group.source === "stderr").at(-1)?.id ?? null)
+      : null;
+
   if (position === "append") {
     const lastCurrentGroup = currentGroups.at(-1);
-    const firstNextGroup = nextGroups[0];
+    const firstNextGroup = nextSourceGroups[0];
 
     if (
       lastCurrentGroup &&
       firstNextGroup &&
-      lastCurrentGroup.group.source === firstNextGroup.group.source &&
-      lastCurrentGroup.group.contextEntry.roleId === firstNextGroup.group.contextEntry.roleId &&
-      lastCurrentGroup.group.contextEntry.laneId === firstNextGroup.group.contextEntry.laneId &&
-      lastCurrentGroup.group.contextEntry.assignmentNumber ===
-        firstNextGroup.group.contextEntry.assignmentNumber
+      canMergeLogGroupContext(lastCurrentGroup.group, firstNextGroup)
     ) {
       return [
         ...currentGroups.slice(0, -1),
-        mergeTimelineLogGroupPair(lastCurrentGroup, firstNextGroup),
+        mergeTimelineLogGroupPair(
+          lastCurrentGroup,
+          buildLogGroupState(
+            firstNextGroup,
+            getLogGroupExpandedMode(firstNextGroup, latestTailStderrId, strategy),
+            { preserveCollapsedMessage: true },
+          ),
+        ),
         ...nextGroups.slice(1),
       ];
     }
@@ -388,20 +420,23 @@ const mergeTimelineLogGroups = (
     return [...currentGroups, ...nextGroups];
   }
 
-  const lastNextGroup = nextGroups.at(-1);
+  const lastNextGroup = nextSourceGroups.at(-1);
   const firstCurrentGroup = currentGroups[0];
   if (
     lastNextGroup &&
     firstCurrentGroup &&
-    lastNextGroup.group.source === firstCurrentGroup.group.source &&
-    lastNextGroup.group.contextEntry.roleId === firstCurrentGroup.group.contextEntry.roleId &&
-    lastNextGroup.group.contextEntry.laneId === firstCurrentGroup.group.contextEntry.laneId &&
-    lastNextGroup.group.contextEntry.assignmentNumber ===
-      firstCurrentGroup.group.contextEntry.assignmentNumber
+    canMergeLogGroupContext(lastNextGroup, firstCurrentGroup.group)
   ) {
     return [
       ...nextGroups.slice(0, -1),
-      mergeTimelineLogGroupPair(lastNextGroup, firstCurrentGroup),
+      mergeTimelineLogGroupPair(
+        buildLogGroupState(
+          lastNextGroup,
+          getLogGroupExpandedMode(lastNextGroup, latestTailStderrId, strategy),
+          { preserveCollapsedMessage: true },
+        ),
+        firstCurrentGroup,
+      ),
       ...currentGroups.slice(1),
     ];
   }
@@ -782,11 +817,13 @@ export function ThreadDetailTimeline({
         }
 
         if (response.entries.length > 0) {
+          const nextSourceGroups = groupThreadLogEntries(response.entries);
           setLogGroups((current) => {
             const nextGroups = mergeTimelineLogGroups(
               current,
-              materializeLogGroups(groupThreadLogEntries(response.entries), "tail"),
+              nextSourceGroups,
               "append",
+              "tail",
             );
             return applyLatestLiveStderr(nextGroups);
           });
@@ -855,13 +892,10 @@ export function ThreadDetailTimeline({
         beforeCursor: logPageInfo.beforeCursor,
         threadId: thread.threadId,
       });
+      const nextSourceGroups = groupThreadLogEntries(response.entries);
 
       setLogGroups((current) => {
-        const nextGroups = mergeTimelineLogGroups(
-          current,
-          materializeLogGroups(groupThreadLogEntries(response.entries), "history"),
-          "prepend",
-        );
+        const nextGroups = mergeTimelineLogGroups(current, nextSourceGroups, "prepend", "history");
         return applyLatestLiveStderr(nextGroups);
       });
       setLogPageInfo((current) => ({

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   mergeTimelineLogGroupPair,
+  mergeTimelineLogGroups,
   type TimelineLogGroup,
 } from "@/components/thread-detail-timeline";
 import type { ThreadLogGroup } from "@/components/thread-view-utils";
@@ -128,4 +129,47 @@ describe("mergeTimelineLogGroupPair", () => {
       },
     });
   });
+});
+
+describe("mergeTimelineLogGroups", () => {
+  it.each([
+    ["live" as const, "newer stderr 3\nnewer stderr 4"],
+    ["manual" as const, "newer stderr 3\nnewer stderr 4"],
+  ])(
+    "preserves %s stderr text when preview-only older history is prepended into the same block",
+    (expandedMode, fullMessage) => {
+      const currentGroups = [
+        createTimelineLogGroup({
+          expandedMode,
+          fullMessage,
+          group: createThreadLogGroup({
+            endCursor: 43,
+            message: fullMessage,
+            preview: "newer stderr 3",
+            startCursor: 32,
+          }),
+        }),
+      ];
+      const olderGroups = [
+        createThreadLogGroup({
+          endCursor: 21,
+          message: "older stderr 1\nolder stderr 2",
+          preview: "older stderr 1",
+          startCursor: 10,
+        }),
+      ];
+
+      expect(
+        mergeTimelineLogGroups(currentGroups, olderGroups, "prepend", "history"),
+      ).toMatchObject([
+        {
+          expandedMode,
+          fullMessage: "older stderr 1\nolder stderr 2\nnewer stderr 3\nnewer stderr 4",
+          group: {
+            message: "older stderr 1\nolder stderr 2\nnewer stderr 3\nnewer stderr 4",
+          },
+        },
+      ]);
+    },
+  );
 });
