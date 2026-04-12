@@ -1,5 +1,9 @@
+import { teamConfig } from "@/team.config";
 import { runCodexStructuredOutput } from "@/lib/agent/codex-cli";
-import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import {
+  createQueuedTeamStructuredExecutor,
+  type TeamStructuredExecutor,
+} from "@/lib/agent/executor";
 import { CoderAgent } from "@/lib/team/roles/coder";
 import { PlannerAgent } from "@/lib/team/roles/planner";
 import { RequestTitleAgent } from "@/lib/team/roles/request-title";
@@ -12,6 +16,11 @@ export type TeamRoleDependencies = {
   coderAgent: Pick<CoderAgent, "run">;
   reviewerAgent: Pick<ReviewerAgent, "run">;
 };
+
+const defaultQueuedExecutor = createQueuedTeamStructuredExecutor({
+  executor: runCodexStructuredOutput,
+  concurrency: teamConfig.dispatch.workerCount,
+});
 
 const createDefaultRoleAgents = (
   executor: TeamStructuredExecutor,
@@ -27,7 +36,7 @@ const createDefaultRoleAgents = (
 export const resolveTeamRoleDependencies = (
   overrides: Partial<TeamRoleDependencies> = {},
 ): TeamRoleDependencies => {
-  const executor = overrides.executor ?? runCodexStructuredOutput;
+  const executor = overrides.executor ?? defaultQueuedExecutor;
 
   return {
     executor,
