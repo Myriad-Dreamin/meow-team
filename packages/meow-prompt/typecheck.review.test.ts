@@ -69,4 +69,59 @@ void output;
       });
     }
   }, 120_000);
+
+  it("keeps system role prompt imports typed after the Vite bootstrap runs without a docs directory", async () => {
+    const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "meow-prompt-typecheck-review-"));
+    const roleDirectory = path.join(temporaryDirectory, "prompts", "roles");
+    const promptPath = path.join(roleDirectory, "fresh.prompt.md");
+    const consumerPath = path.join(temporaryDirectory, "fresh-system-role-consumer.ts");
+    const declarationPath = path.join(roleDirectory, "fresh.prompt.d.md.ts");
+
+    try {
+      mkdirSync(roleDirectory, { recursive: true });
+      writeFileSync(
+        promptPath,
+        "---\ntitle: Fresh system role\nsummary: Static role summary\n---\n# Fresh system role\n\nHello reviewer.\n",
+        "utf8",
+      );
+      writeFileSync(
+        consumerPath,
+        `import { frontmatter, prompt, type FrontMatter } from "./prompts/roles/fresh.prompt.md";
+
+const typedFrontmatter: FrontMatter = frontmatter;
+const title: "Fresh system role" = typedFrontmatter.title;
+const summary: "Static role summary" = typedFrontmatter.summary;
+const output: string = prompt();
+
+void title;
+void summary;
+void output;
+`,
+        "utf8",
+      );
+
+      await build(createMeowPromptViteSyncConfig(temporaryDirectory));
+
+      const declarationSource = readFileSync(declarationPath, "utf8");
+      const program = ts.createProgram([consumerPath], {
+        allowArbitraryExtensions: true,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        noEmit: true,
+        skipLibCheck: true,
+        strict: true,
+        target: ts.ScriptTarget.ES2022,
+      });
+      const diagnostics = ts.getPreEmitDiagnostics(program);
+
+      expect(declarationSource).toContain('readonly title: "Fresh system role";');
+      expect(declarationSource).toContain('readonly summary: "Static role summary";');
+      expect(diagnostics, formatDiagnostics(diagnostics, temporaryDirectory)).toHaveLength(0);
+    } finally {
+      rmSync(temporaryDirectory, {
+        force: true,
+        recursive: true,
+      });
+    }
+  }, 120_000);
 });

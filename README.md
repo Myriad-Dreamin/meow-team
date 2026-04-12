@@ -9,8 +9,9 @@ The default team follows a simple harness engineering workflow:
 - `coder` implements or proposes the concrete change.
 - `reviewer` checks the work for bugs, regressions, and missing tests.
 
-Role behavior lives in Markdown prompts under [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles),
-and the whole team is configured in one file:
+Role behavior lives in statically imported Markdown prompt modules under
+[`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles), and the
+whole team is configured in one file:
 [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
 
 ## Why this shape
@@ -67,7 +68,7 @@ the environment provides a model override.
   single source of truth for the team owner, workflow, storage, model, and
   allowed local repository directories.
 - [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles):
-  Markdown system prompts for each role.
+  statically imported `*.prompt.md` system prompts plus the typed role registry.
 - [`lib/team/network.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/network.ts):
   planner orchestration and thread state management.
 - [`lib/agent/codex-cli.ts`](/home/kamiyoru/work/ts/meow-team/lib/agent/codex-cli.ts):
@@ -110,13 +111,16 @@ selection on every run.
 
 1. Create a new Markdown prompt file in
    [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles), for example
-   `researcher.md`.
-2. Add the role ID to the `workflow` array in
+   `researcher.prompt.md`, with `title` and `summary` frontmatter.
+2. Register the prompt module in
+   [`prompts/roles/index.ts`](/home/kamiyoru/work/ts/meow-team/prompts/roles/index.ts).
+3. Run `pnpm meow-prompt:sync-types` so TypeScript picks up the generated prompt declaration.
+4. Add the role ID to the `workflow` array in
    [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
-3. Restart the dev server if you want the homepage metadata to refresh immediately.
+5. Restart the dev server if you want the homepage metadata to refresh immediately.
 
-The app resolves role titles from the first Markdown heading, so adding a new
-role stays lightweight.
+The static registry reads each role title and summary from prompt frontmatter,
+with the Markdown heading/body kept as the actual system prompt text.
 
 ## Scripts
 
@@ -124,6 +128,7 @@ role stays lightweight.
 - `pnpm build` builds the production app.
 - `pnpm start` runs the production server.
 - `pnpm lint` runs ESLint.
+- `pnpm meow-prompt:sync-types` refreshes generated prompt declarations.
 - `pnpm typecheck` runs TypeScript without emitting files.
 - `pnpm fmt` formats the repo with Prettier.
 - `pnpm fmt:check` checks formatting.

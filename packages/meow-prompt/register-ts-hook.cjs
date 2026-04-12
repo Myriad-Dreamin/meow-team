@@ -16,6 +16,10 @@ const createCompilerOptions = () => ({
   target: ts.ScriptTarget.ES2022,
 });
 
+const rewriteCommonJsIncompatibleSource = (source) => {
+  return source.replace(/fileURLToPath\(import\.meta\.url\)/g, "__filename");
+};
+
 const registerTypeScriptHook = () => {
   if (isRegistered) {
     return;
@@ -34,7 +38,7 @@ const registerTypeScriptHook = () => {
       return;
     }
 
-    const source = fs.readFileSync(filename, "utf8");
+    const source = rewriteCommonJsIncompatibleSource(fs.readFileSync(filename, "utf8"));
     const transpiledModule = ts.transpileModule(source, {
       compilerOptions: createCompilerOptions(),
       fileName: filename,

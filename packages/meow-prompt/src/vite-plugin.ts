@@ -22,6 +22,7 @@ export const createMeowPromptViteSyncConfig = (rootDirectory: string): InlineCon
       },
       write: false,
     },
+    cacheDir: path.join(rootDirectory, ".meow-prompt-vite-cache"),
     logLevel: "silent",
     plugins: [createMeowPromptVitePlugin()],
     root: rootDirectory,

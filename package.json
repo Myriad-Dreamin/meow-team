@@ -6,7 +6,7 @@
   "description": "Continuous Codex CLI engineering harness.",
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "env -u TURBOPACK next build --webpack",
     "start": "next start",
     "docs:dev": "node scripts/vitepress-runner.mjs dev",
     "docs:build": "node scripts/vitepress-runner.mjs build",
@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "meow-prompt:sync-types": "pnpm exec vite build --config packages/meow-prompt/vite-sync.config.ts",
+    "meow-prompt:sync-types": "pnpm exec vite build --configLoader runner --config packages/meow-prompt/vite-sync.config.ts",
     "typecheck": "pnpm meow-prompt:sync-types && pnpm exec next typegen && tsc -p tsconfig.typecheck.json --noEmit --incremental false",
     "fmt": "prettier --write **/*.{js,mjs,cjs,ts,mts,cts}",
     "fmt:check": "prettier --check **/*.{js,mjs,cjs,ts,mts,cts}",
