@@ -11,7 +11,6 @@ import {
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const {
-  appendArchivedOpenSpecLinksToRoadmapTopicMock,
   commitWorktreeChangesMock,
   createOrUpdateGitHubPullRequestMock,
   hasWorktreeChangesMock,
@@ -22,7 +21,6 @@ const {
   threadFile,
   worktreeRoot,
 } = vi.hoisted(() => ({
-  appendArchivedOpenSpecLinksToRoadmapTopicMock: vi.fn(),
   commitWorktreeChangesMock: vi.fn(),
   createOrUpdateGitHubPullRequestMock: vi.fn(),
   hasWorktreeChangesMock: vi.fn(),
@@ -84,14 +82,6 @@ vi.mock("@/lib/git/ops", async () => {
     hasWorktreeChanges: hasWorktreeChangesMock,
     getBranchHead: getBranchHeadMock,
     inspectOpenSpecChangeArchiveState: inspectOpenSpecChangeArchiveStateMock,
-  };
-});
-
-vi.mock("@/lib/team/roadmap", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/team/roadmap")>("@/lib/team/roadmap");
-  return {
-    ...actual,
-    appendArchivedOpenSpecLinksToRoadmapTopic: appendArchivedOpenSpecLinksToRoadmapTopicMock,
   };
 });
 
@@ -303,11 +293,6 @@ describe("approveLanePullRequest", () => {
     vi.clearAllMocks();
     await cleanupThreadStore();
     await fs.rm(worktreeRoot, { recursive: true, force: true });
-    appendArchivedOpenSpecLinksToRoadmapTopicMock.mockResolvedValue({
-      updated: false,
-      topicPath: null,
-      linkedSpecs: [],
-    });
     hasWorktreeChangesMock.mockResolvedValue(true);
     inspectOpenSpecChangeArchiveStateMock.mockReset();
     inspectOpenSpecChangeArchiveStateMock.mockResolvedValueOnce({
@@ -379,16 +364,11 @@ describe("approveLanePullRequest", () => {
         branchName: "requests/example/a1-proposal-1",
       }),
     );
-    expect(appendArchivedOpenSpecLinksToRoadmapTopicMock).toHaveBeenCalledWith({
-      worktreePath: `${worktreeRoot}/meow-1`,
-      changeName: "change-1",
-      archivedChangePath: "openspec/changes/archive/2026-04-11-change-1",
-      conventionalTitle: null,
-    });
     expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
       worktreePath: `${worktreeRoot}/meow-1`,
       message: "coder: archive change-1",
     });
+    expect(commitWorktreeChangesMock).toHaveBeenCalledTimes(1);
     expect(createOrUpdateGitHubPullRequestMock).toHaveBeenCalledWith({
       repositoryPath: `${worktreeRoot}/meow-1`,
       branchName: "requests/example/a1-proposal-1",
@@ -452,15 +432,6 @@ describe("approveLanePullRequest", () => {
         title: "dev(vsc/command): Ship the feature",
       }),
     );
-    expect(appendArchivedOpenSpecLinksToRoadmapTopicMock).toHaveBeenCalledWith({
-      worktreePath: `${worktreeRoot}/meow-1`,
-      changeName: "change-1",
-      archivedChangePath: "openspec/changes/archive/2026-04-11-change-1",
-      conventionalTitle: {
-        type: "dev",
-        scope: "vsc/command",
-      },
-    });
     expect(lane?.pullRequest?.title).toBe("dev(vsc/command): Ship the feature");
   });
 
@@ -563,51 +534,6 @@ describe("approveLanePullRequest", () => {
     expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
     expect(lane?.pullRequest?.status).toBe("failed");
     expect(lane?.lastError).toContain("did not archive OpenSpec change change-1");
-    expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
-    expect(thread?.run?.status).toBe("failed");
-  });
-
-  it("records a roadmap archive-link failure as a blocking finalization error", async () => {
-    appendArchivedOpenSpecLinksToRoadmapTopicMock.mockRejectedValue(
-      new Error(
-        "Roadmap topic docs/roadmap/vscode-extension/command-palette.md is missing a ## Related Specs section.",
-      ),
-    );
-    commitWorktreeChangesMock.mockResolvedValue(undefined);
-    getBranchHeadMock.mockResolvedValue("archive-commit");
-
-    await writeThreadStore(createLane(), {
-      requestTitle: "dev(vsc/command): Ship the feature",
-      conventionalTitle: {
-        type: "dev",
-        scope: "vsc/command",
-      },
-    });
-
-    await expect(
-      approveLanePullRequest({
-        threadId: "thread-1",
-        assignmentNumber: 1,
-        laneId: "lane-1",
-        dependencies: createArchiveDependencies(),
-      }),
-    ).rejects.toThrow("Roadmap topic docs/roadmap/vscode-extension/command-palette.md");
-
-    const thread = await getTeamThreadRecord(threadFile, "thread-1");
-    const lane = thread?.dispatchAssignments[0]?.lanes[0];
-
-    expect(pushLaneBranchMock).not.toHaveBeenCalled();
-    expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
-    expect(lane?.proposalPath).toBe("openspec/changes/archive/2026-04-11-change-1");
-    expect(lane?.latestImplementationCommit).toBe("archive-commit");
-    expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
-    expect(lane?.pullRequest?.status).toBe("failed");
-    expect(lane?.latestActivity).toBe(
-      "Final human approval archived the OpenSpec change, but GitHub PR delivery did not complete.",
-    );
-    expect(lane?.lastError).toContain(
-      "Roadmap topic docs/roadmap/vscode-extension/command-palette.md",
-    );
     expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
     expect(thread?.run?.status).toBe("failed");
   });

@@ -41,7 +41,6 @@ import {
   materializeAssignmentProposals,
 } from "@/lib/team/openspec";
 import { loadRolePrompt } from "@/lib/team/prompts";
-import { appendArchivedOpenSpecLinksToRoadmapTopic } from "@/lib/team/roadmap";
 import { buildLanePullRequestTitle } from "@/lib/team/request-title";
 import {
   resolveTeamRoleDependencies,
@@ -1271,21 +1270,6 @@ const runFinalArchiveCycle = async ({
 
     // Capture the archived branch head before any later delivery step can fail.
     await refreshLatestImplementationCommit();
-
-    const roadmapUpdate = await appendArchivedOpenSpecLinksToRoadmapTopic({
-      worktreePath: lane.worktreePath,
-      changeName: lane.proposalChangeName,
-      archivedChangePath: archivedProposalPath,
-      conventionalTitle: assignment.conventionalTitle,
-    });
-
-    if (roadmapUpdate.updated) {
-      await commitWorktreeChanges({
-        worktreePath: lane.worktreePath,
-        message: `system: archive ${lane.proposalChangeName}`,
-      });
-      await refreshLatestImplementationCommit();
-    }
 
     updatedPushedCommit = latestImplementationCommit
       ? await pushLaneBranch({
