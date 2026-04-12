@@ -105,6 +105,34 @@ const matchesSource = (
   return source === null || entry.source === source;
 };
 
+type TeamCodexLogContextFilters = {
+  assignmentNumber?: number | null;
+  laneId?: string | null;
+  roleId?: string | null;
+};
+
+const matchesLogContext = (
+  entry: TeamCodexLogCursorEntry,
+  filters: TeamCodexLogContextFilters,
+): boolean => {
+  if (
+    typeof filters.assignmentNumber === "number" &&
+    entry.assignmentNumber !== filters.assignmentNumber
+  ) {
+    return false;
+  }
+
+  if (filters.laneId && entry.laneId !== filters.laneId) {
+    return false;
+  }
+
+  if (filters.roleId && entry.roleId !== filters.roleId) {
+    return false;
+  }
+
+  return true;
+};
+
 const buildPageInfo = ({
   entries,
   beforeCursor,
@@ -133,6 +161,7 @@ const readLogEntriesForward = async ({
   endCursor,
   limit,
   source,
+  filters,
 }: {
   handle: FileHandle;
   threadId: string;
@@ -140,6 +169,7 @@ const readLogEntriesForward = async ({
   endCursor: number;
   limit: number;
   source: TeamCodexLogSource | null;
+  filters: TeamCodexLogContextFilters;
 }): Promise<{
   entries: TeamCodexLogCursorEntry[];
   hasNewer: boolean;
@@ -183,7 +213,7 @@ const readLogEntriesForward = async ({
         threadId,
       });
 
-      if (entry && matchesSource(entry, source)) {
+      if (entry && matchesSource(entry, source) && matchesLogContext(entry, filters)) {
         entries.push(entry);
         if (entries.length >= limit + 1) {
           break;
@@ -214,7 +244,7 @@ const readLogEntriesForward = async ({
       threadId,
     });
 
-    if (entry && matchesSource(entry, source)) {
+    if (entry && matchesSource(entry, source) && matchesLogContext(entry, filters)) {
       entries.push(entry);
     }
   }
@@ -231,12 +261,14 @@ const readLogEntriesBackward = async ({
   beforeCursor,
   limit,
   source,
+  filters,
 }: {
   handle: FileHandle;
   threadId: string;
   beforeCursor: number;
   limit: number;
   source: TeamCodexLogSource | null;
+  filters: TeamCodexLogContextFilters;
 }): Promise<{
   entries: TeamCodexLogCursorEntry[];
   hasOlder: boolean;
@@ -295,7 +327,7 @@ const readLogEntriesBackward = async ({
         threadId,
       });
 
-      if (entry && matchesSource(entry, source)) {
+      if (entry && matchesSource(entry, source) && matchesLogContext(entry, filters)) {
         reversedEntries.push(entry);
       }
     }
@@ -312,7 +344,7 @@ const readLogEntriesBackward = async ({
       threadId,
     });
 
-    if (entry && matchesSource(entry, source)) {
+    if (entry && matchesSource(entry, source) && matchesLogContext(entry, filters)) {
       reversedEntries.push(entry);
     }
   }
@@ -332,15 +364,18 @@ const readLogEntriesInRange = async ({
   startCursor,
   endCursor,
   source,
+  filters,
 }: {
   handle: FileHandle;
   threadId: string;
   startCursor: number;
   endCursor: number;
   source: TeamCodexLogSource | null;
+  filters: TeamCodexLogContextFilters;
 }): Promise<TeamCodexLogCursorEntry[]> => {
   const { entries } = await readLogEntriesForward({
     endCursor,
+    filters,
     handle,
     limit: Number.MAX_SAFE_INTEGER,
     source,
@@ -445,6 +480,9 @@ export const listTeamCodexLogWindow = async ({
   beforeCursor = null,
   afterCursor = null,
   source = null,
+  assignmentNumber,
+  laneId,
+  roleId,
 }: {
   threadFile: string;
   threadId: string;
@@ -452,6 +490,9 @@ export const listTeamCodexLogWindow = async ({
   beforeCursor?: number | null;
   afterCursor?: number | null;
   source?: TeamCodexLogSource | null;
+  assignmentNumber?: number | null;
+  laneId?: string | null;
+  roleId?: string | null;
 }): Promise<{
   entries: TeamCodexLogCursorEntry[];
   pageInfo: TeamCodexLogPageInfo;
@@ -464,6 +505,11 @@ export const listTeamCodexLogWindow = async ({
     threadFile,
     threadId,
   });
+  const filters: TeamCodexLogContextFilters = {
+    assignmentNumber,
+    laneId,
+    roleId,
+  };
 
   try {
     const handle = await fs.open(logFilePath, "r");
@@ -493,6 +539,7 @@ export const listTeamCodexLogWindow = async ({
         });
         const { entries, hasNewer } = await readLogEntriesForward({
           endCursor: fileSize,
+          filters,
           handle,
           limit: safeLimit,
           source,
@@ -519,6 +566,7 @@ export const listTeamCodexLogWindow = async ({
       });
       const { entries, hasOlder } = await readLogEntriesBackward({
         beforeCursor: normalizedBeforeCursor,
+        filters,
         handle,
         limit: safeLimit,
         source,
@@ -562,17 +610,28 @@ export const listTeamCodexLogEntriesInRange = async ({
   startCursor,
   endCursor,
   source = null,
+  assignmentNumber,
+  laneId,
+  roleId,
 }: {
   threadFile: string;
   threadId: string;
   startCursor: number;
   endCursor: number;
   source?: TeamCodexLogSource | null;
+  assignmentNumber?: number | null;
+  laneId?: string | null;
+  roleId?: string | null;
 }): Promise<TeamCodexLogCursorEntry[]> => {
   const logFilePath = resolveLogFilePath({
     threadFile,
     threadId,
   });
+  const filters: TeamCodexLogContextFilters = {
+    assignmentNumber,
+    laneId,
+    roleId,
+  };
 
   try {
     const handle = await fs.open(logFilePath, "r");
@@ -596,6 +655,7 @@ export const listTeamCodexLogEntriesInRange = async ({
 
       return readLogEntriesInRange({
         endCursor: normalizedEndCursor,
+        filters,
         handle,
         source,
         startCursor: normalizedStartCursor,

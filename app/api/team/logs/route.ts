@@ -14,6 +14,9 @@ const windowQuerySchema = z
     beforeCursor: z.coerce.number().int().nonnegative().optional(),
     afterCursor: z.coerce.number().int().nonnegative().optional(),
     source: z.enum(["stdout", "stderr", "system"]).optional(),
+    assignmentNumber: z.coerce.number().int().positive().optional(),
+    laneId: z.string().trim().min(1).optional(),
+    roleId: z.string().trim().min(1).optional(),
   })
   .refine((value) => !(value.beforeCursor !== undefined && value.afterCursor !== undefined), {
     message: "Specify at most one cursor boundary per request.",
@@ -62,8 +65,11 @@ export async function GET(request: Request) {
     const parsed = windowQuerySchema.parse(params);
     const result = await listTeamCodexLogWindow({
       afterCursor: parsed.afterCursor ?? null,
+      assignmentNumber: parsed.assignmentNumber ?? null,
       beforeCursor: parsed.beforeCursor ?? null,
+      laneId: parsed.laneId ?? null,
       limit: parsed.limit,
+      roleId: parsed.roleId ?? null,
       source: parsed.source ?? null,
       threadFile: teamConfig.storage.threadFile,
       threadId: parsed.threadId,

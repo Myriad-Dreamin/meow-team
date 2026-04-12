@@ -14,7 +14,9 @@ export type ThreadRepositoryGroup = {
 };
 
 export type ThreadSidebarMetadata = {
-  statusLine: string;
+  statusClassName: string;
+  statusLabel: string;
+  threadLine: string;
   updatedLine: string;
 };
 
@@ -109,7 +111,9 @@ export const formatThreadSidebarMetadata = (
   thread: Pick<TeamThreadSummary, "threadId" | "status" | "updatedAt">,
 ): ThreadSidebarMetadata => {
   return {
-    statusLine: `Thread ${formatThreadId(thread.threadId)} - ${threadStatusLabels[thread.status]}`,
+    statusClassName: `status-${thread.status}`,
+    statusLabel: threadStatusLabels[thread.status],
+    threadLine: `Thread ${formatThreadId(thread.threadId)}`,
     updatedLine: `Updated ${formatTimestamp(thread.updatedAt)}`,
   };
 };

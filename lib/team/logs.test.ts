@@ -21,19 +21,21 @@ const createLogEntry = ({
   index,
   source,
   message,
+  assignmentNumber = 1,
   laneId = "lane-1",
   roleId = "coder",
 }: {
   index: number;
   source: TeamCodexLogSource;
   message: string;
+  assignmentNumber?: number | null;
   laneId?: string | null;
   roleId?: string | null;
 }): TeamCodexLogEntry => {
   return {
     id: `entry-${index}`,
     threadId: "thread-1",
-    assignmentNumber: 1,
+    assignmentNumber,
     roleId,
     laneId,
     source,
@@ -137,6 +139,70 @@ describe("listTeamCodexLogWindow", () => {
     ]);
     expect(stderrWindow.pageInfo.beforeCursor).toBe(stderrWindow.entries[0].startCursor);
     expect(stderrWindow.pageInfo.afterCursor).toBe(stderrWindow.entries[1].endCursor);
+  });
+
+  it("filters windows to a single assignment, lane, and role context", async () => {
+    const threadFile = await createStorePath();
+    const entries = [
+      createLogEntry({
+        assignmentNumber: 1,
+        index: 1,
+        laneId: null,
+        message: "planner stdout",
+        roleId: "planner",
+        source: "stdout",
+      }),
+      createLogEntry({
+        assignmentNumber: 1,
+        index: 2,
+        laneId: "lane-1",
+        message: "lane 1 coder stdout",
+        roleId: "coder",
+        source: "stdout",
+      }),
+      createLogEntry({
+        assignmentNumber: 1,
+        index: 3,
+        laneId: "lane-2",
+        message: "lane 2 coder stdout",
+        roleId: "coder",
+        source: "stdout",
+      }),
+      createLogEntry({
+        assignmentNumber: 1,
+        index: 4,
+        laneId: "lane-1",
+        message: "lane 1 reviewer stdout",
+        roleId: "reviewer",
+        source: "stdout",
+      }),
+      createLogEntry({
+        assignmentNumber: 2,
+        index: 5,
+        laneId: "lane-1",
+        message: "assignment 2 coder stdout",
+        roleId: "coder",
+        source: "stdout",
+      }),
+    ];
+
+    for (const entry of entries) {
+      await appendTeamCodexLogEntry({ entry, threadFile });
+    }
+
+    const filteredWindow = await listTeamCodexLogWindow({
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      limit: 10,
+      roleId: "coder",
+      source: "stdout",
+      threadFile,
+      threadId: "thread-1",
+    });
+
+    expect(filteredWindow.entries.map((entry) => entry.message)).toEqual(["lane 1 coder stdout"]);
+    expect(filteredWindow.pageInfo.beforeCursor).toBe(filteredWindow.entries[0].startCursor);
+    expect(filteredWindow.pageInfo.afterCursor).toBe(filteredWindow.entries[0].endCursor);
   });
 });
 

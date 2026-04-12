@@ -137,7 +137,9 @@ describe("formatThreadSidebarMetadata", () => {
         }),
       ),
     ).toEqual({
-      statusLine: "Thread abcdef12 - Awaiting Proposal Approval",
+      statusClassName: "status-awaiting_human_approval",
+      statusLabel: "Awaiting Proposal Approval",
+      threadLine: "Thread abcdef12",
       updatedLine: `Updated ${formatTimestamp(FIXED_TIMESTAMP)}`,
     });
   });

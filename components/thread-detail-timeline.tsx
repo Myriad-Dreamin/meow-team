@@ -26,7 +26,6 @@ import {
   groupThreadLogEntries,
   pullRequestStatusLabels,
   selectPrimaryLane,
-  threadStatusLabels,
 } from "@/components/thread-view-utils";
 import type { TeamThreadDetail, TeamThreadSummary } from "@/lib/team/history";
 import type {
@@ -34,6 +33,7 @@ import type {
   TeamHumanFeedbackScope,
   TeamHumanFeedbackRecord,
   TeamCodexLogPageInfo,
+  TeamWorkerEvent,
 } from "@/lib/team/types";
 
 type ThreadDetailTimelineProps = {
@@ -65,6 +65,12 @@ type StderrBlockResponse = {
   };
 };
 
+export type TimelineAnchor = {
+  id: string;
+  label: string;
+  level: "primary" | "secondary" | "tertiary";
+};
+
 export type TimelineLogGroup = {
   group: ThreadLogGroup;
   fullMessage: string | null;
@@ -72,55 +78,90 @@ export type TimelineLogGroup = {
   isLoading: boolean;
 };
 
-type ThreadTimelineItem =
-  | {
+export type TimelineTaskOutputBundle = {
+  contextEntry: TeamCodexLogCursorEntry;
+  endedAt: string;
+  id: string;
+  lineCount: number;
+  groups: TimelineLogGroup[];
+  startedAt: string;
+};
+
+type ThreadTimelineAnchorFields = {
+  anchorId?: string;
+  anchorLabel?: string;
+  anchorLevel?: TimelineAnchor["level"];
+};
+
+export type ThreadTimelineItem =
+  | (ThreadTimelineAnchorFields & {
       id: string;
       occurredAt: string;
       kind: "message";
       title: string;
       text: string;
       variant: "human" | "agent";
-      anchorId?: string;
-      anchorLabel?: string;
-    }
-  | {
+    })
+  | (ThreadTimelineAnchorFields & {
       id: string;
       occurredAt: string;
       kind: "planner-note";
       note: string;
-    }
-  | {
+    })
+  | (ThreadTimelineAnchorFields & {
       id: string;
       occurredAt: string;
       kind: "human-feedback";
       feedback: TeamHumanFeedbackRecord;
-    }
-  | {
+    })
+  | (ThreadTimelineAnchorFields & {
       id: string;
       occurredAt: string;
       kind: "handoff";
       handoff: TeamThreadDetail["handoffs"][number];
-    }
-  | {
+    })
+  | (ThreadTimelineAnchorFields & {
+      assignmentNumber: number;
+      id: string;
+      kind: "lane-event";
+      lane: TeamThreadDetail["dispatchAssignments"][number]["lanes"][number];
+      event: TeamWorkerEvent;
+      occurredAt: string;
+      proposalAnchorId: string;
+    })
+  | (ThreadTimelineAnchorFields & {
       id: string;
       occurredAt: string;
       kind: "assignment";
       assignment: TeamThreadDetail["dispatchAssignments"][number];
-      anchorId: string;
-      anchorLabel: string;
-    }
-  | {
+      childAnchors: TimelineAnchor[];
+    })
+  | (ThreadTimelineAnchorFields & {
       id: string;
       occurredAt: string;
-      kind: "log";
-      logGroup: TimelineLogGroup;
-      anchorId?: string;
-      anchorLabel?: string;
-    };
+      kind: "task-output";
+      taskOutput: TimelineTaskOutputBundle;
+    });
 
 const LOG_POLL_INTERVAL_MS = 3000;
 const LOG_WINDOW_LIMIT = 140;
 const SCROLL_THRESHOLD_PX = 56;
+const ACTIVE_ANCHOR_OFFSET_PX = 96;
+
+const buildAssignmentAnchorId = (assignmentNumber: number): string =>
+  `thread-anchor-assignment-${assignmentNumber}`;
+
+const buildLaneAnchorId = (assignmentNumber: number, laneId: string): string =>
+  `thread-anchor-assignment-${assignmentNumber}-${laneId}`;
+
+const buildLaneEventAnchorId = (
+  assignmentNumber: number,
+  laneId: string,
+  eventId: string,
+): string => `thread-anchor-assignment-${assignmentNumber}-${laneId}-event-${eventId}`;
+
+const buildLaneAnchorKey = (assignmentNumber: number, laneId: string): string =>
+  `${assignmentNumber}:${laneId}`;
 
 const EMPTY_PAGE_INFO: TeamCodexLogPageInfo = {
   beforeCursor: null,
@@ -194,6 +235,180 @@ const readErrorMessage = (value: unknown): string | null => {
 
 const buildUnexpectedLogsResponseMessage = (response: Response): string => {
   return `Unable to refresh thread activity (HTTP ${response.status}).`;
+};
+
+const formatEventActorLabel = (actor: TeamWorkerEvent["actor"]): string => {
+  return actor.charAt(0).toUpperCase() + actor.slice(1);
+};
+
+const normalizeAnchorMessage = (value: string): string => {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+};
+
+export const formatCompactTimelineStepLabel = (agentName: string, text: string): string => {
+  const normalizedAgent = agentName.trim() || "Agent";
+  const normalizedText = normalizeAnchorMessage(text);
+
+  if (
+    normalizedAgent.toLowerCase() === "planner" &&
+    (/preferred .*change/u.test(normalizedText) || normalizedText.includes("proposal"))
+  ) {
+    return "Planner proposed";
+  }
+
+  if (normalizedText.includes("approved")) {
+    return `${normalizedAgent} approved`;
+  }
+
+  if (
+    normalizedText.includes("requested changes") ||
+    normalizedText.includes("needs revision") ||
+    normalizedText.includes("revision")
+  ) {
+    return `${normalizedAgent} revision`;
+  }
+
+  return normalizedAgent;
+};
+
+export const formatCompactTimelineHandoffLabel = (
+  handoff: Pick<TeamThreadDetail["handoffs"][number], "decision" | "roleId" | "roleName">,
+): string => {
+  const roleLabelN = (handoff.roleId || handoff.roleName || "agent").trim();
+  const roleLabel = roleLabelN.charAt(0).toUpperCase() + roleLabelN.slice(1);
+
+  if (handoff.decision === "approved") {
+    return `${roleLabel} approved`;
+  }
+
+  if (handoff.decision === "needs_revision") {
+    return `${roleLabel} revision`;
+  }
+
+  return `${roleLabel} handoff`;
+};
+
+export const formatCompactTimelinePlannerNoteLabel = (message: string): string => {
+  const normalizedMessage = normalizeAnchorMessage(message);
+
+  if (normalizedMessage.includes("human approved proposal")) {
+    return "Human approved planner";
+  }
+
+  if (normalizedMessage.includes("created") && normalizedMessage.includes("proposal")) {
+    return "Planner proposed";
+  }
+
+  if (normalizedMessage.includes("waiting for human approval")) {
+    return "Planner waiting";
+  }
+
+  if (normalizedMessage.includes("conflict")) {
+    return "Planner conflict";
+  }
+
+  if (normalizedMessage.includes("failed")) {
+    return "Planner failed";
+  }
+
+  return "Planner note";
+};
+
+export const formatCompactTimelineFeedbackLabel = (
+  feedback: Pick<TeamHumanFeedbackRecord, "scope">,
+): string => {
+  return feedback.scope === "proposal" ? "proposal feedback" : "request feedback";
+};
+
+export const buildCompactLaneEventLabels = (events: TeamWorkerEvent[]): string[] => {
+  let coderRunCount = 0;
+  let reviewerRunCount = 0;
+  let reviewerRevisionCount = 0;
+
+  return events.map((event) => {
+    const normalizedMessage = normalizeAnchorMessage(event.message);
+
+    switch (event.actor) {
+      case "planner":
+        if (normalizedMessage.includes("rebase")) {
+          return "Planner rebase";
+        }
+
+        if (normalizedMessage.includes("approved")) {
+          return "Planner approved";
+        }
+
+        return "Planner proposed";
+
+      case "human":
+        if (normalizedMessage.includes("approved")) {
+          return "Human approved";
+        }
+
+        return "Human update";
+
+      case "coder":
+        const verb = normalizedMessage.includes("implementing")
+          ? "implementing"
+          : normalizedMessage.includes("requested review")
+            ? "requested review"
+            : "updated";
+        if (verb === "implementing") {
+          coderRunCount += 1;
+        }
+
+        if (coderRunCount > 0) {
+          return `Coder ${verb} ${coderRunCount}`;
+        }
+
+        return `Coder ${verb}`;
+
+      case "reviewer":
+        if (normalizedMessage.startsWith("reviewer is ")) {
+          reviewerRunCount += 1;
+          return `Reviewer run ${reviewerRunCount}`;
+        }
+
+        if (normalizedMessage.includes("requested changes")) {
+          reviewerRevisionCount += 1;
+          return `Reviewer revision ${reviewerRevisionCount}`;
+        }
+
+        if (
+          normalizedMessage.includes("approved the proposal") ||
+          normalizedMessage.includes("completed machine review")
+        ) {
+          reviewerRunCount = Math.max(reviewerRunCount, 1);
+          return "Reviewer approved";
+        }
+
+        return "Reviewer update";
+
+      case "system":
+        if (normalizedMessage.includes("published")) {
+          const match = normalizedMessage.match(/published commit \[(\w{7,40})/iu);
+          if (match) {
+            return `Commit ${match[1]}`;
+          }
+        }
+        if (normalizedMessage.includes("/opsx:archive")) {
+          return "System archiving";
+        }
+
+        if (normalizedMessage.includes("github pr ready")) {
+          return "System PR";
+        }
+
+        if (normalizedMessage.includes("archived openspec")) {
+          return "System archived";
+        }
+
+        return "System update";
+
+      default:
+        return `${event.actor} update`;
+    }
+  });
 };
 
 const fetchLogWindow = async ({
@@ -500,6 +715,48 @@ const formatLogTimestampRange = (group: ThreadLogGroup): string => {
   return `${formatTimestamp(group.startedAt)} -> ${formatTimestamp(group.endedAt)}`;
 };
 
+const shareTaskOutputContext = (left: ThreadLogGroup, right: ThreadLogGroup): boolean => {
+  if (left.source === "system" || right.source === "system") {
+    return false;
+  }
+
+  return (
+    left.contextEntry.roleId === right.contextEntry.roleId &&
+    left.contextEntry.laneId === right.contextEntry.laneId &&
+    left.contextEntry.assignmentNumber === right.contextEntry.assignmentNumber
+  );
+};
+
+export const buildTimelineTaskOutputBundles = (
+  logGroups: TimelineLogGroup[],
+): TimelineTaskOutputBundle[] => {
+  const bundles: TimelineTaskOutputBundle[] = [];
+
+  for (const logGroup of logGroups) {
+    const previousBundle = bundles.at(-1);
+    if (
+      previousBundle &&
+      shareTaskOutputContext(previousBundle.groups.at(-1)!.group, logGroup.group)
+    ) {
+      previousBundle.groups.push(logGroup);
+      previousBundle.endedAt = logGroup.group.endedAt;
+      previousBundle.lineCount += logGroup.group.lineCount;
+      continue;
+    }
+
+    bundles.push({
+      contextEntry: logGroup.group.contextEntry,
+      endedAt: logGroup.group.endedAt,
+      id: `task-output-${logGroup.group.id}`,
+      lineCount: logGroup.group.lineCount,
+      groups: [logGroup],
+      startedAt: logGroup.group.startedAt,
+    });
+  }
+
+  return bundles;
+};
+
 const buildTimelineItems = ({
   detail,
   logGroups,
@@ -514,8 +771,9 @@ const buildTimelineItems = ({
   if (detail) {
     detail.userMessages.forEach((message, index) => {
       items.push({
-        anchorId: index === 0 ? "thread-anchor-request" : undefined,
-        anchorLabel: index === 0 ? "Request" : undefined,
+        anchorId: index === 0 ? "thread-anchor-request" : `thread-anchor-message-${message.id}`,
+        anchorLabel: index === 0 ? "Request" : "Follow-up",
+        anchorLevel: "primary",
         id: `message-${message.id}`,
         kind: "message",
         occurredAt: message.timestamp,
@@ -527,6 +785,12 @@ const buildTimelineItems = ({
 
     detail.steps.forEach((step, index) => {
       items.push({
+        anchorId: `thread-anchor-step-${step.createdAt}-${index}`,
+        anchorLabel: formatCompactTimelineStepLabel(
+          step.agentName,
+          step.text || "This step completed through tool calls and state updates.",
+        ),
+        anchorLevel: "primary",
         id: `step-${step.agentName}-${step.createdAt}-${index}`,
         kind: "message",
         occurredAt: step.createdAt,
@@ -538,17 +802,47 @@ const buildTimelineItems = ({
 
     detail.dispatchAssignments.forEach((assignment) => {
       items.push({
-        anchorId: `thread-anchor-assignment-${assignment.assignmentNumber}`,
+        anchorId: buildAssignmentAnchorId(assignment.assignmentNumber),
         anchorLabel: `Assignment ${assignment.assignmentNumber}`,
+        anchorLevel: "primary",
         assignment,
+        childAnchors: assignment.lanes.map((lane) => ({
+          id: buildLaneAnchorId(assignment.assignmentNumber, lane.laneId),
+          label: `Proposal ${lane.laneIndex}`,
+          level: "secondary",
+        })),
         id: `assignment-${assignment.assignmentNumber}`,
         kind: "assignment",
         occurredAt: assignment.requestedAt || assignment.updatedAt,
+      });
+
+      assignment.lanes.forEach((lane) => {
+        const compactLaneEventLabels = buildCompactLaneEventLabels(lane.events);
+
+        lane.events.forEach((event, index) => {
+          items.push({
+            anchorId: buildLaneEventAnchorId(assignment.assignmentNumber, lane.laneId, event.id),
+            anchorLabel:
+              compactLaneEventLabels[index] ??
+              `${formatEventActorLabel(event.actor).toLowerCase()} update`,
+            anchorLevel: "tertiary",
+            assignmentNumber: assignment.assignmentNumber,
+            event,
+            id: `lane-event-${assignment.assignmentNumber}-${lane.laneId}-${event.id}`,
+            kind: "lane-event",
+            lane,
+            occurredAt: event.createdAt,
+            proposalAnchorId: buildLaneAnchorId(assignment.assignmentNumber, lane.laneId),
+          });
+        });
       });
     });
 
     detail.handoffs.forEach((handoff) => {
       items.push({
+        anchorId: `thread-anchor-handoff-${handoff.roleId}-${handoff.sequence}`,
+        anchorLabel: formatCompactTimelineHandoffLabel(handoff),
+        anchorLevel: "primary",
         handoff,
         id: `handoff-${handoff.roleId}-${handoff.sequence}`,
         kind: "handoff",
@@ -559,6 +853,9 @@ const buildTimelineItems = ({
 
   thread.plannerNotes.forEach((note) => {
     items.push({
+      anchorId: `thread-anchor-planner-note-${note.id}`,
+      anchorLabel: formatCompactTimelinePlannerNoteLabel(note.message),
+      anchorLevel: "primary",
       id: `planner-note-${note.id}`,
       kind: "planner-note",
       note: note.message,
@@ -568,6 +865,9 @@ const buildTimelineItems = ({
 
   thread.humanFeedback.forEach((feedback) => {
     items.push({
+      anchorId: `thread-anchor-feedback-${feedback.id}`,
+      anchorLabel: formatCompactTimelineFeedbackLabel(feedback),
+      anchorLevel: feedback.laneId ? "secondary" : "primary",
       feedback,
       id: `human-feedback-${feedback.id}`,
       kind: "human-feedback",
@@ -577,15 +877,24 @@ const buildTimelineItems = ({
 
   const latestLiveStderrGroupId =
     logGroups.filter((group) => group.group.source === "stderr").at(-1)?.group.id ?? null;
-  logGroups.forEach((logGroup) => {
+  const taskOutputBundles = buildTimelineTaskOutputBundles(logGroups);
+  const latestTaskOutputBundleId =
+    taskOutputBundles.find((bundle) =>
+      bundle.groups.some((group) => group.group.id === latestLiveStderrGroupId),
+    )?.id ??
+    taskOutputBundles.at(-1)?.id ??
+    null;
+
+  taskOutputBundles.forEach((taskOutput) => {
     items.push({
       anchorId:
-        logGroup.group.id === latestLiveStderrGroupId ? "thread-anchor-latest-stderr" : undefined,
-      anchorLabel: logGroup.group.id === latestLiveStderrGroupId ? "Latest stderr" : undefined,
-      id: `log-${logGroup.group.id}`,
-      kind: "log",
-      logGroup,
-      occurredAt: logGroup.group.endedAt,
+        taskOutput.id === latestTaskOutputBundleId ? "thread-anchor-latest-task-output" : undefined,
+      anchorLabel: taskOutput.id === latestTaskOutputBundleId ? "Latest task output" : undefined,
+      anchorLevel: "primary",
+      id: taskOutput.id,
+      kind: "task-output",
+      occurredAt: taskOutput.endedAt,
+      taskOutput,
     });
   });
 
@@ -593,9 +902,10 @@ const buildTimelineItems = ({
     assignment: 4,
     handoff: 5,
     "human-feedback": 3,
-    log: 6,
+    "lane-event": 5,
     message: 1,
     "planner-note": 2,
+    "task-output": 6,
   };
 
   return items.sort((left, right) => {
@@ -609,6 +919,45 @@ const buildTimelineItems = ({
 
     return left.id.localeCompare(right.id);
   });
+};
+
+export const buildTimelineAnchors = (timelineItems: ThreadTimelineItem[]): TimelineAnchor[] => {
+  return timelineItems.reduce<TimelineAnchor[]>((anchors, item) => {
+    if ("anchorId" in item && item.anchorId && "anchorLabel" in item && item.anchorLabel) {
+      anchors.push({
+        id: item.anchorId,
+        label: item.anchorLabel,
+        level: item.anchorLevel ?? "primary",
+      });
+    }
+
+    if (item.kind === "assignment") {
+      anchors.push(...item.childAnchors);
+    }
+
+    return anchors;
+  }, []);
+};
+
+export const pickActiveTimelineAnchorId = (
+  anchorOffsets: Array<{ id: string; top: number }>,
+  markerTop: number,
+): string | null => {
+  if (anchorOffsets.length === 0) {
+    return null;
+  }
+
+  let activeAnchorId = anchorOffsets[0]?.id ?? null;
+  for (const anchor of anchorOffsets) {
+    if (anchor.top <= markerTop) {
+      activeAnchorId = anchor.id;
+      continue;
+    }
+
+    break;
+  }
+
+  return activeAnchorId;
 };
 
 const isNearBottom = (element: HTMLDivElement): boolean => {
@@ -642,6 +991,7 @@ export function ThreadDetailTimeline({
   const [isPinnedToTail, setIsPinnedToTail] = useState(true);
   const [isScrollable, setIsScrollable] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [activeAnchorId, setActiveAnchorId] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const latestPageInfoRef = useRef<TeamCodexLogPageInfo>(EMPTY_PAGE_INFO);
   const didInitialTailScrollRef = useRef(false);
@@ -650,30 +1000,19 @@ export function ThreadDetailTimeline({
     scrollTop: number;
   } | null>(null);
   const anchorElementsRef = useRef(new Map<string, HTMLElement>());
+  const railLinkElementsRef = useRef(new Map<string, HTMLAnchorElement>());
   const stderrElementsRef = useRef(new Map<string, HTMLElement>());
+  const railLinksRef = useRef<HTMLDivElement | null>(null);
 
   const primaryLane = selectPrimaryLane(thread.workerLanes);
   const canRestart = canRestartPlanning(thread);
-  const branchDisplay = primaryLane ? getLaneBranchDisplay(primaryLane) : null;
   const timelineItems = buildTimelineItems({
     detail,
     logGroups,
     thread,
   });
   const latestActivityKey = timelineItems.at(-1)?.id;
-  const timelineAnchors = timelineItems.reduce<Array<{ id: string; label: string }>>(
-    (anchors, item) => {
-      if ("anchorId" in item && item.anchorId && "anchorLabel" in item && item.anchorLabel) {
-        anchors.push({
-          id: item.anchorId,
-          label: item.anchorLabel,
-        });
-      }
-
-      return anchors;
-    },
-    [],
-  );
+  const timelineAnchors = buildTimelineAnchors(timelineItems);
 
   useEffect(() => {
     latestPageInfoRef.current = logPageInfo;
@@ -689,6 +1028,35 @@ export function ThreadDetailTimeline({
     setIsScrollable(canScroll);
     setIsPinnedToTail(!canScroll || isNearBottom(element));
     setShowScrollToTop(canScroll && isAwayFromTop(element));
+  });
+
+  const updateActiveAnchor = useEffectEvent(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const anchorOffsets = timelineAnchors.flatMap((anchor) => {
+      const element = anchorElementsRef.current.get(anchor.id);
+      if (!element) {
+        return [];
+      }
+
+      const elementRect = element.getBoundingClientRect();
+      return [
+        {
+          id: anchor.id,
+          top: container.scrollTop + (elementRect.top - containerRect.top),
+        },
+      ];
+    });
+
+    const nextActiveAnchorId = pickActiveTimelineAnchorId(
+      anchorOffsets,
+      container.scrollTop + ACTIVE_ANCHOR_OFFSET_PX,
+    );
+    setActiveAnchorId((current) => (current === nextActiveAnchorId ? current : nextActiveAnchorId));
   });
 
   const pruneInvisibleExpandedStderr = useEffectEvent(() => {
@@ -735,6 +1103,7 @@ export function ThreadDetailTimeline({
 
     const handleScroll = () => {
       updateScrollState();
+      updateActiveAnchor();
       pruneInvisibleExpandedStderr();
     };
 
@@ -756,6 +1125,7 @@ export function ThreadDetailTimeline({
     element.scrollTop =
       pendingSnapshot.scrollTop + (element.scrollHeight - pendingSnapshot.scrollHeight);
     pendingPrependSnapshotRef.current = null;
+    updateActiveAnchor();
   }, [logGroups]);
 
   useEffect(() => {
@@ -768,14 +1138,38 @@ export function ThreadDetailTimeline({
       element.scrollTop = element.scrollHeight;
       didInitialTailScrollRef.current = true;
       updateScrollState();
+      updateActiveAnchor();
       return;
     }
 
     if (isPinnedToTail) {
       element.scrollTop = element.scrollHeight;
       updateScrollState();
+      updateActiveAnchor();
     }
   }, [isPinnedToTail, latestActivityKey, timelineItems.length]);
+
+  useLayoutEffect(() => {
+    updateActiveAnchor();
+  }, [latestActivityKey, timelineAnchors.length, timelineItems.length]);
+
+  useEffect(() => {
+    const railLinksElement = railLinksRef.current;
+    const activeLink = activeAnchorId
+      ? (railLinkElementsRef.current.get(activeAnchorId) ?? null)
+      : null;
+    if (!railLinksElement || !activeLink) {
+      return;
+    }
+
+    const railLinksRect = railLinksElement.getBoundingClientRect();
+    const activeLinkRect = activeLink.getBoundingClientRect();
+    if (activeLinkRect.top < railLinksRect.top || activeLinkRect.bottom > railLinksRect.bottom) {
+      activeLink.scrollIntoView({
+        block: "nearest",
+      });
+    }
+  }, [activeAnchorId]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -930,17 +1324,52 @@ export function ThreadDetailTimeline({
     };
   };
 
+  const registerRailLinkElement = (anchorId: string): RefCallback<HTMLAnchorElement> => {
+    return (element) => {
+      if (element) {
+        railLinkElementsRef.current.set(anchorId, element);
+      } else {
+        railLinkElementsRef.current.delete(anchorId);
+      }
+    };
+  };
+
   const scrollToAnchor = (anchorId: string) => {
     const container = scrollContainerRef.current;
-    const element = anchorElementsRef.current.get(anchorId);
+    const element =
+      anchorElementsRef.current.get(anchorId) ??
+      (typeof document !== "undefined" ? document.getElementById(anchorId) : null);
     if (!container || !element) {
       return;
     }
 
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    setActiveAnchorId(anchorId);
+
     container.scrollTo({
-      behavior: "smooth",
-      top: Math.max(element.offsetTop - 24, 0),
+      behavior: "instant",
+      top: Math.max(container.scrollTop + (elementRect.top - containerRect.top) - 24, 0),
     });
+  };
+
+  const openTaskOutputWindow = (entry: TeamCodexLogCursorEntry) => {
+    const url = new URL("/agent-task-output", window.location.origin);
+    url.searchParams.set("threadId", thread.threadId);
+
+    if (typeof entry.assignmentNumber === "number") {
+      url.searchParams.set("assignmentNumber", String(entry.assignmentNumber));
+    }
+
+    if (entry.laneId) {
+      url.searchParams.set("laneId", entry.laneId);
+    }
+
+    if (entry.roleId) {
+      url.searchParams.set("roleId", entry.roleId);
+    }
+
+    window.open(url.toString(), "_blank");
   };
 
   const toggleStderrGroup = async (groupId: string) => {
@@ -1071,7 +1500,7 @@ export function ThreadDetailTimeline({
 
       <div className="thread-chat-body">
         <div className="thread-chat-main" ref={scrollContainerRef}>
-          <div className="thread-chat-main-inner">
+          <div className="thread-chat-main-inner" id="thread-chat-top">
             {logPageInfo.hasOlder ? (
               <button
                 className="thread-chat-history-button"
@@ -1108,6 +1537,7 @@ export function ThreadDetailTimeline({
                 return (
                   <article
                     className={`thread-chat-bubble thread-chat-bubble-${item.variant}`}
+                    id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
@@ -1122,7 +1552,12 @@ export function ThreadDetailTimeline({
 
               if (item.kind === "planner-note") {
                 return (
-                  <article className="thread-chat-card" key={item.id} ref={anchorRef}>
+                  <article
+                    className="thread-chat-card"
+                    id={item.anchorId}
+                    key={item.id}
+                    ref={anchorRef}
+                  >
                     <div className="thread-chat-meta">
                       <span>Planner note</span>
                       <span>{formatTimestamp(item.occurredAt)}</span>
@@ -1134,7 +1569,12 @@ export function ThreadDetailTimeline({
 
               if (item.kind === "human-feedback") {
                 return (
-                  <article className="thread-chat-card" key={item.id} ref={anchorRef}>
+                  <article
+                    className="thread-chat-card"
+                    id={item.anchorId}
+                    key={item.id}
+                    ref={anchorRef}
+                  >
                     <div className="thread-chat-meta">
                       <span>{formatFeedbackLabel(thread, item.feedback.laneId)}</span>
                       <span>{formatTimestamp(item.occurredAt)}</span>
@@ -1146,7 +1586,12 @@ export function ThreadDetailTimeline({
 
               if (item.kind === "handoff") {
                 return (
-                  <article className="thread-chat-card" key={item.id} ref={anchorRef}>
+                  <article
+                    className="thread-chat-card"
+                    id={item.anchorId}
+                    key={item.id}
+                    ref={anchorRef}
+                  >
                     <div className="thread-chat-meta thread-chat-meta-split">
                       <span>{item.handoff.roleName}</span>
                       <span className={`decision-pill decision-${item.handoff.decision}`}>
@@ -1159,6 +1604,37 @@ export function ThreadDetailTimeline({
                 );
               }
 
+              if (item.kind === "lane-event") {
+                return (
+                  <article
+                    className="thread-chat-card thread-chat-card-lane-event"
+                    id={item.anchorId}
+                    key={item.id}
+                    ref={anchorRef}
+                  >
+                    <div className="thread-chat-meta thread-chat-meta-split">
+                      <span>
+                        {formatEventActorLabel(item.event.actor)}
+                        {" - "}
+                        <a
+                          className="thread-chat-link"
+                          href={`#${item.proposalAnchorId}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            scrollToAnchor(item.proposalAnchorId);
+                          }}
+                        >
+                          Proposal {item.lane.laneIndex}
+                        </a>
+                      </span>
+
+                      <span>{formatTimestamp(item.occurredAt)}</span>
+                    </div>
+                    <LaneMarkdownText className="thread-chat-copy" text={item.event.message} />
+                  </article>
+                );
+              }
+
               if (item.kind === "assignment") {
                 const assignment = item.assignment;
                 const isCurrentAssignment = assignment.assignmentNumber === thread.assignmentNumber;
@@ -1166,6 +1642,7 @@ export function ThreadDetailTimeline({
                 return (
                   <article
                     className="thread-chat-card thread-chat-card-assignment"
+                    id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
@@ -1219,7 +1696,14 @@ export function ThreadDetailTimeline({
                           const commitDisplay = getLaneCommitDisplay(lane);
 
                           return (
-                            <section className="thread-chat-lane-card" key={lane.laneId}>
+                            <section
+                              className="thread-chat-lane-card"
+                              id={buildLaneAnchorId(assignment.assignmentNumber, lane.laneId)}
+                              key={lane.laneId}
+                              ref={registerAnchorElement(
+                                buildLaneAnchorId(assignment.assignmentNumber, lane.laneId),
+                              )}
+                            >
                               <div className="thread-chat-lane-head">
                                 <div>
                                   <p className="timeline-title">Proposal {lane.laneIndex}</p>
@@ -1267,27 +1751,6 @@ export function ThreadDetailTimeline({
                                   <span>{formatTimestamp(lane.pullRequest.updatedAt)}</span>
                                 </div>
                               ) : null}
-
-                              {lane.events.length > 0 ? (
-                                <div className="thread-chat-lane-events">
-                                  {lane.events
-                                    .slice()
-                                    .reverse()
-                                    .map((event) => (
-                                      <article className="thread-chat-lane-event" key={event.id}>
-                                        <div className="thread-chat-meta">
-                                          <span>{event.actor}</span>
-                                          <span>{formatTimestamp(event.createdAt)}</span>
-                                        </div>
-                                        <LaneMarkdownText
-                                          className="thread-chat-copy"
-                                          text={event.message}
-                                        />
-                                      </article>
-                                    ))}
-                                </div>
-                              ) : null}
-
                               {approvalAction ? (
                                 <button
                                   className="secondary-button"
@@ -1417,53 +1880,93 @@ export function ThreadDetailTimeline({
                 );
               }
 
-              const logGroup = item.logGroup;
-              const isStderr = logGroup.group.source === "stderr";
-              const stderrRef = isStderr ? registerStderrElement(logGroup.group.id) : undefined;
-              const content = logGroup.fullMessage ?? logGroup.group.preview;
+              const taskOutput = item.taskOutput;
+              const canOpenTaskOutput = taskOutput.groups.some(
+                (group) => group.group.source !== "system",
+              );
 
               return (
                 <article
-                  className={`thread-chat-card thread-chat-card-log ${
-                    isStderr ? "thread-chat-card-stderr" : ""
-                  }`}
+                  className="thread-chat-card thread-chat-card-log"
+                  id={item.anchorId}
                   key={item.id}
-                  ref={(element) => {
-                    anchorRef?.(element);
-                    stderrRef?.(element);
-                  }}
+                  ref={anchorRef}
                 >
                   <div className="thread-chat-meta thread-chat-meta-split">
-                    <span>{logGroup.group.source}</span>
-                    <span>{describeLogEntryContext(logGroup.group.contextEntry)}</span>
-                    <span>{formatLogTimestampRange(logGroup.group)}</span>
-                    {logGroup.group.lineCount > 1 ? (
-                      <span>{logGroup.group.lineCount} lines</span>
-                    ) : null}
+                    <span>Task output</span>
+                    <span>{describeLogEntryContext(taskOutput.contextEntry)}</span>
+                    <span>
+                      {taskOutput.startedAt === taskOutput.endedAt
+                        ? formatTimestamp(taskOutput.startedAt)
+                        : `${formatTimestamp(taskOutput.startedAt)} -> ${formatTimestamp(
+                            taskOutput.endedAt,
+                          )}`}
+                    </span>
+                    {taskOutput.lineCount > 1 ? <span>{taskOutput.lineCount} lines</span> : null}
                   </div>
 
-                  <pre className="thread-chat-pre">{content}</pre>
+                  <div className="thread-chat-log-stack">
+                    {taskOutput.groups.map((logGroup) => {
+                      const isStderr = logGroup.group.source === "stderr";
+                      const stderrRef = isStderr
+                        ? registerStderrElement(logGroup.group.id)
+                        : undefined;
+                      const content = logGroup.fullMessage ?? logGroup.group.preview;
 
-                  {isStderr ? (
-                    <div className="thread-chat-stderr-actions">
-                      {logGroup.expandedMode === "live" ? (
-                        <span className="thread-chat-live-badge">Live stderr</span>
-                      ) : (
-                        <button
-                          className="secondary-button"
-                          disabled={logGroup.isLoading}
-                          type="button"
-                          onClick={() => {
-                            void toggleStderrGroup(logGroup.group.id);
-                          }}
+                      return (
+                        <section
+                          className={`thread-chat-log-block ${
+                            isStderr ? "thread-chat-log-block-stderr" : ""
+                          }`}
+                          key={logGroup.group.id}
+                          ref={stderrRef}
                         >
-                          {logGroup.isLoading
-                            ? "Loading stderr..."
-                            : logGroup.expandedMode === "manual"
-                              ? "Fold stderr"
-                              : "Expand stderr"}
-                        </button>
-                      )}
+                          <div className="thread-chat-meta thread-chat-meta-split">
+                            <span>{logGroup.group.source}</span>
+                            <span>{formatLogTimestampRange(logGroup.group)}</span>
+                            {logGroup.group.lineCount > 1 ? (
+                              <span>{logGroup.group.lineCount} lines</span>
+                            ) : null}
+                          </div>
+
+                          <pre className="thread-chat-pre thread-chat-log-pre">{content}</pre>
+
+                          {isStderr ? (
+                            <div className="thread-chat-log-actions">
+                              {logGroup.expandedMode === "live" ? (
+                                <span className="thread-chat-live-badge">Live stderr</span>
+                              ) : (
+                                <button
+                                  className="secondary-button"
+                                  disabled={logGroup.isLoading}
+                                  type="button"
+                                  onClick={() => {
+                                    void toggleStderrGroup(logGroup.group.id);
+                                  }}
+                                >
+                                  {logGroup.isLoading
+                                    ? "Loading stderr..."
+                                    : logGroup.expandedMode === "manual"
+                                      ? "Fold stderr"
+                                      : "Expand stderr"}
+                                </button>
+                              )}
+                            </div>
+                          ) : null}
+                        </section>
+                      );
+                    })}
+                  </div>
+
+                  {canOpenTaskOutput ? (
+                    <div className="thread-chat-log-actions">
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => openTaskOutputWindow(taskOutput.contextEntry)}
+                      >
+                        Open task output tab
+                      </button>
                     </div>
                   ) : null}
                 </article>
@@ -1474,25 +1977,39 @@ export function ThreadDetailTimeline({
 
         <aside className="thread-chat-rail">
           <div className="thread-chat-rail-card">
-            <p className="eyebrow">Navigate</p>
-            <div className="thread-chat-rail-links">
+            <div className="thread-chat-rail-links" ref={railLinksRef}>
               {timelineAnchors.map((anchor) => (
-                <button
-                  className="thread-chat-rail-link"
+                <a
+                  className={`thread-chat-rail-link ${
+                    activeAnchorId === anchor.id ? "thread-chat-rail-link-active" : ""
+                  } ${
+                    anchor.level === "secondary"
+                      ? "thread-chat-rail-link-secondary"
+                      : anchor.level === "tertiary"
+                        ? "thread-chat-rail-link-tertiary"
+                        : ""
+                  }`}
+                  aria-current={activeAnchorId === anchor.id ? "location" : undefined}
+                  href={`#${anchor.id}`}
                   key={anchor.id}
-                  type="button"
-                  onClick={() => scrollToAnchor(anchor.id)}
+                  ref={registerRailLinkElement(anchor.id)}
+                  title={anchor.label}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    scrollToAnchor(anchor.id);
+                  }}
                 >
                   {anchor.label}
-                </button>
+                </a>
               ))}
             </div>
 
             {isScrollable && showScrollToTop ? (
-              <button
+              <a
                 className="thread-chat-scroll-top"
-                type="button"
-                onClick={() => {
+                href="#thread-chat-top"
+                onClick={(event) => {
+                  event.preventDefault();
                   scrollContainerRef.current?.scrollTo({
                     behavior: "smooth",
                     top: 0,
@@ -1500,7 +2017,7 @@ export function ThreadDetailTimeline({
                 }}
               >
                 Scroll to top
-              </button>
+              </a>
             ) : null}
           </div>
         </aside>

@@ -516,7 +516,7 @@ export function TeamWorkspace({
     <section className="workspace-shell">
       <aside className="workspace-sidebar">
         <div className="workspace-sidebar-header">
-          <h2>Harness Workspace</h2>
+          <h2>Meow Team</h2>
         </div>
 
         <div className="workspace-nav">
@@ -524,18 +524,17 @@ export function TeamWorkspace({
             <div className="workspace-tab-group-head">
               <div className="workspace-tab-group-heading">
                 <p className="workspace-tab-group-label">Living Threads</p>
-                <button
-                  aria-pressed={resolvedSelectedTab.type === "run"}
-                  className={`workspace-icon-button ${resolvedSelectedTab.type === "run" ? "workspace-icon-button-active" : ""}`}
-                  title="Run Team"
-                  type="button"
-                  onClick={handleSelectRunTab}
-                >
-                  <PlusIcon className="workspace-icon" />
-                  <span className="sr-only">Run Team</span>
-                </button>
               </div>
-              <span className="workspace-tab-group-count">{threads.length}</span>
+              <button
+                aria-pressed={resolvedSelectedTab.type === "run"}
+                className={`workspace-icon-button ${resolvedSelectedTab.type === "run" ? "workspace-icon-button-active" : ""}`}
+                title="Run Team"
+                type="button"
+                onClick={handleSelectRunTab}
+              >
+                <PlusIcon className="workspace-icon" />
+                <span className="sr-only">Run Team</span>
+              </button>
             </div>
 
             {threads.length > 0 ? (
@@ -580,8 +579,15 @@ export function TeamWorkspace({
                               >
                                 <div className="workspace-thread-tab-body">
                                   <span className="workspace-tab-label">{thread.requestTitle}</span>
-                                  <span className="workspace-thread-tab-meta">
-                                    {sidebarMetadata.statusLine}
+                                  <span className="workspace-thread-tab-meta-row">
+                                    <span className="workspace-thread-tab-meta">
+                                      {sidebarMetadata.threadLine}
+                                    </span>
+                                    <span
+                                      className={`workspace-thread-tab-status ${sidebarMetadata.statusClassName}`}
+                                    >
+                                      {sidebarMetadata.statusLabel}
+                                    </span>
                                   </span>
                                   <span className="workspace-thread-tab-meta">
                                     {sidebarMetadata.updatedLine}
