@@ -2,25 +2,28 @@ import { promises as fs } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getTeamThreadRecord, type TeamThreadRecord } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const {
   appendArchivedOpenSpecLinksToRoadmapTopicMock,
-  archiveOpenSpecChangeInWorktreeMock,
   commitWorktreeChangesMock,
   createOrUpdateGitHubPullRequestMock,
+  hasWorktreeChangesMock,
   ensureLaneWorktreeMock,
   getBranchHeadMock,
+  inspectOpenSpecChangeArchiveStateMock,
   pushLaneBranchMock,
   threadFile,
   worktreeRoot,
 } = vi.hoisted(() => ({
   appendArchivedOpenSpecLinksToRoadmapTopicMock: vi.fn(),
-  archiveOpenSpecChangeInWorktreeMock: vi.fn(),
   commitWorktreeChangesMock: vi.fn(),
   createOrUpdateGitHubPullRequestMock: vi.fn(),
+  hasWorktreeChangesMock: vi.fn(),
   ensureLaneWorktreeMock: vi.fn(),
   getBranchHeadMock: vi.fn(),
+  inspectOpenSpecChangeArchiveStateMock: vi.fn(),
   pushLaneBranchMock: vi.fn(),
   threadFile: `/tmp/team-dispatch-approval-${crypto.randomUUID()}.json`,
   worktreeRoot: `/tmp/team-dispatch-worktrees-${crypto.randomUUID()}`,
@@ -71,10 +74,11 @@ vi.mock("@/lib/git/ops", async () => {
   const actual = await vi.importActual<typeof import("@/lib/git/ops")>("@/lib/git/ops");
   return {
     ...actual,
-    archiveOpenSpecChangeInWorktree: archiveOpenSpecChangeInWorktreeMock,
     commitWorktreeChanges: commitWorktreeChangesMock,
     createOrUpdateGitHubPullRequest: createOrUpdateGitHubPullRequestMock,
+    hasWorktreeChanges: hasWorktreeChangesMock,
     getBranchHead: getBranchHeadMock,
+    inspectOpenSpecChangeArchiveState: inspectOpenSpecChangeArchiveStateMock,
   };
 });
 
@@ -112,6 +116,7 @@ const createLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLa
   laneId: "lane-1",
   laneIndex: 1,
   status: "approved",
+  executionPhase: null,
   taskTitle: "Ship the feature",
   taskObjective: "Archive the approved proposal and open a GitHub PR.",
   proposalChangeName: "change-1",
@@ -231,6 +236,36 @@ const writeThreadStore = async (
   );
 };
 
+const createArchiveDependencies = ({
+  coderRun,
+}: {
+  coderRun?: TeamRoleDependencies["coderAgent"]["run"];
+} = {}): TeamRoleDependencies => {
+  return {
+    executor: vi.fn() as TeamRoleDependencies["executor"],
+    requestTitleAgent: {
+      run: vi.fn(),
+    },
+    plannerAgent: {
+      run: vi.fn(),
+    },
+    coderAgent: {
+      run:
+        coderRun ??
+        (vi.fn(async () => ({
+          summary: "Archived the approved OpenSpec change.",
+          deliverable: "Final archive pass completed.",
+          decision: "continue" as const,
+          pullRequestTitle: null,
+          pullRequestSummary: null,
+        })) as TeamRoleDependencies["coderAgent"]["run"]),
+    },
+    reviewerAgent: {
+      run: vi.fn(),
+    },
+  };
+};
+
 describe("approveLanePullRequest", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -241,6 +276,18 @@ describe("approveLanePullRequest", () => {
       topicPath: null,
       linkedSpecs: [],
     });
+    hasWorktreeChangesMock.mockResolvedValue(true);
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValueOnce({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: true,
+      archivedPath: null,
+    });
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: false,
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+    });
   });
 
   afterEach(async () => {
@@ -248,11 +295,26 @@ describe("approveLanePullRequest", () => {
     await fs.rm(worktreeRoot, { recursive: true, force: true });
   });
 
-  it("archives the reviewed OpenSpec change and finalizes GitHub PR delivery", async () => {
-    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
-      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
-      createdArchive: true,
-    });
+  it("routes final approval through the coder archive pass and finalizes GitHub PR delivery", async () => {
+    const coderRun = vi.fn(
+      async (input: Parameters<TeamRoleDependencies["coderAgent"]["run"]>[0]) => {
+        expect(input.input).toContain("/opsx:archive change-1");
+        expect(input.input).toContain("not in an interactive context");
+        expect(input.input).toContain("TBD");
+        expect(input.state.executionPhase).toBe("final_archive");
+        expect(input.state.archiveCommand).toBe("/opsx:archive change-1");
+        expect(input.state.archivePathContext).toBe("openspec/changes/change-1");
+
+        return {
+          summary: "Archived the approved OpenSpec change.",
+          deliverable: "Final archive pass completed.",
+          decision: "continue" as const,
+          pullRequestTitle: null,
+          pullRequestSummary: null,
+        };
+      },
+    );
+
     commitWorktreeChangesMock.mockResolvedValue(undefined);
     getBranchHeadMock.mockResolvedValue("archive-commit");
     pushLaneBranchMock.mockResolvedValue({
@@ -270,39 +332,51 @@ describe("approveLanePullRequest", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
+      dependencies: createArchiveDependencies({
+        coderRun,
+      }),
     });
 
     const thread = await getTeamThreadRecord(threadFile, "thread-1");
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
 
-    expect(ensureLaneWorktreeMock).toHaveBeenCalled();
+    expect(coderRun).toHaveBeenCalledTimes(1);
+    expect(ensureLaneWorktreeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktreePath: `${worktreeRoot}/meow-1`,
+        branchName: "requests/example/a1-proposal-1",
+      }),
+    );
     expect(appendArchivedOpenSpecLinksToRoadmapTopicMock).toHaveBeenCalledWith({
-      worktreePath: expect.stringContaining("finalize-"),
+      worktreePath: `${worktreeRoot}/meow-1`,
       changeName: "change-1",
       archivedChangePath: "openspec/changes/archive/2026-04-11-change-1",
       conventionalTitle: null,
     });
     expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
-      worktreePath: expect.stringContaining("finalize-"),
-      message: "system: archive change-1",
+      worktreePath: `${worktreeRoot}/meow-1`,
+      message: "coder: archive change-1",
     });
     expect(createOrUpdateGitHubPullRequestMock).toHaveBeenCalledWith({
-      repositoryPath: expect.stringContaining("finalize-"),
+      repositoryPath: `${worktreeRoot}/meow-1`,
       branchName: "requests/example/a1-proposal-1",
       baseBranch: "main",
       title: "Ship the feature",
       body: "Machine review approved the branch.",
     });
+    expect(lane?.executionPhase).toBeNull();
     expect(lane?.proposalPath).toBe("openspec/changes/archive/2026-04-11-change-1");
     expect(lane?.latestImplementationCommit).toBe("archive-commit");
+    expect(lane?.latestCoderSummary).toBe("Archived the approved OpenSpec change.");
     expect(lane?.pushedCommit?.commitHash).toBe("archive-commit");
     expect(lane?.pullRequest?.provider).toBe("github");
     expect(lane?.pullRequest?.status).toBe("approved");
     expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/42");
     expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
-    expect(lane?.events.at(-2)?.message).toBe(
-      "Archived OpenSpec change to openspec/changes/archive/2026-04-11-change-1 and pushed commit [archive-comm](<https://github.com/example/meow-team/commit/archive-commit>) to GitHub via origin.",
-    );
+    expect(
+      lane?.events.some((event) => event.message.includes("Coder completed final archive pass")),
+    ).toBe(true);
+    expect(lane?.events.at(-2)?.message).toContain("Archived OpenSpec change");
     expect(lane?.events.at(-1)?.message).toContain("GitHub PR ready");
     expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toContain(
       "GitHub PR is ready",
@@ -312,10 +386,6 @@ describe("approveLanePullRequest", () => {
   });
 
   it("normalizes the final GitHub PR title from stored conventional metadata", async () => {
-    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
-      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
-      createdArchive: true,
-    });
     commitWorktreeChangesMock.mockResolvedValue(undefined);
     getBranchHeadMock.mockResolvedValue("archive-commit");
     pushLaneBranchMock.mockResolvedValue({
@@ -339,6 +409,7 @@ describe("approveLanePullRequest", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
+      dependencies: createArchiveDependencies(),
     });
 
     const thread = await getTeamThreadRecord(threadFile, "thread-1");
@@ -350,7 +421,7 @@ describe("approveLanePullRequest", () => {
       }),
     );
     expect(appendArchivedOpenSpecLinksToRoadmapTopicMock).toHaveBeenCalledWith({
-      worktreePath: expect.stringContaining("finalize-"),
+      worktreePath: `${worktreeRoot}/meow-1`,
       changeName: "change-1",
       archivedChangePath: "openspec/changes/archive/2026-04-11-change-1",
       conventionalTitle: {
@@ -361,10 +432,14 @@ describe("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.title).toBe("dev(vsc/command): Ship the feature");
   });
 
-  it("resumes an interrupted final approval without duplicating the human approval event", async () => {
-    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
+  it("resumes archived final approval without duplicating the human approval event", async () => {
+    const coderRun = vi.fn();
+    hasWorktreeChangesMock.mockResolvedValue(false);
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: false,
       archivedPath: "openspec/changes/archive/2026-04-11-change-1",
-      createdArchive: false,
     });
     getBranchHeadMock.mockResolvedValue("archive-commit");
     pushLaneBranchMock.mockResolvedValue({
@@ -378,8 +453,9 @@ describe("approveLanePullRequest", () => {
 
     await writeThreadStore(
       createLane({
+        proposalPath: "openspec/changes/archive/2026-04-11-change-1",
         latestActivity:
-          "Human approved the machine-reviewed branch. Archiving the OpenSpec change and refreshing the GitHub PR.",
+          "Human approved the machine-reviewed branch. Queueing the coder archive pass before refreshing the GitHub PR.",
         pullRequest: {
           id: "pr-1",
           provider: "local-ci",
@@ -410,11 +486,15 @@ describe("approveLanePullRequest", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
+      dependencies: createArchiveDependencies({
+        coderRun: coderRun as TeamRoleDependencies["coderAgent"]["run"],
+      }),
     });
 
     const thread = await getTeamThreadRecord(threadFile, "thread-1");
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
 
+    expect(coderRun).not.toHaveBeenCalled();
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
     expect(lane?.events.filter((event) => event.actor === "human")).toHaveLength(1);
     expect(lane?.pullRequest?.status).toBe("approved");
@@ -422,8 +502,14 @@ describe("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/88");
   });
 
-  it("records an archive failure as a blocking finalization error", async () => {
-    archiveOpenSpecChangeInWorktreeMock.mockRejectedValue(new Error("OpenSpec change not found."));
+  it("records an archive failure when the coder pass leaves the change unarchived", async () => {
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: true,
+      archivedPath: null,
+    });
+    hasWorktreeChangesMock.mockResolvedValue(false);
 
     await writeThreadStore(createLane());
 
@@ -432,8 +518,9 @@ describe("approveLanePullRequest", () => {
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
+        dependencies: createArchiveDependencies(),
       }),
-    ).rejects.toThrow("OpenSpec change not found.");
+    ).rejects.toThrow("Final archive coder pass did not archive OpenSpec change change-1.");
 
     const thread = await getTeamThreadRecord(threadFile, "thread-1");
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
@@ -443,21 +530,19 @@ describe("approveLanePullRequest", () => {
     expect(lane?.proposalPath).toBe("openspec/changes/change-1");
     expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
     expect(lane?.pullRequest?.status).toBe("failed");
-    expect(lane?.lastError).toContain("OpenSpec change not found");
+    expect(lane?.lastError).toContain("did not archive OpenSpec change change-1");
     expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
     expect(thread?.run?.status).toBe("failed");
   });
 
   it("records a roadmap archive-link failure as a blocking finalization error", async () => {
-    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
-      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
-      createdArchive: true,
-    });
     appendArchivedOpenSpecLinksToRoadmapTopicMock.mockRejectedValue(
       new Error(
         "Roadmap topic docs/roadmap/vscode-extension/command-palette.md is missing a ## Related Specs section.",
       ),
     );
+    commitWorktreeChangesMock.mockResolvedValue(undefined);
+    getBranchHeadMock.mockResolvedValue("archive-commit");
 
     await writeThreadStore(createLane(), {
       requestTitle: "dev(vsc/command): Ship the feature",
@@ -472,20 +557,21 @@ describe("approveLanePullRequest", () => {
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
+        dependencies: createArchiveDependencies(),
       }),
     ).rejects.toThrow("Roadmap topic docs/roadmap/vscode-extension/command-palette.md");
 
     const thread = await getTeamThreadRecord(threadFile, "thread-1");
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
 
-    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
     expect(pushLaneBranchMock).not.toHaveBeenCalled();
     expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
-    expect(lane?.proposalPath).toBe("openspec/changes/change-1");
-    expect(lane?.latestImplementationCommit).toBe("review-commit");
+    expect(lane?.proposalPath).toBe("openspec/changes/archive/2026-04-11-change-1");
+    expect(lane?.latestImplementationCommit).toBe("archive-commit");
+    expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
     expect(lane?.pullRequest?.status).toBe("failed");
     expect(lane?.latestActivity).toBe(
-      "Final human approval failed before the OpenSpec archive and GitHub PR delivery could complete.",
+      "Final human approval archived the OpenSpec change, but GitHub PR delivery did not complete.",
     );
     expect(lane?.lastError).toContain(
       "Roadmap topic docs/roadmap/vscode-extension/command-palette.md",
@@ -495,10 +581,6 @@ describe("approveLanePullRequest", () => {
   });
 
   it("persists archive progress when GitHub PR creation fails after the branch push", async () => {
-    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
-      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
-      createdArchive: true,
-    });
     commitWorktreeChangesMock.mockResolvedValue(undefined);
     getBranchHeadMock.mockResolvedValue("archive-commit");
     pushLaneBranchMock.mockResolvedValue({
@@ -515,6 +597,7 @@ describe("approveLanePullRequest", () => {
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
+        dependencies: createArchiveDependencies(),
       }),
     ).rejects.toThrow("gh auth token missing");
 
@@ -531,11 +614,7 @@ describe("approveLanePullRequest", () => {
     expect(thread?.run?.status).toBe("failed");
   });
 
-  it("keeps the proposal unarchived when the archive commit fails", async () => {
-    archiveOpenSpecChangeInWorktreeMock.mockResolvedValue({
-      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
-      createdArchive: true,
-    });
+  it("keeps the proposal unarchived when the coder archive commit fails", async () => {
     commitWorktreeChangesMock.mockRejectedValue(new Error("git user identity missing"));
 
     await writeThreadStore(createLane());
@@ -545,6 +624,7 @@ describe("approveLanePullRequest", () => {
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
+        dependencies: createArchiveDependencies(),
       }),
     ).rejects.toThrow("git user identity missing");
 
@@ -559,7 +639,7 @@ describe("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.status).toBe("failed");
     expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
     expect(lane?.latestActivity).toBe(
-      "Final human approval failed before the OpenSpec archive and GitHub PR delivery could complete.",
+      "Final human approval failed before the coder archive pass and GitHub PR delivery could complete.",
     );
     expect(lane?.lastError).toContain("git user identity missing");
     expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toBe(

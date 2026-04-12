@@ -11,6 +11,7 @@ const createLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLa
   laneId: "lane-1",
   laneIndex: 1,
   status: "queued",
+  executionPhase: null,
   taskTitle: "Notify on Attention-Needed Threads",
   taskObjective: "Add desktop alerts for approval waits and failures.",
   proposalChangeName: "desktop-attention-a1-p1-notify-on-attention-needed-threads",

@@ -51,6 +51,7 @@ import {
   createTeamRunEnv,
   persistTeamRunState,
   runTeam,
+  type TeamRunEnv,
 } from "@/lib/team/network";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
@@ -70,12 +71,13 @@ const repository: TeamRepositoryOption = {
   relativePath: ".",
 };
 
-const createPersistStateMock = () => vi.fn(async () => undefined);
+const createPersistStateMock = () => vi.fn<TeamRunEnv["persistState"]>(async () => undefined);
 
 const createReplayLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLaneRecord => ({
   laneId: "lane-1",
   laneIndex: 1,
   status: "awaiting_human_approval",
+  executionPhase: null,
   taskTitle: "Replay task",
   taskObjective: "Replay the persisted stage safely.",
   proposalChangeName: "replay-change",
@@ -1154,6 +1156,12 @@ describe.sequential("runTeam", () => {
       threadId: "thread-finalize",
       assignmentNumber: 4,
       laneId: "lane-2",
+      dependencies: expect.objectContaining({
+        requestTitleAgent: expect.any(Object),
+        plannerAgent: expect.any(Object),
+        coderAgent: expect.any(Object),
+        reviewerAgent: expect.any(Object),
+      }),
     });
     expect(queueLaneProposalForExecutionMock).not.toHaveBeenCalled();
     expect(ensurePendingDispatchWorkMock).not.toHaveBeenCalled();

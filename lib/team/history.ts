@@ -268,8 +268,14 @@ const normalizePushedCommit = (
 };
 
 const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord => {
+  const defaultExecutionPhase =
+    lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing"
+      ? "implementation"
+      : null;
+
   return {
     ...lane,
+    executionPhase: lane.executionPhase ?? defaultExecutionPhase,
     proposalChangeName: lane.proposalChangeName ?? null,
     proposalPath: lane.proposalPath ?? null,
     workerSlot: lane.workerSlot ?? null,

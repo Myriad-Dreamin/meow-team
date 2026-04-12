@@ -1004,6 +1004,7 @@ const runReviewingStage = async (
 };
 
 const runArchivingStage = async (
+  env: TeamRunEnv,
   currentState: TeamRunArchivingStageState,
 ): Promise<TeamRunCompletedState> => {
   const persistedThread = await getTeamThreadRecord(
@@ -1021,6 +1022,7 @@ const runArchivingStage = async (
       threadId: currentState.args.threadId,
       assignmentNumber: currentState.args.assignmentNumber,
       laneId: currentState.args.laneId,
+      dependencies: env.deps,
     });
   }
 
@@ -1067,7 +1069,7 @@ const advanceTeamRunState = async (
     case "reviewing":
       return runReviewingStage(env, currentState);
     case "archiving":
-      return runArchivingStage(currentState);
+      return runArchivingStage(env, currentState);
     case "completed":
       return currentState;
   }

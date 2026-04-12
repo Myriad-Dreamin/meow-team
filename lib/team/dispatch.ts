@@ -1,14 +1,13 @@
 import "server-only";
 
-import path from "node:path";
 import { teamConfig } from "@/team.config";
 import {
-  archiveOpenSpecChangeInWorktree,
   commitWorktreeChanges,
   createOrUpdateGitHubPullRequest,
   detectBranchConflict,
   getBranchHead,
   hasWorktreeChanges,
+  inspectOpenSpecChangeArchiveState,
   listExistingBranches,
   resolveRepositoryBaseBranch,
   tryRebaseWorktreeBranch,
@@ -75,6 +74,7 @@ type LaneRunState = TeamRoleState &
     objective: string;
     laneId: string;
     laneIndex: number;
+    executionPhase: TeamWorkerLaneRecord["executionPhase"];
     taskTitle: string;
     taskObjective: string;
     requestTitle: string;
@@ -82,6 +82,8 @@ type LaneRunState = TeamRoleState &
     planSummary: string;
     planDeliverable: string;
     conflictNote: string | null;
+    archiveCommand: string | null;
+    archivePathContext: string | null;
     pullRequestDraft: LanePullRequestDraft | null;
   };
 
@@ -195,6 +197,12 @@ const getLaneWorkflow = (): string[] => {
   return teamConfig.workflow.filter((roleId) => roleId === "coder" || roleId === "reviewer");
 };
 
+const isFinalArchivePhase = (
+  lane: Pick<TeamWorkerLaneRecord, "executionPhase">,
+): lane is Pick<TeamWorkerLaneRecord, "executionPhase"> & { executionPhase: "final_archive" } => {
+  return lane.executionPhase === "final_archive";
+};
+
 const getHighestHandoffSequence = (handoffs: Partial<Record<string, TeamRoleHandoff>>): number => {
   return Object.values(handoffs).reduce((highestSequence, handoff) => {
     return handoff ? Math.max(highestSequence, handoff.sequence) : highestSequence;
@@ -301,6 +309,11 @@ const buildLaneInitialState = ({
   workflow: string[];
   handoffs: Partial<Record<string, TeamRoleHandoff>>;
 }): LaneRunState => {
+  const archiveCommand =
+    lane.executionPhase === "final_archive" && lane.proposalChangeName
+      ? `/opsx:archive ${lane.proposalChangeName}`
+      : null;
+
   return {
     teamName: teamConfig.name,
     ownerName: teamConfig.owner.name,
@@ -308,6 +321,7 @@ const buildLaneInitialState = ({
     repository,
     laneId: lane.laneId,
     laneIndex: lane.laneIndex,
+    executionPhase: lane.executionPhase ?? "implementation",
     taskTitle: lane.taskTitle ?? `Lane ${lane.laneIndex} task`,
     taskObjective:
       lane.taskObjective ?? assignment.plannerSummary ?? "Implement the assigned task.",
@@ -328,6 +342,8 @@ const buildLaneInitialState = ({
       lane.requeueReason === "planner_detected_conflict"
         ? "Planner detected a pull request conflict. Resolve the branch and prepare it for review again."
         : null,
+    archiveCommand,
+    archivePathContext: lane.proposalPath,
     workflow,
     handoffs,
     handoffCounter: getHighestHandoffSequence(handoffs),
@@ -339,8 +355,15 @@ const buildLaneInitialState = ({
 const buildCoderCommitMessage = ({
   lane,
 }: {
-  lane: Pick<TeamWorkerLaneRecord, "laneIndex" | "taskTitle" | "requeueReason">;
+  lane: Pick<
+    TeamWorkerLaneRecord,
+    "executionPhase" | "laneIndex" | "proposalChangeName" | "taskTitle" | "requeueReason"
+  >;
 }): string => {
+  if (lane.executionPhase === "final_archive" && lane.proposalChangeName) {
+    return `coder: archive ${lane.proposalChangeName}`;
+  }
+
   const taskLabel = lane.taskTitle?.trim() || `proposal ${lane.laneIndex}`;
 
   if (lane.requeueReason === "reviewer_requested_changes") {
@@ -356,6 +379,55 @@ const buildCoderCommitMessage = ({
 
 const noBranchOutputMessage =
   "Coder completed without producing a new branch commit. The lane was stopped to avoid an infinite coder/reviewer loop.";
+
+const buildFinalArchiveApprovalActivity = ({
+  lane,
+  isRetry,
+  isResume,
+}: {
+  lane: Pick<TeamWorkerLaneRecord, "proposalPath">;
+  isRetry: boolean;
+  isResume: boolean;
+}): string => {
+  if (isRetry) {
+    return lane.proposalPath?.startsWith("openspec/changes/archive/")
+      ? "Retrying final approval for the archived OpenSpec change and GitHub PR delivery."
+      : "Retrying final approval through the coder archive pass and GitHub PR refresh.";
+  }
+
+  if (isResume) {
+    return lane.proposalPath?.startsWith("openspec/changes/archive/")
+      ? "Resuming final approval for the archived OpenSpec change and GitHub PR delivery."
+      : "Resuming final approval through the coder archive pass and GitHub PR refresh.";
+  }
+
+  return lane.proposalPath?.startsWith("openspec/changes/archive/")
+    ? "Human approved the archived machine-reviewed branch. Refreshing the GitHub PR delivery."
+    : "Human approved the machine-reviewed branch. Queueing the coder archive pass before refreshing the GitHub PR.";
+};
+
+const buildFinalArchiveInput = ({
+  lane,
+}: {
+  lane: Pick<TeamWorkerLaneRecord, "proposalChangeName" | "proposalPath">;
+}): string => {
+  if (!lane.proposalChangeName) {
+    return "Complete the non-interactive final archive continuation for this approved proposal.";
+  }
+
+  const archiveCommand = `/opsx:archive ${lane.proposalChangeName}`;
+  const archivePathContext = lane.proposalPath ?? `openspec/changes/${lane.proposalChangeName}`;
+
+  return [
+    "Complete the dedicated final archive continuation for an already machine-reviewed proposal.",
+    `Run \`${archiveCommand}\`.`,
+    "You are not in an interactive context. Do not ask the user to select a change or confirm archive decisions.",
+    "If archive inspection finds unsynced delta specs, sync them before archiving.",
+    "If the archive creates or exposes `TBD` placeholders, replace them before finishing.",
+    `Archive path context: ${archivePathContext}.`,
+    "Finish with the branch ready for system commit detection, roadmap archive linking, GitHub push, and GitHub PR refresh.",
+  ].join("\n");
+};
 
 const summarizeGitFailure = (message: string): string => {
   return (
@@ -420,28 +492,6 @@ const createPullRequestRecord = ({
   };
 };
 
-const buildLaneFinalizationWorktreePath = ({
-  repositoryPath,
-  threadId,
-  assignmentNumber,
-  laneId,
-}: {
-  repositoryPath: string;
-  threadId: string;
-  assignmentNumber: number;
-  laneId: string;
-}): string => {
-  const worktreeRoot = resolveWorktreeRoot({
-    repositoryPath,
-    worktreeRoot: teamConfig.dispatch.worktreeRoot,
-  });
-  const encodedLaneKey = Buffer.from(`${threadId}:${assignmentNumber}:${laneId}`, "utf8").toString(
-    "hex",
-  );
-
-  return path.join(worktreeRoot, `finalize-${encodedLaneKey}`);
-};
-
 const createProposalLane = ({
   threadId,
   laneIndex,
@@ -477,6 +527,7 @@ const createProposalLane = ({
     laneId,
     laneIndex,
     status: "awaiting_human_approval",
+    executionPhase: null,
     taskTitle: task.title,
     taskObjective: task.objective,
     proposalChangeName,
@@ -1040,6 +1091,387 @@ export const assignPendingDispatchWorkerSlots = ({
   }
 };
 
+const runFinalArchiveCycle = async ({
+  threadId,
+  assignmentNumber,
+  laneId,
+  dependencies,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+  dependencies: TeamRoleDependencies;
+}): Promise<void> => {
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  if (!thread) {
+    return;
+  }
+
+  const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
+  const lane = findLane(assignment, laneId);
+
+  if (
+    !assignment.repository ||
+    !lane.worktreePath ||
+    !lane.branchName ||
+    !lane.baseBranch ||
+    !lane.proposalChangeName ||
+    !lane.pullRequest
+  ) {
+    throw new Error("Final archive lane is missing repository, branch, or OpenSpec metadata.");
+  }
+
+  const repositoryPath = assignment.repository.path;
+  const laneBranchName = lane.branchName;
+  const pullRequestSummary =
+    lane.pullRequest.summary?.trim() ||
+    lane.latestReviewerSummary?.trim() ||
+    `Proposal ${lane.laneIndex} passed machine review.`;
+  const pullRequestTitle =
+    lane.pullRequest.title?.trim() ||
+    buildCanonicalLanePullRequestDraft({
+      assignment,
+      lane,
+      summary: pullRequestSummary,
+    }).title;
+  const humanApprovedAt = lane.pullRequest.humanApprovedAt ?? new Date().toISOString();
+  let latestImplementationCommit = lane.latestImplementationCommit;
+  let updatedPushedCommit = lane.pushedCommit;
+  let archivedProposalPath = lane.proposalPath;
+  let archivePersistedToBranch =
+    lane.proposalPath?.startsWith("openspec/changes/archive/") ?? false;
+  let coderHandoff: TeamRoleHandoff | null = null;
+  let coderArchivedThisRun = false;
+  const refreshLatestImplementationCommit = async (): Promise<string> => {
+    latestImplementationCommit = await getBranchHead({
+      repositoryPath,
+      branchName: laneBranchName,
+    });
+
+    return latestImplementationCommit;
+  };
+
+  try {
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (mutableThread, now) => {
+        const mutableAssignment = findAssignment(
+          mutableThread.dispatchAssignments,
+          assignmentNumber,
+        );
+        const mutableLane = findLane(mutableAssignment, laneId);
+        mutableLane.status = "coding";
+        mutableLane.executionPhase = "final_archive";
+        mutableLane.lastError = null;
+        mutableLane.startedAt = mutableLane.startedAt ?? now;
+        mutableLane.finishedAt = null;
+        mutableLane.latestActivity = mutableLane.proposalPath?.startsWith(
+          "openspec/changes/archive/",
+        )
+          ? "Final approval is refreshing GitHub delivery for the archived OpenSpec change."
+          : `Coder is running non-interactive /opsx:archive ${mutableLane.proposalChangeName} for final approval.`;
+        mutableLane.updatedAt = now;
+        appendLaneEvent(mutableLane, "system", mutableLane.latestActivity, now);
+        synchronizeDispatchAssignment(mutableAssignment, now);
+      },
+    });
+
+    await ensureLaneWorktree({
+      repositoryPath: assignment.repository.path,
+      worktreeRoot: resolveWorktreeRoot({
+        repositoryPath: assignment.repository.path,
+        worktreeRoot: teamConfig.dispatch.worktreeRoot,
+      }),
+      worktreePath: lane.worktreePath,
+      branchName: lane.branchName,
+      startPoint: lane.latestImplementationCommit ?? lane.baseBranch,
+    });
+
+    const preArchiveState = await inspectOpenSpecChangeArchiveState({
+      worktreePath: lane.worktreePath,
+      changeName: lane.proposalChangeName,
+    });
+
+    if (preArchiveState.sourceExists && preArchiveState.archivedPath) {
+      throw new Error(
+        `OpenSpec change ${lane.proposalChangeName} exists in both active and archived paths.`,
+      );
+    }
+
+    if (preArchiveState.sourceExists) {
+      const coderRole = await loadRolePrompt("coder");
+      const coderState = buildLaneInitialState({
+        repository: assignment.repository,
+        lane,
+        assignment,
+        workflow: getLaneWorkflow(),
+        handoffs: buildLanePersistedHandoffs({
+          lane,
+          assignmentNumber,
+        }),
+      });
+      const coderResponse = await dependencies.coderAgent.run({
+        role: coderRole,
+        state: coderState,
+        input: buildFinalArchiveInput({
+          lane,
+        }),
+        onEvent: async (event) => {
+          await appendTeamCodexLogEvent({
+            threadFile: teamConfig.storage.threadFile,
+            threadId,
+            assignmentNumber,
+            roleId: coderRole.id,
+            laneId,
+            event,
+          });
+        },
+      });
+
+      coderHandoff = applyHandoff({
+        state: coderState,
+        role: coderRole,
+        summary: coderResponse.summary,
+        deliverable: coderResponse.deliverable,
+        decision: coderResponse.decision,
+      });
+
+      if (await hasWorktreeChanges(lane.worktreePath)) {
+        await commitWorktreeChanges({
+          worktreePath: lane.worktreePath,
+          message: buildCoderCommitMessage({
+            lane,
+          }),
+        });
+      }
+
+      const postArchiveState = await inspectOpenSpecChangeArchiveState({
+        worktreePath: lane.worktreePath,
+        changeName: lane.proposalChangeName,
+      });
+
+      if (postArchiveState.sourceExists || !postArchiveState.archivedPath) {
+        throw new Error(
+          `Final archive coder pass did not archive OpenSpec change ${lane.proposalChangeName}.`,
+        );
+      }
+
+      archivedProposalPath = postArchiveState.archivedPath;
+      archivePersistedToBranch = true;
+      coderArchivedThisRun = true;
+    } else if (preArchiveState.archivedPath) {
+      archivedProposalPath = preArchiveState.archivedPath;
+      archivePersistedToBranch = true;
+    } else {
+      throw new Error(
+        `OpenSpec change ${lane.proposalChangeName} was not found in the active or archived OpenSpec directories.`,
+      );
+    }
+
+    // Capture the archived branch head before any later delivery step can fail.
+    await refreshLatestImplementationCommit();
+
+    const roadmapUpdate = await appendArchivedOpenSpecLinksToRoadmapTopic({
+      worktreePath: lane.worktreePath,
+      changeName: lane.proposalChangeName,
+      archivedChangePath: archivedProposalPath,
+      conventionalTitle: assignment.conventionalTitle,
+    });
+
+    if (roadmapUpdate.updated) {
+      await commitWorktreeChanges({
+        worktreePath: lane.worktreePath,
+        message: `system: archive ${lane.proposalChangeName}`,
+      });
+      await refreshLatestImplementationCommit();
+    }
+
+    updatedPushedCommit = latestImplementationCommit
+      ? await pushLaneBranch({
+          repositoryPath: assignment.repository.path,
+          branchName: lane.branchName,
+          commitHash: latestImplementationCommit,
+        })
+      : null;
+
+    if (!latestImplementationCommit || !updatedPushedCommit) {
+      throw new Error(
+        "Final approval could not resolve the archived branch head for GitHub delivery.",
+      );
+    }
+
+    const finalizedCommitHash = latestImplementationCommit;
+    const finalizedPushedCommit = updatedPushedCommit;
+
+    const gitHubPullRequest = await createOrUpdateGitHubPullRequest({
+      repositoryPath: lane.worktreePath,
+      branchName: lane.branchName,
+      baseBranch: lane.baseBranch,
+      title: pullRequestTitle,
+      body: pullRequestSummary,
+    });
+
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (mutableThread, now) => {
+        const mutableAssignment = findAssignment(
+          mutableThread.dispatchAssignments,
+          assignmentNumber,
+        );
+        const mutableLane = findLane(mutableAssignment, laneId);
+        const mutablePullRequest = mutableLane.pullRequest;
+
+        if (!mutablePullRequest) {
+          throw new Error("This reviewed branch no longer has pull request metadata.");
+        }
+
+        mutableLane.status = "approved";
+        mutableLane.executionPhase = null;
+        mutableLane.proposalPath = archivedProposalPath;
+        mutableLane.latestImplementationCommit = finalizedCommitHash;
+        mutableLane.pushedCommit = finalizedPushedCommit;
+        if (coderHandoff) {
+          mutableLane.latestCoderHandoff = coderHandoff;
+          mutableLane.latestCoderSummary = coderHandoff.summary;
+        }
+        mutableLane.latestActivity =
+          "Human approval finalized the machine-reviewed branch. The OpenSpec change was archived and the GitHub PR is ready.";
+        mutableLane.lastError = null;
+        mutableLane.workerSlot = null;
+        mutableLane.requeueReason = null;
+        mutableLane.pullRequest = {
+          ...mutablePullRequest,
+          provider: "github",
+          title: pullRequestTitle,
+          summary: pullRequestSummary,
+          status: "approved",
+          humanApprovedAt,
+          updatedAt: now,
+          url: gitHubPullRequest.url,
+        };
+        mutableLane.updatedAt = now;
+        mutableLane.finishedAt = now;
+        if (coderHandoff) {
+          appendLaneEvent(
+            mutableLane,
+            "coder",
+            `Coder completed final archive pass: ${coderHandoff.summary}`,
+            now,
+          );
+        }
+        appendLaneEvent(
+          mutableLane,
+          "system",
+          coderArchivedThisRun || archivedProposalPath !== lane.proposalPath
+            ? `Archived OpenSpec change to ${archivedProposalPath} and pushed commit ${formatCommitActivityReference(
+                {
+                  commitHash: finalizedCommitHash,
+                  commitUrl: finalizedPushedCommit.commitUrl,
+                },
+              )} to GitHub via ${finalizedPushedCommit.remoteName}.`
+            : `Verified archived OpenSpec change at ${archivedProposalPath} and refreshed commit ${formatCommitActivityReference(
+                {
+                  commitHash: finalizedCommitHash,
+                  commitUrl: finalizedPushedCommit.commitUrl,
+                },
+              )} on GitHub via ${finalizedPushedCommit.remoteName}.`,
+          now,
+        );
+        appendLaneEvent(mutableLane, "system", `GitHub PR ready: ${gitHubPullRequest.url}`, now);
+        appendPlannerNote(
+          mutableAssignment,
+          `Human approved proposal ${mutableLane.laneIndex}; ${archivedProposalPath} is archived on ${mutableLane.branchName ?? lane.branchName}, and the GitHub PR is ready at ${gitHubPullRequest.url}.`,
+          now,
+        );
+        synchronizeDispatchAssignment(mutableAssignment, now);
+      },
+    });
+  } catch (error) {
+    const errorSummary = summarizeGitFailure(
+      error instanceof Error ? error.message : "GitHub PR finalization failed.",
+    );
+
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (mutableThread, now) => {
+        const mutableAssignment = findAssignment(
+          mutableThread.dispatchAssignments,
+          assignmentNumber,
+        );
+        const mutableLane = findLane(mutableAssignment, laneId);
+        const mutablePullRequest = mutableLane.pullRequest;
+
+        if (!mutablePullRequest) {
+          throw new Error("This reviewed branch no longer has pull request metadata.");
+        }
+
+        mutableLane.status = "approved";
+        mutableLane.executionPhase = null;
+        if (archivePersistedToBranch) {
+          mutableLane.proposalPath = archivedProposalPath;
+        }
+        mutableLane.latestImplementationCommit = latestImplementationCommit;
+        mutableLane.pushedCommit = updatedPushedCommit;
+        if (coderHandoff) {
+          mutableLane.latestCoderHandoff = coderHandoff;
+          mutableLane.latestCoderSummary = coderHandoff.summary;
+        }
+        mutableLane.latestActivity = archivePersistedToBranch
+          ? "Final human approval archived the OpenSpec change, but GitHub PR delivery did not complete."
+          : "Final human approval failed before the coder archive pass and GitHub PR delivery could complete.";
+        mutableLane.lastError = errorSummary;
+        mutableLane.workerSlot = null;
+        mutableLane.requeueReason = null;
+        mutableLane.pullRequest = {
+          ...mutablePullRequest,
+          title: pullRequestTitle,
+          summary: pullRequestSummary,
+          status: "failed",
+          humanApprovedAt,
+          updatedAt: now,
+        };
+        mutableLane.updatedAt = now;
+        mutableLane.finishedAt = now;
+        if (coderHandoff) {
+          appendLaneEvent(
+            mutableLane,
+            "coder",
+            `Coder completed final archive pass: ${coderHandoff.summary}`,
+            now,
+          );
+        }
+        appendLaneEvent(mutableLane, "system", errorSummary, now);
+        appendPlannerNote(
+          mutableAssignment,
+          archivePersistedToBranch &&
+            archivedProposalPath &&
+            archivedProposalPath !== lane.proposalPath
+            ? `Final approval for proposal ${mutableLane.laneIndex} failed after archiving ${archivedProposalPath}: ${errorSummary}`
+            : `Final approval for proposal ${mutableLane.laneIndex} failed: ${errorSummary}`,
+          now,
+        );
+        synchronizeDispatchAssignment(mutableAssignment, now);
+      },
+    });
+
+    await appendTeamCodexLogEvent({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      assignmentNumber,
+      roleId: null,
+      laneId,
+      event: {
+        source: "system",
+        message: errorSummary,
+        createdAt: new Date().toISOString(),
+      },
+    });
+  }
+};
+
 const runLaneCycle = async ({
   threadId,
   assignmentNumber,
@@ -1071,6 +1503,16 @@ const runLaneCycle = async ({
       throw new Error("Lane is missing repository, branch, or worktree metadata.");
     }
 
+    if (isFinalArchivePhase(lane)) {
+      await runFinalArchiveCycle({
+        threadId,
+        assignmentNumber,
+        laneId,
+        dependencies,
+      });
+      return;
+    }
+
     await updateTeamThreadRecord({
       threadFile: teamConfig.storage.threadFile,
       threadId,
@@ -1081,6 +1523,7 @@ const runLaneCycle = async ({
         );
         const mutableLane = findLane(mutableAssignment, laneId);
         mutableLane.status = "coding";
+        mutableLane.executionPhase ??= "implementation";
         mutableLane.lastError = null;
         mutableLane.latestImplementationCommit = null;
         mutableLane.pushedCommit = null;
@@ -1175,6 +1618,7 @@ const runLaneCycle = async ({
           );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "failed";
+          mutableLane.executionPhase = null;
           mutableLane.latestImplementationCommit = null;
           mutableLane.pushedCommit = null;
           mutableLane.latestCoderHandoff = coderHandoff;
@@ -1227,6 +1671,7 @@ const runLaneCycle = async ({
           commitHash: branchHeadAfterCoding,
         });
         mutableLane.status = "reviewing";
+        mutableLane.executionPhase = "implementation";
         mutableLane.latestImplementationCommit = branchHeadAfterCoding;
         mutableLane.pushedCommit = null;
         mutableLane.latestCoderHandoff = coderHandoff;
@@ -1248,6 +1693,7 @@ const runLaneCycle = async ({
     const reviewerLane: TeamWorkerLaneRecord = {
       ...lane,
       status: "reviewing",
+      executionPhase: "implementation",
       latestImplementationCommit: branchHeadAfterCoding,
       pushedCommit: null,
       latestCoderHandoff: coderHandoff,
@@ -1315,6 +1761,7 @@ const runLaneCycle = async ({
           );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
+          mutableLane.executionPhase = "implementation";
           mutableLane.pushedCommit = null;
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderHandoff = coderHandoff;
@@ -1395,6 +1842,7 @@ const runLaneCycle = async ({
           );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
+          mutableLane.executionPhase = "implementation";
           mutableLane.pushedCommit = null;
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderHandoff = coderHandoff;
@@ -1458,6 +1906,7 @@ const runLaneCycle = async ({
           );
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "failed";
+          mutableLane.executionPhase = null;
           mutableLane.latestImplementationCommit = latestImplementationCommit;
           mutableLane.pushedCommit = null;
           mutableLane.latestDecision = reviewerHandoff.decision;
@@ -1533,6 +1982,7 @@ const runLaneCycle = async ({
         );
         const mutableLane = findLane(mutableAssignment, laneId);
         mutableLane.status = "approved";
+        mutableLane.executionPhase = null;
         mutableLane.latestImplementationCommit = latestImplementationCommit;
         mutableLane.pushedCommit = pushedCommit;
         mutableLane.latestDecision = reviewerHandoff.decision;
@@ -1628,16 +2078,29 @@ const ensureLaneRun = ({
         updater: (thread, now) => {
           const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
           const lane = findLane(assignment, laneId);
-          lane.status = "failed";
+          const isFinalArchiveLane = isFinalArchivePhase(lane);
+          lane.status = isFinalArchiveLane ? "approved" : "failed";
+          lane.executionPhase = null;
           lane.workerSlot = null;
           lane.lastError = message;
-          lane.latestActivity = "Background lane execution failed.";
+          lane.latestActivity = isFinalArchiveLane
+            ? "Final human approval failed before the coder archive pass and GitHub PR delivery could complete."
+            : "Background lane execution failed.";
+          if (isFinalArchiveLane && lane.pullRequest) {
+            lane.pullRequest = {
+              ...lane.pullRequest,
+              status: "failed",
+              updatedAt: now,
+            };
+          }
           lane.updatedAt = now;
           lane.finishedAt = now;
           appendLaneEvent(lane, "system", message, now);
           appendPlannerNote(
             assignment,
-            `Lane ${lane.laneIndex} failed and needs attention: ${message}`,
+            isFinalArchiveLane
+              ? `Final approval for proposal ${lane.laneIndex} failed: ${message}`
+              : `Lane ${lane.laneIndex} failed and needs attention: ${message}`,
             now,
           );
           synchronizeDispatchAssignment(assignment, now);
@@ -1868,6 +2331,7 @@ export const queueLaneProposalForExecution = async ({
       }
 
       lane.status = "queued";
+      lane.executionPhase = "implementation";
       lane.latestActivity = "Human approved the proposal and added it to the coding-review queue.";
       lane.approvalGrantedAt = now;
       lane.workerSlot = null;
@@ -1915,11 +2379,14 @@ export const approveLanePullRequest = async ({
   threadId,
   assignmentNumber,
   laneId,
+  dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  dependencies?: Partial<TeamRoleDependencies>;
 }): Promise<void> => {
+  const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
     throw new Error(`Thread ${threadId} was not found in ${teamConfig.storage.threadFile}.`);
@@ -1928,8 +2395,10 @@ export const approveLanePullRequest = async ({
   const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
   const lane = findLane(assignment, laneId);
   const pullRequest = lane.pullRequest;
+  const archiveInProgress =
+    isFinalArchivePhase(lane) && (lane.status === "queued" || lane.status === "coding");
 
-  if (lane.status !== "approved" || !pullRequest) {
+  if ((!archiveInProgress && lane.status !== "approved") || !pullRequest) {
     throw new Error("This reviewed branch is not waiting for final human approval.");
   }
 
@@ -1962,27 +2431,23 @@ export const approveLanePullRequest = async ({
     lane,
     summary: pullRequestSummary,
   }).title;
-  const finalizationWorktreePath = buildLaneFinalizationWorktreePath({
-    repositoryPath: assignment.repository.path,
-    threadId,
-    assignmentNumber,
-    laneId,
-  });
-
-  const humanApprovedAt = await updateTeamThreadRecord({
+  await updateTeamThreadRecord({
     threadFile: teamConfig.storage.threadFile,
     threadId,
     updater: (mutableThread, now) => {
       const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
       const mutableLane = findLane(mutableAssignment, laneId);
       const mutablePullRequest = mutableLane.pullRequest;
+      const mutableArchiveInProgress =
+        isFinalArchivePhase(mutableLane) &&
+        (mutableLane.status === "queued" || mutableLane.status === "coding");
 
-      if (mutableLane.status !== "approved" || !mutablePullRequest) {
+      if ((!mutableArchiveInProgress && mutableLane.status !== "approved") || !mutablePullRequest) {
         throw new Error("This reviewed branch is not waiting for final human approval.");
       }
 
       if (mutablePullRequest.status === "approved") {
-        return mutablePullRequest.humanApprovedAt ?? now;
+        return;
       }
 
       if (
@@ -2000,20 +2465,42 @@ export const approveLanePullRequest = async ({
         mutablePullRequest.status === "awaiting_human_approval" &&
         mutablePullRequest.humanApprovedAt !== null;
 
-      mutableLane.latestActivity = isRetry
-        ? "Retrying final approval to archive the OpenSpec change and refresh the GitHub PR."
-        : isResume
-          ? "Resuming final approval to archive the OpenSpec change and refresh the GitHub PR."
-          : "Human approved the machine-reviewed branch. Archiving the OpenSpec change and refreshing the GitHub PR.";
+      if (mutableArchiveInProgress) {
+        mutableLane.lastError = null;
+        mutableLane.pullRequest = {
+          ...mutablePullRequest,
+          title: pullRequestTitle,
+          summary: pullRequestSummary,
+          status: "awaiting_human_approval",
+          humanApprovedAt: nextHumanApprovedAt,
+          updatedAt: now,
+        };
+        mutableLane.updatedAt = now;
+        synchronizeDispatchAssignment(mutableAssignment, now);
+        return;
+      }
+
+      mutableLane.status = "queued";
+      mutableLane.executionPhase = "final_archive";
+      mutableLane.latestActivity = buildFinalArchiveApprovalActivity({
+        lane: mutableLane,
+        isRetry,
+        isResume,
+      });
       mutableLane.lastError = null;
+      mutableLane.workerSlot = null;
+      mutableLane.queuedAt = now;
+      mutableLane.finishedAt = null;
       mutableLane.pullRequest = {
         ...mutablePullRequest,
+        title: pullRequestTitle,
+        summary: pullRequestSummary,
         status: "awaiting_human_approval",
         humanApprovedAt: nextHumanApprovedAt,
         updatedAt: now,
       };
       mutableLane.updatedAt = now;
-      if (!isResume) {
+      if (!isResume && !mutableArchiveInProgress) {
         appendLaneEvent(
           mutableLane,
           "human",
@@ -2024,199 +2511,28 @@ export const approveLanePullRequest = async ({
         );
       }
       synchronizeDispatchAssignment(mutableAssignment, now);
-
-      return nextHumanApprovedAt;
     },
   });
 
-  let latestImplementationCommit = lane.latestImplementationCommit;
-  let updatedPushedCommit = lane.pushedCommit;
-  let archivedProposalPath = lane.proposalPath;
-  let archiveCreated = false;
-  let archivePersistedToBranch =
-    lane.proposalPath?.startsWith("openspec/changes/archive/") ?? false;
+  await ensurePendingDispatchWork({
+    threadId,
+    dependencies: resolvedDependencies,
+  });
 
-  try {
-    await ensureLaneWorktree({
-      repositoryPath: assignment.repository.path,
-      worktreePath: finalizationWorktreePath,
-      branchName: lane.branchName,
-      startPoint: lane.latestImplementationCommit ?? lane.baseBranch,
-    });
+  await activeLaneRuns.get(laneRunKey(threadId, assignmentNumber, laneId));
 
-    const archiveResult = await archiveOpenSpecChangeInWorktree({
-      worktreePath: finalizationWorktreePath,
-      changeName: lane.proposalChangeName,
-    });
-    archivedProposalPath = archiveResult.archivedPath;
-    archiveCreated = archiveResult.createdArchive;
-    const roadmapUpdate = await appendArchivedOpenSpecLinksToRoadmapTopic({
-      worktreePath: finalizationWorktreePath,
-      changeName: lane.proposalChangeName,
-      archivedChangePath: archivedProposalPath,
-      conventionalTitle: assignment.conventionalTitle,
-    });
+  const refreshedThread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  if (!refreshedThread) {
+    throw new Error(`Thread ${threadId} was not found in ${teamConfig.storage.threadFile}.`);
+  }
 
-    if (archiveResult.createdArchive || roadmapUpdate.updated) {
-      await commitWorktreeChanges({
-        worktreePath: finalizationWorktreePath,
-        message: `system: archive ${lane.proposalChangeName}`,
-      });
-    }
-    archivePersistedToBranch = true;
+  const refreshedLane = findLane(
+    findAssignment(refreshedThread.dispatchAssignments, assignmentNumber),
+    laneId,
+  );
 
-    latestImplementationCommit = await getBranchHead({
-      repositoryPath: assignment.repository.path,
-      branchName: lane.branchName,
-    });
-    updatedPushedCommit = await pushLaneBranch({
-      repositoryPath: assignment.repository.path,
-      branchName: lane.branchName,
-      commitHash: latestImplementationCommit,
-    });
-
-    if (!latestImplementationCommit || !updatedPushedCommit) {
-      throw new Error(
-        "Final approval could not resolve the archived branch head for GitHub delivery.",
-      );
-    }
-
-    const finalizedCommitHash = latestImplementationCommit;
-    const finalizedPushedCommit = updatedPushedCommit;
-
-    const gitHubPullRequest = await createOrUpdateGitHubPullRequest({
-      repositoryPath: finalizationWorktreePath,
-      branchName: lane.branchName,
-      baseBranch: lane.baseBranch,
-      title: pullRequestTitle,
-      body: pullRequestSummary,
-    });
-
-    await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
-      threadId,
-      updater: (mutableThread, now) => {
-        const mutableAssignment = findAssignment(
-          mutableThread.dispatchAssignments,
-          assignmentNumber,
-        );
-        const mutableLane = findLane(mutableAssignment, laneId);
-        const mutablePullRequest = mutableLane.pullRequest;
-
-        if (!mutablePullRequest) {
-          throw new Error("This reviewed branch no longer has pull request metadata.");
-        }
-
-        mutableLane.proposalPath = archivedProposalPath;
-        mutableLane.latestImplementationCommit = finalizedCommitHash;
-        mutableLane.pushedCommit = finalizedPushedCommit;
-        mutableLane.latestActivity =
-          "Human approval finalized the machine-reviewed branch. The OpenSpec change was archived and the GitHub PR is ready.";
-        mutableLane.lastError = null;
-        mutableLane.pullRequest = {
-          ...mutablePullRequest,
-          provider: "github",
-          title: pullRequestTitle,
-          summary: pullRequestSummary,
-          status: "approved",
-          humanApprovedAt,
-          updatedAt: now,
-          url: gitHubPullRequest.url,
-        };
-        mutableLane.updatedAt = now;
-        appendLaneEvent(
-          mutableLane,
-          "system",
-          archiveCreated
-            ? `Archived OpenSpec change to ${archivedProposalPath} and pushed commit ${formatCommitActivityReference(
-                {
-                  commitHash: finalizedCommitHash,
-                  commitUrl: finalizedPushedCommit.commitUrl,
-                },
-              )} to GitHub via ${finalizedPushedCommit.remoteName}.`
-            : `Verified archived OpenSpec change at ${archivedProposalPath} and refreshed commit ${formatCommitActivityReference(
-                {
-                  commitHash: finalizedCommitHash,
-                  commitUrl: finalizedPushedCommit.commitUrl,
-                },
-              )} on GitHub via ${finalizedPushedCommit.remoteName}.`,
-          now,
-        );
-        appendLaneEvent(mutableLane, "system", `GitHub PR ready: ${gitHubPullRequest.url}`, now);
-        appendPlannerNote(
-          mutableAssignment,
-          `Human approved proposal ${mutableLane.laneIndex}; ${archivedProposalPath} is archived on ${mutableLane.branchName ?? lane.branchName}, and the GitHub PR is ready at ${gitHubPullRequest.url}.`,
-          now,
-        );
-        synchronizeDispatchAssignment(mutableAssignment, now);
-      },
-    });
-  } catch (error) {
-    const errorSummary = summarizeGitFailure(
-      error instanceof Error ? error.message : "GitHub PR finalization failed.",
-    );
-
-    await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
-      threadId,
-      updater: (mutableThread, now) => {
-        const mutableAssignment = findAssignment(
-          mutableThread.dispatchAssignments,
-          assignmentNumber,
-        );
-        const mutableLane = findLane(mutableAssignment, laneId);
-        const mutablePullRequest = mutableLane.pullRequest;
-
-        if (!mutablePullRequest) {
-          throw new Error("This reviewed branch no longer has pull request metadata.");
-        }
-
-        if (archivePersistedToBranch) {
-          mutableLane.proposalPath = archivedProposalPath;
-        }
-        mutableLane.latestImplementationCommit = latestImplementationCommit;
-        mutableLane.pushedCommit = updatedPushedCommit;
-        mutableLane.latestActivity = archivePersistedToBranch
-          ? "Final human approval archived the OpenSpec change, but GitHub PR delivery did not complete."
-          : "Final human approval failed before the OpenSpec archive and GitHub PR delivery could complete.";
-        mutableLane.lastError = errorSummary;
-        mutableLane.pullRequest = {
-          ...mutablePullRequest,
-          title: pullRequestTitle,
-          summary: pullRequestSummary,
-          status: "failed",
-          humanApprovedAt,
-          updatedAt: now,
-        };
-        mutableLane.updatedAt = now;
-        appendLaneEvent(mutableLane, "system", errorSummary, now);
-        appendPlannerNote(
-          mutableAssignment,
-          archivePersistedToBranch &&
-            archivedProposalPath &&
-            archivedProposalPath !== lane.proposalPath
-            ? `Final approval for proposal ${mutableLane.laneIndex} failed after archiving ${archivedProposalPath}: ${errorSummary}`
-            : `Final approval for proposal ${mutableLane.laneIndex} failed: ${errorSummary}`,
-          now,
-        );
-        synchronizeDispatchAssignment(mutableAssignment, now);
-      },
-    });
-
-    await appendTeamCodexLogEvent({
-      threadFile: teamConfig.storage.threadFile,
-      threadId,
-      assignmentNumber,
-      roleId: null,
-      laneId,
-      event: {
-        source: "system",
-        message: errorSummary,
-        createdAt: new Date().toISOString(),
-      },
-    });
-
-    throw error;
+  if (refreshedLane.pullRequest?.status === "failed") {
+    throw new Error(refreshedLane.lastError ?? "Final approval failed.");
   }
 };
 

@@ -37,6 +37,7 @@ const createLane = ({
     laneId,
     laneIndex,
     status,
+    executionPhase: null,
     taskTitle: `Task ${laneIndex}`,
     taskObjective: `Objective ${laneIndex}`,
     proposalChangeName: `change-${laneId}`,

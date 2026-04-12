@@ -483,6 +483,30 @@ const findExistingArchivedOpenSpecChange = async ({
   return matchingArchivePaths[0] ?? null;
 };
 
+export const inspectOpenSpecChangeArchiveState = async ({
+  worktreePath,
+  changeName,
+}: {
+  worktreePath: string;
+  changeName: string;
+}): Promise<{
+  sourcePath: string;
+  sourceExists: boolean;
+  archivedPath: string | null;
+}> => {
+  const sourcePath = path.join("openspec", "changes", changeName).split(path.sep).join("/");
+
+  return {
+    sourcePath,
+    sourceExists: await pathExists(path.join(worktreePath, sourcePath)),
+    archivedPath:
+      (await findExistingArchivedOpenSpecChange({
+        worktreePath,
+        changeName,
+      })) ?? null,
+  };
+};
+
 export const archiveOpenSpecChangeInWorktree = async ({
   worktreePath,
   changeName,

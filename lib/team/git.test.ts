@@ -15,6 +15,7 @@ import {
 import {
   archiveOpenSpecChangeInWorktree,
   getBranchHead,
+  inspectOpenSpecChangeArchiveState,
   normalizeGitHubRepositoryUrl,
   resolveGitHubPushRemote,
   tryRebaseWorktreeBranch,
@@ -303,6 +304,54 @@ describe("pushLaneBranch", () => {
 });
 
 describe("archiveOpenSpecChangeInWorktree", () => {
+  it("inspects whether a change is still active or already archived", async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-archive-test-"));
+    temporaryDirectories.add(worktreePath);
+
+    const sourceChangePath = path.join(
+      worktreePath,
+      "openspec",
+      "changes",
+      "change-name",
+      "proposal.md",
+    );
+    const archiveProposalPath = path.join(
+      worktreePath,
+      "openspec",
+      "changes",
+      "archive",
+      "2026-04-11-change-name",
+      "proposal.md",
+    );
+    await fs.mkdir(path.dirname(sourceChangePath), { recursive: true });
+    await fs.writeFile(sourceChangePath, "proposal\n", "utf8");
+
+    await expect(
+      inspectOpenSpecChangeArchiveState({
+        worktreePath,
+        changeName: "change-name",
+      }),
+    ).resolves.toEqual({
+      sourcePath: "openspec/changes/change-name",
+      sourceExists: true,
+      archivedPath: null,
+    });
+
+    await fs.mkdir(path.dirname(archiveProposalPath), { recursive: true });
+    await fs.writeFile(archiveProposalPath, "archived\n", "utf8");
+
+    await expect(
+      inspectOpenSpecChangeArchiveState({
+        worktreePath,
+        changeName: "change-name",
+      }),
+    ).resolves.toEqual({
+      sourcePath: "openspec/changes/change-name",
+      sourceExists: true,
+      archivedPath: "openspec/changes/archive/2026-04-11-change-name",
+    });
+  });
+
   it("moves an active OpenSpec change into the dated archive directory", async () => {
     const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-archive-test-"));
     temporaryDirectories.add(worktreePath);
