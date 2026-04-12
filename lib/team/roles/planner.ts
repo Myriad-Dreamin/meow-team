@@ -11,6 +11,7 @@ import {
 } from "@/lib/team/request-title";
 import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
 import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
+import { prompt as renderPlannerPrompt, type Args as PlannerPromptArgs } from "./planner.prompt.md";
 
 const plannerTaskSchema = z.object({
   title: z.string().trim().min(1),
@@ -109,37 +110,24 @@ const buildPlannerPrompt = ({ role, state }: PlannerPromptInput): string => {
     ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
     : "Selected repository: none. Proposal dispatch is blocked until a repository is selected.";
 
-  return [
-    `You are Planner, the dispatch coordinator inside the ${state.teamName} engineering harness.`,
-    `Owner: ${state.ownerName}.`,
-    `Shared objective: ${state.objective}`,
+  const templateArgs: PlannerPromptArgs = {
+    assignmentNumber: state.assignmentNumber,
+    handoffs: summarizeHandoffs(state),
+    localSkillReference: buildLocalSkillReference(),
+    maxProposalCount: teamConfig.dispatch.maxProposalCount,
+    objective: state.objective,
+    openSpecSkillReference: buildOpenSpecSkillReference(),
+    openSpecSkills: describeLocalOpenSpecSkills(),
+    ownerName: state.ownerName,
     repositoryContext,
-    `Configured workflow: ${state.workflow.join(" -> ")}`,
-    `Current assignment number: ${state.assignmentNumber}.`,
-    `Configured coding-review pool size: ${teamConfig.dispatch.workerCount}.`,
-    "Planner proposals are separate from the coding-review pool. The planner can create one or more proposals, then approved proposals are scheduled onto the shared coder/reviewer pool.",
-    "Codex skill context:",
-    buildLocalSkillReference(),
-    "OpenSpec context:",
-    describeLocalOpenSpecSkills(),
-    buildOpenSpecSkillReference(),
-    buildPlannerRequestContext(state),
-    "Your role prompt is below:",
-    role.prompt.trim(),
-    "Current handoffs for this assignment:",
-    summarizeHandoffs(state),
-    "Rules:",
-    `- Create a practical engineering plan and split it into between 1 and ${teamConfig.dispatch.maxProposalCount} concrete proposals for the request group when a repository is selected.`,
-    "- Keep proposals logical and implementation-focused. Do not describe them as tied to a specific branch or worker slot.",
-    "- Align each proposal with the local OpenSpec flow so the backend can materialize a real OpenSpec change for it.",
-    "- Use branchPrefix as a short, git-friendly theme for the request group.",
-    "- If no repository is selected, explain that dispatch is blocked and set dispatch to null.",
-    "Final response requirements:",
-    "- Return JSON that matches the provided schema exactly.",
-    "- Put the planner handoff in handoff.summary and handoff.deliverable.",
-    '- Set handoff.decision to "continue".',
-    "- If dispatch is possible, fill dispatch.planSummary, dispatch.plannerDeliverable, dispatch.branchPrefix, and dispatch.tasks.",
-  ].join("\n\n");
+    requestContext: buildPlannerRequestContext(state),
+    rolePrompt: role.prompt.trim(),
+    teamName: state.teamName,
+    workerCount: teamConfig.dispatch.workerCount,
+    workflow: state.workflow.join(" -> "),
+  };
+
+  return renderPlannerPrompt(templateArgs);
 };
 
 export class PlannerAgent {

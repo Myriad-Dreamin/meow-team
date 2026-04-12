@@ -3,12 +3,11 @@ import { fileURLToPath } from "node:url";
 import { compilePromptModule, getPromptTemplateDeclarationPath } from "./compiler";
 
 const defaultRuntimeModulePath = fileURLToPath(new URL("./runtime", import.meta.url));
-const promptTemplateBootstrapPatterns = [
-  "/app/**/*.prompt.md",
-  "/app/**/*.template.md",
-  "/docs/**/*.prompt.md",
-  "/docs/**/*.template.md",
-] as const;
+const promptTemplateBootstrapRoots = ["/app", "/docs", "/lib/team/roles"] as const;
+const promptTemplateBootstrapPatterns = promptTemplateBootstrapRoots.flatMap((root) => [
+  `${root}/**/*.prompt.md`,
+  `${root}/**/*.template.md`,
+]);
 
 const writeFileIfChanged = async (filePath: string, contents: string): Promise<void> => {
   let currentContents: string | null = null;
