@@ -65,7 +65,7 @@ type StderrBlockResponse = {
   };
 };
 
-type TimelineLogGroup = {
+export type TimelineLogGroup = {
   group: ThreadLogGroup;
   fullMessage: string | null;
   expandedMode: "collapsed" | "live" | "manual";
@@ -304,7 +304,7 @@ const materializeLogGroups = (
   });
 };
 
-const mergeTimelineLogGroupPair = (
+export const mergeTimelineLogGroupPair = (
   left: TimelineLogGroup,
   right: TimelineLogGroup,
 ): TimelineLogGroup => {
@@ -331,8 +331,8 @@ const mergeTimelineLogGroupPair = (
   }
 
   const fullMessage =
-    left.fullMessage !== null && right.fullMessage !== null
-      ? `${left.fullMessage}\n${right.fullMessage}`
+    left.fullMessage !== null || right.fullMessage !== null
+      ? `${left.fullMessage ?? left.group.message}\n${right.fullMessage ?? right.group.message}`
       : null;
   const expandedMode =
     fullMessage === null
