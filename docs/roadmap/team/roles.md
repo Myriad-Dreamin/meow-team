@@ -24,3 +24,5 @@ preserves deterministic handoff state, archive-time behavior, and role-specific
 validation without changing the default workflow contract.
 
 ## Related Specs
+
+- [role-prompts-a1-p1-extract-harness-role-prompt-templates](../../../openspec/changes/archive/2026-04-12-role-prompts-a1-p1-extract-harness-role-prompt-templates/specs/role-prompts-a1-p1-extract-harness-role-prompt-templates/spec.md)
