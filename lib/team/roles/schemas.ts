@@ -23,10 +23,11 @@ export const teamConventionalTitleSchema = z.object({
   scope: z.string().trim().regex(CONVENTIONAL_TITLE_SCOPE_PATTERN).nullable(),
 });
 
-export const rolePromptSchema = z.object({
+export const teamRoleSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
-  summary: z.string(),
-  prompt: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
   filePath: z.string().trim().min(1),
 });
+
+export const rolePromptSchema = teamRoleSchema;

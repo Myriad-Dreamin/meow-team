@@ -7,13 +7,17 @@ import {
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
 import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
-import type { RolePrompt } from "@/lib/team/prompts";
 import type {
   TeamCodexEvent,
   TeamRoleHandoff,
   TeamWorkerLaneExecutionPhase,
 } from "@/lib/team/types";
-import { prompt as renderCoderPrompt, type Args as CoderPromptArgs } from "./coder.prompt.md";
+import {
+  frontmatter as coderFrontmatter,
+  prompt as renderCoderPrompt,
+  type Args as CoderPromptArgs,
+} from "./coder.prompt.md";
+import { createTeamRoleDefinition } from "./metadata";
 
 const coderOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -46,7 +50,6 @@ export type CoderRoleState = TeamRepositoryContext & {
 };
 
 export type CoderRoleInput = {
-  role: RolePrompt;
   input: string;
   state: CoderRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
@@ -55,13 +58,19 @@ export type CoderRoleInput = {
 export type CoderRoleOutput = z.infer<typeof coderOutputSchema>;
 type CoderPromptInput = Omit<CoderRoleInput, "onEvent">;
 
+export const coderRole = createTeamRoleDefinition({
+  roleId: "coder",
+  filePath: "lib/team/roles/coder.prompt.md",
+  frontmatter: coderFrontmatter,
+});
+
 const laneSkillReference = [
   "- `.codex/skills/team-harness-workflow/SKILL.md`",
   "- `.codex/skills/team-harness-workflow/references/lanes.md`",
   "- `.codex/skills/openspec-apply-change/SKILL.md`",
 ].join("\n");
 
-const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
+const buildCoderPrompt = ({ state, input }: CoderPromptInput): string => {
   const isFinalArchive = state.executionPhase === "final_archive";
   const finalArchiveSection = isFinalArchive
     ? [
@@ -94,8 +103,7 @@ const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
     repositoryName: state.repository.name,
     repositoryPath: state.repository.path,
     requestTitle: state.requestTitle,
-    roleName: role.name,
-    rolePrompt: role.prompt.trim(),
+    roleName: coderRole.name,
     taskObjective: state.taskObjective,
     taskTitle: state.taskTitle,
     teamName: state.teamName,

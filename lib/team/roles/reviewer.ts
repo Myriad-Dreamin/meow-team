@@ -8,12 +8,13 @@ import {
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
 import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
-import type { RolePrompt } from "@/lib/team/prompts";
 import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
 import {
+  frontmatter as reviewerFrontmatter,
   prompt as renderReviewerPrompt,
   type Args as ReviewerPromptArgs,
 } from "./reviewer.prompt.md";
+import { createTeamRoleDefinition } from "./metadata";
 
 const reviewerOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -43,7 +44,6 @@ export type ReviewerRoleState = TeamRepositoryContext & {
 };
 
 export type ReviewerRoleInput = {
-  role: RolePrompt;
   input: string;
   state: ReviewerRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
@@ -52,13 +52,19 @@ export type ReviewerRoleInput = {
 export type ReviewerRoleOutput = z.infer<typeof reviewerOutputSchema>;
 type ReviewerPromptInput = Omit<ReviewerRoleInput, "onEvent">;
 
+export const reviewerRole = createTeamRoleDefinition({
+  roleId: "reviewer",
+  filePath: "lib/team/roles/reviewer.prompt.md",
+  frontmatter: reviewerFrontmatter,
+});
+
 const laneSkillReference = [
   "- `.codex/skills/team-harness-workflow/SKILL.md`",
   "- `.codex/skills/team-harness-workflow/references/lanes.md`",
   "- `.codex/skills/openspec-apply-change/SKILL.md`",
 ].join("\n");
 
-const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): string => {
+const buildReviewerPrompt = ({ state, input }: ReviewerPromptInput): string => {
   const templateArgs: ReviewerPromptArgs = {
     assignmentInput: input,
     baseBranch: state.baseBranch,
@@ -81,8 +87,7 @@ const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): strin
     reviewerExecutionRules: buildReviewerExecutionRules()
       .map((rule) => `- ${rule}`)
       .join("\n"),
-    roleName: role.name,
-    rolePrompt: role.prompt.trim(),
+    roleName: reviewerRole.name,
     taskObjective: state.taskObjective,
     taskTitle: state.taskTitle,
     teamName: state.teamName,

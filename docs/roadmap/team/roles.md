@@ -5,23 +5,22 @@ outline: deep
 
 # Roles
 
-## Prompt Layers
+## Prompt Source
 
-Track the separation between human-authored role system prompt modules in
-`prompts/roles/*.prompt.md` and runtime prompt templates colocated with the
-role implementations in `lib/team/roles`.
+Track the single prompt-authoring source in `lib/team/roles/*.prompt.md`,
+where each planner/coder/reviewer template carries both frontmatter metadata
+and the runtime system instructions used by the harness.
 
-## Static Registry
+## Metadata Wiring
 
-Track the explicit prompt registry in `prompts/roles/index.ts`, including the
-frontmatter-backed title and summary metadata that replaces runtime filesystem
-reads.
+Track how the role modules derive IDs, names, summaries, and file paths from
+their colocated prompt frontmatter instead of a separate prompt registry.
 
 ## Template Plumbing
 
-Track typed `meow-prompt` import support, declaration sync coverage for both
-`prompts/roles` and `lib/team/roles`, and regression tests that keep role
-templates compatible with TypeScript, Vitest, and the app/runtime loaders.
+Track typed `meow-prompt` import support, declaration sync coverage for
+`lib/team/roles`, and regression tests that keep role templates compatible
+with TypeScript, Vitest, and the app/runtime loaders.
 
 ## Workflow Expectations
 

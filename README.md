@@ -10,7 +10,7 @@ The default team follows a simple harness engineering workflow:
 - `reviewer` checks the work for bugs, regressions, and missing tests.
 
 Role behavior lives in statically imported Markdown prompt modules under
-[`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles), and the
+[`lib/team/roles`](/home/kamiyoru/work/ts/meow-team/lib/team/roles), and the
 whole team is configured in one file:
 [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
 
@@ -67,8 +67,9 @@ the environment provides a model override.
 - [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts):
   single source of truth for the team owner, workflow, storage, model, and
   allowed local repository directories.
-- [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles):
-  statically imported `*.prompt.md` system prompts plus the typed role registry.
+- [`lib/team/roles`](/home/kamiyoru/work/ts/meow-team/lib/team/roles):
+  colocated role agents plus the `*.prompt.md` templates that carry both role
+  metadata and runtime prompt text.
 - [`lib/team/network.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/network.ts):
   planner orchestration and thread state management.
 - [`lib/agent/codex-cli.ts`](/home/kamiyoru/work/ts/meow-team/lib/agent/codex-cli.ts):
@@ -110,17 +111,18 @@ selection on every run.
 ## Adding a Role
 
 1. Create a new Markdown prompt file in
-   [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles), for example
+   [`lib/team/roles`](/home/kamiyoru/work/ts/meow-team/lib/team/roles), for example
    `researcher.prompt.md`, with `title` and `summary` frontmatter.
-2. Register the prompt module in
-   [`prompts/roles/index.ts`](/home/kamiyoru/work/ts/meow-team/prompts/roles/index.ts).
+2. Add or update the matching role module in
+   [`lib/team/roles`](/home/kamiyoru/work/ts/meow-team/lib/team/roles) and wire it into the harness dependencies or routing where needed.
 3. Run `pnpm meow-prompt:sync-types` so TypeScript picks up the generated prompt declaration.
 4. Add the role ID to the `workflow` array in
    [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
 5. Restart the dev server if you want the homepage metadata to refresh immediately.
 
-The static registry reads each role title and summary from prompt frontmatter,
-with the Markdown heading/body kept as the actual system prompt text.
+Each role module now reads the role title and summary directly from the
+colocated prompt frontmatter, with the Markdown body kept as the actual system
+prompt text.
 
 ## Scripts
 

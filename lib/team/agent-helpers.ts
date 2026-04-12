@@ -1,4 +1,4 @@
-import type { RolePrompt } from "@/lib/team/prompts";
+import type { TeamRoleDefinition } from "@/lib/team/roles/metadata";
 import type { TeamRoleDecision, TeamRoleHandoff } from "@/lib/team/types";
 
 export type TeamRoleState = {
@@ -48,7 +48,7 @@ export const applyHandoff = <TState extends TeamRoleState>({
   decision,
 }: {
   state: TState;
-  role: RolePrompt;
+  role: TeamRoleDefinition;
   summary: string;
   deliverable: string;
   decision: TeamRoleDecision;
