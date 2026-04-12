@@ -6,4 +6,4 @@
 ## 2. Implementation
 
 - [x] 2.1 Implement the approved objective: Move the inline prompt construction in `lib/team/roles` into colocated `meow-prompt` markdown files, preserve the separate `prompts/roles` role definitions, and extend typed prompt-import support plus regression coverage so the new templates pass format, lint, test, typecheck, and build validation.
-- [ ] 2.2 Run validation and capture reviewer findings for "Extract harness role prompt templates"
+- [x] 2.2 Run validation and capture reviewer findings for "Extract harness role prompt templates"
