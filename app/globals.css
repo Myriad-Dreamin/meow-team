@@ -717,29 +717,75 @@ main {
 
 .workspace-thread-group-list {
   display: grid;
-  gap: 16px;
+  gap: 0;
 }
 
 .workspace-repository-group {
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: rgba(7, 18, 33, 0.42);
+  gap: 10px;
+  padding: 0;
+}
+
+.workspace-repository-group + .workspace-repository-group {
+  padding-top: 18px;
+  border-top: 1px solid rgba(159, 177, 198, 0.16);
 }
 
 .workspace-repository-group-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
+}
+
+.workspace-repository-group-toggle {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-repository-group-toggle:hover .workspace-repository-group-title,
+.workspace-repository-group-toggle:focus-visible .workspace-repository-group-title {
+  color: rgba(236, 243, 250, 0.96);
+}
+
+.workspace-repository-group-toggle:focus-visible {
+  outline: 2px solid rgba(125, 242, 198, 0.45);
+  outline-offset: 6px;
+  border-radius: 14px;
+}
+
+.workspace-repository-group-copy {
+  min-width: 0;
+}
+
+.workspace-repository-group-chevron {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  color: var(--muted);
+  transform: rotate(90deg);
+  transition: transform 160ms ease;
+}
+
+.workspace-repository-group-chevron-collapsed {
+  transform: rotate(0deg);
 }
 
 .workspace-repository-group-title {
   margin: 0;
   font-weight: 700;
   line-height: 1.4;
+  transition: color 160ms ease;
 }
 
 .workspace-repository-group-path {
@@ -753,7 +799,7 @@ main {
 .workspace-tab-button {
   width: 100%;
   display: grid;
-  gap: 10px;
+  gap: 0;
   padding: 16px;
   text-align: left;
   color: var(--text);
@@ -783,19 +829,15 @@ main {
   line-height: 1.45;
 }
 
-.workspace-tab-meta {
-  color: var(--muted);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.workspace-thread-tab-body {
+  display: grid;
+  gap: 6px;
 }
 
-.workspace-thread-tab-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+.workspace-thread-tab-meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .workspace-empty-state {
