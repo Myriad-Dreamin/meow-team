@@ -4,16 +4,17 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
 import { TeamStatusBar } from "@/components/team-status-bar";
 import {
+  buildThreadRepositoryGroups,
+  formatThreadSidebarMetadata,
+  getThreadRepositoryGroupKey,
+} from "@/components/team-workspace-sidebar";
+import {
   collectThreadAttentionNotifications,
   mergeStoredAttentionFingerprints,
   selectUndeliveredAttentionNotifications,
 } from "@/components/thread-attention-utils";
 import { ThreadDetailPanel } from "@/components/thread-detail-panel";
-import {
-  formatThreadId,
-  formatTimestamp,
-  threadStatusLabels,
-} from "@/components/thread-view-utils";
+import { formatThreadId, threadStatusLabels } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
@@ -48,19 +49,11 @@ type TeamWorkspaceResponse = {
   repositoryPicker: TeamRepositoryPickerModel;
 };
 
-type ThreadRepositoryGroup = {
-  key: string;
-  title: string;
-  description: string;
-  threads: TeamThreadSummary[];
-};
-
 const POLL_INTERVAL_MS = 5000;
 const SELECTED_TAB_STORAGE_KEY = "team-workspace.selected-tab";
 const DESKTOP_NOTIFICATIONS_ENABLED_STORAGE_KEY = "team-workspace.desktop-attention.enabled";
 const DELIVERED_ATTENTION_FINGERPRINTS_STORAGE_KEY = "team-workspace.desktop-attention.delivered";
 const LEGACY_SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY = "team-workspace.desktop-attention.seen";
-const NO_REPOSITORY_GROUP_KEY = "__no_repository__";
 
 type NotificationPermissionState = NotificationPermission | "unsupported";
 
@@ -77,6 +70,21 @@ const PlusIcon = ({ className }: WorkspaceIconProps) => (
   >
     <path d="M8 3.25v9.5" />
     <path d="M3.25 8h9.5" />
+  </svg>
+);
+
+const ChevronIcon = ({ className }: WorkspaceIconProps) => (
+  <svg
+    aria-hidden="true"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth="1.8"
+    viewBox="0 0 16 16"
+  >
+    <path d="m5.5 3.5 5 4.5-5 4.5" />
   </svg>
 );
 
@@ -198,38 +206,6 @@ const parseStoredSelectedTab = (value: string | null): SelectedTab | null => {
   return null;
 };
 
-const formatRepositoryGroupDescription = (repository: TeamRepositoryOption): string => {
-  const repositoryLabel =
-    repository.relativePath === "." ? repository.name : repository.relativePath;
-  return `${repository.rootLabel} / ${repositoryLabel}`;
-};
-
-const groupThreadsByRepository = (threads: TeamThreadSummary[]): ThreadRepositoryGroup[] => {
-  const groups = new Map<string, ThreadRepositoryGroup>();
-
-  for (const thread of threads) {
-    const repository = thread.repository;
-    const groupKey = repository?.id ?? NO_REPOSITORY_GROUP_KEY;
-    const existingGroup = groups.get(groupKey);
-
-    if (existingGroup) {
-      existingGroup.threads.push(thread);
-      continue;
-    }
-
-    groups.set(groupKey, {
-      key: groupKey,
-      title: repository?.name ?? "No Repository",
-      description: repository
-        ? formatRepositoryGroupDescription(repository)
-        : "Threads without a selected repository",
-      threads: [thread],
-    });
-  }
-
-  return Array.from(groups.values());
-};
-
 export function TeamWorkspace({
   disabled,
   initialPrompt,
@@ -259,6 +235,9 @@ export function TeamWorkspace({
     () => getNotificationPermissionState(),
   );
   const [notificationPermissionPending, setNotificationPermissionPending] = useState(false);
+  const [collapsedThreadGroupKeys, setCollapsedThreadGroupKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   const deliveredAttentionFingerprintsRef = useRef<Set<string>>(
     readStoredDeliveredAttentionFingerprints(),
   );
@@ -383,7 +362,8 @@ export function TeamWorkspace({
     resolvedSelectedTab.type === "thread"
       ? (threads.find((thread) => thread.threadId === resolvedSelectedTab.threadId) ?? null)
       : null;
-  const threadGroups = groupThreadsByRepository(threads);
+  const activeThreadGroupKey = activeThread ? getThreadRepositoryGroupKey(activeThread) : null;
+  const threadGroups = buildThreadRepositoryGroups(threads);
 
   const handleEnableDesktopNotifications = () => {
     if (!isNotificationSupported()) {
@@ -508,6 +488,19 @@ export function TeamWorkspace({
     });
   };
 
+  const handleToggleThreadGroup = (groupKey: string) => {
+    setCollapsedThreadGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+
+      return next;
+    });
+  };
+
   const handleRefreshThreads = async () => {
     const nextState = await fetchWorkspaceState();
     setThreads(nextState.threads);
@@ -548,43 +541,61 @@ export function TeamWorkspace({
 
             {threads.length > 0 ? (
               <div className="workspace-thread-group-list">
-                {threadGroups.map((group) => (
-                  <section className="workspace-repository-group" key={group.key}>
-                    <div className="workspace-repository-group-head">
-                      <div>
-                        <p className="workspace-repository-group-title">{group.title}</p>
-                        <p className="workspace-repository-group-path">{group.description}</p>
-                      </div>
-                      <span className="workspace-tab-group-count">{group.threads.length}</span>
-                    </div>
+                {threadGroups.map((group) => {
+                  const groupPanelId = `workspace-thread-group-${encodeURIComponent(group.key)}`;
+                  const isGroupCollapsed =
+                    collapsedThreadGroupKeys.has(group.key) && group.key !== activeThreadGroupKey;
 
-                    <div className="workspace-thread-tab-list">
-                      {group.threads.map((thread) => (
+                  return (
+                    <section className="workspace-repository-group" key={group.key}>
+                      <div className="workspace-repository-group-head">
                         <button
-                          className={`workspace-tab-button ${resolvedSelectedTab.type === "thread" && resolvedSelectedTab.threadId === thread.threadId ? "workspace-tab-button-active" : ""}`}
-                          key={thread.threadId}
+                          aria-controls={groupPanelId}
+                          aria-expanded={!isGroupCollapsed}
+                          className="workspace-repository-group-toggle"
                           type="button"
-                          onClick={() => handleSelectThreadTab(thread.threadId)}
+                          onClick={() => handleToggleThreadGroup(group.key)}
                         >
-                          <div className="workspace-thread-tab-head">
-                            <span className="workspace-tab-label">{thread.requestTitle}</span>
-                            <span className={`status-pill status-${thread.status}`}>
-                              {threadStatusLabels[thread.status]}
-                            </span>
-                          </div>
-                          <div className="workspace-thread-tab-meta-row">
-                            <span className="workspace-tab-meta">
-                              Thread {formatThreadId(thread.threadId)}
-                            </span>
-                            <span className="workspace-tab-meta">
-                              Updated {formatTimestamp(thread.updatedAt)}
-                            </span>
+                          <ChevronIcon
+                            className={`workspace-repository-group-chevron ${isGroupCollapsed ? "workspace-repository-group-chevron-collapsed" : ""}`}
+                          />
+                          <div className="workspace-repository-group-copy">
+                            <p className="workspace-repository-group-title">{group.title}</p>
+                            <p className="workspace-repository-group-path">{group.description}</p>
                           </div>
                         </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
+                        <span className="workspace-tab-group-count">{group.threads.length}</span>
+                      </div>
+
+                      {!isGroupCollapsed ? (
+                        <div className="workspace-thread-tab-list" id={groupPanelId}>
+                          {group.threads.map((thread) => {
+                            const sidebarMetadata = formatThreadSidebarMetadata(thread);
+
+                            return (
+                              <button
+                                className={`workspace-tab-button ${resolvedSelectedTab.type === "thread" && resolvedSelectedTab.threadId === thread.threadId ? "workspace-tab-button-active" : ""}`}
+                                key={thread.threadId}
+                                type="button"
+                                onClick={() => handleSelectThreadTab(thread.threadId)}
+                              >
+                                <div className="workspace-thread-tab-body">
+                                  <span className="workspace-tab-label">{thread.requestTitle}</span>
+                                  <span className="workspace-thread-tab-meta">
+                                    {sidebarMetadata.statusLine}
+                                  </span>
+                                  <span className="workspace-thread-tab-meta">
+                                    {sidebarMetadata.updatedLine}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </section>
+                  );
+                })}
               </div>
             ) : (
               <p className="workspace-empty-state">
