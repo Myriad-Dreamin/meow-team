@@ -2275,7 +2275,7 @@ describe.sequential("approveLaneProposal", () => {
     });
   });
 
-  it("creates a draft GitHub PR before coding and readies the same PR after machine review", async () => {
+  it("creates a draft GitHub PR before coding and rebases cleanly onto main before readying the tracking PR", async () => {
     let resolveCoder:
       | ((value: Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>) => void)
       | null = null;
@@ -2296,7 +2296,8 @@ describe.sequential("approveLaneProposal", () => {
     getBranchHeadMock
       .mockResolvedValueOnce("proposal-commit")
       .mockResolvedValueOnce("proposal-commit")
-      .mockResolvedValueOnce("review-commit");
+      .mockResolvedValueOnce("review-commit")
+      .mockResolvedValueOnce("rebased-review-commit");
     pushLaneBranchMock
       .mockResolvedValueOnce({
         ...basePushedCommit,
@@ -2305,7 +2306,7 @@ describe.sequential("approveLaneProposal", () => {
       })
       .mockResolvedValueOnce({
         ...basePushedCommit,
-        commitHash: "review-commit",
+        commitHash: "rebased-review-commit",
       });
     createOrUpdateGitHubPullRequestMock
       .mockResolvedValueOnce({
@@ -2371,6 +2372,15 @@ describe.sequential("approveLaneProposal", () => {
       expect(lane?.latestActivity).toContain("marked the tracking PR ready");
     });
 
+    expect(tryRebaseWorktreeBranchMock).toHaveBeenCalledWith({
+      worktreePath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+      baseBranch: "main",
+    });
+    expect(pushLaneBranchMock).toHaveBeenNthCalledWith(2, {
+      repositoryPath: dispatchRepository.path,
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "rebased-review-commit",
+    });
     expect(createOrUpdateGitHubPullRequestMock).toHaveBeenNthCalledWith(2, {
       repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
       branchName: "requests/example/a1-proposal-1",

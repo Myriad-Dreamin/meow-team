@@ -2018,25 +2018,34 @@ const runLaneCycle = async ({
     let latestImplementationCommit = branchHeadAfterCoding;
     let rebaseErrorSummary: string | null = null;
 
-    if (hasConflict) {
-      const rebaseAttempt = await tryRebaseWorktreeBranch({
-        worktreePath: lane.worktreePath,
-        baseBranch: lane.baseBranch,
-      });
+    const rebaseAttempt = await tryRebaseWorktreeBranch({
+      worktreePath: lane.worktreePath,
+      baseBranch: lane.baseBranch,
+    });
 
-      if (rebaseAttempt.applied) {
-        latestImplementationCommit = await getBranchHead({
-          repositoryPath: assignment.repository.path,
-          branchName: lane.branchName,
-        });
-      } else {
-        rebaseErrorSummary = rebaseAttempt.error
-          ? summarizeGitFailure(rebaseAttempt.error)
-          : "Git rebase failed.";
-      }
+    if (rebaseAttempt.applied) {
+      latestImplementationCommit = await getBranchHead({
+        repositoryPath: assignment.repository.path,
+        branchName: lane.branchName,
+      });
+    } else {
+      rebaseErrorSummary = rebaseAttempt.error
+        ? summarizeGitFailure(rebaseAttempt.error)
+        : "Git rebase failed.";
     }
 
-    if (hasConflict && rebaseErrorSummary) {
+    const rebasedOntoBase = latestImplementationCommit !== branchHeadAfterCoding;
+    const rebaseFailureActivity = hasConflict
+      ? "Planner detected a pull request conflict and the auto-rebase attempt failed, so the proposal was requeued."
+      : "Planner could not rebase the lane onto the base branch, so the proposal was requeued for conflict resolution.";
+    const rebaseFailureReviewerEvent = hasConflict
+      ? `Reviewer approved the proposal, but the planner auto-rebase attempt failed after detecting a conflict: ${reviewerHandoff.summary}`
+      : `Reviewer approved the proposal, but the planner auto-rebase attempt onto ${lane.baseBranch} failed: ${reviewerHandoff.summary}`;
+    const rebaseFailurePlannerNote = hasConflict
+      ? `Conflict detected for proposal ${lane.laneIndex}; automatic rebase onto ${lane.baseBranch} failed (${rebaseErrorSummary}), so the coder was requeued before machine review could complete.`
+      : `Proposal ${lane.laneIndex} passed machine review, but the automatic rebase onto ${lane.baseBranch} failed (${rebaseErrorSummary}), so the coder was requeued before machine review could complete.`;
+
+    if (rebaseErrorSummary) {
       await updateTeamThreadRecord({
         threadFile: teamConfig.storage.threadFile,
         threadId,
@@ -2054,8 +2063,7 @@ const runLaneCycle = async ({
           mutableLane.latestReviewerHandoff = reviewerHandoff;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestReviewerSummary = reviewerHandoff.summary;
-          mutableLane.latestActivity =
-            "Planner detected a pull request conflict, the auto-rebase attempt failed, and the lane was requeued.";
+          mutableLane.latestActivity = rebaseFailureActivity;
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
           mutableLane.queuedAt = mutableNow;
@@ -2072,17 +2080,8 @@ const runLaneCycle = async ({
           };
           mutableLane.updatedAt = mutableNow;
           mutableLane.finishedAt = null;
-          appendLaneEvent(
-            mutableLane,
-            "reviewer",
-            `Reviewer approved the proposal, but the planner auto-rebase attempt failed after detecting a conflict: ${reviewerHandoff.summary}`,
-            mutableNow,
-          );
-          appendPlannerNote(
-            mutableAssignment,
-            `Conflict detected for proposal ${mutableLane.laneIndex}; automatic rebase onto ${mutableLane.baseBranch ?? lane.baseBranch} failed (${rebaseErrorSummary}), so the coder was requeued before machine review could complete.`,
-            mutableNow,
-          );
+          appendLaneEvent(mutableLane, "reviewer", rebaseFailureReviewerEvent, mutableNow);
+          appendPlannerNote(mutableAssignment, rebaseFailurePlannerNote, mutableNow);
           synchronizeDispatchAssignment(mutableAssignment, mutableNow);
         },
       });
@@ -2139,7 +2138,7 @@ const runLaneCycle = async ({
           };
           mutableLane.updatedAt = mutableNow;
           mutableLane.finishedAt = mutableNow;
-          if (hasConflict) {
+          if (rebasedOntoBase) {
             appendLaneEvent(
               mutableLane,
               "planner",
@@ -2156,7 +2155,9 @@ const runLaneCycle = async ({
           appendLaneEvent(mutableLane, "system", pushErrorMessage, mutableNow);
           appendPlannerNote(
             mutableAssignment,
-            `Proposal ${mutableLane.laneIndex} passed machine review, but publishing ${mutableLane.branchName ?? lane.branchName} to GitHub failed (${pushErrorSummary}).`,
+            rebasedOntoBase
+              ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch} after machine review, but publishing ${mutableLane.branchName ?? lane.branchName} to GitHub failed (${pushErrorSummary}).`
+              : `Proposal ${mutableLane.laneIndex} passed machine review, but publishing ${mutableLane.branchName ?? lane.branchName} to GitHub failed (${pushErrorSummary}).`,
             mutableNow,
           );
           synchronizeDispatchAssignment(mutableAssignment, mutableNow);
@@ -2237,7 +2238,7 @@ const runLaneCycle = async ({
           };
           mutableLane.updatedAt = mutableNow;
           mutableLane.finishedAt = mutableNow;
-          if (hasConflict) {
+          if (rebasedOntoBase) {
             appendLaneEvent(
               mutableLane,
               "planner",
@@ -2263,7 +2264,9 @@ const runLaneCycle = async ({
           appendLaneEvent(mutableLane, "system", pullRequestErrorMessage, mutableNow);
           appendPlannerNote(
             mutableAssignment,
-            `Proposal ${mutableLane.laneIndex} passed machine review and was pushed to GitHub, but refreshing the tracking PR failed (${pullRequestErrorSummary}).`,
+            rebasedOntoBase
+              ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch} and pushed to GitHub after machine review, but refreshing the tracking PR failed (${pullRequestErrorSummary}).`
+              : `Proposal ${mutableLane.laneIndex} passed machine review and was pushed to GitHub, but refreshing the tracking PR failed (${pullRequestErrorSummary}).`,
             mutableNow,
           );
           synchronizeDispatchAssignment(mutableAssignment, mutableNow);
@@ -2323,7 +2326,7 @@ const runLaneCycle = async ({
         };
         mutableLane.updatedAt = mutableNow;
         mutableLane.finishedAt = mutableNow;
-        if (hasConflict) {
+        if (rebasedOntoBase) {
           appendLaneEvent(
             mutableLane,
             "planner",
@@ -2360,7 +2363,7 @@ const runLaneCycle = async ({
         );
         appendPlannerNote(
           mutableAssignment,
-          hasConflict
+          rebasedOntoBase
             ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch}, pushed to GitHub, and marked ready on GitHub after machine review. It is now waiting for final human approval.`
             : `Proposal ${mutableLane.laneIndex} was pushed to GitHub, marked ready on GitHub after machine review, and is now waiting for final human approval.`,
           mutableNow,
