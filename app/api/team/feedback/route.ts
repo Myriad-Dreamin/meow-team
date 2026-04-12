@@ -1,11 +1,11 @@
 // API docs: docs/api/team/feedback.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prepareAssignmentReplan } from "@/lib/team/dispatch";
 import { markTeamThreadFailed } from "@/lib/team/history";
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
+  prepareAssignmentReplan,
   persistTeamRunState,
   runTeam,
 } from "@/lib/team/network";

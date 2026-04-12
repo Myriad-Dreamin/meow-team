@@ -4,36 +4,69 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
-  approveLanePullRequestMock,
-  createPlannerDispatchAssignmentMock,
-  ensurePendingDispatchWorkMock,
+  commitWorktreeChangesMock,
+  createOrUpdateGitHubPullRequestMock,
+  deleteManagedBranchesMock,
+  ensureLaneWorktreeMock,
   findConfiguredRepositoryMock,
-  queueLaneProposalForExecutionMock,
+  getBranchHeadMock,
+  hasWorktreeChangesMock,
+  inspectOpenSpecChangeArchiveStateMock,
+  listExistingBranchesMock,
+  materializeAssignmentProposalsMock,
+  pushLaneBranchMock,
+  resolveRepositoryBaseBranchMock,
 } = vi.hoisted(() => {
   return {
-    approveLanePullRequestMock: vi.fn(),
-    createPlannerDispatchAssignmentMock: vi.fn(),
-    ensurePendingDispatchWorkMock: vi.fn(),
+    commitWorktreeChangesMock: vi.fn(),
+    createOrUpdateGitHubPullRequestMock: vi.fn(),
+    deleteManagedBranchesMock: vi.fn(),
+    ensureLaneWorktreeMock: vi.fn(),
     findConfiguredRepositoryMock: vi.fn(),
-    queueLaneProposalForExecutionMock: vi.fn(),
+    getBranchHeadMock: vi.fn(),
+    hasWorktreeChangesMock: vi.fn(),
+    inspectOpenSpecChangeArchiveStateMock: vi.fn(),
+    listExistingBranchesMock: vi.fn(),
+    materializeAssignmentProposalsMock: vi.fn(),
+    pushLaneBranchMock: vi.fn(),
+    resolveRepositoryBaseBranchMock: vi.fn(),
   };
 });
 
-vi.mock("@/lib/team/dispatch", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/team/dispatch")>();
-
+vi.mock("@/lib/git/ops", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/git/ops")>();
   return {
     ...actual,
-    approveLanePullRequest: approveLanePullRequestMock,
-    createPlannerDispatchAssignment: createPlannerDispatchAssignmentMock,
-    ensurePendingDispatchWork: ensurePendingDispatchWorkMock,
-    queueLaneProposalForExecution: queueLaneProposalForExecutionMock,
+    commitWorktreeChanges: commitWorktreeChangesMock,
+    createOrUpdateGitHubPullRequest: createOrUpdateGitHubPullRequestMock,
+    getBranchHead: getBranchHeadMock,
+    hasWorktreeChanges: hasWorktreeChangesMock,
+    inspectOpenSpecChangeArchiveState: inspectOpenSpecChangeArchiveStateMock,
+    listExistingBranches: listExistingBranchesMock,
+    resolveRepositoryBaseBranch: resolveRepositoryBaseBranchMock,
+  };
+});
+
+vi.mock("@/lib/team/git", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/team/git")>("@/lib/team/git");
+  return {
+    ...actual,
+    deleteManagedBranches: deleteManagedBranchesMock,
+    ensureLaneWorktree: ensureLaneWorktreeMock,
+    pushLaneBranch: pushLaneBranchMock,
+  };
+});
+
+vi.mock("@/lib/team/openspec", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/team/openspec")>();
+  return {
+    ...actual,
+    materializeAssignmentProposals: materializeAssignmentProposalsMock,
   };
 });
 
 vi.mock("@/lib/team/repositories", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/team/repositories")>();
-
   return {
     ...actual,
     findConfiguredRepository: findConfiguredRepositoryMock,
@@ -41,17 +74,25 @@ vi.mock("@/lib/team/repositories", async (importOriginal) => {
 });
 
 import { teamConfig } from "@/team.config";
+import * as historyModule from "@/lib/team/history";
 import {
   getTeamThreadRecord,
+  type PendingDispatchAssignment,
   type TeamThreadRecord,
   updateTeamThreadRecord,
   upsertTeamThreadRun,
 } from "@/lib/team/history";
 import {
+  approveLanePullRequest,
+  assignPendingDispatchThreadSlots,
+  assignPendingDispatchWorkerSlots,
   createInitialTeamRunState,
+  createPlannerDispatchAssignment,
   createTeamRunEnv,
+  ensurePendingDispatchWork,
   persistTeamRunState,
   runTeam,
+  teamNetworkDispatchOps,
   type TeamRunEnv,
 } from "@/lib/team/network";
 import {
@@ -66,6 +107,16 @@ type RequestTitleAgentArgs = Parameters<TeamRoleDependencies["requestTitleAgent"
 type PlannerAgentArgs = Parameters<TeamRoleDependencies["plannerAgent"]["run"]>;
 type PlannerAgentResult = Awaited<ReturnType<TeamRoleDependencies["plannerAgent"]["run"]>>;
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
+const createPlannerDispatchAssignmentSpy = vi.spyOn(
+  teamNetworkDispatchOps,
+  "createPlannerDispatchAssignment",
+);
+const approveLanePullRequestSpy = vi.spyOn(teamNetworkDispatchOps, "approveLanePullRequest");
+const ensurePendingDispatchWorkSpy = vi.spyOn(teamNetworkDispatchOps, "ensurePendingDispatchWork");
+const queueLaneProposalForExecutionSpy = vi.spyOn(
+  teamNetworkDispatchOps,
+  "queueLaneProposalForExecution",
+);
 
 const repository: TeamRepositoryOption = {
   id: "repo-1",
@@ -73,6 +124,15 @@ const repository: TeamRepositoryOption = {
   rootId: "root-1",
   rootLabel: "Workspace",
   path: process.cwd(),
+  relativePath: ".",
+};
+
+const dispatchRepository: TeamRepositoryOption = {
+  id: "repo-dispatch",
+  name: "Repository",
+  rootId: "root-dispatch",
+  rootLabel: "Root",
+  path: "/tmp/repository",
   relativePath: ".",
 };
 
@@ -219,16 +279,16 @@ describe.sequential("runTeam", () => {
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), "run-team-"));
     teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
 
-    createPlannerDispatchAssignmentMock.mockReset();
-    createPlannerDispatchAssignmentMock.mockResolvedValue({} as never);
-    approveLanePullRequestMock.mockReset();
-    approveLanePullRequestMock.mockResolvedValue(undefined);
-    ensurePendingDispatchWorkMock.mockReset();
-    ensurePendingDispatchWorkMock.mockResolvedValue(undefined);
+    createPlannerDispatchAssignmentSpy.mockReset();
+    createPlannerDispatchAssignmentSpy.mockResolvedValue({} as never);
+    approveLanePullRequestSpy.mockReset();
+    approveLanePullRequestSpy.mockResolvedValue(undefined);
+    ensurePendingDispatchWorkSpy.mockReset();
+    ensurePendingDispatchWorkSpy.mockResolvedValue(undefined);
     findConfiguredRepositoryMock.mockReset();
     findConfiguredRepositoryMock.mockResolvedValue(null);
-    queueLaneProposalForExecutionMock.mockReset();
-    queueLaneProposalForExecutionMock.mockResolvedValue(undefined);
+    queueLaneProposalForExecutionSpy.mockReset();
+    queueLaneProposalForExecutionSpy.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
@@ -346,7 +406,7 @@ describe.sequential("runTeam", () => {
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(coderAgentMock.run).not.toHaveBeenCalled();
     expect(reviewerAgentMock.run).not.toHaveBeenCalled();
-    expect(createPlannerDispatchAssignmentMock).toHaveBeenCalledWith({
+    expect(createPlannerDispatchAssignmentSpy).toHaveBeenCalledWith({
       threadId: "thread-1",
       assignmentNumber: 1,
       repository,
@@ -367,7 +427,7 @@ describe.sequential("runTeam", () => {
       ],
       deleteExistingBranches: undefined,
     });
-    expect(ensurePendingDispatchWorkMock).toHaveBeenCalledWith({
+    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
       threadId: "thread-1",
       dependencies: expect.objectContaining({
         executor,
@@ -502,7 +562,7 @@ describe.sequential("runTeam", () => {
     expect(callOrder).toEqual(["request-title:initial", "planner", "request-title:metadata"]);
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(2);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
-    expect(createPlannerDispatchAssignmentMock).toHaveBeenCalledWith({
+    expect(createPlannerDispatchAssignmentSpy).toHaveBeenCalledWith({
       threadId: "thread-stale-conventional-title",
       assignmentNumber: 1,
       repository,
@@ -593,7 +653,7 @@ describe.sequential("runTeam", () => {
     expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(executorMock).not.toHaveBeenCalled();
-    expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
+    expect(createPlannerDispatchAssignmentSpy).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "planning",
@@ -738,7 +798,7 @@ describe.sequential("runTeam", () => {
 
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
-    expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
+    expect(createPlannerDispatchAssignmentSpy).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "planning",
@@ -815,7 +875,7 @@ describe.sequential("runTeam", () => {
       input: "Ship reliable dispatch coordination.",
     });
 
-    createPlannerDispatchAssignmentMock.mockImplementationOnce(async (input) => {
+    createPlannerDispatchAssignmentSpy.mockImplementationOnce(async (input) => {
       await updateTeamThreadRecord({
         threadFile: teamConfig.storage.threadFile,
         threadId: input.threadId,
@@ -892,8 +952,8 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
 
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
-    expect(createPlannerDispatchAssignmentMock).toHaveBeenCalledTimes(1);
-    expect(ensurePendingDispatchWorkMock).toHaveBeenCalledTimes(2);
+    expect(createPlannerDispatchAssignmentSpy).toHaveBeenCalledTimes(1);
+    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledTimes(2);
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-replay");
     expect(thread?.dispatchAssignments).toHaveLength(1);
@@ -1021,7 +1081,7 @@ describe.sequential("runTeam", () => {
 
     expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
     expect(plannerAgentMock.run).not.toHaveBeenCalled();
-    expect(createPlannerDispatchAssignmentMock).not.toHaveBeenCalled();
+    expect(createPlannerDispatchAssignmentSpy).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual(["init"]);
   });
 
@@ -1046,7 +1106,7 @@ describe.sequential("runTeam", () => {
       },
     });
 
-    queueLaneProposalForExecutionMock.mockImplementationOnce(
+    queueLaneProposalForExecutionSpy.mockImplementationOnce(
       async ({
         threadId,
         assignmentNumber,
@@ -1090,8 +1150,8 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
     await runTeam(env, structuredClone(persistedStage));
 
-    expect(queueLaneProposalForExecutionMock).toHaveBeenCalledTimes(1);
-    expect(ensurePendingDispatchWorkMock).toHaveBeenCalledTimes(2);
+    expect(queueLaneProposalForExecutionSpy).toHaveBeenCalledTimes(1);
+    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledTimes(2);
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-coding-replay");
     expect(thread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("queued");
@@ -1113,12 +1173,12 @@ describe.sequential("runTeam", () => {
     const result = await runTeam(env, initialState);
 
     expect(result).toBeNull();
-    expect(queueLaneProposalForExecutionMock).toHaveBeenCalledWith({
+    expect(queueLaneProposalForExecutionSpy).toHaveBeenCalledWith({
       threadId: "thread-approval",
       assignmentNumber: 2,
       laneId: "lane-3",
     });
-    expect(ensurePendingDispatchWorkMock).toHaveBeenCalledWith({
+    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
       threadId: "thread-approval",
       dependencies: expect.objectContaining({
         requestTitleAgent: expect.any(Object),
@@ -1151,7 +1211,7 @@ describe.sequential("runTeam", () => {
     const result = await runTeam(env, initialState);
 
     expect(result).toBeNull();
-    expect(approveLanePullRequestMock).toHaveBeenCalledWith({
+    expect(approveLanePullRequestSpy).toHaveBeenCalledWith({
       threadId: "thread-finalize",
       assignmentNumber: 4,
       laneId: "lane-2",
@@ -1162,8 +1222,8 @@ describe.sequential("runTeam", () => {
         reviewerAgent: expect.any(Object),
       }),
     });
-    expect(queueLaneProposalForExecutionMock).not.toHaveBeenCalled();
-    expect(ensurePendingDispatchWorkMock).not.toHaveBeenCalled();
+    expect(queueLaneProposalForExecutionSpy).not.toHaveBeenCalled();
+    expect(ensurePendingDispatchWorkSpy).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "archiving",
@@ -1226,7 +1286,7 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
     await runTeam(env, structuredClone(persistedStage));
 
-    expect(approveLanePullRequestMock).not.toHaveBeenCalled();
+    expect(approveLanePullRequestSpy).not.toHaveBeenCalled();
   });
 
   it("resumes pending dispatch work through the reviewing stage", async () => {
@@ -1243,7 +1303,7 @@ describe.sequential("runTeam", () => {
     const result = await runTeam(env, initialState);
 
     expect(result).toBeNull();
-    expect(ensurePendingDispatchWorkMock).toHaveBeenCalledWith({
+    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
       threadId: "thread-dispatch",
       dependencies: expect.objectContaining({
         requestTitleAgent: expect.any(Object),
@@ -1257,5 +1317,1229 @@ describe.sequential("runTeam", () => {
       "reviewing",
       "completed",
     ]);
+  });
+});
+
+const createDispatchLane = ({
+  laneId,
+  laneIndex,
+  status,
+  workerSlot = null,
+  worktreePath = null,
+  queuedAt = FIXED_TIMESTAMP,
+  branchName = `requests/test/a1-proposal-${laneIndex}`,
+  baseBranch = "main",
+  taskTitle = `Task ${laneIndex}`,
+  taskObjective = `Objective ${laneIndex}`,
+  proposalChangeName = `change-${laneId}`,
+  proposalPath = `openspec/changes/change-${laneId}`,
+  latestImplementationCommit = null,
+  pushedCommit = null,
+  latestDecision = null,
+  latestCoderSummary = null,
+  latestReviewerSummary = null,
+  latestActivity = null,
+  approvalRequestedAt = null,
+  approvalGrantedAt = null,
+  runCount = 0,
+  revisionCount = 0,
+  requeueReason = null,
+  lastError = null,
+  pullRequest = null,
+  events = [],
+  startedAt = null,
+  finishedAt = null,
+}: {
+  laneId: string;
+  laneIndex: number;
+  status: TeamWorkerLaneRecord["status"];
+  workerSlot?: number | null;
+  worktreePath?: string | null;
+  queuedAt?: string | null;
+  branchName?: string;
+  baseBranch?: string;
+  taskTitle?: string;
+  taskObjective?: string;
+  proposalChangeName?: string;
+  proposalPath?: string;
+  latestImplementationCommit?: TeamWorkerLaneRecord["latestImplementationCommit"];
+  pushedCommit?: TeamWorkerLaneRecord["pushedCommit"];
+  latestDecision?: TeamWorkerLaneRecord["latestDecision"];
+  latestCoderSummary?: string | null;
+  latestReviewerSummary?: string | null;
+  latestActivity?: string | null;
+  approvalRequestedAt?: string | null;
+  approvalGrantedAt?: string | null;
+  runCount?: number;
+  revisionCount?: number;
+  requeueReason?: TeamWorkerLaneRecord["requeueReason"];
+  lastError?: string | null;
+  pullRequest?: TeamWorkerLaneRecord["pullRequest"];
+  events?: TeamWorkerLaneRecord["events"];
+  startedAt?: string | null;
+  finishedAt?: string | null;
+}): TeamWorkerLaneRecord => {
+  return {
+    laneId,
+    laneIndex,
+    status,
+    executionPhase: null,
+    taskTitle,
+    taskObjective,
+    proposalChangeName,
+    proposalPath,
+    workerSlot,
+    branchName,
+    baseBranch,
+    worktreePath,
+    latestImplementationCommit,
+    pushedCommit,
+    latestCoderHandoff: null,
+    latestReviewerHandoff: null,
+    latestDecision,
+    latestCoderSummary,
+    latestReviewerSummary,
+    latestActivity,
+    approvalRequestedAt,
+    approvalGrantedAt,
+    queuedAt,
+    runCount,
+    revisionCount,
+    requeueReason,
+    lastError,
+    pullRequest,
+    events,
+    startedAt,
+    finishedAt,
+    updatedAt: FIXED_TIMESTAMP,
+  };
+};
+
+const createDispatchAssignment = ({
+  assignmentNumber,
+  lanes,
+  repository = dispatchRepository,
+  status = "running",
+  threadSlot = null,
+  plannerWorktreePath = null,
+  workerCount = 3,
+  requestTitle = "Request",
+  conventionalTitle = null,
+  requestText = "Implement the request.",
+  plannerSummary = "Plan summary",
+  plannerDeliverable = "Plan deliverable",
+  branchPrefix = "test",
+  canonicalBranchName = `requests/test/a${assignmentNumber}`,
+  baseBranch = "main",
+}: {
+  assignmentNumber: number;
+  lanes: TeamWorkerLaneRecord[];
+  repository?: TeamRepositoryOption | null;
+  status?: TeamDispatchAssignment["status"];
+  threadSlot?: number | null;
+  plannerWorktreePath?: string | null;
+  workerCount?: number;
+  requestTitle?: string;
+  conventionalTitle?: TeamDispatchAssignment["conventionalTitle"];
+  requestText?: string;
+  plannerSummary?: string;
+  plannerDeliverable?: string;
+  branchPrefix?: string;
+  canonicalBranchName?: string | null;
+  baseBranch?: string;
+}): TeamDispatchAssignment => {
+  return {
+    assignmentNumber,
+    status,
+    repository,
+    requestTitle,
+    conventionalTitle,
+    requestText,
+    requestedAt: FIXED_TIMESTAMP,
+    startedAt: FIXED_TIMESTAMP,
+    finishedAt: null,
+    updatedAt: FIXED_TIMESTAMP,
+    plannerSummary,
+    plannerDeliverable,
+    branchPrefix,
+    canonicalBranchName,
+    baseBranch,
+    threadSlot,
+    plannerWorktreePath,
+    workerCount,
+    lanes,
+    plannerNotes: [],
+    humanFeedback: [],
+    supersededAt: null,
+    supersededReason: null,
+  };
+};
+
+const createPendingAssignment = ({
+  threadId,
+  assignmentNumber,
+  lanes,
+  status = "running",
+  threadSlot = null,
+  plannerWorktreePath = null,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  lanes: TeamWorkerLaneRecord[];
+  status?: TeamDispatchAssignment["status"];
+  threadSlot?: number | null;
+  plannerWorktreePath?: string | null;
+}): PendingDispatchAssignment => {
+  return {
+    threadId,
+    assignment: createDispatchAssignment({
+      assignmentNumber,
+      lanes,
+      status,
+      threadSlot,
+      plannerWorktreePath,
+    }),
+  };
+};
+
+const createDispatchThreadRecord = ({
+  threadId,
+  assignment,
+  runStatus = "running",
+}: {
+  threadId: string;
+  assignment: TeamDispatchAssignment;
+  runStatus?: NonNullable<TeamThreadRecord["run"]>["status"];
+}): TeamThreadRecord => {
+  return {
+    threadId,
+    data: {
+      teamId: teamConfig.id,
+      teamName: teamConfig.name,
+      ownerName: teamConfig.owner.name,
+      objective: teamConfig.owner.objective,
+      selectedRepository: assignment.repository,
+      workflow: [...teamConfig.workflow],
+      handoffs: {},
+      handoffCounter: 0,
+      assignmentNumber: assignment.assignmentNumber,
+      requestTitle: assignment.requestTitle,
+      conventionalTitle: assignment.conventionalTitle,
+      requestText: assignment.requestText,
+      latestInput: assignment.requestText,
+      forceReset: false,
+    },
+    results: [],
+    userMessages: [],
+    dispatchAssignments: [assignment],
+    run: {
+      status: runStatus,
+      startedAt: FIXED_TIMESTAMP,
+      finishedAt: null,
+      lastError: null,
+    },
+    createdAt: FIXED_TIMESTAMP,
+    updatedAt: FIXED_TIMESTAMP,
+  };
+};
+
+const basePushedCommit = {
+  remoteName: "origin",
+  repositoryUrl: "https://github.com/example/meow-team",
+  branchUrl: "https://github.com/example/meow-team/tree/requests/example/a1-proposal-1",
+  commitUrl: "https://github.com/example/meow-team/commit/review-commit",
+  commitHash: "review-commit",
+  pushedAt: FIXED_TIMESTAMP,
+};
+
+describe("assignPendingDispatchThreadSlots", () => {
+  it("assigns shared meow-N slots across active threads and preserves a claimed slot", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-2",
+        assignmentNumber: 1,
+        threadSlot: 2,
+        plannerWorktreePath: "/tmp/worktrees/meow-2",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-2-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-3",
+        assignmentNumber: 1,
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-3-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-4",
+        assignmentNumber: 1,
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-4-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchThreadSlots({
+      pendingAssignments,
+      workerCount: 3,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[0].assignment.threadSlot).toBe(1);
+    expect(pendingAssignments[0].assignment.plannerWorktreePath).toBe("/tmp/worktrees/meow-1");
+    expect(pendingAssignments[1].assignment.threadSlot).toBe(2);
+    expect(pendingAssignments[1].assignment.plannerWorktreePath).toBe("/tmp/worktrees/meow-2");
+    expect(pendingAssignments[2].assignment.threadSlot).toBe(3);
+    expect(pendingAssignments[2].assignment.plannerWorktreePath).toBe("/tmp/worktrees/meow-3");
+    expect(pendingAssignments[3].assignment.threadSlot).toBeNull();
+    expect(pendingAssignments[3].assignment.plannerWorktreePath).toBeNull();
+  });
+
+  it("releases a slot when a terminal thread leaves the active set", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        threadSlot: 1,
+        plannerWorktreePath: "/tmp/worktrees/meow-1",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-2",
+        assignmentNumber: 1,
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-2-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchThreadSlots({
+      pendingAssignments,
+      workerCount: 1,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[1].assignment.threadSlot).toBeNull();
+
+    assignPendingDispatchThreadSlots({
+      pendingAssignments: [pendingAssignments[1]],
+      workerCount: 1,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[1].assignment.threadSlot).toBe(1);
+    expect(pendingAssignments[1].assignment.plannerWorktreePath).toBe("/tmp/worktrees/meow-1");
+  });
+
+  it("derives a thread slot from legacy lane metadata", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "coding",
+            workerSlot: null,
+            worktreePath: "/tmp/worktrees/meow-2",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchThreadSlots({
+      pendingAssignments,
+      workerCount: 3,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[0].assignment.threadSlot).toBe(2);
+    expect(pendingAssignments[0].assignment.plannerWorktreePath).toBe("/tmp/worktrees/meow-2");
+  });
+});
+
+describe("assignPendingDispatchWorkerSlots", () => {
+  it("preserves an active lane's slot and only starts one queued lane per thread", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        threadSlot: 1,
+        plannerWorktreePath: "/tmp/worktrees/meow-1",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "coding",
+            workerSlot: 1,
+            worktreePath: "/tmp/worktrees/meow-1",
+          }),
+          createDispatchLane({
+            laneId: "thread-1-lane-2",
+            laneIndex: 2,
+            status: "queued",
+            queuedAt: "2026-04-11T08:01:00.000Z",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-2",
+        assignmentNumber: 1,
+        threadSlot: 2,
+        plannerWorktreePath: "/tmp/worktrees/meow-2",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-2-lane-1",
+            laneIndex: 1,
+            status: "queued",
+            queuedAt: "2026-04-11T08:02:00.000Z",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchWorkerSlots({
+      pendingAssignments,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[0].assignment.lanes[0].workerSlot).toBe(1);
+    expect(pendingAssignments[0].assignment.lanes[0].worktreePath).toBe("/tmp/worktrees/meow-1");
+    expect(pendingAssignments[0].assignment.lanes[1].workerSlot).toBeNull();
+    expect(pendingAssignments[0].assignment.lanes[1].worktreePath).toBeNull();
+    expect(pendingAssignments[1].assignment.lanes[0].workerSlot).toBe(2);
+    expect(pendingAssignments[1].assignment.lanes[0].worktreePath).toBe("/tmp/worktrees/meow-2");
+  });
+
+  it("avoids planner and lane collisions by keeping a queued lane on its thread slot", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        threadSlot: 1,
+        plannerWorktreePath: "/tmp/worktrees/meow-1",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-2",
+        assignmentNumber: 1,
+        threadSlot: 2,
+        plannerWorktreePath: "/tmp/worktrees/meow-2",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-2-lane-1",
+            laneIndex: 1,
+            status: "queued",
+            queuedAt: "2026-04-11T08:01:00.000Z",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchWorkerSlots({
+      pendingAssignments,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[1].assignment.lanes[0].workerSlot).toBe(2);
+    expect(pendingAssignments[1].assignment.lanes[0].worktreePath).toBe("/tmp/worktrees/meow-2");
+  });
+
+  it("reuses a preserved thread slot for queued work after worker count shrinks", () => {
+    const pendingAssignments = [
+      createPendingAssignment({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        threadSlot: 1,
+        plannerWorktreePath: "/tmp/worktrees/meow-1",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-1-lane-1",
+            laneIndex: 1,
+            status: "awaiting_human_approval",
+          }),
+        ],
+      }),
+      createPendingAssignment({
+        threadId: "thread-2",
+        assignmentNumber: 1,
+        threadSlot: 3,
+        plannerWorktreePath: "/tmp/worktrees/meow-3",
+        lanes: [
+          createDispatchLane({
+            laneId: "thread-2-lane-1",
+            laneIndex: 1,
+            status: "queued",
+            queuedAt: "2026-04-11T08:01:00.000Z",
+          }),
+        ],
+      }),
+    ];
+
+    assignPendingDispatchWorkerSlots({
+      pendingAssignments,
+      resolveAssignmentWorktreeRoot: () => "/tmp/worktrees",
+    });
+
+    expect(pendingAssignments[1].assignment.lanes[0].workerSlot).toBe(3);
+    expect(pendingAssignments[1].assignment.lanes[0].worktreePath).toBe("/tmp/worktrees/meow-3");
+  });
+});
+
+describe.sequential("ensurePendingDispatchWork", () => {
+  let originalWorkerCount: number;
+  let getTeamThreadRecordSpy: ReturnType<typeof vi.spyOn>;
+  let listPendingDispatchAssignmentsSpy: ReturnType<typeof vi.spyOn> | null;
+  let updateTeamThreadRecordSpy: ReturnType<typeof vi.spyOn> | null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    originalWorkerCount = teamConfig.dispatch.workerCount;
+    teamConfig.dispatch.workerCount = 1;
+    listPendingDispatchAssignmentsSpy = null;
+    updateTeamThreadRecordSpy = null;
+    getTeamThreadRecordSpy = vi.spyOn(historyModule, "getTeamThreadRecord").mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    getTeamThreadRecordSpy.mockRestore();
+    listPendingDispatchAssignmentsSpy?.mockRestore();
+    updateTeamThreadRecordSpy?.mockRestore();
+    teamConfig.dispatch.workerCount = originalWorkerCount;
+  });
+
+  it("does not erase a fresher slot claim when an older allocator pass finishes later", async () => {
+    const threadStore: Record<string, TeamThreadRecord> = {
+      "thread-1": createDispatchThreadRecord({
+        threadId: "thread-1",
+        assignment: createDispatchAssignment({
+          assignmentNumber: 1,
+          workerCount: 1,
+          lanes: [
+            createDispatchLane({
+              laneId: "thread-1-lane-1",
+              laneIndex: 1,
+              status: "queued",
+            }),
+          ],
+        }),
+      }),
+      "thread-2": createDispatchThreadRecord({
+        threadId: "thread-2",
+        assignment: createDispatchAssignment({
+          assignmentNumber: 1,
+          workerCount: 1,
+          lanes: [
+            createDispatchLane({
+              laneId: "thread-2-lane-1",
+              laneIndex: 1,
+              status: "reviewing",
+              workerSlot: 1,
+              worktreePath: "/tmp/worktrees/meow-1",
+            }),
+          ],
+        }),
+      }),
+    };
+
+    const buildPendingAssignmentsSnapshot = (threadIds: string[]): PendingDispatchAssignment[] => {
+      return threadIds.map((threadId) => ({
+        threadId,
+        assignment: structuredClone(threadStore[threadId].dispatchAssignments[0]),
+      }));
+    };
+
+    const pendingSnapshots: PendingDispatchAssignment[][] = [
+      buildPendingAssignmentsSnapshot(["thread-1", "thread-2"]),
+    ];
+    let nestedPassStarted = false;
+
+    listPendingDispatchAssignmentsSpy = vi
+      .spyOn(historyModule, "listPendingDispatchAssignments")
+      .mockImplementation(async () => {
+        return structuredClone(pendingSnapshots.shift() ?? []);
+      });
+
+    updateTeamThreadRecordSpy = vi
+      .spyOn(historyModule, "updateTeamThreadRecord")
+      .mockImplementation(
+        async ({
+          threadId,
+          updater,
+        }: {
+          threadId: string;
+          updater: (thread: TeamThreadRecord, now: string) => Promise<unknown> | unknown;
+        }) => {
+          if (threadId === "thread-1" && !nestedPassStarted) {
+            nestedPassStarted = true;
+            const releasedAssignment = threadStore["thread-2"].dispatchAssignments[0];
+            const releasedLane = releasedAssignment?.lanes[0];
+            if (!releasedAssignment || !releasedLane) {
+              throw new Error("Thread 2 assignment setup is incomplete.");
+            }
+
+            releasedAssignment.status = "approved";
+            releasedAssignment.finishedAt = FIXED_TIMESTAMP;
+            releasedLane.status = "approved";
+            releasedLane.workerSlot = null;
+            releasedLane.worktreePath = null;
+            releasedLane.finishedAt = FIXED_TIMESTAMP;
+            releasedLane.updatedAt = FIXED_TIMESTAMP;
+
+            pendingSnapshots.push(buildPendingAssignmentsSnapshot(["thread-1"]), [], []);
+
+            await ensurePendingDispatchWork();
+          }
+
+          const thread = structuredClone(threadStore[threadId]);
+          await updater(thread, FIXED_TIMESTAMP);
+          thread.updatedAt = FIXED_TIMESTAMP;
+          threadStore[threadId] = thread;
+        },
+      );
+
+    await ensurePendingDispatchWork();
+
+    const lane = threadStore["thread-1"].dispatchAssignments[0]?.lanes[0];
+    expect(nestedPassStarted).toBe(true);
+    expect(lane?.status).toBe("queued");
+    expect(lane?.workerSlot).toBe(1);
+    expect(lane?.worktreePath).toBe(
+      path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot, "meow-1"),
+    );
+  });
+});
+
+describe.sequential("createPlannerDispatchAssignment", () => {
+  let originalThreadFile: string;
+  let tempDirectory: string;
+
+  const plannerInput = {
+    assignmentNumber: 1,
+    repository: dispatchRepository,
+    requestTitle: "dev(vsc/command): Fix Parallel Worktree Allocation",
+    conventionalTitle: {
+      type: "dev" as const,
+      scope: "vsc/command",
+    },
+    requestText: "Isolate planner staging worktrees and shared lane slots across threads.",
+    plannerSummary: "Planner summary",
+    plannerDeliverable: "Planner deliverable",
+    branchPrefix: "parallel-worktrees",
+    tasks: [
+      {
+        title: "Proposal 1",
+        objective: "Implement the scoped worktree allocation change.",
+      },
+    ],
+  };
+
+  const writePlannerThread = async (threadId: string) => {
+    await upsertTeamThreadRun({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      state: {
+        teamId: teamConfig.id,
+        teamName: teamConfig.name,
+        ownerName: teamConfig.owner.name,
+        objective: teamConfig.owner.objective,
+        selectedRepository: dispatchRepository,
+        workflow: [...teamConfig.workflow],
+        handoffs: {},
+        handoffCounter: 0,
+        assignmentNumber: plannerInput.assignmentNumber,
+        requestTitle: plannerInput.requestTitle,
+        conventionalTitle: plannerInput.conventionalTitle,
+        requestText: plannerInput.requestText,
+        latestInput: plannerInput.requestText,
+        forceReset: false,
+      },
+      input: plannerInput.requestText,
+    });
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    originalThreadFile = teamConfig.storage.threadFile;
+    tempDirectory = await mkdtemp(path.join(os.tmpdir(), "dispatch-materialize-"));
+    teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
+    deleteManagedBranchesMock.mockResolvedValue(undefined);
+    listExistingBranchesMock.mockResolvedValue([]);
+    materializeAssignmentProposalsMock.mockResolvedValue(undefined);
+    resolveRepositoryBaseBranchMock.mockResolvedValue("main");
+  });
+
+  afterEach(async () => {
+    await resetTeamThreadStorageStateCacheForTests();
+    teamConfig.storage.threadFile = originalThreadFile;
+    await rm(tempDirectory, {
+      force: true,
+      recursive: true,
+    });
+  });
+
+  it("isolates canonical and lane branches when different threads reuse the same prefix", async () => {
+    await writePlannerThread("thread-alpha");
+    await writePlannerThread("thread-beta");
+
+    const alphaAssignment = await createPlannerDispatchAssignment({
+      threadId: "thread-alpha",
+      ...plannerInput,
+    });
+    const betaAssignment = await createPlannerDispatchAssignment({
+      threadId: "thread-beta",
+      ...plannerInput,
+    });
+    const plannerWorktreeRoot = path.join(
+      dispatchRepository.path,
+      teamConfig.dispatch.worktreeRoot,
+    );
+
+    expect(alphaAssignment.canonicalBranchName).toMatch(/^requests\/parallel-worktrees\//);
+    expect(betaAssignment.canonicalBranchName).toMatch(/^requests\/parallel-worktrees\//);
+    expect(alphaAssignment.canonicalBranchName).not.toBe(betaAssignment.canonicalBranchName);
+    expect(alphaAssignment.lanes[0]?.branchName).not.toBe(betaAssignment.lanes[0]?.branchName);
+
+    expect(materializeAssignmentProposalsMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        repositoryPath: dispatchRepository.path,
+        baseBranch: "main",
+        canonicalBranchName: alphaAssignment.canonicalBranchName,
+        requestTitle: plannerInput.requestTitle,
+        conventionalTitle: plannerInput.conventionalTitle,
+        worktreeRoot: plannerWorktreeRoot,
+        plannerWorktreePath: `${plannerWorktreeRoot}/meow-1`,
+        lanes: expect.arrayContaining([
+          expect.objectContaining({
+            branchName: alphaAssignment.lanes[0]?.branchName,
+            proposalChangeName: alphaAssignment.lanes[0]?.proposalChangeName,
+          }),
+        ]),
+      }),
+    );
+    expect(materializeAssignmentProposalsMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        repositoryPath: dispatchRepository.path,
+        baseBranch: "main",
+        canonicalBranchName: betaAssignment.canonicalBranchName,
+        requestTitle: plannerInput.requestTitle,
+        conventionalTitle: plannerInput.conventionalTitle,
+        worktreeRoot: plannerWorktreeRoot,
+        plannerWorktreePath: `${plannerWorktreeRoot}/meow-2`,
+        lanes: expect.arrayContaining([
+          expect.objectContaining({
+            branchName: betaAssignment.lanes[0]?.branchName,
+            proposalChangeName: betaAssignment.lanes[0]?.proposalChangeName,
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("reuses the same branch namespace when rematerializing the same thread assignment", async () => {
+    await writePlannerThread("thread-alpha");
+
+    const firstAssignment = await createPlannerDispatchAssignment({
+      threadId: "thread-alpha",
+      ...plannerInput,
+    });
+    const secondAssignment = await createPlannerDispatchAssignment({
+      threadId: "thread-alpha",
+      ...plannerInput,
+    });
+
+    expect(firstAssignment.canonicalBranchName).toBe(secondAssignment.canonicalBranchName);
+    expect(firstAssignment.lanes[0]?.branchName).toBe(secondAssignment.lanes[0]?.branchName);
+  });
+
+  it("keeps slash-delimited conventional scope metadata out of branch namespaces", async () => {
+    await writePlannerThread("thread-scope");
+
+    const assignment = await createPlannerDispatchAssignment({
+      threadId: "thread-scope",
+      ...plannerInput,
+    });
+
+    expect(assignment.canonicalBranchName).toContain("parallel-worktrees");
+    expect(assignment.canonicalBranchName).not.toContain("vsc/command");
+    expect(assignment.lanes[0]?.proposalChangeName).not.toContain("vsc/command");
+    expect(assignment.conventionalTitle).toEqual(plannerInput.conventionalTitle);
+  });
+});
+
+describe.sequential("approveLanePullRequest", () => {
+  let originalThreadFile: string;
+  let tempDirectory: string;
+
+  const writeApprovalThreadStore = async (
+    lane: TeamWorkerLaneRecord,
+    assignmentOverrides: Partial<TeamDispatchAssignment> = {},
+  ) => {
+    const assignment = createDispatchAssignment({
+      assignmentNumber: 1,
+      repository: dispatchRepository,
+      status: "approved",
+      requestTitle: assignmentOverrides.requestTitle ?? "Ship the feature",
+      conventionalTitle: assignmentOverrides.conventionalTitle ?? null,
+      requestText: assignmentOverrides.requestText ?? "Finalize the reviewed branch.",
+      plannerSummary:
+        assignmentOverrides.plannerSummary ?? "Wait for final human approval after machine review.",
+      plannerDeliverable: assignmentOverrides.plannerDeliverable ?? "Planner deliverable",
+      branchPrefix: assignmentOverrides.branchPrefix ?? "example",
+      canonicalBranchName: assignmentOverrides.canonicalBranchName ?? "requests/example/a1",
+      workerCount: assignmentOverrides.workerCount ?? 1,
+      lanes: [lane],
+    });
+
+    await writeStoredThreadRecord(
+      createDispatchThreadRecord({
+        threadId: "thread-1",
+        assignment,
+        runStatus: "approved",
+      }),
+    );
+  };
+
+  const createApprovalLane = (
+    overrides: Partial<TeamWorkerLaneRecord> = {},
+  ): TeamWorkerLaneRecord => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+    return {
+      ...createDispatchLane({
+        laneId: "lane-1",
+        laneIndex: 1,
+        status: "approved",
+        branchName: "requests/example/a1-proposal-1",
+        baseBranch: "main",
+        taskTitle: "Ship the feature",
+        taskObjective: "Archive the approved proposal and open a GitHub PR.",
+        proposalChangeName: "change-1",
+        proposalPath: "openspec/changes/change-1",
+        worktreePath: `${worktreeRoot}/meow-1`,
+        latestImplementationCommit: "review-commit",
+        pushedCommit: basePushedCommit,
+        latestDecision: "approved",
+        latestCoderSummary: "Implemented the requested branch updates.",
+        latestReviewerSummary: "Machine review approved the branch.",
+        latestActivity: "Waiting for final human approval.",
+        approvalRequestedAt: FIXED_TIMESTAMP,
+        approvalGrantedAt: FIXED_TIMESTAMP,
+        queuedAt: FIXED_TIMESTAMP,
+        runCount: 1,
+        pullRequest: {
+          id: "pr-1",
+          provider: "local-ci",
+          title: "Ship the feature",
+          summary: "Machine review approved the branch.",
+          branchName: "requests/example/a1-proposal-1",
+          baseBranch: "main",
+          status: "awaiting_human_approval",
+          requestedAt: FIXED_TIMESTAMP,
+          humanApprovalRequestedAt: FIXED_TIMESTAMP,
+          humanApprovedAt: null,
+          machineReviewedAt: FIXED_TIMESTAMP,
+          updatedAt: FIXED_TIMESTAMP,
+          url: null,
+        },
+      }),
+      ...overrides,
+    };
+  };
+
+  const createArchiveDependencies = ({
+    coderRun,
+  }: {
+    coderRun?: TeamRoleDependencies["coderAgent"]["run"];
+  } = {}): TeamRoleDependencies => {
+    return {
+      executor: vi.fn() as TeamRoleDependencies["executor"],
+      requestTitleAgent: {
+        run: vi.fn(),
+      },
+      plannerAgent: {
+        run: vi.fn(),
+      },
+      coderAgent: {
+        run:
+          coderRun ??
+          (vi.fn(async () => ({
+            summary: "Archived the approved OpenSpec change.",
+            deliverable: "Final archive pass completed.",
+            decision: "continue" as const,
+            pullRequestTitle: null,
+            pullRequestSummary: null,
+          })) as TeamRoleDependencies["coderAgent"]["run"]),
+      },
+      reviewerAgent: {
+        run: vi.fn(),
+      },
+    };
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    originalThreadFile = teamConfig.storage.threadFile;
+    tempDirectory = await mkdtemp(path.join(os.tmpdir(), "dispatch-approval-"));
+    teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
+    hasWorktreeChangesMock.mockResolvedValue(true);
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValueOnce({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: true,
+      archivedPath: null,
+    });
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: false,
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+    });
+  });
+
+  afterEach(async () => {
+    await resetTeamThreadStorageStateCacheForTests();
+    teamConfig.storage.threadFile = originalThreadFile;
+    await rm(tempDirectory, {
+      force: true,
+      recursive: true,
+    });
+  });
+
+  it("routes final approval through the coder archive pass and finalizes GitHub PR delivery", async () => {
+    const coderRun = vi.fn(
+      async (input: Parameters<TeamRoleDependencies["coderAgent"]["run"]>[0]) => {
+        expect(input.input).toContain("/opsx:archive change-1");
+        expect(input.input).toContain("not in an interactive context");
+        expect(input.input).toContain("TBD");
+        expect(input.state.executionPhase).toBe("final_archive");
+        expect(input.state.archiveCommand).toBe("/opsx:archive change-1");
+        expect(input.state.archivePathContext).toBe("openspec/changes/change-1");
+
+        return {
+          summary: "Archived the approved OpenSpec change.",
+          deliverable: "Final archive pass completed.",
+          decision: "continue" as const,
+          pullRequestTitle: null,
+          pullRequestSummary: null,
+        };
+      },
+    );
+
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+    commitWorktreeChangesMock.mockResolvedValue(undefined);
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
+      commitHash: "archive-commit",
+    });
+    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/42",
+    });
+
+    await writeApprovalThreadStore(createApprovalLane());
+
+    await approveLanePullRequest({
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      dependencies: createArchiveDependencies({
+        coderRun,
+      }),
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(coderRun).toHaveBeenCalledTimes(1);
+    expect(ensureLaneWorktreeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktreePath: `${worktreeRoot}/meow-1`,
+        branchName: "requests/example/a1-proposal-1",
+      }),
+    );
+    expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
+      worktreePath: `${worktreeRoot}/meow-1`,
+      message: "coder: archive change-1",
+    });
+    expect(commitWorktreeChangesMock).toHaveBeenCalledTimes(1);
+    expect(createOrUpdateGitHubPullRequestMock).toHaveBeenCalledWith({
+      repositoryPath: `${worktreeRoot}/meow-1`,
+      branchName: "requests/example/a1-proposal-1",
+      baseBranch: "main",
+      title: "Ship the feature",
+      body: "Machine review approved the branch.",
+    });
+    expect(lane?.executionPhase).toBeNull();
+    expect(lane?.proposalPath).toBe("openspec/changes/archive/2026-04-11-change-1");
+    expect(lane?.latestImplementationCommit).toBe("archive-commit");
+    expect(lane?.latestCoderSummary).toBe("Archived the approved OpenSpec change.");
+    expect(lane?.pushedCommit?.commitHash).toBe("archive-commit");
+    expect(lane?.pullRequest?.provider).toBe("github");
+    expect(lane?.pullRequest?.status).toBe("approved");
+    expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/42");
+    expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
+    expect(
+      lane?.events.some((event) => event.message.includes("Coder completed final archive pass")),
+    ).toBe(true);
+    expect(lane?.events.at(-2)?.message).toContain("Archived OpenSpec change");
+    expect(lane?.events.at(-1)?.message).toContain("GitHub PR ready");
+    expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toContain(
+      "GitHub PR is ready",
+    );
+    expect(thread?.dispatchAssignments[0]?.status).toBe("completed");
+    expect(thread?.run?.status).toBe("completed");
+  });
+
+  it("normalizes the final GitHub PR title from stored conventional metadata", async () => {
+    commitWorktreeChangesMock.mockResolvedValue(undefined);
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
+      commitHash: "archive-commit",
+    });
+    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/77",
+    });
+
+    await writeApprovalThreadStore(createApprovalLane(), {
+      requestTitle: "dev(vsc/command): Ship the feature",
+      conventionalTitle: {
+        type: "dev",
+        scope: "vsc/command",
+      },
+    });
+
+    await approveLanePullRequest({
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      dependencies: createArchiveDependencies(),
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(createOrUpdateGitHubPullRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "dev(vsc/command): Ship the feature",
+      }),
+    );
+    expect(lane?.pullRequest?.title).toBe("dev(vsc/command): Ship the feature");
+  });
+
+  it("resumes archived final approval without duplicating the human approval event", async () => {
+    const coderRun = vi.fn();
+    hasWorktreeChangesMock.mockResolvedValue(false);
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: false,
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+    });
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
+      commitHash: "archive-commit",
+    });
+    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/88",
+    });
+
+    await writeApprovalThreadStore(
+      createApprovalLane({
+        proposalPath: "openspec/changes/archive/2026-04-11-change-1",
+        latestActivity:
+          "Human approved the machine-reviewed branch. Queueing the coder archive pass before refreshing the GitHub PR.",
+        pullRequest: {
+          id: "pr-1",
+          provider: "local-ci",
+          title: "Ship the feature",
+          summary: "Machine review approved the branch.",
+          branchName: "requests/example/a1-proposal-1",
+          baseBranch: "main",
+          status: "awaiting_human_approval",
+          requestedAt: FIXED_TIMESTAMP,
+          humanApprovalRequestedAt: FIXED_TIMESTAMP,
+          humanApprovedAt: FIXED_TIMESTAMP,
+          machineReviewedAt: FIXED_TIMESTAMP,
+          updatedAt: FIXED_TIMESTAMP,
+          url: null,
+        },
+        events: [
+          {
+            id: "event-1",
+            actor: "human",
+            message: "Human approved the machine-reviewed branch for GitHub PR delivery.",
+            createdAt: FIXED_TIMESTAMP,
+          },
+        ],
+      }),
+    );
+
+    await approveLanePullRequest({
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      dependencies: createArchiveDependencies({
+        coderRun: coderRun as TeamRoleDependencies["coderAgent"]["run"],
+      }),
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(coderRun).not.toHaveBeenCalled();
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(lane?.events.filter((event) => event.actor === "human")).toHaveLength(1);
+    expect(lane?.pullRequest?.status).toBe("approved");
+    expect(lane?.pullRequest?.humanApprovedAt).toBe(FIXED_TIMESTAMP);
+    expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/88");
+  });
+
+  it("records an archive failure when the coder pass leaves the change unarchived", async () => {
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: true,
+      archivedPath: null,
+    });
+    hasWorktreeChangesMock.mockResolvedValue(false);
+
+    await writeApprovalThreadStore(createApprovalLane());
+
+    await expect(
+      approveLanePullRequest({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+        dependencies: createArchiveDependencies(),
+      }),
+    ).rejects.toThrow("Final archive coder pass did not archive OpenSpec change change-1.");
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(pushLaneBranchMock).not.toHaveBeenCalled();
+    expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
+    expect(lane?.proposalPath).toBe("openspec/changes/change-1");
+    expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
+    expect(lane?.pullRequest?.status).toBe("failed");
+    expect(lane?.lastError).toContain("did not archive OpenSpec change change-1");
+    expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
+    expect(thread?.run?.status).toBe("failed");
+  });
+
+  it("persists archive progress when GitHub PR creation fails after the branch push", async () => {
+    commitWorktreeChangesMock.mockResolvedValue(undefined);
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
+      commitHash: "archive-commit",
+    });
+    createOrUpdateGitHubPullRequestMock.mockRejectedValue(new Error("gh auth token missing"));
+
+    await writeApprovalThreadStore(createApprovalLane());
+
+    await expect(
+      approveLanePullRequest({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+        dependencies: createArchiveDependencies(),
+      }),
+    ).rejects.toThrow("gh auth token missing");
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(lane?.proposalPath).toBe("openspec/changes/archive/2026-04-11-change-1");
+    expect(lane?.latestImplementationCommit).toBe("archive-commit");
+    expect(lane?.pushedCommit?.commitHash).toBe("archive-commit");
+    expect(lane?.pullRequest?.status).toBe("failed");
+    expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
+    expect(lane?.lastError).toContain("gh auth token missing");
+    expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
+    expect(thread?.run?.status).toBe("failed");
+  });
+
+  it("keeps the proposal unarchived when the coder archive commit fails", async () => {
+    commitWorktreeChangesMock.mockRejectedValue(new Error("git user identity missing"));
+
+    await writeApprovalThreadStore(createApprovalLane());
+
+    await expect(
+      approveLanePullRequest({
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+        dependencies: createArchiveDependencies(),
+      }),
+    ).rejects.toThrow("git user identity missing");
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(pushLaneBranchMock).not.toHaveBeenCalled();
+    expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
+    expect(lane?.proposalPath).toBe("openspec/changes/change-1");
+    expect(lane?.latestImplementationCommit).toBe("review-commit");
+    expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
+    expect(lane?.pullRequest?.status).toBe("failed");
+    expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
+    expect(lane?.latestActivity).toBe(
+      "Final human approval failed before the coder archive pass and GitHub PR delivery could complete.",
+    );
+    expect(lane?.lastError).toContain("git user identity missing");
+    expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toBe(
+      "Final approval for proposal 1 failed: git user identity missing",
+    );
+    expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
+    expect(thread?.run?.status).toBe("failed");
   });
 });
