@@ -1,7 +1,7 @@
+import BetterSqlite3 from "better-sqlite3";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyTeamThreadStorageMigrations,
@@ -10,6 +10,8 @@ import {
   resetTeamThreadStorageStateCacheForTests,
   TEAM_THREAD_STORAGE_LATEST_SCHEMA_VERSION,
 } from "@/lib/team/storage";
+
+type DatabaseSync = BetterSqlite3.Database;
 
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 const databases: DatabaseSync[] = [];
@@ -41,7 +43,7 @@ afterEach(async () => {
 
 describe("applyTeamThreadStorageMigrations", () => {
   it("applies ordered migrations and keeps reruns idempotent in memory", () => {
-    const database = registerDatabase(new DatabaseSync(":memory:"));
+    const database = registerDatabase(new BetterSqlite3(":memory:"));
 
     applyTeamThreadStorageMigrations({
       database,
@@ -60,7 +62,7 @@ describe("applyTeamThreadStorageMigrations", () => {
       metadata: {
         created_at: FIXED_TIMESTAMP,
         schema_version: "1",
-        storage_engine: "node:sqlite",
+        storage_engine: "better-sqlite3",
       },
     });
     expect(
@@ -108,7 +110,7 @@ describe("applyTeamThreadStorageMigrations", () => {
       metadata: {
         created_at: FIXED_TIMESTAMP,
         schema_version: String(TEAM_THREAD_STORAGE_LATEST_SCHEMA_VERSION),
-        storage_engine: "node:sqlite",
+        storage_engine: "better-sqlite3",
       },
     });
     expect(
@@ -139,6 +141,34 @@ describe("applyTeamThreadStorageMigrations", () => {
     ).toEqual({
       name: "idx_team_threads_updated_at",
     });
+  });
+
+  it("updates existing storage metadata to the npm-backed engine label", () => {
+    const database = registerDatabase(new BetterSqlite3(":memory:"));
+
+    applyTeamThreadStorageMigrations({
+      database,
+      now: FIXED_TIMESTAMP,
+      targetVersion: TEAM_THREAD_STORAGE_LATEST_SCHEMA_VERSION,
+    });
+
+    database
+      .prepare(
+        `
+          UPDATE storage_metadata
+          SET value = 'node:sqlite'
+          WHERE key = 'storage_engine'
+        `,
+      )
+      .run();
+
+    applyTeamThreadStorageMigrations({
+      database,
+      now: "2026-04-12T09:30:00.000Z",
+      targetVersion: TEAM_THREAD_STORAGE_LATEST_SCHEMA_VERSION,
+    });
+
+    expect(readTeamThreadStorageMetadata(database).metadata.storage_engine).toBe("better-sqlite3");
   });
 });
 

@@ -6,9 +6,9 @@ outline: deep
 # Storage guide
 
 The owner harness team now persists thread history in a server-only SQLite
-store backed by Node's official [`node:sqlite`](https://nodejs.org/api/sqlite.html)
-module. The runtime floor is Node `22.13.0` so the module is available without
-the older `--experimental-sqlite` flag requirement.
+store backed by the mature [`better-sqlite3`](https://www.npmjs.com/package/better-sqlite3)
+package. The project runtime floor remains Node `22.13.0`, but storage no
+longer depends on Node's experimental builtin SQLite module.
 
 ## Default location
 
@@ -30,7 +30,7 @@ The storage layer keeps two schema-management structures:
   migration.
 - `storage_metadata`
   Stores runtime metadata such as:
-  - `storage_engine=node:sqlite`
+  - `storage_engine=better-sqlite3`
   - `schema_version=<latest applied migration>`
   - `created_at=<first bootstrap timestamp>`
   - `legacy_import_source=<path>` when a JSON import runs
@@ -81,8 +81,8 @@ subsequent reads and writes use SQLite only.
 
 ## Performance notes
 
-- The server runtime keeps a shared `DatabaseSync` connection per SQLite path in
-  server-only state so the Next.js APIs do not reopen the same database on
+- The server runtime keeps a shared `better-sqlite3` connection per SQLite path
+  in server-only state so the Next.js APIs do not reopen the same database on
   every request.
 - SQLite runs in WAL mode for file-backed databases so reads do not block on the
   common write path.
@@ -94,7 +94,7 @@ subsequent reads and writes use SQLite only.
 
 ## Testing
 
-- Use `new DatabaseSync(":memory:")` for migration tests.
+- Use `new Database(":memory:")` from `better-sqlite3` for migration tests.
 - Use a temporary `.json` path when you need to exercise the legacy import path.
 - Use a temporary `.sqlite` path when you want the production storage layout
   directly.

@@ -1,8 +1,10 @@
 import "server-only";
 
+import BetterSqlite3 from "better-sqlite3";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+
+type DatabaseSync = BetterSqlite3.Database;
 
 export type TeamThreadStorageLocation = {
   inputPath: string;
@@ -82,6 +84,7 @@ const mutationQueues = new Map<string, Promise<unknown>>();
 const LEGACY_JSON_READ_RETRY_COUNT = 3;
 const LEGACY_JSON_READ_RETRY_DELAY_MS = 25;
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+const STORAGE_ENGINE = "better-sqlite3";
 
 const bootstrapSchemaSql = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -235,11 +238,11 @@ const ensureDatabaseDirectory = async (sqlitePath: string): Promise<void> => {
 };
 
 const configureDatabase = (database: DatabaseSync, location: TeamThreadStorageLocation): void => {
-  database.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
-  database.exec("PRAGMA foreign_keys = ON");
+  database.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+  database.pragma("foreign_keys = ON");
 
   if (location.sqlitePath !== ":memory:") {
-    database.exec("PRAGMA journal_mode = WAL");
+    database.pragma("journal_mode = WAL");
   }
 };
 
@@ -254,7 +257,9 @@ export const getTeamThreadStorageState = async (
     statePromise = (async () => {
       await ensureDatabaseDirectory(location.sqlitePath);
 
-      const database = new DatabaseSync(location.sqlitePath);
+      const database = new BetterSqlite3(location.sqlitePath, {
+        timeout: SQLITE_BUSY_TIMEOUT_MS,
+      });
       try {
         configureDatabase(database, location);
         return {
@@ -387,7 +392,10 @@ const synchronizeStorageMetadata = (database: DatabaseSync, now: string): void =
     return;
   }
 
-  ensureStorageMetadataValue(database, "storage_engine", "node:sqlite", now);
+  if (getStorageMetadataValue(database, "storage_engine") !== STORAGE_ENGINE) {
+    upsertStorageMetadataValue(database, "storage_engine", STORAGE_ENGINE, now);
+  }
+
   ensureStorageMetadataValue(database, "created_at", now, now);
 
   const schemaVersion = String(readSchemaMigrations(database).at(-1)?.version ?? 0);
