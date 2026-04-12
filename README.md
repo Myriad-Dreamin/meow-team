@@ -131,7 +131,9 @@ role stays lightweight.
 
 ## Notes
 
-- Thread history is stored locally in `data/team-threads.json`.
+- Thread history is stored locally in `data/team-threads.sqlite`.
+- Existing `data/team-threads.json` stores are imported on first access. See
+  `docs/storage.md` for the migration and runtime details.
 - A legacy `.env` from the previous copied project may still exist locally.
   If it contains unrelated secrets from the copied app, rotate them and remove
   them from this project.

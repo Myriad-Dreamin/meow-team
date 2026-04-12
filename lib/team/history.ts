@@ -1,5 +1,5 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import "server-only";
+
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/network";
 import {
@@ -7,6 +7,12 @@ import {
   parseConventionalTitle,
   resolveDisplayRequestTitle,
 } from "@/lib/team/request-title";
+import {
+  getTeamThreadStorageRecord,
+  listTeamThreadStorageRecords,
+  type TeamThreadStorageRecord,
+  updateTeamThreadStorageRecord,
+} from "@/lib/team/storage";
 import {
   createEmptyWorkerLaneCounts,
   mergeWorkerLaneCounts,
@@ -82,10 +88,6 @@ export type TeamThreadRecord = {
   updatedAt: string;
 };
 
-type ThreadStore = {
-  threads: Record<string, StoredThread>;
-};
-
 export type TeamThreadSummary = {
   threadId: string;
   assignmentNumber: number;
@@ -130,86 +132,33 @@ export type PendingDispatchAssignment = {
   assignment: TeamDispatchAssignment;
 };
 
-const mutationQueues = new Map<string, Promise<unknown>>();
-const THREAD_STORE_READ_RETRY_COUNT = 3;
-const THREAD_STORE_READ_RETRY_DELAY_MS = 25;
-
-const emptyStore = (): ThreadStore => ({ threads: {} });
-
-const resolveStorePath = (threadFile: string): string => {
-  return path.isAbsolute(threadFile) ? threadFile : path.join(process.cwd(), threadFile);
-};
-
-const sleep = async (delayMs: number): Promise<void> => {
-  await new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
-};
-
-const isUnexpectedEndOfJsonError = (error: unknown): boolean => {
-  return error instanceof SyntaxError && /Unexpected end of JSON input/u.test(error.message);
-};
-
-const ensureStoreDirectory = async (storePath: string): Promise<void> => {
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-};
-
-const readThreadStore = async (storePath: string): Promise<ThreadStore> => {
-  for (let attempt = 0; attempt <= THREAD_STORE_READ_RETRY_COUNT; attempt += 1) {
-    try {
-      const raw = await fs.readFile(storePath, "utf8");
-      const parsed = JSON.parse(raw) as ThreadStore;
-      return parsed.threads ? parsed : emptyStore();
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code === "ENOENT") {
-        return emptyStore();
-      }
-
-      if (isUnexpectedEndOfJsonError(error) && attempt < THREAD_STORE_READ_RETRY_COUNT) {
-        await sleep(THREAD_STORE_READ_RETRY_DELAY_MS);
-        continue;
-      }
-
-      if (isUnexpectedEndOfJsonError(error)) {
-        throw new Error(
-          `Thread store at ${storePath} could not be parsed after ${THREAD_STORE_READ_RETRY_COUNT + 1} read attempts.`,
-        );
-      }
-
-      throw error;
-    }
-  }
-
-  return emptyStore();
-};
-
-const writeThreadStore = async (storePath: string, store: ThreadStore): Promise<void> => {
-  await ensureStoreDirectory(storePath);
-  const temporaryStorePath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
-
+const readStoredThreadFromRecord = (record: TeamThreadStorageRecord): StoredThread => {
   try {
-    // Use an atomic rename so concurrent readers never observe partial JSON.
-    await fs.writeFile(temporaryStorePath, JSON.stringify(store, null, 2), "utf8");
-    await fs.rename(temporaryStorePath, storePath);
-  } finally {
-    await fs.rm(temporaryStorePath, {
-      force: true,
+    const parsed = JSON.parse(record.payloadJson) as StoredThread | null;
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Stored thread payload must be a JSON object.");
+    }
+
+    return {
+      ...parsed,
+      threadId: parsed.threadId ?? record.threadId,
+      createdAt: parsed.createdAt ?? record.createdAt,
+      updatedAt: parsed.updatedAt ?? record.updatedAt,
+    };
+  } catch (error) {
+    throw new Error(`Thread ${record.threadId} could not be parsed from SQLite storage.`, {
+      cause: error,
     });
   }
 };
 
-const queueStoreMutation = async <T>(storePath: string, task: () => Promise<T>): Promise<T> => {
-  const previous = mutationQueues.get(storePath) ?? Promise.resolve();
-  const mutation = previous.catch(() => undefined).then(task);
-  const tracked = mutation.finally(() => {
-    if (mutationQueues.get(storePath) === tracked) {
-      mutationQueues.delete(storePath);
-    }
-  });
-
-  mutationQueues.set(storePath, tracked);
-  return mutation;
+const serializeStoredThreadRecord = (thread: StoredThread): TeamThreadStorageRecord => {
+  return {
+    threadId: thread.threadId,
+    payloadJson: JSON.stringify(thread),
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+  };
 };
 
 const extractLegacyMessageText = (message: StoredLegacyMessage): string => {
@@ -654,24 +603,18 @@ export const listTeamThreadSummaries = async (
   threadFile: string,
   limit = 24,
 ): Promise<TeamThreadSummary[]> => {
-  const storePath = resolveStorePath(threadFile);
-  const store = await readThreadStore(storePath);
-
-  return Object.values(store.threads)
-    .map(summarizeThread)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-    .slice(0, limit);
+  const storedThreads = await listTeamThreadStorageRecords(threadFile, limit);
+  return storedThreads.map((record) => summarizeThread(readStoredThreadFromRecord(record)));
 };
 
 export const getTeamWorkspaceStatusSnapshot = async (
   threadFile: string,
 ): Promise<TeamWorkspaceStatusSnapshot> => {
-  const storePath = resolveStorePath(threadFile);
-  const store = await readThreadStore(storePath);
+  const storedThreads = await listTeamThreadStorageRecords(threadFile);
 
-  return Object.values(store.threads).reduce<TeamWorkspaceStatusSnapshot>(
-    (snapshot, storedThread) => {
-      const summary = summarizeThread(storedThread);
+  return storedThreads.reduce<TeamWorkspaceStatusSnapshot>(
+    (snapshot, storedRecord) => {
+      const summary = summarizeThread(readStoredThreadFromRecord(storedRecord));
 
       snapshot.livingThreadCount += 1;
 
@@ -696,9 +639,8 @@ export const getTeamThreadRecord = async (
   threadFile: string,
   threadId: string,
 ): Promise<TeamThreadRecord | null> => {
-  const storePath = resolveStorePath(threadFile);
-  const store = await readThreadStore(storePath);
-  const thread = store.threads[threadId];
+  const storedRecord = await getTeamThreadStorageRecord(threadFile, threadId);
+  const thread = storedRecord ? readStoredThreadFromRecord(storedRecord) : null;
 
   return thread ? synchronizeTeamThreadRun(normalizeStoredThread(thread), thread.updatedAt) : null;
 };
@@ -734,24 +676,25 @@ export const updateTeamThreadRecord = async <T>({
   threadId: string;
   updater: (thread: TeamThreadRecord, now: string) => Promise<T> | T;
 }): Promise<T> => {
-  const storePath = resolveStorePath(threadFile);
+  return updateTeamThreadStorageRecord({
+    threadFile,
+    threadId,
+    updater: async (storedRecord) => {
+      if (!storedRecord) {
+        throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
+      }
 
-  return queueStoreMutation(storePath, async () => {
-    const store = await readThreadStore(storePath);
-    const currentThread = store.threads[threadId];
-    if (!currentThread) {
-      throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
-    }
+      const now = new Date().toISOString();
+      const thread = normalizeStoredThread(readStoredThreadFromRecord(storedRecord));
+      const value = await updater(thread, now);
+      thread.updatedAt = now;
+      synchronizeTeamThreadRun(thread, now);
 
-    const now = new Date().toISOString();
-    const thread = normalizeStoredThread(currentThread);
-    const value = await updater(thread, now);
-    thread.updatedAt = now;
-    synchronizeTeamThreadRun(thread, now);
-    store.threads[threadId] = thread;
-    await writeThreadStore(storePath, store);
-
-    return value;
+      return {
+        value,
+        nextRecord: serializeStoredThreadRecord(thread),
+      };
+    },
   });
 };
 
@@ -759,14 +702,15 @@ export const listPendingDispatchAssignments = async (
   threadFile: string,
   threadId?: string,
 ): Promise<PendingDispatchAssignment[]> => {
-  const storePath = resolveStorePath(threadFile);
-  const store = await readThreadStore(storePath);
-  const threads = threadId
-    ? Object.values(store.threads).filter((thread) => thread.threadId === threadId)
-    : Object.values(store.threads);
+  const storedThreads = threadId
+    ? [await getTeamThreadStorageRecord(threadFile, threadId)].filter(
+        (record): record is TeamThreadStorageRecord => Boolean(record),
+      )
+    : await listTeamThreadStorageRecords(threadFile);
 
-  return threads
-    .flatMap((storedThread) => {
+  return storedThreads
+    .flatMap((storedRecord) => {
+      const storedThread = readStoredThreadFromRecord(storedRecord);
       const thread = synchronizeTeamThreadRun(
         normalizeStoredThread(storedThread),
         storedThread.updatedAt,
@@ -840,44 +784,50 @@ export const upsertTeamThreadRun = async ({
   state: TeamRunState;
   input: string;
 }): Promise<void> => {
-  const storePath = resolveStorePath(threadFile);
-  await queueStoreMutation(storePath, async () => {
-    const store = await readThreadStore(storePath);
-    const currentThread = store.threads[threadId];
-    const now = new Date().toISOString();
-    const existingThread = currentThread ? normalizeStoredThread(currentThread) : null;
+  await updateTeamThreadStorageRecord({
+    threadFile,
+    threadId,
+    updater: (storedRecord) => {
+      const now = new Date().toISOString();
+      const existingThread = storedRecord
+        ? normalizeStoredThread(readStoredThreadFromRecord(storedRecord))
+        : null;
 
-    const thread: TeamThreadRecord = {
-      threadId,
-      data: {
-        ...state,
-        latestInput: input,
-        handoffs: filterHandoffsForWorkflow(state),
-      },
-      results: existingThread?.results ?? [],
-      userMessages: [
-        ...(existingThread?.userMessages ?? []),
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: input,
-          timestamp: now,
+      const thread: TeamThreadRecord = {
+        threadId,
+        data: {
+          ...state,
+          latestInput: input,
+          handoffs: filterHandoffsForWorkflow(state),
         },
-      ],
-      dispatchAssignments: existingThread?.dispatchAssignments ?? [],
-      run: {
-        status: "running",
-        startedAt: existingThread?.run?.startedAt ?? now,
-        finishedAt: null,
-        lastError: null,
-      },
-      createdAt: existingThread?.createdAt ?? now,
-      updatedAt: now,
-    };
+        results: existingThread?.results ?? [],
+        userMessages: [
+          ...(existingThread?.userMessages ?? []),
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: input,
+            timestamp: now,
+          },
+        ],
+        dispatchAssignments: existingThread?.dispatchAssignments ?? [],
+        run: {
+          status: "running",
+          startedAt: existingThread?.run?.startedAt ?? now,
+          finishedAt: null,
+          lastError: null,
+        },
+        createdAt: existingThread?.createdAt ?? now,
+        updatedAt: now,
+      };
 
-    synchronizeTeamThreadRun(thread, now);
-    store.threads[threadId] = thread;
-    await writeThreadStore(storePath, store);
+      synchronizeTeamThreadRun(thread, now);
+
+      return {
+        value: undefined,
+        nextRecord: serializeStoredThreadRecord(thread),
+      };
+    },
   });
 };
 
