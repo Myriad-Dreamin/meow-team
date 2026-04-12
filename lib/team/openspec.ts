@@ -1,9 +1,8 @@
 import "server-only";
 
 import { promises as fs } from "node:fs";
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
+import { runOpenSpec } from "@/lib/cli-tools/openspec";
 import { commitWorktreeChanges, ensureBranchRef, hasWorktreeChanges } from "@/lib/git/ops";
 import { ensureLaneWorktree, sanitizeBranchSegment } from "@/lib/team/git";
 import {
@@ -11,39 +10,6 @@ import {
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
-
-const execFileAsync = promisify(execFile);
-
-const runOpenSpec = async (
-  workingDirectory: string,
-  args: string[],
-): Promise<{
-  stdout: string;
-  stderr: string;
-}> => {
-  try {
-    const result = await execFileAsync("openspec", args, {
-      cwd: workingDirectory,
-      env: {
-        ...process.env,
-        OPENSPEC_TELEMETRY: "0",
-      },
-      maxBuffer: 1024 * 1024 * 4,
-    });
-
-    return {
-      stdout: result.stdout.trim(),
-      stderr: result.stderr.trim(),
-    };
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException & {
-      stdout?: string;
-      stderr?: string;
-    };
-    const output = [nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(output || `OpenSpec command failed in ${workingDirectory}.`);
-  }
-};
 
 type ProposalLane = Pick<
   TeamWorkerLaneRecord,

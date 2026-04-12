@@ -1,10 +1,9 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { runGit as execGit } from "@/lib/cli-tools/git";
 import {
   buildCanonicalBranchName,
   buildLaneBranchName,
@@ -20,24 +19,11 @@ import {
   resolveGitHubPushRemote,
   tryRebaseWorktreeBranch,
 } from "@/lib/git/ops";
-
-const execFileAsync = promisify(execFile);
 const temporaryDirectories = new Set<string>();
 
 const runGit = async (repositoryPath: string, args: string[]): Promise<string> => {
-  try {
-    const result = await execFileAsync("git", ["-C", repositoryPath, ...args], {
-      maxBuffer: 1024 * 1024 * 4,
-    });
-    return result.stdout.trim();
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException & {
-      stdout?: string;
-      stderr?: string;
-    };
-    const output = [nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(output || `git ${args.join(" ")} failed in ${repositoryPath}`);
-  }
+  const { stdout } = await execGit(repositoryPath, args);
+  return stdout;
 };
 
 const createRepository = async (): Promise<string> => {

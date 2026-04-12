@@ -1,9 +1,8 @@
 import "server-only";
 
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { promisify } from "node:util";
+import { runGit } from "@/lib/cli-tools/git";
 import {
   ensureWorktreeCheckout,
   listExistingBranches,
@@ -12,35 +11,6 @@ import {
   removeWorktreeDirectory,
 } from "@/lib/git/ops";
 import type { TeamPushedCommitRecord } from "@/lib/team/types";
-
-const execFileAsync = promisify(execFile);
-
-const runGit = async (
-  repositoryPath: string,
-  args: string[],
-): Promise<{
-  stdout: string;
-  stderr: string;
-}> => {
-  try {
-    const result = await execFileAsync("git", ["-C", repositoryPath, ...args], {
-      maxBuffer: 1024 * 1024 * 4,
-    });
-
-    return {
-      stdout: result.stdout.trim(),
-      stderr: result.stderr.trim(),
-    };
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException & {
-      stdout?: string;
-      stderr?: string;
-    };
-
-    const output = [nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(output || `Git command failed in ${repositoryPath}: git ${args.join(" ")}`);
-  }
-};
 
 export class ExistingBranchesRequireDeleteError extends Error {
   branchNames: string[];

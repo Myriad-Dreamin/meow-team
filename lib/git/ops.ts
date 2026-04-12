@@ -1,70 +1,11 @@
 import "server-only";
 
-import { execFile } from "node:child_process";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
-
-const execFileAsync = promisify(execFile);
+import { runGh } from "@/lib/cli-tools/gh";
+import { runGit } from "@/lib/cli-tools/git";
 const DEFAULT_PUSH_REMOTE_NAME = "origin";
-
-const runGit = async (
-  repositoryPath: string,
-  args: string[],
-): Promise<{
-  stdout: string;
-  stderr: string;
-}> => {
-  try {
-    const result = await execFileAsync("git", ["-C", repositoryPath, ...args], {
-      maxBuffer: 1024 * 1024 * 4,
-    });
-
-    return {
-      stdout: result.stdout.trim(),
-      stderr: result.stderr.trim(),
-    };
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException & {
-      stdout?: string;
-      stderr?: string;
-    };
-
-    const output = [nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(output || `Git command failed in ${repositoryPath}: git ${args.join(" ")}`);
-  }
-};
-
-const runGh = async (
-  repositoryPath: string,
-  args: string[],
-): Promise<{
-  stdout: string;
-  stderr: string;
-}> => {
-  try {
-    const result = await execFileAsync("gh", args, {
-      cwd: repositoryPath,
-      maxBuffer: 1024 * 1024 * 4,
-    });
-
-    return {
-      stdout: result.stdout.trim(),
-      stderr: result.stderr.trim(),
-    };
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException & {
-      stdout?: string;
-      stderr?: string;
-    };
-
-    const output = [nodeError.stderr, nodeError.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(
-      output || `GitHub CLI command failed in ${repositoryPath}: gh ${args.join(" ")}`,
-    );
-  }
-};
 
 const branchExists = async (repositoryPath: string, branchName: string): Promise<boolean> => {
   try {
