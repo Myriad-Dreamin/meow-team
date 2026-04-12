@@ -18,7 +18,7 @@ import {
   type TeamThreadStorageTarget,
   type TeamThreadStorageRecord,
   updateTeamThreadStorageRecord,
-} from "@/lib/team/storage";
+} from "@/lib/storage/thread";
 import {
   createEmptyWorkerLaneCounts,
   mergeWorkerLaneCounts,

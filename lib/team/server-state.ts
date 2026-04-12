@@ -5,7 +5,7 @@ import {
   getTeamThreadStorageState,
   resetTeamThreadStorageStateCacheForTests,
   type TeamThreadStorageState,
-} from "@/lib/team/storage";
+} from "@/lib/storage/thread";
 
 export type TeamServerState = {
   threadFile: string;

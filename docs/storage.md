@@ -57,7 +57,7 @@ Migrations are handwritten, ordered, and idempotent:
 The migration runner first bootstraps `schema_migrations`, then applies each
 missing migration inside an `IMMEDIATE` transaction and records the applied
 version. SQLite migration behavior is covered by `:memory:` tests in
-`lib/team/storage.test.ts`.
+`lib/storage/thread.test.ts`.
 
 ## Legacy JSON import
 

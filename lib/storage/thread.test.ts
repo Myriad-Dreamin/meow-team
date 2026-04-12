@@ -9,7 +9,7 @@ import {
   readTeamThreadStorageMetadata,
   resetTeamThreadStorageStateCacheForTests,
   TEAM_THREAD_STORAGE_LATEST_SCHEMA_VERSION,
-} from "@/lib/team/storage";
+} from "@/lib/storage/thread";
 
 type DatabaseSync = BetterSqlite3.Database;
 
