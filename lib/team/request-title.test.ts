@@ -31,7 +31,7 @@ describe("request-title conventional formatting", () => {
           scope: "vsc/command",
         },
       }),
-    ).toBe("dev(vsc/command): Standardize Conventional Request and PR Titles");
+    ).toBe("dev(vsc/command): standardize conventional request and PR titles");
   });
 
   it("uses the lane task title when multiple proposals share one request group", () => {
@@ -46,6 +46,34 @@ describe("request-title conventional formatting", () => {
         },
       }),
     ).toBe("dev(planner/dispatch): Repair reviewer finalization flow");
+  });
+
+  it("lowercases scoped canonical request title subjects", () => {
+    expect(
+      buildCanonicalRequestTitle({
+        requestTitle: "feat(lane/commits): Link lane commit activity to GitHub",
+        taskTitle: null,
+        taskCount: 1,
+        conventionalTitle: {
+          type: "feat",
+          scope: "lane/commits",
+        },
+      }),
+    ).toBe("feat(lane/commits): link lane commit activity to GitHub");
+  });
+
+  it("removes duplicated leading conventional verbs from scoped canonical subjects", () => {
+    expect(
+      buildCanonicalRequestTitle({
+        requestTitle: "refactor(team/runteam): Refactor `runTeam` into a persisted stage machine",
+        taskTitle: null,
+        taskCount: 1,
+        conventionalTitle: {
+          type: "refactor",
+          scope: "team/runteam",
+        },
+      }),
+    ).toBe("refactor(team/runteam): `runTeam` into a persisted stage machine");
   });
 
   it("parses canonical titles and preserves the subject when reformatting", () => {

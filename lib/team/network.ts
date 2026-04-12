@@ -20,6 +20,7 @@ import { loadRolePrompt } from "@/lib/team/prompts";
 import {
   buildCanonicalRequestTitle,
   buildDeterministicRequestTitle,
+  describeConventionalTitleMetadata,
   normalizeConventionalTitleMetadata,
   normalizeRequestTitle,
   parseConventionalTitle,
@@ -198,6 +199,10 @@ export type TeamRunMachineState =
 const normalizeRequestText = (value: string | null | undefined): string | null => {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+};
+
+const describeUnknownError = (error: unknown): string => {
+  return error instanceof Error ? error.message : "Unknown error.";
 };
 
 const buildInitialState = (
@@ -412,6 +417,8 @@ const resolveRequestMetadata = async ({
   providedRequestText,
   existingThread,
   shouldResetAssignment,
+  worktreePath,
+  dependencies,
   logEvent,
 }: {
   input: string;
@@ -419,6 +426,8 @@ const resolveRequestMetadata = async ({
   providedRequestText?: string;
   existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
   shouldResetAssignment: boolean;
+  worktreePath: string;
+  dependencies: TeamRoleDependencies;
   logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<InitialRequestMetadata> => {
   const requestText =
@@ -464,8 +473,47 @@ const resolveRequestMetadata = async ({
     };
   }
 
+  try {
+    const generatedMetadata = await generateRequestMetadata({
+      input,
+      requestText,
+      tasks: null,
+      worktreePath,
+      dependencies,
+    });
+
+    if (generatedMetadata.requestTitle) {
+      await logEvent?.({
+        source: "system",
+        message: `Generated request title: ${generatedMetadata.requestTitle}`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return {
+        requestTitle: generatedMetadata.requestTitle,
+        conventionalTitle: generatedMetadata.conventionalTitle,
+        requestText,
+      };
+    }
+  } catch (error) {
+    await logEvent?.({
+      source: "system",
+      message: `Request title generation fell back to a deterministic title: ${describeUnknownError(
+        error,
+      )}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const fallbackTitle = buildDeterministicRequestTitle(requestText);
+  await logEvent?.({
+    source: "system",
+    message: `Using deterministic request title fallback: ${fallbackTitle}`,
+    createdAt: new Date().toISOString(),
+  });
+
   return {
-    requestTitle: null,
+    requestTitle: fallbackTitle,
     conventionalTitle: null,
     requestText,
   };
@@ -477,7 +525,6 @@ const generateRequestMetadata = async ({
   tasks,
   worktreePath,
   dependencies,
-  logEvent,
 }: {
   input: string;
   requestText: string;
@@ -487,46 +534,23 @@ const generateRequestMetadata = async ({
   }> | null;
   worktreePath: string;
   dependencies: TeamRoleDependencies;
-  logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<{
   requestTitle: string | null;
   conventionalTitle: ConventionalTitleMetadata | null;
-} | null> => {
-  try {
-    const generatedTitleResponse = await dependencies.requestTitleAgent.run({
-      input,
-      requestText,
-      worktreePath,
-      tasks,
-    });
-    const generatedTitle = normalizeRequestTitle(generatedTitleResponse.title);
-    const generatedConventionalTitle = normalizeConventionalTitleMetadata(
-      generatedTitleResponse.conventionalTitle,
-    );
+}> => {
+  const generatedTitleResponse = await dependencies.requestTitleAgent.run({
+    input,
+    requestText,
+    worktreePath,
+    tasks,
+  });
 
-    if (generatedTitle || generatedConventionalTitle) {
-      await logEvent?.({
-        source: "system",
-        message: `Generated request title: ${generatedTitle ?? "Untitled Request"}`,
-        createdAt: new Date().toISOString(),
-      });
-
-      return {
-        requestTitle: generatedTitle,
-        conventionalTitle: generatedConventionalTitle,
-      };
-    }
-  } catch (error) {
-    await logEvent?.({
-      source: "system",
-      message: `Request title generation fell back to a deterministic title: ${
-        error instanceof Error ? error.message : "Unknown error."
-      }`,
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  return null;
+  return {
+    requestTitle: normalizeRequestTitle(generatedTitleResponse.title),
+    conventionalTitle: tasks?.length
+      ? normalizeConventionalTitleMetadata(generatedTitleResponse.conventionalTitle)
+      : null,
+  };
 };
 
 const finalizeRequestMetadata = async ({
@@ -547,18 +571,28 @@ const finalizeRequestMetadata = async ({
   dependencies: TeamRoleDependencies;
   logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<ResolvedRequestMetadata> => {
-  const shouldGenerate =
-    !initialMetadata.requestTitle || (Boolean(tasks?.length) && !initialMetadata.conventionalTitle);
-  const generatedMetadata = shouldGenerate
-    ? await generateRequestMetadata({
+  const shouldGenerateTitle = !initialMetadata.requestTitle;
+  const shouldGenerateConventionalTitle =
+    Boolean(tasks?.length) && !initialMetadata.conventionalTitle;
+  let generatedMetadata: {
+    requestTitle: string | null;
+    conventionalTitle: ConventionalTitleMetadata | null;
+  } | null = null;
+  let generationError: unknown = null;
+
+  if (shouldGenerateTitle || shouldGenerateConventionalTitle) {
+    try {
+      generatedMetadata = await generateRequestMetadata({
         input,
         requestText: initialMetadata.requestText,
         tasks,
         worktreePath,
         dependencies,
-        logEvent,
-      })
-    : null;
+      });
+    } catch (error) {
+      generationError = error;
+    }
+  }
 
   const requestTitle =
     initialMetadata.requestTitle ??
@@ -568,10 +602,46 @@ const finalizeRequestMetadata = async ({
     initialMetadata.conventionalTitle ??
     (tasks?.length ? (generatedMetadata?.conventionalTitle ?? null) : null);
 
-  if (!initialMetadata.requestTitle && !generatedMetadata?.requestTitle) {
+  if (shouldGenerateTitle && generatedMetadata?.requestTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Generated request title: ${generatedMetadata.requestTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  if (shouldGenerateTitle && !generatedMetadata?.requestTitle) {
+    if (generationError) {
+      await logEvent?.({
+        source: "system",
+        message: `Request title generation fell back to a deterministic title: ${describeUnknownError(
+          generationError,
+        )}`,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     await logEvent?.({
       source: "system",
       message: `Using deterministic request title fallback: ${requestTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  if (shouldGenerateConventionalTitle && generatedMetadata?.conventionalTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Generated conventional title metadata: ${describeConventionalTitleMetadata(
+        generatedMetadata.conventionalTitle,
+      )}`,
+      createdAt: new Date().toISOString(),
+    });
+  } else if (shouldGenerateConventionalTitle && generationError && !shouldGenerateTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Conventional title metadata generation was skipped: ${describeUnknownError(
+        generationError,
+      )}`,
       createdAt: new Date().toISOString(),
     });
   }
@@ -686,6 +756,8 @@ const buildPlanningStageState = async (
     providedRequestText: args.requestText,
     existingThread,
     shouldResetAssignment,
+    worktreePath: selectedRepository?.path ?? process.cwd(),
+    dependencies: env.deps,
     logEvent: forwardPlannerEvent,
   });
   state.requestTitle = requestMetadata.requestTitle;
