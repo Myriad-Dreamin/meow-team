@@ -125,7 +125,11 @@ const isRepositoryPickerModel = (value: unknown): value is TeamRepositoryPickerM
 };
 
 const isWorkspaceResponse = (value: unknown): value is TeamWorkspaceResponse => {
-  return isRecord(value) && Array.isArray(value.threads) && isRepositoryPickerModel(value.repositoryPicker);
+  return (
+    isRecord(value) &&
+    Array.isArray(value.threads) &&
+    isRepositoryPickerModel(value.repositoryPicker)
+  );
 };
 
 const isNotificationSupported = (): boolean =>
@@ -512,12 +516,7 @@ export function TeamWorkspace({
     <section className="workspace-shell">
       <aside className="workspace-sidebar">
         <div className="workspace-sidebar-header">
-          <div>
-            <h2>Harness Workspace</h2>
-            <p className="workspace-sidebar-copy">
-              Track living threads, launch requests, and adjust workspace settings.
-            </p>
-          </div>
+          <h2>Harness Workspace</h2>
         </div>
 
         <div className="workspace-nav">
@@ -613,10 +612,6 @@ export function TeamWorkspace({
               <div>
                 <h3>New Request</h3>
               </div>
-              <p className="workspace-editor-copy">
-                Create a new request group, reuse a thread for continuity, and watch the planner
-                stream live Codex output.
-              </p>
             </>
           ) : resolvedSelectedTab.type === "settings" ? (
             <>

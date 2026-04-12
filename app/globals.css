@@ -221,7 +221,6 @@ main {
 .hero-panel,
 .warning-panel,
 .info-panel,
-.console-panel,
 .timeline-panel,
 .workspace-shell {
   position: relative;
@@ -548,11 +547,11 @@ main {
 .thread-section h3 {
   margin: 0;
   font-family: var(--font-serif);
-  line-height: 1.08;
+  line-height: 1;
 }
 
 .workspace-sidebar-header h2 {
-  font-size: 2rem;
+  font-size: 1.875rem;
 }
 
 .workspace-sidebar-copy {
@@ -874,7 +873,7 @@ main {
 }
 
 .workspace-editor-header h3 {
-  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  font-size: clamp(1.2rem, 3vw, 2rem);
 }
 
 .workspace-editor-copy,
@@ -896,7 +895,6 @@ main {
 .workspace-editor-body {
   min-height: 0;
   overflow: auto;
-  padding: 24px;
   scrollbar-width: none;
   -ms-overflow-style: none;
   background:
@@ -1029,12 +1027,10 @@ main {
 .thread-chat-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
   height: 100%;
   min-height: 0;
 }
 
-.thread-chat-header,
 .thread-chat-card,
 .thread-chat-bubble,
 .thread-chat-rail-card {
@@ -1048,14 +1044,10 @@ main {
   display: grid;
   gap: 16px;
   padding: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(245, 196, 107, 0.16), transparent 22%),
-    linear-gradient(160deg, rgba(11, 27, 47, 0.94) 0%, rgba(8, 20, 35, 0.92) 100%);
 }
 
-.thread-chat-header-copy {
-  display: grid;
-  gap: 8px;
+.thread-chat-header-copy p {
+  margin: 0;
 }
 
 .thread-chat-header h2 {
@@ -1106,6 +1098,8 @@ main {
   grid-template-columns: minmax(0, 1fr) 220px;
   gap: 18px;
   min-height: 0;
+  padding: 0 24px;
+  border-top: 1px solid var(--line);
 }
 
 .thread-chat-main {
@@ -1935,8 +1929,7 @@ main {
   .hero-panel,
   .info-panel,
   .console-panel,
-  .timeline-panel,
-  .workspace-editor-body {
+  .timeline-panel {
     padding: 20px;
   }
 

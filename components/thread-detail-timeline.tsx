@@ -283,8 +283,7 @@ const buildLogGroupState = (
     fullMessage,
     group: {
       ...group,
-      message:
-        fullMessage ?? (options?.preserveCollapsedMessage ? group.message : group.preview),
+      message: fullMessage ?? (options?.preserveCollapsedMessage ? group.message : group.preview),
     },
     isLoading: false,
   };
@@ -620,6 +619,11 @@ const isAwayFromTop = (element: HTMLDivElement): boolean => {
   return element.scrollTop > SCROLL_THRESHOLD_PX;
 };
 
+const getPrNumber = (url: string): string => {
+  const match = url.match(/pull\/(\d+)/);
+  return match ? match[1] : url;
+};
+
 export function ThreadDetailTimeline({
   thread,
   detail,
@@ -819,12 +823,7 @@ export function ThreadDetailTimeline({
         if (response.entries.length > 0) {
           const nextSourceGroups = groupThreadLogEntries(response.entries);
           setLogGroups((current) => {
-            const nextGroups = mergeTimelineLogGroups(
-              current,
-              nextSourceGroups,
-              "append",
-              "tail",
-            );
+            const nextGroups = mergeTimelineLogGroups(current, nextSourceGroups, "append", "tail");
             return applyLatestLiveStderr(nextGroups);
           });
         }
@@ -1038,19 +1037,14 @@ export function ThreadDetailTimeline({
     <div className="thread-chat-shell">
       <header className="thread-chat-header">
         <div className="thread-chat-header-copy">
-          <p className="eyebrow">Living Thread</p>
-          <h2>{thread.requestTitle}</h2>
-          <p className="section-copy">
+          <p>
             {primaryLane?.latestActivity ??
               thread.latestPlanSummary ??
               "Timeline view stays pinned to the latest activity until you scroll away."}
           </p>
         </div>
-        <span className={`status-pill status-${thread.status}`}>
-          {threadStatusLabels[thread.status]}
-        </span>
         <div className="thread-chat-link-strip">
-          <span>Thread {thread.threadId}</span>
+          <span title={`Thread ${thread.threadId}`}>Thread {thread.threadId?.slice(0, 8)}</span>
           <span>Assignment #{thread.assignmentNumber}</span>
           <span>{thread.repository?.name ?? "No repository selected"}</span>
           <span>Updated {formatTimestamp(thread.updatedAt)}</span>
@@ -1064,31 +1058,13 @@ export function ThreadDetailTimeline({
                 href={primaryLane.pullRequest.url}
                 rel="noreferrer"
                 target="_blank"
+                title={primaryLane.pullRequest.title}
               >
-                {primaryLane.pullRequest.title}
+                PR #{getPrNumber(primaryLane.pullRequest.url)}
               </a>
             ) : (
               <span>{primaryLane.pullRequest.title}</span>
             )
-          ) : null}
-          {branchDisplay ? (
-            branchDisplay.href ? (
-              <a
-                className="thread-chat-link"
-                href={branchDisplay.href}
-                rel="noreferrer"
-                target="_blank"
-                title={branchDisplay.value}
-              >
-                Branch: {branchDisplay.value}
-              </a>
-            ) : (
-              <span title={branchDisplay.value}>Branch: {branchDisplay.value}</span>
-            )
-          ) : thread.latestCanonicalBranchName ? (
-            <span title={thread.latestCanonicalBranchName}>
-              Branch: {thread.latestCanonicalBranchName}
-            </span>
           ) : null}
         </div>
       </header>

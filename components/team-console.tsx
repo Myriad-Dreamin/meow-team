@@ -519,7 +519,6 @@ export function TeamConsole({
   return (
     <section className="console-panel">
       <div className="section-header">
-        <p className="eyebrow">Run Team</p>
         <h2>Continuous Assignment Console</h2>
         <p className="section-copy">
           Reuse the same thread ID to keep the planning conversation continuous. The planner creates
