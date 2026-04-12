@@ -13,7 +13,8 @@ import type { TeamRunState } from "@/lib/team/network";
 import {
   resetTeamThreadStorageStateCacheForTests,
   resolveTeamThreadStorageLocation,
-} from "@/lib/team/storage";
+  updateTeamThreadStorageRecord,
+} from "@/lib/storage/thread";
 import type {
   TeamDispatchAssignment,
   TeamThreadStatus,
@@ -24,11 +25,18 @@ const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 const temporaryFiles = new Set<string>();
 
 const trackTemporaryStore = (storePath: string): void => {
-  const { sqlitePath } = resolveTeamThreadStorageLocation(storePath);
+  const { legacyJsonPath, sqlitePath } = resolveTeamThreadStorageLocation(storePath);
   temporaryFiles.add(storePath);
+  if (legacyJsonPath) {
+    temporaryFiles.add(legacyJsonPath);
+  }
   temporaryFiles.add(sqlitePath);
   temporaryFiles.add(`${sqlitePath}-shm`);
   temporaryFiles.add(`${sqlitePath}-wal`);
+};
+
+const createSqliteStorePath = (prefix: string): string => {
+  return path.join(os.tmpdir(), `${prefix}-${crypto.randomUUID()}.sqlite`);
 };
 
 const createRunState = (): TeamRunState => {
@@ -182,6 +190,36 @@ const createStoredThread = ({
   };
 };
 
+type StoredThreadFixture = ReturnType<typeof createStoredThread>;
+
+const writeStoredThreadToSqlite = async (
+  storePath: string,
+  thread: StoredThreadFixture,
+): Promise<void> => {
+  await updateTeamThreadStorageRecord({
+    threadFile: storePath,
+    threadId: thread.threadId,
+    updater: () => ({
+      value: undefined,
+      nextRecord: {
+        threadId: thread.threadId,
+        payloadJson: JSON.stringify(thread),
+        createdAt: thread.createdAt,
+        updatedAt: thread.updatedAt,
+      },
+    }),
+  });
+};
+
+const writeStoredThreadsToSqlite = async (
+  storePath: string,
+  threads: Record<string, StoredThreadFixture>,
+): Promise<void> => {
+  for (const thread of Object.values(threads)) {
+    await writeStoredThreadToSqlite(storePath, thread);
+  }
+};
+
 afterEach(async () => {
   await resetTeamThreadStorageStateCacheForTests();
 
@@ -196,7 +234,7 @@ afterEach(async () => {
 
 describe("getTeamWorkspaceStatusSnapshot", () => {
   it("counts active threads and lane states across the full store", async () => {
-    const storePath = path.join(os.tmpdir(), `team-history-status-${crypto.randomUUID()}.json`);
+    const storePath = createSqliteStorePath("team-history-status");
     trackTemporaryStore(storePath);
 
     const activeCodingThreads = Array.from({ length: 24 }, (_, index) => {
@@ -271,7 +309,7 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
       ],
     ]);
 
-    await fs.writeFile(storePath, JSON.stringify({ threads }, null, 2), "utf8");
+    await writeStoredThreadsToSqlite(storePath, threads);
 
     const snapshot = await getTeamWorkspaceStatusSnapshot(storePath);
 
@@ -329,7 +367,7 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
   });
 
   it("normalizes older lane records that do not yet include pushed commit metadata", async () => {
-    const storePath = path.join(os.tmpdir(), `team-history-legacy-${crypto.randomUUID()}.json`);
+    const storePath = createSqliteStorePath("team-history-legacy");
     trackTemporaryStore(storePath);
 
     const legacyThread = createStoredThread({
@@ -361,11 +399,7 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
       Reflect.deleteProperty(serializedLegacyLane, "pushedCommit");
     }
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify({ threads: { "legacy-thread": serializedLegacyThread } }, null, 2),
-      "utf8",
-    );
+    await writeStoredThreadToSqlite(storePath, serializedLegacyThread);
 
     const thread = await getTeamThreadRecord(storePath, "legacy-thread");
 
@@ -376,7 +410,7 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
   });
 
   it("marks fully finalized machine-reviewed lanes as completed once GitHub delivery is ready", async () => {
-    const storePath = path.join(os.tmpdir(), `team-history-completed-${crypto.randomUUID()}.json`);
+    const storePath = createSqliteStorePath("team-history-completed");
     trackTemporaryStore(storePath);
 
     const finalizedThread = createStoredThread({
@@ -413,11 +447,7 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
       ],
     });
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify({ threads: { "finalized-thread": finalizedThread } }, null, 2),
-      "utf8",
-    );
+    await writeStoredThreadToSqlite(storePath, finalizedThread);
 
     const thread = await getTeamThreadRecord(storePath, "finalized-thread");
 

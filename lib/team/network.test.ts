@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,6 +43,7 @@ vi.mock("@/lib/team/repositories", async (importOriginal) => {
 import { teamConfig } from "@/team.config";
 import {
   getTeamThreadRecord,
+  type TeamThreadRecord,
   updateTeamThreadRecord,
   upsertTeamThreadRun,
 } from "@/lib/team/history";
@@ -53,7 +54,10 @@ import {
   runTeam,
   type TeamRunEnv,
 } from "@/lib/team/network";
-import { resetTeamThreadStorageStateCacheForTests } from "@/lib/team/storage";
+import {
+  resetTeamThreadStorageStateCacheForTests,
+  updateTeamThreadStorageRecord,
+} from "@/lib/storage/thread";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
@@ -140,6 +144,22 @@ const createReplayAssignment = (
   ...overrides,
 });
 
+const writeStoredThreadRecord = async (thread: TeamThreadRecord): Promise<void> => {
+  await updateTeamThreadStorageRecord({
+    threadFile: teamConfig.storage.threadFile,
+    threadId: thread.threadId,
+    updater: () => ({
+      value: undefined,
+      nextRecord: {
+        threadId: thread.threadId,
+        payloadJson: JSON.stringify(thread),
+        createdAt: thread.createdAt,
+        updatedAt: thread.updatedAt,
+      },
+    }),
+  });
+};
+
 const writeReplayThreadStore = async ({
   threadId,
   assignmentNumber = 1,
@@ -151,53 +171,41 @@ const writeReplayThreadStore = async ({
   lane: TeamWorkerLaneRecord;
   assignmentOverrides?: Partial<TeamDispatchAssignment>;
 }) => {
-  await writeFile(
-    teamConfig.storage.threadFile,
-    JSON.stringify(
-      {
-        threads: {
-          [threadId]: {
-            threadId,
-            data: {
-              teamId: teamConfig.id,
-              teamName: teamConfig.name,
-              ownerName: teamConfig.owner.name,
-              objective: teamConfig.owner.objective,
-              selectedRepository: repository,
-              workflow: [...teamConfig.workflow],
-              handoffs: {},
-              handoffCounter: 0,
-              assignmentNumber,
-              requestTitle: assignmentOverrides.requestTitle ?? "Replay Request",
-              conventionalTitle: assignmentOverrides.conventionalTitle ?? null,
-              requestText: assignmentOverrides.requestText ?? "Replay the persisted stage.",
-              latestInput: assignmentOverrides.requestText ?? "Replay the persisted stage.",
-              forceReset: false,
-            },
-            results: [],
-            userMessages: [],
-            dispatchAssignments: [
-              createReplayAssignment(lane, {
-                assignmentNumber,
-                ...assignmentOverrides,
-              }),
-            ],
-            run: {
-              status: "running",
-              startedAt: FIXED_TIMESTAMP,
-              finishedAt: null,
-              lastError: null,
-            },
-            createdAt: FIXED_TIMESTAMP,
-            updatedAt: FIXED_TIMESTAMP,
-          },
-        },
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
+  await writeStoredThreadRecord({
+    threadId,
+    data: {
+      teamId: teamConfig.id,
+      teamName: teamConfig.name,
+      ownerName: teamConfig.owner.name,
+      objective: teamConfig.owner.objective,
+      selectedRepository: repository,
+      workflow: [...teamConfig.workflow],
+      handoffs: {},
+      handoffCounter: 0,
+      assignmentNumber,
+      requestTitle: assignmentOverrides.requestTitle ?? "Replay Request",
+      conventionalTitle: assignmentOverrides.conventionalTitle ?? null,
+      requestText: assignmentOverrides.requestText ?? "Replay the persisted stage.",
+      latestInput: assignmentOverrides.requestText ?? "Replay the persisted stage.",
+      forceReset: false,
+    },
+    results: [],
+    userMessages: [],
+    dispatchAssignments: [
+      createReplayAssignment(lane, {
+        assignmentNumber,
+        ...assignmentOverrides,
+      }),
+    ],
+    run: {
+      status: "running",
+      startedAt: FIXED_TIMESTAMP,
+      finishedAt: null,
+      lastError: null,
+    },
+    createdAt: FIXED_TIMESTAMP,
+    updatedAt: FIXED_TIMESTAMP,
+  });
 };
 
 describe.sequential("runTeam", () => {
@@ -209,7 +217,7 @@ describe.sequential("runTeam", () => {
     originalThreadFile = teamConfig.storage.threadFile;
     originalWorkerCount = teamConfig.dispatch.workerCount;
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), "run-team-"));
-    teamConfig.storage.threadFile = path.join(tempDirectory, "threads.json");
+    teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
 
     createPlannerDispatchAssignmentMock.mockReset();
     createPlannerDispatchAssignmentMock.mockResolvedValue({} as never);
@@ -342,7 +350,7 @@ describe.sequential("runTeam", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       repository,
-      requestTitle: "dev(dispatch/coordination): stabilize dispatch flow",
+      requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
       conventionalTitle: {
         type: "dev",
         scope: "dispatch/coordination",
@@ -380,7 +388,7 @@ describe.sequential("runTeam", () => {
     if (!result) {
       throw new Error("Expected a planning summary.");
     }
-    expect(result.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+    expect(result.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
     expect(result.requestText).toBe("Ship reliable dispatch coordination.");
     expect(result.repository).toEqual(repository);
     expect(result.handoffs).toHaveLength(1);
@@ -397,7 +405,7 @@ describe.sequential("runTeam", () => {
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
     expect(thread?.data.conventionalTitle).toEqual({
       type: "dev",
       scope: "dispatch/coordination",
@@ -498,7 +506,7 @@ describe.sequential("runTeam", () => {
       threadId: "thread-stale-conventional-title",
       assignmentNumber: 1,
       repository,
-      requestTitle: "dev(dispatch/coordination): stabilize dispatch flow",
+      requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
       conventionalTitle: {
         type: "dev",
         scope: "dispatch/coordination",
@@ -522,13 +530,13 @@ describe.sequential("runTeam", () => {
       "reviewing",
       "completed",
     ]);
-    expect(result?.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+    expect(result?.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
 
     const thread = await getTeamThreadRecord(
       teamConfig.storage.threadFile,
       "thread-stale-conventional-title",
     );
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
     expect(thread?.data.conventionalTitle).toEqual({
       type: "dev",
       scope: "dispatch/coordination",
@@ -890,115 +898,104 @@ describe.sequential("runTeam", () => {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-replay");
     expect(thread?.dispatchAssignments).toHaveLength(1);
     expect(thread?.results).toHaveLength(1);
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
   });
 
   it("fails fast when all shared meow slots are already assigned to active threads", async () => {
     teamConfig.dispatch.workerCount = 1;
     findConfiguredRepositoryMock.mockResolvedValue(repository);
 
-    await writeFile(
-      teamConfig.storage.threadFile,
-      JSON.stringify(
+    await writeStoredThreadRecord({
+      threadId: "active-thread",
+      data: {
+        teamId: teamConfig.id,
+        teamName: teamConfig.name,
+        ownerName: teamConfig.owner.name,
+        objective: teamConfig.owner.objective,
+        selectedRepository: repository,
+        workflow: ["planner", "coder", "reviewer"],
+        handoffs: {},
+        handoffCounter: 0,
+        assignmentNumber: 1,
+        requestTitle: "Existing request",
+        conventionalTitle: null,
+        requestText: "Keep the current slot busy.",
+        latestInput: "Keep the current slot busy.",
+        forceReset: false,
+      },
+      results: [],
+      userMessages: [],
+      dispatchAssignments: [
         {
-          threads: {
-            "active-thread": {
-              threadId: "active-thread",
-              data: {
-                teamId: teamConfig.id,
-                teamName: teamConfig.name,
-                ownerName: teamConfig.owner.name,
-                objective: teamConfig.owner.objective,
-                selectedRepository: repository,
-                workflow: ["planner", "coder", "reviewer"],
-                handoffs: {},
-                handoffCounter: 0,
-                assignmentNumber: 1,
-                requestTitle: "Existing request",
-                conventionalTitle: null,
-                requestText: "Keep the current slot busy.",
-                latestInput: "Keep the current slot busy.",
-                forceReset: false,
-              },
-              results: [],
-              userMessages: [],
-              dispatchAssignments: [
-                {
-                  assignmentNumber: 1,
-                  status: "running",
-                  repository,
-                  requestTitle: "Existing request",
-                  conventionalTitle: null,
-                  requestText: "Keep the current slot busy.",
-                  requestedAt: FIXED_TIMESTAMP,
-                  startedAt: FIXED_TIMESTAMP,
-                  finishedAt: null,
-                  updatedAt: FIXED_TIMESTAMP,
-                  plannerSummary: "Existing summary",
-                  plannerDeliverable: "Existing deliverable",
-                  branchPrefix: "existing",
-                  canonicalBranchName: "requests/existing/a1",
-                  baseBranch: "main",
-                  threadSlot: 1,
-                  plannerWorktreePath: "/tmp/worktrees/meow-1",
-                  workerCount: 1,
-                  lanes: [
-                    {
-                      laneId: "lane-1",
-                      laneIndex: 1,
-                      status: "awaiting_human_approval",
-                      taskTitle: "Existing task",
-                      taskObjective: "Hold the shared slot.",
-                      proposalChangeName: "existing-change",
-                      proposalPath: "openspec/changes/existing-change",
-                      workerSlot: null,
-                      branchName: "requests/existing/a1-proposal-1",
-                      baseBranch: "main",
-                      worktreePath: null,
-                      latestImplementationCommit: null,
-                      pushedCommit: null,
-                      latestCoderHandoff: null,
-                      latestReviewerHandoff: null,
-                      latestDecision: null,
-                      latestCoderSummary: null,
-                      latestReviewerSummary: null,
-                      latestActivity: null,
-                      approvalRequestedAt: FIXED_TIMESTAMP,
-                      approvalGrantedAt: null,
-                      queuedAt: null,
-                      runCount: 0,
-                      revisionCount: 0,
-                      requeueReason: null,
-                      lastError: null,
-                      pullRequest: null,
-                      events: [],
-                      startedAt: null,
-                      finishedAt: null,
-                      updatedAt: FIXED_TIMESTAMP,
-                    },
-                  ],
-                  plannerNotes: [],
-                  humanFeedback: [],
-                  supersededAt: null,
-                  supersededReason: null,
-                },
-              ],
-              run: {
-                status: "running",
-                startedAt: FIXED_TIMESTAMP,
-                finishedAt: null,
-                lastError: null,
-              },
-              createdAt: FIXED_TIMESTAMP,
+          assignmentNumber: 1,
+          status: "running",
+          repository,
+          requestTitle: "Existing request",
+          conventionalTitle: null,
+          requestText: "Keep the current slot busy.",
+          requestedAt: FIXED_TIMESTAMP,
+          startedAt: FIXED_TIMESTAMP,
+          finishedAt: null,
+          updatedAt: FIXED_TIMESTAMP,
+          plannerSummary: "Existing summary",
+          plannerDeliverable: "Existing deliverable",
+          branchPrefix: "existing",
+          canonicalBranchName: "requests/existing/a1",
+          baseBranch: "main",
+          threadSlot: 1,
+          plannerWorktreePath: "/tmp/worktrees/meow-1",
+          workerCount: 1,
+          lanes: [
+            {
+              laneId: "lane-1",
+              laneIndex: 1,
+              status: "awaiting_human_approval",
+              executionPhase: null,
+              taskTitle: "Existing task",
+              taskObjective: "Hold the shared slot.",
+              proposalChangeName: "existing-change",
+              proposalPath: "openspec/changes/existing-change",
+              workerSlot: null,
+              branchName: "requests/existing/a1-proposal-1",
+              baseBranch: "main",
+              worktreePath: null,
+              latestImplementationCommit: null,
+              pushedCommit: null,
+              latestCoderHandoff: null,
+              latestReviewerHandoff: null,
+              latestDecision: null,
+              latestCoderSummary: null,
+              latestReviewerSummary: null,
+              latestActivity: null,
+              approvalRequestedAt: FIXED_TIMESTAMP,
+              approvalGrantedAt: null,
+              queuedAt: null,
+              runCount: 0,
+              revisionCount: 0,
+              requeueReason: null,
+              lastError: null,
+              pullRequest: null,
+              events: [],
+              startedAt: null,
+              finishedAt: null,
               updatedAt: FIXED_TIMESTAMP,
             },
-          },
+          ],
+          plannerNotes: [],
+          humanFeedback: [],
+          supersededAt: null,
+          supersededReason: null,
         },
-        null,
-        2,
-      ),
-      "utf8",
-    );
+      ],
+      run: {
+        status: "running",
+        startedAt: FIXED_TIMESTAMP,
+        finishedAt: null,
+        lastError: null,
+      },
+      createdAt: FIXED_TIMESTAMP,
+      updatedAt: FIXED_TIMESTAMP,
+    });
 
     const requestTitleAgentMock = { run: vi.fn() };
     const plannerAgentMock = { run: vi.fn() };

@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getTeamThreadRecord, type TeamThreadRecord } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
-import { resolveTeamThreadStorageLocation } from "@/lib/team/storage";
+import {
+  resetTeamThreadStorageStateCacheForTests,
+  resolveTeamThreadStorageLocation,
+  updateTeamThreadStorageRecord,
+} from "@/lib/storage/thread";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const {
@@ -26,7 +30,7 @@ const {
   getBranchHeadMock: vi.fn(),
   inspectOpenSpecChangeArchiveStateMock: vi.fn(),
   pushLaneBranchMock: vi.fn(),
-  threadFile: `/tmp/team-dispatch-approval-${crypto.randomUUID()}.json`,
+  threadFile: `/tmp/team-dispatch-approval-${crypto.randomUUID()}.sqlite`,
   worktreeRoot: `/tmp/team-dispatch-worktrees-${crypto.randomUUID()}`,
 }));
 
@@ -97,13 +101,18 @@ const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
 const storageLocation = resolveTeamThreadStorageLocation(threadFile);
 
 const cleanupThreadStore = async () => {
+  await resetTeamThreadStorageStateCacheForTests();
+
   await Promise.all(
     [
       threadFile,
+      storageLocation.legacyJsonPath,
       storageLocation.sqlitePath,
       `${storageLocation.sqlitePath}-shm`,
       `${storageLocation.sqlitePath}-wal`,
-    ].map((filePath) => fs.rm(filePath, { force: true })),
+    ]
+      .filter((filePath): filePath is string => Boolean(filePath))
+      .map((filePath) => fs.rm(filePath, { force: true })),
   );
 };
 
@@ -241,12 +250,22 @@ const writeThreadStore = async (
   lane: TeamWorkerLaneRecord,
   assignmentOverrides: Partial<TeamDispatchAssignment> = {},
 ) => {
+  const thread = createThread(lane, assignmentOverrides);
+
   await fs.mkdir(worktreeRoot, { recursive: true });
-  await fs.writeFile(
+  await updateTeamThreadStorageRecord({
     threadFile,
-    JSON.stringify({ threads: { "thread-1": createThread(lane, assignmentOverrides) } }, null, 2),
-    "utf8",
-  );
+    threadId: thread.threadId,
+    updater: () => ({
+      value: undefined,
+      nextRecord: {
+        threadId: thread.threadId,
+        payloadJson: JSON.stringify(thread),
+        createdAt: thread.createdAt,
+        updatedAt: thread.updatedAt,
+      },
+    }),
+  });
 };
 
 const createArchiveDependencies = ({
