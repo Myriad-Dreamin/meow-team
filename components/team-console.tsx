@@ -2,6 +2,12 @@
 
 import { startTransition, useEffect, useState, type FormEvent } from "react";
 import {
+  applyRequestedTeamConsoleRepositorySelection,
+  createAutoTeamConsoleRepositorySelection,
+  createManualTeamConsoleRepositorySelection,
+  reconcileTeamConsoleRepositorySelection,
+} from "@/components/team-console-repository-selection";
+import {
   TeamThreadLogPanel,
   isTeamCodexLogEntry,
   mergeLogEntries,
@@ -204,7 +210,9 @@ export function TeamConsole({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [title, setTitle] = useState("");
   const [threadId, setThreadId] = useState("");
-  const [repositoryId, setRepositoryId] = useState("");
+  const [repositorySelection, setRepositorySelection] = useState(() =>
+    createAutoTeamConsoleRepositorySelection(repositoryPicker),
+  );
   const [reset, setReset] = useState(false);
   const [runState, setRunState] = useState<RunState>(initialRunState);
   const [notice, setNotice] = useState<string | null>(null);
@@ -220,6 +228,7 @@ export function TeamConsole({
   const isBusy = isRunning || isAwaitingBranchDeletion;
   const hasRepositories = repositoryPicker.orderedRepositories.length > 0;
   const hasSuggestedRepositories = repositoryPicker.suggestedRepositories.length > 0;
+  const repositoryId = repositorySelection.repositoryId;
 
   useEffect(() => {
     const storedThreadId = window.localStorage.getItem(ACTIVE_LOG_THREAD_ID_STORAGE_KEY);
@@ -257,6 +266,12 @@ export function TeamConsole({
     window.localStorage.removeItem(ACTIVE_LOG_STARTED_AT_STORAGE_KEY);
   }, [activeLogStartedAt, activeThreadId]);
 
+  useEffect(() => {
+    setRepositorySelection((currentSelection) =>
+      reconcileTeamConsoleRepositorySelection(currentSelection, repositoryPicker),
+    );
+  }, [repositoryPicker]);
+
   const executeRun = async (
     request: TeamRunRequest,
     previousResult = runState.result,
@@ -277,7 +292,9 @@ export function TeamConsole({
     setPrompt(request.input);
     setTitle(request.title ?? "");
     setThreadId(request.threadId ?? "");
-    setRepositoryId(request.repositoryId ?? "");
+    setRepositorySelection((currentSelection) =>
+      applyRequestedTeamConsoleRepositorySelection(currentSelection, request.repositoryId),
+    );
     setReset(request.reset);
     setPendingBranchDeletion(null);
     setRunState({
@@ -576,7 +593,11 @@ export function TeamConsole({
               <select
                 name="repositoryId"
                 value={repositoryId}
-                onChange={(event) => setRepositoryId(event.target.value)}
+                onChange={(event) =>
+                  setRepositorySelection(
+                    createManualTeamConsoleRepositorySelection(event.target.value),
+                  )
+                }
                 disabled={disabled || isBusy}
               >
                 <option value="">No repository selected</option>
