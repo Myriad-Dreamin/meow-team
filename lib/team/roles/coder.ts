@@ -13,6 +13,7 @@ import type {
   TeamRoleHandoff,
   TeamWorkerLaneExecutionPhase,
 } from "@/lib/team/types";
+import { prompt as renderCoderPrompt, type Args as CoderPromptArgs } from "./coder.prompt.md";
 
 const coderOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -54,61 +55,55 @@ export type CoderRoleInput = {
 export type CoderRoleOutput = z.infer<typeof coderOutputSchema>;
 type CoderPromptInput = Omit<CoderRoleInput, "onEvent">;
 
+const laneSkillReference = [
+  "- `.codex/skills/team-harness-workflow/SKILL.md`",
+  "- `.codex/skills/team-harness-workflow/references/lanes.md`",
+  "- `.codex/skills/openspec-apply-change/SKILL.md`",
+].join("\n");
+
 const buildCoderPrompt = ({ role, state, input }: CoderPromptInput): string => {
   const isFinalArchive = state.executionPhase === "final_archive";
+  const finalArchiveSection = isFinalArchive
+    ? [
+        state.archiveCommand ? `Archive command: ${state.archiveCommand}.` : null,
+        state.archivePathContext ? `Archive path context: ${state.archivePathContext}.` : null,
+        "Archive continuation: this is the final coder-only archive pass. Do not route back to reviewer.",
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    : "";
 
-  return [
-    `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
-    `Owner: ${state.ownerName}.`,
-    `Shared objective: ${state.objective}`,
-    `Repository: ${state.repository.name} at ${state.repository.path}.`,
-    `Dedicated branch: ${state.branchName}.`,
-    `Base branch: ${state.baseBranch}.`,
-    `Dedicated worktree: ${state.worktreePath}.`,
-    state.implementationCommit
+  const templateArgs: CoderPromptArgs = {
+    assignmentInput: input,
+    baseBranch: state.baseBranch,
+    branchName: state.branchName,
+    codexSkillContext: laneSkillReference,
+    conventionalTitle: describeConventionalTitleMetadata(state.conventionalTitle),
+    executionPhase: state.executionPhase ?? "implementation",
+    finalArchiveSection,
+    handoffs: summarizeHandoffs(state),
+    implementationCommitSection: state.implementationCommit
       ? `Implementation commit ready for review: ${state.implementationCommit}.`
-      : null,
-    `Lane index: ${state.laneIndex}.`,
-    `Lane execution phase: ${state.executionPhase ?? "implementation"}.`,
-    `Task title: ${state.taskTitle}.`,
-    `Task objective: ${state.taskObjective}`,
-    `Canonical request title: ${state.requestTitle}.`,
-    `Conventional title metadata: ${describeConventionalTitleMetadata(state.conventionalTitle)}.`,
-    `Planner summary: ${state.planSummary}`,
-    `Planner deliverable: ${state.planDeliverable}`,
-    state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
-    isFinalArchive && state.archiveCommand ? `Archive command: ${state.archiveCommand}.` : null,
-    isFinalArchive && state.archivePathContext
-      ? `Archive path context: ${state.archivePathContext}.`
-      : null,
-    isFinalArchive
-      ? "Archive continuation: this is the final coder-only archive pass. Do not route back to reviewer."
-      : null,
-    `Workflow context: ${state.workflow.join(" -> ")}`,
-    "Current handoffs:",
-    summarizeHandoffs(state),
-    `Current assignment input: ${input}`,
-    "Codex skill context:",
-    [
-      "- `.codex/skills/team-harness-workflow/SKILL.md`",
-      "- `.codex/skills/team-harness-workflow/references/lanes.md`",
-      "- `.codex/skills/openspec-apply-change/SKILL.md`",
-    ].join("\n"),
-    "Repository instructions: read INSTRUCTIONS.md and AGENTS.md before changing code, use pnpm for scripts, and keep project text in English.",
-    "Your role prompt is below:",
-    role.prompt.trim(),
-    "Execution rules:",
-    "- Operate only inside the dedicated worktree and branch for this lane.",
-    "- Use Codex CLI native repository tools and shell access to inspect, edit, and validate work.",
-    "- Produce concrete repository changes before finishing.",
-    '- Finish with decision "continue" after implementation exists for review.',
-    "Final response requirements:",
-    "- Your final response must match the provided JSON schema exactly.",
-    '- Put the concise handoff in "summary" and the detailed notes in "deliverable".',
-    '- For coder, set decision to "continue" and set pullRequestTitle and pullRequestSummary to null.',
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+      : "",
+    laneIndex: state.laneIndex,
+    objective: state.objective,
+    ownerName: state.ownerName,
+    planDeliverable: state.planDeliverable,
+    planSummary: state.planSummary,
+    plannerNoteSection: state.conflictNote ? `Planner note: ${state.conflictNote}` : "",
+    repositoryName: state.repository.name,
+    repositoryPath: state.repository.path,
+    requestTitle: state.requestTitle,
+    roleName: role.name,
+    rolePrompt: role.prompt.trim(),
+    taskObjective: state.taskObjective,
+    taskTitle: state.taskTitle,
+    teamName: state.teamName,
+    workflow: state.workflow.join(" -> "),
+    worktreePath: state.worktreePath,
+  };
+
+  return renderCoderPrompt(templateArgs);
 };
 
 export class CoderAgent {

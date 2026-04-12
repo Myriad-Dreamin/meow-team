@@ -18,19 +18,19 @@ const formatDiagnostics = (
 };
 
 describe("meow-prompt typecheck regression", () => {
-  it("keeps app prompt imports typed after the Vite bootstrap runs without a docs directory", async () => {
+  it("keeps harness role prompt imports typed after the Vite bootstrap runs without a docs directory", async () => {
     const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "meow-prompt-typecheck-review-"));
-    const appDirectory = path.join(temporaryDirectory, "app");
-    const promptPath = path.join(appDirectory, "fresh.prompt.md");
+    const roleDirectory = path.join(temporaryDirectory, "lib", "team", "roles");
+    const promptPath = path.join(roleDirectory, "fresh.prompt.md");
     const consumerPath = path.join(temporaryDirectory, "fresh-consumer.ts");
-    const declarationPath = path.join(appDirectory, "fresh.prompt.d.md.ts");
+    const declarationPath = path.join(roleDirectory, "fresh.prompt.d.md.ts");
 
     try {
-      mkdirSync(appDirectory, { recursive: true });
+      mkdirSync(roleDirectory, { recursive: true });
       writeFileSync(promptPath, "---\ntitle: Fresh prompt\n---\nHello [[param:name]].\n", "utf8");
       writeFileSync(
         consumerPath,
-        `import { frontmatter, prompt, type Args, type FrontMatter } from "./app/fresh.prompt.md";
+        `import { frontmatter, prompt, type Args, type FrontMatter } from "./lib/team/roles/fresh.prompt.md";
 
 const typedFrontmatter: FrontMatter = frontmatter;
 const title: "Fresh prompt" = typedFrontmatter.title;

@@ -10,6 +10,10 @@ import {
 import { teamRoleDecisionSchema } from "@/lib/team/roles/schemas";
 import type { RolePrompt } from "@/lib/team/prompts";
 import type { TeamCodexEvent, TeamRoleHandoff } from "@/lib/team/types";
+import {
+  prompt as renderReviewerPrompt,
+  type Args as ReviewerPromptArgs,
+} from "./reviewer.prompt.md";
 
 const reviewerOutputSchema = z.object({
   summary: z.string().trim().min(1),
@@ -48,50 +52,45 @@ export type ReviewerRoleInput = {
 export type ReviewerRoleOutput = z.infer<typeof reviewerOutputSchema>;
 type ReviewerPromptInput = Omit<ReviewerRoleInput, "onEvent">;
 
+const laneSkillReference = [
+  "- `.codex/skills/team-harness-workflow/SKILL.md`",
+  "- `.codex/skills/team-harness-workflow/references/lanes.md`",
+  "- `.codex/skills/openspec-apply-change/SKILL.md`",
+].join("\n");
+
 const buildReviewerPrompt = ({ role, state, input }: ReviewerPromptInput): string => {
-  return [
-    `You are ${role.name}, a background lane role inside the ${state.teamName} engineering harness.`,
-    `Owner: ${state.ownerName}.`,
-    `Shared objective: ${state.objective}`,
-    `Repository: ${state.repository.name} at ${state.repository.path}.`,
-    `Dedicated branch: ${state.branchName}.`,
-    `Base branch: ${state.baseBranch}.`,
-    `Dedicated worktree: ${state.worktreePath}.`,
-    state.implementationCommit
+  const templateArgs: ReviewerPromptArgs = {
+    assignmentInput: input,
+    baseBranch: state.baseBranch,
+    branchName: state.branchName,
+    codexSkillContext: laneSkillReference,
+    conventionalTitle: describeConventionalTitleMetadata(state.conventionalTitle),
+    handoffs: summarizeHandoffs(state),
+    implementationCommitSection: state.implementationCommit
       ? `Implementation commit ready for review: ${state.implementationCommit}.`
       : "Implementation commit ready for review: none.",
-    `Lane index: ${state.laneIndex}.`,
-    `Task title: ${state.taskTitle}.`,
-    `Task objective: ${state.taskObjective}`,
-    `Canonical request title: ${state.requestTitle}.`,
-    `Conventional title metadata: ${describeConventionalTitleMetadata(state.conventionalTitle)}.`,
-    `Planner summary: ${state.planSummary}`,
-    `Planner deliverable: ${state.planDeliverable}`,
-    state.conflictNote ? `Planner note: ${state.conflictNote}` : null,
-    `Workflow context: ${state.workflow.join(" -> ")}`,
-    "Current handoffs:",
-    summarizeHandoffs(state),
-    `Current assignment input: ${input}`,
-    "Codex skill context:",
-    [
-      "- `.codex/skills/team-harness-workflow/SKILL.md`",
-      "- `.codex/skills/team-harness-workflow/references/lanes.md`",
-      "- `.codex/skills/openspec-apply-change/SKILL.md`",
-    ].join("\n"),
-    "Repository instructions: read INSTRUCTIONS.md and AGENTS.md before changing code, use pnpm for scripts, and keep project text in English.",
-    "Your role prompt is below:",
-    role.prompt.trim(),
-    "Execution rules:",
-    "- Operate only inside the dedicated worktree and branch for this lane.",
-    "- Use Codex CLI native repository tools and shell access to inspect, edit, and validate work.",
-    ...buildReviewerExecutionRules().map((rule) => `- ${rule}`),
-    "Final response requirements:",
-    "- Your final response must match the provided JSON schema exactly.",
-    '- Put the concise handoff in "summary" and the detailed notes in "deliverable".',
-    '- For reviewer, set decision to "approved" or "needs_revision". If approved, fill both pullRequestTitle and pullRequestSummary. The harness will normalize the final PR title to the shared conventional format. If not approved, set both pullRequestTitle and pullRequestSummary to null.',
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    laneIndex: state.laneIndex,
+    objective: state.objective,
+    ownerName: state.ownerName,
+    planDeliverable: state.planDeliverable,
+    planSummary: state.planSummary,
+    plannerNoteSection: state.conflictNote ? `Planner note: ${state.conflictNote}` : "",
+    repositoryName: state.repository.name,
+    repositoryPath: state.repository.path,
+    requestTitle: state.requestTitle,
+    reviewerExecutionRules: buildReviewerExecutionRules()
+      .map((rule) => `- ${rule}`)
+      .join("\n"),
+    roleName: role.name,
+    rolePrompt: role.prompt.trim(),
+    taskObjective: state.taskObjective,
+    taskTitle: state.taskTitle,
+    teamName: state.teamName,
+    workflow: state.workflow.join(" -> "),
+    worktreePath: state.worktreePath,
+  };
+
+  return renderReviewerPrompt(templateArgs);
 };
 
 export class ReviewerAgent {
