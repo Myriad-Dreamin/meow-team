@@ -20,6 +20,9 @@ contracts that keep multi-lane runs deterministic.
 - Use the Roles topic for prompt rendering, schema contracts, and role-specific
   execution boundaries.
 - Use the Storage topic for persisted run state, history, and thread data.
+- Use the Worktree topic for reusable checkout behavior, git or `gh`
+  subprocess hygiene, and tracking-PR delivery rules that depend on managed
+  lane worktrees.
 - Favor typed template imports and explicit state shaping over ad-hoc string
   assembly.
 - Keep role additions predictable so new harness roles can be added without
@@ -30,3 +33,4 @@ contracts that keep multi-lane runs deterministic.
 - [Network](/roadmap/team/network)
 - [Roles](/roadmap/team/roles)
 - [Storage](/roadmap/team/storage)
+- [Worktree](/roadmap/team/worktree)
