@@ -7,3 +7,4 @@ license: Apache-2.0
 ## Items
 
 - Expand the auto-created [Run roadmap](docs/roadmap/run/index.md) and [Team topic](docs/roadmap/run/team.md) for the `run/team` archive-finalization scope.
+- Expand the auto-created [Team roadmap](docs/roadmap/team/index.md) and [Storage topic](docs/roadmap/team/storage.md) for the `team/storage` archive-finalization scope.
