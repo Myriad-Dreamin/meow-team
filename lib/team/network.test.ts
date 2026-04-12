@@ -98,8 +98,10 @@ import {
   createTeamRunEnv,
   ensurePendingDispatchWork,
   persistTeamRunState,
+  prepareAssignmentReplan,
   runTeam,
   teamNetworkDispatchOps,
+  TeamThreadReplanError,
   type TeamRunEnv,
 } from "@/lib/team/network";
 import {
@@ -1516,10 +1518,12 @@ const createDispatchThreadRecord = ({
   threadId,
   assignment,
   runStatus = "running",
+  archivedAt = null,
 }: {
   threadId: string;
   assignment: TeamDispatchAssignment;
   runStatus?: NonNullable<TeamThreadRecord["run"]>["status"];
+  archivedAt?: string | null;
 }): TeamThreadRecord => {
   return {
     threadId,
@@ -1542,6 +1546,7 @@ const createDispatchThreadRecord = ({
     results: [],
     userMessages: [],
     dispatchAssignments: [assignment],
+    archivedAt,
     run: {
       status: runStatus,
       startedAt: FIXED_TIMESTAMP,
@@ -1552,6 +1557,71 @@ const createDispatchThreadRecord = ({
     updatedAt: FIXED_TIMESTAMP,
   };
 };
+
+describe.sequential("prepareAssignmentReplan", () => {
+  let originalThreadFile: string;
+  let tempDirectory: string;
+
+  beforeEach(async () => {
+    originalThreadFile = teamConfig.storage.threadFile;
+    tempDirectory = await mkdtemp(path.join(os.tmpdir(), "prepare-replan-"));
+    teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
+  });
+
+  afterEach(async () => {
+    await resetTeamThreadStorageStateCacheForTests();
+    teamConfig.storage.threadFile = originalThreadFile;
+    await rm(tempDirectory, {
+      force: true,
+      recursive: true,
+    });
+  });
+
+  it("rejects archived threads before replanning and leaves their assignment state untouched", async () => {
+    await writeStoredThreadRecord(
+      createDispatchThreadRecord({
+        threadId: "thread-archived-replan",
+        assignment: createDispatchAssignment({
+          assignmentNumber: 1,
+          status: "completed",
+          lanes: [
+            createDispatchLane({
+              laneId: "lane-1",
+              laneIndex: 1,
+              status: "approved",
+              approvalGrantedAt: FIXED_TIMESTAMP,
+              finishedAt: FIXED_TIMESTAMP,
+            }),
+          ],
+        }),
+        archivedAt: "2026-04-11T09:00:00.000Z",
+        runStatus: "completed",
+      }),
+    );
+
+    const replanPromise = prepareAssignmentReplan({
+      threadId: "thread-archived-replan",
+      assignmentNumber: 1,
+      scope: "assignment",
+      suggestion: "Reopen the planning loop.",
+    });
+
+    await expect(replanPromise).rejects.toBeInstanceOf(TeamThreadReplanError);
+    await expect(replanPromise).rejects.toMatchObject({
+      code: "archived",
+      message: "Archived threads cannot restart planning.",
+      name: "TeamThreadReplanError",
+      statusCode: 409,
+    });
+
+    const thread = await getTeamThreadRecord(
+      teamConfig.storage.threadFile,
+      "thread-archived-replan",
+    );
+    expect(thread?.dispatchAssignments[0]?.supersededAt).toBeNull();
+    expect(thread?.dispatchAssignments[0]?.humanFeedback).toHaveLength(0);
+  });
+});
 
 const basePushedCommit = {
   remoteName: "origin",

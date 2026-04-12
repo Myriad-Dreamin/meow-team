@@ -8,6 +8,7 @@ import {
   prepareAssignmentReplan,
   persistTeamRunState,
   runTeam,
+  TeamThreadReplanError,
 } from "@/lib/team/network";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
 import { getTeamServerState } from "@/lib/team/server-state";
@@ -87,6 +88,15 @@ export async function POST(request: Request) {
           issues: error.issues,
         },
         { status: 400 },
+      );
+    }
+
+    if (error instanceof TeamThreadReplanError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+        },
+        { status: error.statusCode },
       );
     }
 

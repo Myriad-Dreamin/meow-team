@@ -273,6 +273,22 @@ export class DispatchThreadCapacityError extends Error {
   }
 }
 
+export class TeamThreadReplanError extends Error {
+  readonly code: "not_found" | "archived" | "superseded" | "active_queue";
+  readonly statusCode: 404 | 409;
+
+  constructor(
+    code: "not_found" | "archived" | "superseded" | "active_queue",
+    message: string,
+    statusCode: 404 | 409,
+  ) {
+    super(message);
+    this.name = "TeamThreadReplanError";
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
 const activeLaneRuns = new Map<string, Promise<void>>();
 let plannerDispatchQueue = Promise.resolve();
 
@@ -3141,20 +3157,30 @@ export const prepareAssignmentReplan = async ({
 }> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
-    throw new Error(`Thread ${threadId} was not found.`);
+    throw new TeamThreadReplanError("not_found", `Thread ${threadId} was not found.`, 404);
+  }
+
+  if (thread.archivedAt) {
+    throw new TeamThreadReplanError("archived", "Archived threads cannot restart planning.", 409);
   }
 
   const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
   if (assignment.supersededAt) {
-    throw new Error("This request group has already been superseded by newer feedback.");
+    throw new TeamThreadReplanError(
+      "superseded",
+      "This request group has already been superseded by newer feedback.",
+      409,
+    );
   }
 
   const hasActiveQueue = assignment.lanes.some(
     (lane) => lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing",
   );
   if (hasActiveQueue) {
-    throw new Error(
+    throw new TeamThreadReplanError(
+      "active_queue",
       "Wait for the active coding-review queue to finish before restarting planning with human feedback.",
+      409,
     );
   }
 

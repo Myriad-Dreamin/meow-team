@@ -161,6 +161,7 @@ export const buildFeedbackKey = (
 
 export const canRestartPlanning = (thread: TeamThreadSummary): boolean => {
   return (
+    !thread.archivedAt &&
     thread.workerCounts.queued === 0 &&
     thread.workerCounts.coding === 0 &&
     thread.workerCounts.reviewing === 0

@@ -1003,6 +1003,9 @@ export function ThreadDetailTimeline({
 
   const primaryLane = selectPrimaryLane(thread.workerLanes);
   const canRestart = canRestartPlanning(thread);
+  const replanBlockedCopy = thread.archivedAt
+    ? "Archived threads are read-only. Proposal and request-group replanning are unavailable."
+    : "Request-group replanning unlocks after queued coding and review work finish.";
   const timelineItems = buildTimelineItems({
     detail,
     logGroups,
@@ -1868,8 +1871,7 @@ export function ThreadDetailTimeline({
                         </div>
                       ) : (
                         <p className="thread-chat-copy">
-                          Request-group replanning unlocks after queued coding and review work
-                          finish.
+                          {replanBlockedCopy}
                         </p>
                       )
                     ) : null}

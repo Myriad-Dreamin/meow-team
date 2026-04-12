@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canArchiveThread,
+  canRestartPlanning,
   describeLane,
   formatPoolSlot,
   formatCommitHash,
@@ -346,6 +347,26 @@ describe("thread view primary lane helpers", () => {
 });
 
 describe("thread visibility helpers", () => {
+  it("blocks replanning for archived thread summaries", () => {
+    expect(canRestartPlanning(createThread())).toBe(true);
+    expect(canRestartPlanning(createThread({ archivedAt: FIXED_TIMESTAMP }))).toBe(false);
+    expect(
+      canRestartPlanning(
+        createThread({
+          workerCounts: {
+            idle: 0,
+            queued: 1,
+            coding: 0,
+            reviewing: 0,
+            awaitingHumanApproval: 0,
+            approved: 0,
+            failed: 0,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("only allows archiving inactive, unarchived thread summaries", () => {
     expect(canArchiveThread(createThread())).toBe(true);
     expect(canArchiveThread(createThread({ status: "running" }))).toBe(false);
