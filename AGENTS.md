@@ -11,7 +11,7 @@
 - Build and evolve agent behavior through Codex CLI runs, repo-local skills, and explicit application orchestration.
 - Keep role system prompts in Markdown under [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles).
 - The default workflow is `planner -> coder -> reviewer`.
-- Extra roles are supported by adding a Markdown file and then referencing its role ID in `team.config.ts`.
+- Extra roles are supported by adding a `*.prompt.md` file under [`prompts/roles`](/home/kamiyoru/work/ts/meow-team/prompts/roles), registering it in [`prompts/roles/index.ts`](/home/kamiyoru/work/ts/meow-team/prompts/roles/index.ts), running `pnpm meow-prompt:sync-types`, and then referencing its role ID in [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
 - Use the OpenAI backend for model configuration, with Codex as the default coding model.
 - Prefer deterministic routing and explicit handoff state over hidden prompt-only coordination.
 - Keep continuous-run persistence inside [`lib/team/history.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/history.ts).

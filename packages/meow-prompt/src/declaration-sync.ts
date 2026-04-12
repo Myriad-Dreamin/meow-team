@@ -3,7 +3,12 @@ import { fileURLToPath } from "node:url";
 import { compilePromptModule, getPromptTemplateDeclarationPath } from "./compiler";
 
 const defaultRuntimeModulePath = fileURLToPath(new URL("./runtime", import.meta.url));
-const promptTemplateBootstrapRoots = ["/app", "/docs", "/lib/team/roles"] as const;
+const promptTemplateBootstrapRoots = [
+  "/app",
+  "/docs",
+  "/lib/team/roles",
+  "/prompts/roles",
+] as const;
 const promptTemplateBootstrapPatterns = promptTemplateBootstrapRoots.flatMap((root) => [
   `${root}/**/*.prompt.md`,
   `${root}/**/*.template.md`,

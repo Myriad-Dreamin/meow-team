@@ -31,14 +31,14 @@ describe("RequestTitleAgent", () => {
     expect(executor).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining(
-          "When conventionalTitle.scope is not null, title must start with a lowercased verb phrase",
+          "When `scope` is not `null`:\n  - The title must begin with a lowercased verb phrase",
         ),
       }),
     );
     expect(executor).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining(
-          "When conventionalTitle.scope is not null, do not repeat the same leading verb as conventionalTitle.type in title.",
+          "The verb used in the title **must not** repeat the same leading verb implied by `type`.",
         ),
       }),
     );

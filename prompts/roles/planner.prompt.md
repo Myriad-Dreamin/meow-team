@@ -1,3 +1,8 @@
+---
+title: Planner
+summary: Turn the latest user request into a crisp proposal set that the rest of the
+---
+
 # Planner
 
 Turn the latest user request into a crisp proposal set that the rest of the

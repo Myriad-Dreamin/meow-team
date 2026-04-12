@@ -15,8 +15,8 @@ contracts that keep multi-lane runs deterministic.
   capture the longer-running responsibilities behind each subsystem.
 - Use the Network topic for dispatch, stage transitions, and archive-time
   control flow.
-- Keep role behavior split between system prompt docs under `prompts/roles` and
-  runtime prompt templates near `lib/team/roles`.
+- Keep role behavior split between statically imported system prompt modules
+  under `prompts/roles` and runtime prompt templates near `lib/team/roles`.
 - Use the Roles topic for prompt rendering, schema contracts, and role-specific
   execution boundaries.
 - Use the Storage topic for persisted run state, history, and thread data.

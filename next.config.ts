@@ -12,6 +12,7 @@ const meowPromptLoader = path.join(
 
 const nextConfig: NextConfig = {
   turbopack: {
+    root: rootDirectory,
     rules: {
       "*.prompt.md": {
         loaders: [meowPromptLoader],
@@ -22,6 +23,18 @@ const nextConfig: NextConfig = {
         as: "*.js",
       },
     },
+  },
+  webpack(config) {
+    config.module.rules.push({
+      test: /\.(prompt|template)\.md$/,
+      use: [
+        {
+          loader: meowPromptLoader,
+        },
+      ],
+    });
+
+    return config;
   },
 };
 

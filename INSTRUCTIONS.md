@@ -21,7 +21,7 @@ small continuous team and runs it through a simple web interface.
   - `planner`
   - `coder`
   - `reviewer`
-- Additional roles should be easy to add through Markdown prompt files.
+- Additional roles should be easy to add through `prompts/roles/*.prompt.md` modules, explicit entries in `prompts/roles/index.ts`, and `pnpm meow-prompt:sync-types`.
 - Team ownership should be defined in a single configuration file.
 - The team should support continuous runs by persisting thread history.
 

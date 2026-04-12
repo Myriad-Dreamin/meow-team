@@ -1,4 +1,7 @@
-import yaml from "js-yaml";
+import { existsSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 type LoadYaml = (source: string, options?: { schema?: unknown }) => unknown;
 type ParseYaml = (source: string) => unknown;
@@ -8,13 +11,58 @@ type YamlModule = {
 };
 
 let parseYaml: ParseYaml | null = null;
+let yamlModule: YamlModule | null = null;
+
+const currentFilePath = fileURLToPath(import.meta.url);
+const packageRoot = path.resolve(path.dirname(currentFilePath), "..");
+const workspaceRoot = path.resolve(packageRoot, "..", "..");
+
+const getJsYamlRequireBasePaths = (): string[] => {
+  const candidatePaths = [path.join(packageRoot, "package.json")];
+  const workspaceNodeModulesPath = path.join(workspaceRoot, "node_modules");
+
+  if (existsSync(workspaceNodeModulesPath)) {
+    const resolvedWorkspaceRoot = path.dirname(realpathSync(workspaceNodeModulesPath));
+    const resolvedPackageJsonPath = path.join(
+      resolvedWorkspaceRoot,
+      "packages",
+      "meow-prompt",
+      "package.json",
+    );
+
+    if (existsSync(resolvedPackageJsonPath)) {
+      candidatePaths.push(resolvedPackageJsonPath);
+    }
+  }
+
+  return [...new Set(candidatePaths)];
+};
+
+const getYamlModule = (): YamlModule => {
+  if (yamlModule) {
+    return yamlModule;
+  }
+
+  let lastError: unknown = null;
+
+  for (const requireBasePath of getJsYamlRequireBasePaths()) {
+    try {
+      yamlModule = createRequire(requireBasePath)("js-yaml") as YamlModule;
+      return yamlModule;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Unable to resolve js-yaml.");
+};
 
 const getParseYaml = (): ParseYaml => {
   if (parseYaml) {
     return parseYaml;
   }
 
-  const { load, JSON_SCHEMA } = yaml as YamlModule;
+  const { load, JSON_SCHEMA } = getYamlModule();
   parseYaml = (source) => load(source, { schema: JSON_SCHEMA });
   return parseYaml;
 };
