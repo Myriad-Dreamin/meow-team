@@ -1,15 +1,17 @@
 import { TeamWorkspace } from "@/components/team-workspace";
-import { teamConfig } from "@/team.config";
 import { listTeamThreadSummaries } from "@/lib/team/history";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
+import { getTeamServerState } from "@/lib/team/server-state";
+import { teamConfig } from "@/team.config";
 import { teamRuntimeConfig } from "@/lib/config/runtime";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const serverState = await getTeamServerState();
   const [availableRepositories, threadSummaries] = await Promise.all([
     listConfiguredRepositories(teamConfig),
-    listTeamThreadSummaries(teamConfig.storage.threadFile),
+    listTeamThreadSummaries(serverState.threadStorage),
   ]);
 
   const hasApiKey = teamRuntimeConfig.hasApiKey;

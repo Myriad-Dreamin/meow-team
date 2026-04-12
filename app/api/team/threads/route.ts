@@ -1,6 +1,5 @@
 // API docs: docs/api/team/threads/index.md
 import { NextResponse } from "next/server";
-import { teamConfig } from "@/team.config";
 import { listTeamThreadSummaries } from "@/lib/team/history";
 import {
   createInitialTeamRunState,
@@ -8,6 +7,7 @@ import {
   persistTeamRunState,
   runTeam,
 } from "@/lib/team/network";
+import { getTeamServerState } from "@/lib/team/server-state";
 
 export const runtime = "nodejs";
 
@@ -19,7 +19,8 @@ export async function GET() {
     });
     await persistTeamRunState(env, initialState);
     await runTeam(env, initialState);
-    const threads = await listTeamThreadSummaries(teamConfig.storage.threadFile);
+    const serverState = await getTeamServerState();
+    const threads = await listTeamThreadSummaries(serverState.threadStorage);
     return NextResponse.json({
       threads,
     });

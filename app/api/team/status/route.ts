@@ -2,14 +2,15 @@
 import { NextResponse } from "next/server";
 import { getTeamHostStatusSnapshot } from "@/lib/status/host";
 import { getTeamWorkspaceStatusSnapshot } from "@/lib/team/history";
-import { teamConfig } from "@/team.config";
+import { getTeamServerState } from "@/lib/team/server-state";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
     const sampledAt = new Date().toISOString();
-    const workspace = await getTeamWorkspaceStatusSnapshot(teamConfig.storage.threadFile);
+    const serverState = await getTeamServerState();
+    const workspace = await getTeamWorkspaceStatusSnapshot(serverState.threadStorage);
     const host = getTeamHostStatusSnapshot();
 
     return NextResponse.json(

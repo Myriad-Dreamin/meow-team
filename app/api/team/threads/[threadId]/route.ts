@@ -1,6 +1,5 @@
 // API docs: docs/api/team/threads/threadId.md
 import { NextResponse } from "next/server";
-import { teamConfig } from "@/team.config";
 import { getTeamThreadDetail } from "@/lib/team/history";
 import {
   createInitialTeamRunState,
@@ -8,6 +7,7 @@ import {
   persistTeamRunState,
   runTeam,
 } from "@/lib/team/network";
+import { getTeamServerState } from "@/lib/team/server-state";
 
 export const runtime = "nodejs";
 
@@ -28,7 +28,8 @@ export async function GET(_request: Request, context: RouteContext) {
     });
     await persistTeamRunState(env, initialState);
     await runTeam(env, initialState);
-    const thread = await getTeamThreadDetail(teamConfig.storage.threadFile, threadId);
+    const serverState = await getTeamServerState();
+    const thread = await getTeamThreadDetail(serverState.threadStorage, threadId);
 
     if (!thread) {
       return NextResponse.json(

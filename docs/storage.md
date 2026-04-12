@@ -81,6 +81,9 @@ subsequent reads and writes use SQLite only.
 
 ## Performance notes
 
+- The server runtime keeps a shared `DatabaseSync` connection per SQLite path in
+  server-only state so the Next.js APIs do not reopen the same database on
+  every request.
 - SQLite runs in WAL mode for file-backed databases so reads do not block on the
   common write path.
 - `busy_timeout` is enabled to smooth short lock contention.

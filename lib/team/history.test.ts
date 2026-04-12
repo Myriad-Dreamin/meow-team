@@ -8,7 +8,10 @@ import {
   updateTeamThreadRecord,
 } from "@/lib/team/history";
 import type { TeamRunState } from "@/lib/team/network";
-import { resolveTeamThreadStorageLocation } from "@/lib/team/storage";
+import {
+  resetTeamThreadStorageStateCacheForTests,
+  resolveTeamThreadStorageLocation,
+} from "@/lib/team/storage";
 import type {
   TeamDispatchAssignment,
   TeamThreadStatus,
@@ -156,6 +159,8 @@ const createStoredThread = ({
 };
 
 afterEach(async () => {
+  await resetTeamThreadStorageStateCacheForTests();
+
   await Promise.all(
     [...temporaryFiles].map(async (filePath) => {
       await fs.rm(filePath, { force: true });

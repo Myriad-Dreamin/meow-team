@@ -1,7 +1,6 @@
 // API docs: docs/api/team/feedback.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { teamConfig } from "@/team.config";
 import { prepareAssignmentReplan } from "@/lib/team/dispatch";
 import { markTeamThreadFailed } from "@/lib/team/history";
 import {
@@ -11,6 +10,7 @@ import {
   runTeam,
 } from "@/lib/team/network";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
+import { getTeamServerState } from "@/lib/team/server-state";
 
 export const runtime = "nodejs";
 
@@ -35,6 +35,7 @@ const feedbackSchema = z
 export async function POST(request: Request) {
   try {
     const body = feedbackSchema.parse(await request.json());
+    const serverState = await getTeamServerState();
 
     if (!teamRuntimeConfig.apiKey) {
       return NextResponse.json(
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
       const message = error instanceof Error ? error.message : "Unknown error.";
       console.error(`[team-feedback:${body.threadId}] ${message}`);
       await markTeamThreadFailed({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile: serverState.threadStorage,
         threadId: body.threadId,
         error: message,
       });

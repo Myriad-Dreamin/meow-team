@@ -53,6 +53,7 @@ import {
   runTeam,
   type TeamRunEnv,
 } from "@/lib/team/network";
+import { resetTeamThreadStorageStateCacheForTests } from "@/lib/team/storage";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
@@ -223,6 +224,7 @@ describe.sequential("runTeam", () => {
   });
 
   afterEach(async () => {
+    await resetTeamThreadStorageStateCacheForTests();
     teamConfig.storage.threadFile = originalThreadFile;
     teamConfig.dispatch.workerCount = originalWorkerCount;
     await rm(tempDirectory, {

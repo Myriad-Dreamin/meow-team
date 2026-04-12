@@ -32,6 +32,13 @@ export type TeamThreadStorageMetadata = {
   metadata: Record<string, string>;
 };
 
+export type TeamThreadStorageState = {
+  location: TeamThreadStorageLocation;
+  database: DatabaseSync;
+};
+
+export type TeamThreadStorageTarget = string | TeamThreadStorageState;
+
 type LegacyThreadStore = {
   threads?: Record<
     string,
@@ -68,6 +75,8 @@ type TeamThreadStorageUpdateResult<T> = {
   nextRecord: TeamThreadStorageRecord;
   value: T;
 };
+
+type TeamThreadStorageStateCache = Map<string, Promise<TeamThreadStorageState>>;
 
 const mutationQueues = new Map<string, Promise<unknown>>();
 const LEGACY_JSON_READ_RETRY_COUNT = 3;
@@ -198,6 +207,25 @@ export const resolveTeamThreadStorageLocation = (threadFile: string): TeamThread
   };
 };
 
+const getTeamThreadStorageStateCache = (): TeamThreadStorageStateCache => {
+  const globalCache = globalThis as typeof globalThis & {
+    __teamThreadStorageStateCache?: TeamThreadStorageStateCache;
+  };
+
+  globalCache.__teamThreadStorageStateCache ??= new Map();
+  return globalCache.__teamThreadStorageStateCache;
+};
+
+const describeTeamThreadStorageTarget = (target: TeamThreadStorageTarget): string => {
+  return typeof target === "string" ? target : target.location.inputPath;
+};
+
+const resolveTeamThreadStorageLocationFromTarget = (
+  target: TeamThreadStorageTarget,
+): TeamThreadStorageLocation => {
+  return typeof target === "string" ? resolveTeamThreadStorageLocation(target) : target.location;
+};
+
 const ensureDatabaseDirectory = async (sqlitePath: string): Promise<void> => {
   if (sqlitePath === ":memory:") {
     return;
@@ -212,6 +240,56 @@ const configureDatabase = (database: DatabaseSync, location: TeamThreadStorageLo
 
   if (location.sqlitePath !== ":memory:") {
     database.exec("PRAGMA journal_mode = WAL");
+  }
+};
+
+export const getTeamThreadStorageState = async (
+  threadFile: string,
+): Promise<TeamThreadStorageState> => {
+  const location = resolveTeamThreadStorageLocation(threadFile);
+  const cache = getTeamThreadStorageStateCache();
+  let statePromise = cache.get(location.sqlitePath);
+
+  if (!statePromise) {
+    statePromise = (async () => {
+      await ensureDatabaseDirectory(location.sqlitePath);
+
+      const database = new DatabaseSync(location.sqlitePath);
+      try {
+        configureDatabase(database, location);
+        return {
+          location,
+          database,
+        };
+      } catch (error) {
+        database.close();
+        throw error;
+      }
+    })();
+
+    cache.set(location.sqlitePath, statePromise);
+  }
+
+  try {
+    return await statePromise;
+  } catch (error) {
+    if (cache.get(location.sqlitePath) === statePromise) {
+      cache.delete(location.sqlitePath);
+    }
+
+    throw error;
+  }
+};
+
+export const resetTeamThreadStorageStateCacheForTests = async (): Promise<void> => {
+  const cache = getTeamThreadStorageStateCache();
+  const states = await Promise.allSettled(cache.values());
+  cache.clear();
+
+  for (const state of states) {
+    if (state.status === "fulfilled") {
+      state.value.database.close();
+    }
   }
 };
 
@@ -483,21 +561,15 @@ const importLegacyThreadStoreIfNeeded = async (
 };
 
 const withTeamThreadDatabase = async <T>(
-  threadFile: string,
+  target: TeamThreadStorageTarget,
   task: (database: DatabaseSync, location: TeamThreadStorageLocation) => Promise<T> | T,
 ): Promise<T> => {
-  const location = resolveTeamThreadStorageLocation(threadFile);
-  await ensureDatabaseDirectory(location.sqlitePath);
+  const state = typeof target === "string" ? await getTeamThreadStorageState(target) : target;
 
-  const database = new DatabaseSync(location.sqlitePath);
-  try {
-    configureDatabase(database, location);
-    applyTeamThreadStorageMigrations({ database });
-    await importLegacyThreadStoreIfNeeded(database, location);
-    return await task(database, location);
-  } finally {
-    database.close();
-  }
+  applyTeamThreadStorageMigrations({ database: state.database });
+  await importLegacyThreadStoreIfNeeded(state.database, state.location);
+
+  return await task(state.database, state.location);
 };
 
 const mapThreadStorageRow = (row: ThreadStorageRow): TeamThreadStorageRecord => {
@@ -556,44 +628,44 @@ const getThreadRow = (database: DatabaseSync, threadId: string): TeamThreadStora
 };
 
 export const listTeamThreadStorageRecords = async (
-  threadFile: string,
+  target: TeamThreadStorageTarget,
   limit?: number,
 ): Promise<TeamThreadStorageRecord[]> => {
-  return withTeamThreadDatabase(threadFile, (database) => {
+  return withTeamThreadDatabase(target, (database) => {
     return listThreadRows(database, limit);
   });
 };
 
 export const getTeamThreadStorageRecord = async (
-  threadFile: string,
+  target: TeamThreadStorageTarget,
   threadId: string,
 ): Promise<TeamThreadStorageRecord | null> => {
-  return withTeamThreadDatabase(threadFile, (database) => {
+  return withTeamThreadDatabase(target, (database) => {
     return getThreadRow(database, threadId);
   });
 };
 
 export const updateTeamThreadStorageRecord = async <T>({
-  threadFile,
+  threadFile: target,
   threadId,
   updater,
 }: {
-  threadFile: string;
+  threadFile: TeamThreadStorageTarget;
   threadId: string;
   updater: (
     record: TeamThreadStorageRecord | null,
   ) => Promise<TeamThreadStorageUpdateResult<T>> | TeamThreadStorageUpdateResult<T>;
 }): Promise<T> => {
-  const location = resolveTeamThreadStorageLocation(threadFile);
+  const location = resolveTeamThreadStorageLocationFromTarget(target);
 
   return queueStorageMutation(location.sqlitePath, () =>
-    withTeamThreadDatabase(threadFile, async (database) => {
+    withTeamThreadDatabase(target, async (database) => {
       const currentRecord = getThreadRow(database, threadId);
       const { nextRecord, value } = await updater(currentRecord);
 
       if (nextRecord.threadId !== threadId) {
         throw new Error(
-          `Thread storage update for ${threadId} attempted to write record ${nextRecord.threadId}.`,
+          `Thread storage update for ${threadId} in ${describeTeamThreadStorageTarget(target)} attempted to write record ${nextRecord.threadId}.`,
         );
       }
 

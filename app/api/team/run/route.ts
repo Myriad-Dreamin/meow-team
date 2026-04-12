@@ -18,6 +18,7 @@ import {
   runTeam,
   type TeamRunSummary,
 } from "@/lib/team/network";
+import { getTeamServerState } from "@/lib/team/server-state";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 
 export const runtime = "nodejs";
@@ -61,6 +62,7 @@ const runTeamSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = runTeamSchema.parse(await request.json());
+    const serverState = await getTeamServerState();
 
     if (!teamRuntimeConfig.apiKey) {
       return NextResponse.json(
@@ -73,7 +75,7 @@ export async function POST(request: Request) {
 
     if (body.threadId) {
       const hasActiveDispatch = await threadHasActiveDispatchAssignment(
-        teamConfig.storage.threadFile,
+        serverState.threadStorage,
         body.threadId,
       );
 
@@ -100,9 +102,7 @@ export async function POST(request: Request) {
     }
 
     if (selectedRepository) {
-      const activeDispatchThreadCount = await countActiveDispatchThreads(
-        teamConfig.storage.threadFile,
-      );
+      const activeDispatchThreadCount = await countActiveDispatchThreads(serverState.threadStorage);
       if (activeDispatchThreadCount >= teamConfig.dispatch.workerCount) {
         const capacityError = new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
         return NextResponse.json(
@@ -190,7 +190,7 @@ export async function POST(request: Request) {
             } else {
               try {
                 await markTeamThreadFailed({
-                  threadFile: teamConfig.storage.threadFile,
+                  threadFile: serverState.threadStorage,
                   threadId,
                   error: message,
                 });

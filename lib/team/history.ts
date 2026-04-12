@@ -10,6 +10,7 @@ import {
 import {
   getTeamThreadStorageRecord,
   listTeamThreadStorageRecords,
+  type TeamThreadStorageTarget,
   type TeamThreadStorageRecord,
   updateTeamThreadStorageRecord,
 } from "@/lib/team/storage";
@@ -130,6 +131,10 @@ export type TeamThreadDetail = {
 export type PendingDispatchAssignment = {
   threadId: string;
   assignment: TeamDispatchAssignment;
+};
+
+const describeThreadStorageTarget = (target: TeamThreadStorageTarget): string => {
+  return typeof target === "string" ? target : target.location.inputPath;
 };
 
 const readStoredThreadFromRecord = (record: TeamThreadStorageRecord): StoredThread => {
@@ -600,7 +605,7 @@ const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
 };
 
 export const listTeamThreadSummaries = async (
-  threadFile: string,
+  threadFile: TeamThreadStorageTarget,
   limit = 24,
 ): Promise<TeamThreadSummary[]> => {
   const storedThreads = await listTeamThreadStorageRecords(threadFile, limit);
@@ -608,7 +613,7 @@ export const listTeamThreadSummaries = async (
 };
 
 export const getTeamWorkspaceStatusSnapshot = async (
-  threadFile: string,
+  threadFile: TeamThreadStorageTarget,
 ): Promise<TeamWorkspaceStatusSnapshot> => {
   const storedThreads = await listTeamThreadStorageRecords(threadFile);
 
@@ -636,7 +641,7 @@ export const getTeamWorkspaceStatusSnapshot = async (
 };
 
 export const getTeamThreadRecord = async (
-  threadFile: string,
+  threadFile: TeamThreadStorageTarget,
   threadId: string,
 ): Promise<TeamThreadRecord | null> => {
   const storedRecord = await getTeamThreadStorageRecord(threadFile, threadId);
@@ -646,7 +651,7 @@ export const getTeamThreadRecord = async (
 };
 
 export const getTeamThreadDetail = async (
-  threadFile: string,
+  threadFile: TeamThreadStorageTarget,
   threadId: string,
 ): Promise<TeamThreadDetail | null> => {
   const thread = await getTeamThreadRecord(threadFile, threadId);
@@ -672,7 +677,7 @@ export const updateTeamThreadRecord = async <T>({
   threadId,
   updater,
 }: {
-  threadFile: string;
+  threadFile: TeamThreadStorageTarget;
   threadId: string;
   updater: (thread: TeamThreadRecord, now: string) => Promise<T> | T;
 }): Promise<T> => {
@@ -681,7 +686,9 @@ export const updateTeamThreadRecord = async <T>({
     threadId,
     updater: async (storedRecord) => {
       if (!storedRecord) {
-        throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
+        throw new Error(
+          `Thread ${threadId} was not found in ${describeThreadStorageTarget(threadFile)}.`,
+        );
       }
 
       const now = new Date().toISOString();
@@ -699,7 +706,7 @@ export const updateTeamThreadRecord = async <T>({
 };
 
 export const listPendingDispatchAssignments = async (
-  threadFile: string,
+  threadFile: TeamThreadStorageTarget,
   threadId?: string,
 ): Promise<PendingDispatchAssignment[]> => {
   const storedThreads = threadId
@@ -732,7 +739,7 @@ export const listPendingDispatchAssignments = async (
 };
 
 export const threadHasActiveDispatchAssignment = async (
-  threadFile: string,
+  threadFile: TeamThreadStorageTarget,
   threadId: string,
 ): Promise<boolean> => {
   const thread = await getTeamThreadRecord(threadFile, threadId);
@@ -745,7 +752,9 @@ export const threadHasActiveDispatchAssignment = async (
   );
 };
 
-export const countActiveDispatchThreads = async (threadFile: string): Promise<number> => {
+export const countActiveDispatchThreads = async (
+  threadFile: TeamThreadStorageTarget,
+): Promise<number> => {
   const pendingAssignments = await listPendingDispatchAssignments(threadFile);
   return new Set(pendingAssignments.map((pending) => pending.threadId)).size;
 };
@@ -755,7 +764,7 @@ export const markTeamThreadFailed = async ({
   threadId,
   error,
 }: {
-  threadFile: string;
+  threadFile: TeamThreadStorageTarget;
   threadId: string;
   error: string;
 }): Promise<void> => {
@@ -779,7 +788,7 @@ export const upsertTeamThreadRun = async ({
   state,
   input,
 }: {
-  threadFile: string;
+  threadFile: TeamThreadStorageTarget;
   threadId: string;
   state: TeamRunState;
   input: string;
@@ -837,7 +846,7 @@ export const appendTeamExecutionStep = async ({
   state,
   step,
 }: {
-  threadFile: string;
+  threadFile: TeamThreadStorageTarget;
   threadId: string;
   state: TeamRunState;
   step: TeamExecutionStep;
