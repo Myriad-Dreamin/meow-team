@@ -3,6 +3,11 @@ import "server-only";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/network";
 import {
+  buildTeamRepositoryPickerModel,
+  type TeamRepositoryPickerModel,
+  type TeamRepositoryUsageRecord,
+} from "@/lib/team/repository-picker";
+import {
   normalizeConventionalTitleMetadata,
   parseConventionalTitle,
   resolveDisplayRequestTitle,
@@ -131,6 +136,34 @@ export type TeamThreadDetail = {
 export type PendingDispatchAssignment = {
   threadId: string;
   assignment: TeamDispatchAssignment;
+};
+
+const getLatestThreadRequestTimestamp = (thread: TeamThreadRecord): string => {
+  return thread.userMessages.at(-1)?.timestamp ?? thread.updatedAt ?? thread.createdAt;
+};
+
+const collectRepositoryUsageRecords = (thread: TeamThreadRecord): TeamRepositoryUsageRecord[] => {
+  const usageRecords: TeamRepositoryUsageRecord[] = [];
+
+  if (thread.data.selectedRepository) {
+    usageRecords.push({
+      repositoryId: thread.data.selectedRepository.id,
+      requestedAt: getLatestThreadRequestTimestamp(thread),
+    });
+  }
+
+  for (const assignment of thread.dispatchAssignments) {
+    if (!assignment.repository) {
+      continue;
+    }
+
+    usageRecords.push({
+      repositoryId: assignment.repository.id,
+      requestedAt: assignment.requestedAt || assignment.startedAt || thread.updatedAt,
+    });
+  }
+
+  return usageRecords;
 };
 
 const describeThreadStorageTarget = (target: TeamThreadStorageTarget): string => {
@@ -610,6 +643,30 @@ export const listTeamThreadSummaries = async (
 ): Promise<TeamThreadSummary[]> => {
   const storedThreads = await listTeamThreadStorageRecords(threadFile, limit);
   return storedThreads.map((record) => summarizeThread(readStoredThreadFromRecord(record)));
+};
+
+export const getTeamRepositoryPickerModel = async ({
+  threadFile,
+  repositories,
+}: {
+  threadFile: TeamThreadStorageTarget;
+  repositories: TeamRepositoryOption[];
+}): Promise<TeamRepositoryPickerModel> => {
+  const storedThreads = await listTeamThreadStorageRecords(threadFile);
+  const usageRecords = storedThreads.flatMap((record) => {
+    const storedThread = readStoredThreadFromRecord(record);
+    const thread = synchronizeTeamThreadRun(
+      normalizeStoredThread(storedThread),
+      storedThread.updatedAt,
+    );
+
+    return collectRepositoryUsageRecords(thread);
+  });
+
+  return buildTeamRepositoryPickerModel({
+    repositories,
+    usageRecords,
+  });
 };
 
 export const getTeamWorkspaceStatusSnapshot = async (

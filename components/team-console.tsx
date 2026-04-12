@@ -8,6 +8,7 @@ import {
 } from "@/components/thread-log-panel";
 import type { TeamRunSummary } from "@/lib/team/network";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 
 type TeamConsoleProps = {
@@ -15,7 +16,7 @@ type TeamConsoleProps = {
   initialPrompt: string;
   initialLogThreadId: string | null;
   onThreadActivity?: (threadId: string | null) => void;
-  repositories: TeamRepositoryOption[];
+  repositoryPicker: TeamRepositoryPickerModel;
   workerCount: number;
 };
 
@@ -188,12 +189,16 @@ const buildUnexpectedResponseMessage = (response: Response, body: string): strin
   return `Team run failed with HTTP ${response.status}. The server returned an unexpected response body.`;
 };
 
+const formatRepositoryLabel = (repository: TeamRepositoryOption): string => {
+  return `${repository.rootLabel} / ${repository.relativePath === "." ? repository.name : repository.relativePath}`;
+};
+
 export function TeamConsole({
   disabled,
   initialPrompt,
   initialLogThreadId,
   onThreadActivity,
-  repositories,
+  repositoryPicker,
   workerCount,
 }: TeamConsoleProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -213,7 +218,8 @@ export function TeamConsole({
   const isRunning = runState.status === "running";
   const isAwaitingBranchDeletion = pendingBranchDeletion !== null;
   const isBusy = isRunning || isAwaitingBranchDeletion;
-  const hasRepositories = repositories.length > 0;
+  const hasRepositories = repositoryPicker.orderedRepositories.length > 0;
+  const hasSuggestedRepositories = repositoryPicker.suggestedRepositories.length > 0;
 
   useEffect(() => {
     const storedThreadId = window.localStorage.getItem(ACTIVE_LOG_THREAD_ID_STORAGE_KEY);
@@ -522,8 +528,9 @@ export function TeamConsole({
         </p>
         {hasRepositories ? (
           <p className="field-hint">
-            Select a repository before planning proposals. Only repositories discovered from
-            directories configured in `team.config.ts` can be selected here.
+            Suggested repositories are ranked from prior Run Team requests. Every repository
+            discovered from directories configured in `team.config.ts` stays selectable, and the
+            picker keeps your current choice until you change it.
           </p>
         ) : null}
       </div>
@@ -574,12 +581,30 @@ export function TeamConsole({
                 disabled={disabled || isBusy}
               >
                 <option value="">No repository selected</option>
-                {repositories.map((repository) => (
-                  <option key={repository.id} value={repository.id}>
-                    {repository.rootLabel} /{" "}
-                    {repository.relativePath === "." ? repository.name : repository.relativePath}
-                  </option>
-                ))}
+                {hasSuggestedRepositories ? (
+                  <optgroup label="Suggested from prior team runs">
+                    {repositoryPicker.suggestedRepositories.map((repository) => (
+                      <option key={repository.id} value={repository.id}>
+                        {formatRepositoryLabel(repository)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {repositoryPicker.remainingRepositories.length > 0 ? (
+                  <optgroup
+                    label={
+                      hasSuggestedRepositories
+                        ? "Other accessible repositories"
+                        : "Accessible repositories"
+                    }
+                  >
+                    {repositoryPicker.remainingRepositories.map((repository) => (
+                      <option key={repository.id} value={repository.id}>
+                        {formatRepositoryLabel(repository)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
             </label>
           ) : (
