@@ -65,7 +65,7 @@
       "properties": {
         "meowTeam.backendBaseUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:3000",
+          "default": "http://127.0.0.1:21125",
           "markdownDescription": "Base URL for the Next.js backend that serves `/api/team/*`.",
           "pattern": "^https?://.+"
         }
