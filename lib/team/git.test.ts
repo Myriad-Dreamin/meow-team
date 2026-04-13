@@ -15,10 +15,9 @@ import {
   archiveOpenSpecChangeInWorktree,
   getBranchHead,
   inspectOpenSpecChangeArchiveState,
-  normalizeGitHubRepositoryUrl,
-  resolveGitHubPushRemote,
   tryRebaseWorktreeBranch,
 } from "@/lib/git/ops";
+import { normalizeGitHubRepositoryUrl, resolveGitHubPushRemote } from "@/lib/platform/gh";
 const temporaryDirectories = new Set<string>();
 
 const runGit = async (repositoryPath: string, args: string[]): Promise<string> => {

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   commitWorktreeChangesMock,
-  createOrUpdateGitHubPullRequestMock,
   detectBranchConflictMock,
   deleteManagedBranchesMock,
   ensureLaneWorktreeMock,
@@ -17,11 +16,11 @@ const {
   materializeAssignmentProposalsMock,
   pushLaneBranchMock,
   resolveRepositoryBaseBranchMock,
+  synchronizePullRequestMock,
   tryRebaseWorktreeBranchMock,
 } = vi.hoisted(() => {
   return {
     commitWorktreeChangesMock: vi.fn(),
-    createOrUpdateGitHubPullRequestMock: vi.fn(),
     detectBranchConflictMock: vi.fn(),
     deleteManagedBranchesMock: vi.fn(),
     ensureLaneWorktreeMock: vi.fn(),
@@ -33,6 +32,7 @@ const {
     materializeAssignmentProposalsMock: vi.fn(),
     pushLaneBranchMock: vi.fn(),
     resolveRepositoryBaseBranchMock: vi.fn(),
+    synchronizePullRequestMock: vi.fn(),
     tryRebaseWorktreeBranchMock: vi.fn(),
   };
 });
@@ -42,7 +42,6 @@ vi.mock("@/lib/git/ops", async (importOriginal) => {
   return {
     ...actual,
     commitWorktreeChanges: commitWorktreeChangesMock,
-    createOrUpdateGitHubPullRequest: createOrUpdateGitHubPullRequestMock,
     detectBranchConflict: detectBranchConflictMock,
     getBranchHead: getBranchHeadMock,
     hasWorktreeChanges: hasWorktreeChangesMock,
@@ -50,6 +49,14 @@ vi.mock("@/lib/git/ops", async (importOriginal) => {
     listExistingBranches: listExistingBranchesMock,
     resolveRepositoryBaseBranch: resolveRepositoryBaseBranchMock,
     tryRebaseWorktreeBranch: tryRebaseWorktreeBranchMock,
+  };
+});
+
+vi.mock("@/lib/platform", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/platform")>();
+  return {
+    ...actual,
+    synchronizePullRequest: synchronizePullRequestMock,
   };
 });
 
@@ -2320,7 +2327,7 @@ describe.sequential("approveLaneProposal", () => {
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), "dispatch-proposal-"));
     teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
     commitWorktreeChangesMock.mockResolvedValue(undefined);
-    createOrUpdateGitHubPullRequestMock.mockReset();
+    synchronizePullRequestMock.mockReset();
     detectBranchConflictMock.mockReset();
     detectBranchConflictMock.mockResolvedValue(false);
     ensureLaneWorktreeMock.mockReset();
@@ -2378,7 +2385,7 @@ describe.sequential("approveLaneProposal", () => {
         ...basePushedCommit,
         commitHash: "rebased-review-commit",
       });
-    createOrUpdateGitHubPullRequestMock
+    synchronizePullRequestMock
       .mockResolvedValueOnce({
         url: "https://github.com/example/meow-team/pull/42",
       })
@@ -2414,7 +2421,7 @@ describe.sequential("approveLaneProposal", () => {
     const draftLane = draftThread?.dispatchAssignments[0]?.lanes[0];
     const trackingPullRequestId = draftLane?.pullRequest?.id;
 
-    expect(createOrUpdateGitHubPullRequestMock).toHaveBeenNthCalledWith(1, {
+    expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(1, {
       repositoryPath: dispatchRepository.path,
       branchName: "requests/example/a1-proposal-1",
       baseBranch: "main",
@@ -2451,7 +2458,7 @@ describe.sequential("approveLaneProposal", () => {
       branchName: "requests/example/a1-proposal-1",
       commitHash: "rebased-review-commit",
     });
-    expect(createOrUpdateGitHubPullRequestMock).toHaveBeenNthCalledWith(2, {
+    expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(2, {
       repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
       branchName: "requests/example/a1-proposal-1",
       baseBranch: "main",
@@ -2533,7 +2540,7 @@ describe.sequential("approveLaneProposal", () => {
     });
 
     expect(pushLaneBranchMock).not.toHaveBeenCalled();
-    expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
+    expect(synchronizePullRequestMock).not.toHaveBeenCalled();
     expect(tryRebaseWorktreeBranchMock).toHaveBeenCalledWith({
       worktreePath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
       baseBranch: "main",
@@ -2706,7 +2713,7 @@ describe.sequential("approveLanePullRequest", () => {
       commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
       commitHash: "archive-commit",
     });
-    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+    synchronizePullRequestMock.mockResolvedValue({
       url: "https://github.com/example/meow-team/pull/42",
     });
 
@@ -2736,7 +2743,7 @@ describe.sequential("approveLanePullRequest", () => {
       message: "coder: archive change-1",
     });
     expect(commitWorktreeChangesMock).toHaveBeenCalledTimes(1);
-    expect(createOrUpdateGitHubPullRequestMock).toHaveBeenCalledWith({
+    expect(synchronizePullRequestMock).toHaveBeenCalledWith({
       repositoryPath: `${worktreeRoot}/meow-1`,
       branchName: "requests/example/a1-proposal-1",
       baseBranch: "main",
@@ -2773,7 +2780,7 @@ describe.sequential("approveLanePullRequest", () => {
       commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
       commitHash: "archive-commit",
     });
-    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+    synchronizePullRequestMock.mockResolvedValue({
       url: "https://github.com/example/meow-team/pull/77",
     });
 
@@ -2795,7 +2802,7 @@ describe.sequential("approveLanePullRequest", () => {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
 
-    expect(createOrUpdateGitHubPullRequestMock).toHaveBeenCalledWith(
+    expect(synchronizePullRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "dev(vsc/command): Ship the feature",
       }),
@@ -2818,7 +2825,7 @@ describe.sequential("approveLanePullRequest", () => {
       commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
       commitHash: "archive-commit",
     });
-    createOrUpdateGitHubPullRequestMock.mockResolvedValue({
+    synchronizePullRequestMock.mockResolvedValue({
       url: "https://github.com/example/meow-team/pull/88",
     });
 
@@ -2898,7 +2905,7 @@ describe.sequential("approveLanePullRequest", () => {
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
 
     expect(pushLaneBranchMock).not.toHaveBeenCalled();
-    expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
+    expect(synchronizePullRequestMock).not.toHaveBeenCalled();
     expect(lane?.proposalPath).toBe("openspec/changes/change-1");
     expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
     expect(lane?.pullRequest?.status).toBe("failed");
@@ -2915,7 +2922,7 @@ describe.sequential("approveLanePullRequest", () => {
       commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
       commitHash: "archive-commit",
     });
-    createOrUpdateGitHubPullRequestMock.mockRejectedValue(new Error("gh auth token missing"));
+    synchronizePullRequestMock.mockRejectedValue(new Error("gh auth token missing"));
 
     await writeApprovalThreadStore(createApprovalLane());
 
@@ -2959,7 +2966,7 @@ describe.sequential("approveLanePullRequest", () => {
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
 
     expect(pushLaneBranchMock).not.toHaveBeenCalled();
-    expect(createOrUpdateGitHubPullRequestMock).not.toHaveBeenCalled();
+    expect(synchronizePullRequestMock).not.toHaveBeenCalled();
     expect(lane?.proposalPath).toBe("openspec/changes/change-1");
     expect(lane?.latestImplementationCommit).toBe("review-commit");
     expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
