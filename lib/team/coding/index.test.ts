@@ -110,7 +110,7 @@ import {
   teamNetworkDispatchOps,
   TeamThreadReplanError,
   type TeamRunEnv,
-} from "@/lib/team/network";
+} from "@/lib/team/coding";
 import {
   resetTeamThreadStorageStateCacheForTests,
   updateTeamThreadStorageRecord,
@@ -217,7 +217,9 @@ const createReplayAssignment = (
   ...overrides,
 });
 
-const writeStoredThreadRecord = async (thread: TeamThreadRecord): Promise<void> => {
+const writeStoredThreadRecord = async (
+  thread: Omit<TeamThreadRecord, "archivedAt"> & { archivedAt?: TeamThreadRecord["archivedAt"] },
+): Promise<void> => {
   await updateTeamThreadStorageRecord({
     threadFile: teamConfig.storage.threadFile,
     threadId: thread.threadId,
@@ -225,7 +227,10 @@ const writeStoredThreadRecord = async (thread: TeamThreadRecord): Promise<void> 
       value: undefined,
       nextRecord: {
         threadId: thread.threadId,
-        payloadJson: JSON.stringify(thread),
+        payloadJson: JSON.stringify({
+          archivedAt: null,
+          ...thread,
+        }),
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
       },
@@ -2353,9 +2358,11 @@ describe.sequential("approveLaneProposal", () => {
   });
 
   it("creates a draft GitHub PR before coding and rebases cleanly onto main before readying the tracking PR", async () => {
-    let resolveCoder:
-      | ((value: Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>) => void)
-      | null = null;
+    let resolveCoder: (
+      value: Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>,
+    ) => void = () => {
+      throw new Error("Coder resolver was not initialized.");
+    };
     const coderRun = vi.fn(
       () =>
         new Promise<Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>>((resolve) => {
@@ -2430,7 +2437,7 @@ describe.sequential("approveLaneProposal", () => {
       draft: true,
     });
 
-    resolveCoder?.({
+    resolveCoder({
       summary: "Implemented the approved proposal.",
       deliverable: "Implementation is ready for machine review.",
       decision: "continue",
@@ -2474,10 +2481,7 @@ describe.sequential("approveLaneProposal", () => {
       Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>
     >(() => undefined);
     const coderRun = vi
-      .fn<
-        TeamRoleDependencies["coderAgent"]["run"],
-        Parameters<TeamRoleDependencies["coderAgent"]["run"]>
-      >()
+      .fn<TeamRoleDependencies["coderAgent"]["run"]>()
       .mockResolvedValueOnce({
         summary: "Implemented the approved proposal.",
         deliverable: "Implementation is ready for machine review.",

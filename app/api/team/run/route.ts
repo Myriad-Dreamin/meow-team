@@ -17,7 +17,7 @@ import {
   persistTeamRunState,
   runTeam,
   type TeamRunSummary,
-} from "@/lib/team/network";
+} from "@/lib/team/coding";
 import { getTeamServerState } from "@/lib/team/server-state";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 

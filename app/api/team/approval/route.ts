@@ -6,7 +6,7 @@ import {
   createTeamRunEnv,
   persistTeamRunState,
   runTeam,
-} from "@/lib/team/network";
+} from "@/lib/team/coding";
 
 export const runtime = "nodejs";
 

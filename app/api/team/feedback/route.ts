@@ -9,7 +9,7 @@ import {
   persistTeamRunState,
   runTeam,
   TeamThreadReplanError,
-} from "@/lib/team/network";
+} from "@/lib/team/coding";
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
 import { getTeamServerState } from "@/lib/team/server-state";
 

@@ -11,7 +11,7 @@ import {
   updateTeamThreadRecord,
 } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
-import type { TeamRunState } from "@/lib/team/network";
+import type { TeamRunState } from "@/lib/team/coding/shared";
 import {
   resetTeamThreadStorageStateCacheForTests,
   resolveTeamThreadStorageLocation,
