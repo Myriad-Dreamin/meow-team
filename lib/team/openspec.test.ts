@@ -7,6 +7,7 @@ import type {
   OpenSpecMaterializerInput,
   OpenSpecMaterializerOutput,
 } from "@/lib/team/roles/openspec-materializer";
+import { buildExpectedOpenSpecArtifactPaths } from "@/lib/team/roles/openspec-materializer";
 
 const {
   commitWorktreeChangesMock,
@@ -81,6 +82,40 @@ const seedOpenSpecChange = async ({
   });
 };
 
+const writeExpectedProposalArtifacts = async ({
+  worktreePath,
+  proposalChangeName,
+  proposalPath,
+  contentByPath = {},
+}: {
+  worktreePath: string;
+  proposalChangeName: string;
+  proposalPath: string;
+  contentByPath?: Record<string, string>;
+}): Promise<string[]> => {
+  await seedOpenSpecChange({
+    worktreePath,
+    proposalChangeName,
+  });
+
+  const artifactPaths = buildExpectedOpenSpecArtifactPaths({
+    proposalChangeName,
+    proposalPath,
+  });
+
+  await Promise.all(
+    artifactPaths.map((artifactPath) =>
+      writeArtifact({
+        worktreePath,
+        relativePath: artifactPath,
+        content: contentByPath[artifactPath] ?? "# Artifact\n",
+      }),
+    ),
+  );
+
+  return artifactPaths;
+};
+
 afterEach(async () => {
   await Promise.all(
     [...temporaryDirectories].map(async (directoryPath) => {
@@ -133,13 +168,15 @@ describe("materializeAssignmentProposals", () => {
     const proposalPath = `openspec/changes/${proposalChangeName}`;
 
     hasWorktreeChangesMock.mockResolvedValue(true);
-    listWorktreeChangesMock.mockResolvedValue([
-      `${proposalPath}/.openspec.yaml`,
-      `${proposalPath}/design.md`,
-      `${proposalPath}/proposal.md`,
-      `${proposalPath}/specs/${proposalChangeName}/spec.md`,
-      `${proposalPath}/tasks.md`,
-    ]);
+    listWorktreeChangesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        `${proposalPath}/.openspec.yaml`,
+        `${proposalPath}/design.md`,
+        `${proposalPath}/proposal.md`,
+        `${proposalPath}/specs/${proposalChangeName}/spec.md`,
+        `${proposalPath}/tasks.md`,
+      ]);
 
     const openSpecMaterializerAgent: {
       run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
@@ -321,14 +358,16 @@ describe("materializeAssignmentProposals", () => {
     const proposalPath = "openspec/changes/change-1";
 
     hasWorktreeChangesMock.mockResolvedValue(true);
-    listWorktreeChangesMock.mockResolvedValue([
-      `${proposalPath}/.openspec.yaml`,
-      `${proposalPath}/design.md`,
-      `${proposalPath}/proposal.md`,
-      `${proposalPath}/specs/${proposalChangeName}/spec.md`,
-      `${proposalPath}/tasks.md`,
-      "README.md",
-    ]);
+    listWorktreeChangesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        `${proposalPath}/.openspec.yaml`,
+        `${proposalPath}/design.md`,
+        `${proposalPath}/proposal.md`,
+        `${proposalPath}/specs/${proposalChangeName}/spec.md`,
+        `${proposalPath}/tasks.md`,
+        "README.md",
+      ]);
 
     const openSpecMaterializerAgent: {
       run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
@@ -401,7 +440,224 @@ describe("materializeAssignmentProposals", () => {
         openSpecMaterializerAgent,
       }),
     ).rejects.toThrow(
-      "OpenSpec materializer left unexpected planner worktree changes for change-1: README.md.",
+      "OpenSpec materializer changed planner worktree paths outside change-1: README.md.",
+    );
+
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(ensureBranchRefMock).not.toHaveBeenCalled();
+  });
+
+  it("fails when a later materializer run removes artifacts from an earlier proposal", async () => {
+    const repositoryPath = await createTemporaryDirectory();
+    const worktreeRoot = path.join(repositoryPath, "worktrees");
+    const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
+    const firstProposalChangeName = "change-1";
+    const firstProposalPath = "openspec/changes/change-1";
+    const secondProposalChangeName = "change-2";
+    const secondProposalPath = "openspec/changes/change-2";
+    const firstProposalChangedPaths = [
+      `${firstProposalPath}/.openspec.yaml`,
+      ...buildExpectedOpenSpecArtifactPaths({
+        proposalChangeName: firstProposalChangeName,
+        proposalPath: firstProposalPath,
+      }),
+    ];
+    const secondProposalChangedPaths = [
+      `${secondProposalPath}/.openspec.yaml`,
+      ...buildExpectedOpenSpecArtifactPaths({
+        proposalChangeName: secondProposalChangeName,
+        proposalPath: secondProposalPath,
+      }),
+    ];
+
+    listWorktreeChangesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(firstProposalChangedPaths)
+      .mockResolvedValueOnce(firstProposalChangedPaths)
+      .mockResolvedValueOnce(
+        [
+          ...firstProposalChangedPaths.filter(
+            (changedPath) => changedPath !== `${firstProposalPath}/proposal.md`,
+          ),
+          ...secondProposalChangedPaths,
+        ].sort(),
+      );
+
+    const openSpecMaterializerAgent: {
+      run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
+    } = {
+      run: vi.fn(async (input: OpenSpecMaterializerInput) => {
+        if (input.state.proposalChangeName === firstProposalChangeName) {
+          return {
+            summary: "Materialized the first proposal.",
+            deliverable: "Wrote the first proposal artifacts.",
+            artifactsCreated: await writeExpectedProposalArtifacts({
+              worktreePath: plannerWorktreePath,
+              proposalChangeName: firstProposalChangeName,
+              proposalPath: firstProposalPath,
+            }),
+          };
+        }
+
+        const artifactsCreated = await writeExpectedProposalArtifacts({
+          worktreePath: plannerWorktreePath,
+          proposalChangeName: secondProposalChangeName,
+          proposalPath: secondProposalPath,
+        });
+        await fs.rm(path.join(plannerWorktreePath, firstProposalPath, "proposal.md"));
+
+        return {
+          summary: "Materialized the second proposal.",
+          deliverable: "Wrote the second proposal artifacts and removed the first proposal file.",
+          artifactsCreated,
+        };
+      }),
+    };
+
+    await expect(
+      materializeAssignmentProposals({
+        repositoryPath,
+        baseBranch: "main",
+        canonicalBranchName: "requests/example/thread-1/a1",
+        requestTitle: "feat(dispatch): Materialize proposal artifacts",
+        conventionalTitle: {
+          type: "feat",
+          scope: "dispatch",
+        },
+        plannerSummary: "Planner summary",
+        plannerDeliverable: "Planner deliverable",
+        requestInput: "Materialize proposal artifacts through the agent.",
+        worktreeRoot,
+        plannerWorktreePath,
+        lanes: [
+          {
+            laneIndex: 1,
+            taskTitle: "Materialize proposal artifacts",
+            taskObjective: "Write the first proposal files from the agent.",
+            proposalChangeName: firstProposalChangeName,
+            proposalPath: firstProposalPath,
+            branchName: "requests/example/thread-1/a1-proposal-1",
+          },
+          {
+            laneIndex: 2,
+            taskTitle: "Materialize proposal artifacts",
+            taskObjective: "Write the second proposal files from the agent.",
+            proposalChangeName: secondProposalChangeName,
+            proposalPath: secondProposalPath,
+            branchName: "requests/example/thread-1/a1-proposal-2",
+          },
+        ],
+        openSpecMaterializerAgent,
+      }),
+    ).rejects.toThrow(
+      `OpenSpec materializer changed planner worktree paths outside ${secondProposalChangeName}: ${firstProposalPath}/proposal.md.`,
+    );
+
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(ensureBranchRefMock).not.toHaveBeenCalled();
+  });
+
+  it("fails when a later materializer run rewrites artifacts from an earlier proposal", async () => {
+    const repositoryPath = await createTemporaryDirectory();
+    const worktreeRoot = path.join(repositoryPath, "worktrees");
+    const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
+    const firstProposalChangeName = "change-1";
+    const firstProposalPath = "openspec/changes/change-1";
+    const secondProposalChangeName = "change-2";
+    const secondProposalPath = "openspec/changes/change-2";
+    const firstProposalChangedPaths = [
+      `${firstProposalPath}/.openspec.yaml`,
+      ...buildExpectedOpenSpecArtifactPaths({
+        proposalChangeName: firstProposalChangeName,
+        proposalPath: firstProposalPath,
+      }),
+    ];
+    const secondProposalChangedPaths = [
+      `${secondProposalPath}/.openspec.yaml`,
+      ...buildExpectedOpenSpecArtifactPaths({
+        proposalChangeName: secondProposalChangeName,
+        proposalPath: secondProposalPath,
+      }),
+    ];
+
+    listWorktreeChangesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(firstProposalChangedPaths)
+      .mockResolvedValueOnce(firstProposalChangedPaths)
+      .mockResolvedValueOnce([...firstProposalChangedPaths, ...secondProposalChangedPaths].sort());
+
+    const openSpecMaterializerAgent: {
+      run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
+    } = {
+      run: vi.fn(async (input: OpenSpecMaterializerInput) => {
+        if (input.state.proposalChangeName === firstProposalChangeName) {
+          return {
+            summary: "Materialized the first proposal.",
+            deliverable: "Wrote the first proposal artifacts.",
+            artifactsCreated: await writeExpectedProposalArtifacts({
+              worktreePath: plannerWorktreePath,
+              proposalChangeName: firstProposalChangeName,
+              proposalPath: firstProposalPath,
+            }),
+          };
+        }
+
+        const artifactsCreated = await writeExpectedProposalArtifacts({
+          worktreePath: plannerWorktreePath,
+          proposalChangeName: secondProposalChangeName,
+          proposalPath: secondProposalPath,
+        });
+        await writeArtifact({
+          worktreePath: plannerWorktreePath,
+          relativePath: `${firstProposalPath}/proposal.md`,
+          content: "# Rewritten\n",
+        });
+
+        return {
+          summary: "Materialized the second proposal.",
+          deliverable: "Wrote the second proposal artifacts and rewrote the first proposal file.",
+          artifactsCreated,
+        };
+      }),
+    };
+
+    await expect(
+      materializeAssignmentProposals({
+        repositoryPath,
+        baseBranch: "main",
+        canonicalBranchName: "requests/example/thread-1/a1",
+        requestTitle: "feat(dispatch): Materialize proposal artifacts",
+        conventionalTitle: {
+          type: "feat",
+          scope: "dispatch",
+        },
+        plannerSummary: "Planner summary",
+        plannerDeliverable: "Planner deliverable",
+        requestInput: "Materialize proposal artifacts through the agent.",
+        worktreeRoot,
+        plannerWorktreePath,
+        lanes: [
+          {
+            laneIndex: 1,
+            taskTitle: "Materialize proposal artifacts",
+            taskObjective: "Write the first proposal files from the agent.",
+            proposalChangeName: firstProposalChangeName,
+            proposalPath: firstProposalPath,
+            branchName: "requests/example/thread-1/a1-proposal-1",
+          },
+          {
+            laneIndex: 2,
+            taskTitle: "Materialize proposal artifacts",
+            taskObjective: "Write the second proposal files from the agent.",
+            proposalChangeName: secondProposalChangeName,
+            proposalPath: secondProposalPath,
+            branchName: "requests/example/thread-1/a1-proposal-2",
+          },
+        ],
+        openSpecMaterializerAgent,
+      }),
+    ).rejects.toThrow(
+      `OpenSpec materializer modified previously materialized planner artifacts while processing ${secondProposalChangeName}: ${firstProposalPath}/proposal.md.`,
     );
 
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();

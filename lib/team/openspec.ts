@@ -1,6 +1,7 @@
 import "server-only";
 
-import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
+import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { runOpenSpec } from "@/lib/cli-tools/openspec";
 import {
@@ -23,12 +24,24 @@ type ProposalLane = Pick<
   "laneIndex" | "taskTitle" | "taskObjective" | "proposalChangeName" | "proposalPath" | "branchName"
 >;
 
+type MaterializedProposalSnapshot = {
+  proposalPath: string;
+  fileFingerprints: Record<string, string>;
+};
+
 const toPosixPath = (value: string): string => {
   return value.split(path.sep).join("/");
 };
 
 const normalizeChangedPath = (value: string): string => {
   return toPosixPath(value).replace(/^\.\//, "").replace(/\/+$/, "");
+};
+
+const isPathWithinProposalPath = (changedPath: string, proposalPath: string): boolean => {
+  const normalizedProposalPath = normalizeChangedPath(proposalPath);
+  return (
+    changedPath === normalizedProposalPath || changedPath.startsWith(`${normalizedProposalPath}/`)
+  );
 };
 
 const ensureOpenSpecChange = async ({
@@ -98,34 +111,175 @@ const assertMaterializedOpenSpecArtifacts = async ({
   );
 };
 
-const assertOnlyExpectedProposalChangesRemain = async ({
-  worktreePath,
-  proposalChangeName,
-  allowedProposalPaths,
+const listNormalizedWorktreeChanges = async (worktreePath: string): Promise<string[]> => {
+  return (await listWorktreeChanges(worktreePath)).map(normalizeChangedPath);
+};
+
+const calculateChangedPathDelta = ({
+  beforePaths,
+  afterPaths,
 }: {
-  worktreePath: string;
+  beforePaths: string[];
+  afterPaths: string[];
+}): string[] => {
+  const beforePathSet = new Set(beforePaths);
+  const afterPathSet = new Set(afterPaths);
+
+  return Array.from(
+    new Set([
+      ...beforePaths.filter((changedPath) => !afterPathSet.has(changedPath)),
+      ...afterPaths.filter((changedPath) => !beforePathSet.has(changedPath)),
+    ]),
+  ).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+};
+
+const assertProposalChangeDeltaIsIsolated = ({
+  beforePaths,
+  afterPaths,
+  proposalChangeName,
+  proposalPath,
+}: {
+  beforePaths: string[];
+  afterPaths: string[];
   proposalChangeName: string;
-  allowedProposalPaths: string[];
-}): Promise<void> => {
-  const allowedRoots = allowedProposalPaths.map(
-    (proposalPath) => `${normalizeChangedPath(proposalPath)}/`,
-  );
-  const unexpectedPaths = (await listWorktreeChanges(worktreePath))
-    .map(normalizeChangedPath)
-    .filter(
-      (changedPath) =>
-        !allowedRoots.some(
-          (allowedRoot) =>
-            changedPath === allowedRoot.slice(0, -1) || changedPath.startsWith(allowedRoot),
-        ),
-    );
+  proposalPath: string;
+}): void => {
+  const unexpectedPaths = calculateChangedPathDelta({
+    beforePaths,
+    afterPaths,
+  }).filter((changedPath) => !isPathWithinProposalPath(changedPath, proposalPath));
 
   if (unexpectedPaths.length === 0) {
     return;
   }
 
   throw new Error(
-    `OpenSpec materializer left unexpected planner worktree changes for ${proposalChangeName}: ${unexpectedPaths.join(
+    `OpenSpec materializer changed planner worktree paths outside ${proposalChangeName}: ${unexpectedPaths.join(
+      ", ",
+    )}.`,
+  );
+};
+
+const hashFileAtPath = async (filePath: string): Promise<string> => {
+  const content = await fs.readFile(filePath);
+  return createHash("sha256").update(content).digest("hex");
+};
+
+const listFilesRecursively = async (directoryPath: string): Promise<string[]> => {
+  let entries: Dirent[];
+
+  try {
+    entries = await fs.readdir(directoryPath, {
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const nestedPaths = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directoryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        return listFilesRecursively(entryPath);
+      }
+
+      if (entry.isFile()) {
+        return [entryPath];
+      }
+
+      return [];
+    }),
+  );
+
+  return nestedPaths.flat();
+};
+
+const captureProposalSnapshot = async ({
+  worktreePath,
+  proposalPath,
+}: {
+  worktreePath: string;
+  proposalPath: string;
+}): Promise<MaterializedProposalSnapshot> => {
+  const absoluteProposalPath = path.join(worktreePath, proposalPath);
+  const filePaths = (await listFilesRecursively(absoluteProposalPath)).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+  const fileFingerprintEntries = await Promise.all(
+    filePaths.map(async (absoluteFilePath) => {
+      const relativeFilePath = toPosixPath(path.relative(worktreePath, absoluteFilePath));
+      return [relativeFilePath, await hashFileAtPath(absoluteFilePath)] as const;
+    }),
+  );
+
+  return {
+    proposalPath,
+    fileFingerprints: Object.fromEntries(fileFingerprintEntries),
+  };
+};
+
+const assertPriorProposalSnapshotsRemainUnchanged = async ({
+  worktreePath,
+  proposalChangeName,
+  priorSnapshots,
+}: {
+  worktreePath: string;
+  proposalChangeName: string;
+  priorSnapshots: MaterializedProposalSnapshot[];
+}): Promise<void> => {
+  const mutatedPaths: string[] = [];
+
+  for (const priorSnapshot of priorSnapshots) {
+    const currentSnapshot = await captureProposalSnapshot({
+      worktreePath,
+      proposalPath: priorSnapshot.proposalPath,
+    });
+    const trackedPaths = Array.from(
+      new Set([
+        ...Object.keys(priorSnapshot.fileFingerprints),
+        ...Object.keys(currentSnapshot.fileFingerprints),
+      ]),
+    ).sort((left, right) => {
+      if (left === right) {
+        return 0;
+      }
+
+      return left < right ? -1 : 1;
+    });
+
+    for (const trackedPath of trackedPaths) {
+      if (
+        priorSnapshot.fileFingerprints[trackedPath] !==
+        currentSnapshot.fileFingerprints[trackedPath]
+      ) {
+        mutatedPaths.push(trackedPath);
+      }
+    }
+  }
+
+  const uniqueMutatedPaths = Array.from(new Set(mutatedPaths));
+
+  if (uniqueMutatedPaths.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer modified previously materialized planner artifacts while processing ${proposalChangeName}: ${uniqueMutatedPaths.join(
       ", ",
     )}.`,
   );
@@ -217,9 +371,12 @@ export const materializeAssignmentProposals = async ({
     path: plannerWorktreePath,
     rootPath: worktreeRoot,
   });
-  const allowedProposalPaths: string[] = [];
+  const materializedProposalSnapshots: MaterializedProposalSnapshot[] = [];
 
   for (const lane of activeLanes) {
+    const changedPathsBeforeMaterialization =
+      await listNormalizedWorktreeChanges(plannerWorktreePath);
+
     await ensureOpenSpecChange({
       worktreePath: plannerWorktreePath,
       proposalChangeName: lane.proposalChangeName,
@@ -249,12 +406,25 @@ export const materializeAssignmentProposals = async ({
       proposalPath: lane.proposalPath,
       reportedArtifacts: materializerResult.artifactsCreated,
     });
-    allowedProposalPaths.push(lane.proposalPath);
-    await assertOnlyExpectedProposalChangesRemain({
+    const changedPathsAfterMaterialization =
+      await listNormalizedWorktreeChanges(plannerWorktreePath);
+    await assertProposalChangeDeltaIsIsolated({
+      beforePaths: changedPathsBeforeMaterialization,
+      afterPaths: changedPathsAfterMaterialization,
+      proposalChangeName: lane.proposalChangeName,
+      proposalPath: lane.proposalPath,
+    });
+    await assertPriorProposalSnapshotsRemainUnchanged({
       worktreePath: plannerWorktreePath,
       proposalChangeName: lane.proposalChangeName,
-      allowedProposalPaths,
+      priorSnapshots: materializedProposalSnapshots,
     });
+    materializedProposalSnapshots.push(
+      await captureProposalSnapshot({
+        worktreePath: plannerWorktreePath,
+        proposalPath: lane.proposalPath,
+      }),
+    );
   }
 
   if (await hasWorktreeChanges(plannerWorktreePath)) {
