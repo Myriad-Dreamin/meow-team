@@ -732,4 +732,66 @@ describe("materializeAssignmentProposals", () => {
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
     expect(ensureBranchRefMock).not.toHaveBeenCalled();
   });
+
+  it("fails when the materializer deletes the change scaffold after OpenSpec creates it", async () => {
+    const repositoryPath = await createTemporaryDirectory();
+    const worktreeRoot = path.join(repositoryPath, "worktrees");
+    const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
+    const proposalChangeName = "change-1";
+    const proposalPath = "openspec/changes/change-1";
+
+    const openSpecMaterializerAgent: {
+      run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
+    } = {
+      run: vi.fn(async () => {
+        const artifactsCreated = await writeExpectedProposalArtifacts({
+          worktreePath: plannerWorktreePath,
+          proposalChangeName,
+          proposalPath,
+        });
+
+        await fs.rm(path.join(plannerWorktreePath, proposalPath, ".openspec.yaml"));
+
+        return {
+          summary: "Materialized the change artifacts.",
+          deliverable: "Wrote the proposal files and removed the OpenSpec scaffold.",
+          artifactsCreated,
+        };
+      }),
+    };
+
+    await expect(
+      materializeAssignmentProposals({
+        repositoryPath,
+        baseBranch: "main",
+        canonicalBranchName: "requests/example/thread-1/a1",
+        requestTitle: "feat(dispatch): Materialize proposal artifacts",
+        conventionalTitle: {
+          type: "feat",
+          scope: "dispatch",
+        },
+        plannerSummary: "Planner summary",
+        plannerDeliverable: "Planner deliverable",
+        requestInput: "Materialize proposal artifacts through the agent.",
+        worktreeRoot,
+        plannerWorktreePath,
+        lanes: [
+          {
+            laneIndex: 1,
+            taskTitle: "Materialize proposal artifacts",
+            taskObjective: "Write the proposal files from the agent.",
+            proposalChangeName,
+            proposalPath,
+            branchName: "requests/example/thread-1/a1-proposal-1",
+          },
+        ],
+        openSpecMaterializerAgent,
+      }),
+    ).rejects.toThrow(
+      `OpenSpec materializer did not produce the expected artifacts for ${proposalChangeName}: ${proposalPath}/.openspec.yaml`,
+    );
+
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(ensureBranchRefMock).not.toHaveBeenCalled();
+  });
 });

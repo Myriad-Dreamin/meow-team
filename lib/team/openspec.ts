@@ -91,10 +91,13 @@ const assertMaterializedOpenSpecArtifacts = async ({
   proposalPath: string;
   reportedArtifacts: string[];
 }): Promise<void> => {
-  const expectedArtifacts = buildExpectedOpenSpecArtifactPaths({
-    proposalChangeName,
-    proposalPath,
-  });
+  const expectedArtifacts = [
+    path.join(proposalPath, ".openspec.yaml"),
+    ...buildExpectedOpenSpecArtifactPaths({
+      proposalChangeName,
+      proposalPath,
+    }),
+  ].map(toPosixPath);
 
   const missingArtifacts = (
     await Promise.all(
