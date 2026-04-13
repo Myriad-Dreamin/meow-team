@@ -210,14 +210,52 @@ export const hasWorktreeChanges = async (worktreePath: string): Promise<boolean>
   return stdout.length > 0;
 };
 
+const listNamedPaths = (stdout: string): string[] => {
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+};
+
+export const listWorktreeChanges = async (worktreePath: string): Promise<string[]> => {
+  const [stagedChanges, unstagedChanges, untrackedChanges] = await Promise.all([
+    runGit(worktreePath, ["diff", "--cached", "--name-only", "--relative", "--no-renames"]),
+    runGit(worktreePath, ["diff", "--name-only", "--relative", "--no-renames"]),
+    runGit(worktreePath, ["ls-files", "--others", "--exclude-standard", "--full-name"]),
+  ]);
+
+  return Array.from(
+    new Set([
+      ...listNamedPaths(stagedChanges.stdout),
+      ...listNamedPaths(unstagedChanges.stdout),
+      ...listNamedPaths(untrackedChanges.stdout),
+    ]),
+  ).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+};
+
 export const commitWorktreeChanges = async ({
   worktreePath,
   message,
+  pathspecs,
 }: {
   worktreePath: string;
   message: string;
+  pathspecs?: string[];
 }): Promise<void> => {
-  await runGit(worktreePath, ["add", "-A"]);
+  const normalizedPathspecs = pathspecs
+    ?.map((pathspec) => pathspec.trim())
+    .filter((pathspec): pathspec is string => pathspec.length > 0);
+
+  await runGit(
+    worktreePath,
+    normalizedPathspecs?.length ? ["add", "-A", "--", ...normalizedPathspecs] : ["add", "-A"],
+  );
   await runGit(worktreePath, ["commit", "-m", message]);
 };
 

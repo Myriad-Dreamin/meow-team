@@ -2769,6 +2769,9 @@ describe.sequential("approveLaneProposal", () => {
       plannerAgent: {
         run: vi.fn(),
       },
+      openSpecMaterializerAgent: {
+        run: vi.fn(),
+      },
       coderAgent: {
         run:
           coderRun ??
@@ -3222,6 +3225,9 @@ describe.sequential("approveLanePullRequest", () => {
         run: vi.fn(),
       },
       plannerAgent: {
+        run: vi.fn(),
+      },
+      openSpecMaterializerAgent: {
         run: vi.fn(),
       },
       coderAgent: {

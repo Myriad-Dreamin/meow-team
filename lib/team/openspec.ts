@@ -1,262 +1,54 @@
 import "server-only";
 
-import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
+import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { runOpenSpec } from "@/lib/cli-tools/openspec";
-import { commitWorktreeChanges, ensureBranchRef, hasWorktreeChanges } from "@/lib/git/ops";
-import { ensureLaneWorktree, sanitizeBranchSegment } from "@/lib/team/git";
 import {
-  describeConventionalTitleMetadata,
-  type ConventionalTitleMetadata,
-} from "@/lib/team/request-title";
-import type { TeamWorkerLaneRecord } from "@/lib/team/types";
+  commitWorktreeChanges,
+  ensureBranchRef,
+  getBranchHead,
+  hasWorktreeChanges,
+  listExistingBranches,
+  listWorktreeChanges,
+} from "@/lib/git/ops";
+import { createWorktree } from "@/lib/team/coding/worktree";
+import { ensureLaneWorktree, sanitizeBranchSegment } from "@/lib/team/git";
+import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
+import {
+  buildExpectedOpenSpecArtifactPaths,
+  type OpenSpecMaterializerAgent,
+} from "@/lib/team/roles/openspec-materializer";
+import type { TeamCodexEvent, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 type ProposalLane = Pick<
   TeamWorkerLaneRecord,
   "laneIndex" | "taskTitle" | "taskObjective" | "proposalChangeName" | "proposalPath" | "branchName"
 >;
 
-const describeWorktreePool = (worktreeRoot: string): string => {
-  return `${worktreeRoot}/meow-N`;
+type MaterializedProposalSnapshot = {
+  proposalPath: string;
+  fileFingerprints: Record<string, string>;
 };
 
-const normalizeSentence = (value: string): string => {
-  const trimmed = value.trim().replace(/\s+/g, " ");
-  if (!trimmed) {
-    return "";
-  }
-
-  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+type MaterializationGitState = {
+  plannerHeadCommit: string;
+  managedBranchHeads: Record<string, string | null>;
 };
 
-const buildCapabilityName = (changeName: string): string => {
-  return sanitizeBranchSegment(changeName).replace(/\//g, "-");
+const toPosixPath = (value: string): string => {
+  return value.split(path.sep).join("/");
 };
 
-const buildConventionalTitleSection = ({
-  requestTitle,
-  conventionalTitle,
-}: {
-  requestTitle: string;
-  conventionalTitle: ConventionalTitleMetadata | null;
-}): string => {
-  return `## Conventional Title
-
-- Canonical request/PR title: \`${requestTitle}\`
-- Conventional title metadata: \`${describeConventionalTitleMetadata(conventionalTitle)}\`
-- Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter \`branchPrefix\` or OpenSpec change paths.
-`;
+const normalizeChangedPath = (value: string): string => {
+  return toPosixPath(value).replace(/^\.\//, "").replace(/\/+$/, "");
 };
 
-const buildProposalWhy = ({
-  taskObjective,
-  requestInput,
-  plannerSummary,
-}: {
-  taskObjective: string;
-  requestInput: string | null;
-  plannerSummary: string | null;
-}): string => {
-  return [
-    normalizeSentence(taskObjective),
-    plannerSummary ? normalizeSentence(plannerSummary) : null,
-    requestInput
-      ? `This proposal is one candidate implementation for the request: ${normalizeSentence(requestInput)}`
-      : null,
-  ]
-    .filter(Boolean)
-    .join(" ");
-};
-
-const buildProposalMarkdown = ({
-  repositoryPath,
-  proposalChangeName,
-  requestTitle,
-  conventionalTitle,
-  taskTitle,
-  taskObjective,
-  plannerSummary,
-  plannerDeliverable,
-  requestInput,
-  worktreeRoot,
-}: {
-  repositoryPath: string;
-  proposalChangeName: string;
-  requestTitle: string;
-  conventionalTitle: ConventionalTitleMetadata | null;
-  taskTitle: string;
-  taskObjective: string;
-  plannerSummary: string | null;
-  plannerDeliverable: string | null;
-  requestInput: string | null;
-  worktreeRoot: string;
-}): string => {
-  const capabilityName = buildCapabilityName(proposalChangeName);
-
-  return `## Why
-
-${buildProposalWhy({
-  taskObjective,
-  requestInput,
-  plannerSummary,
-})}
-
-## What Changes
-
-- Introduce the \`${proposalChangeName}\` OpenSpec change for proposal "${taskTitle}".
-- ${normalizeSentence(taskObjective)}
-- Keep the proposal logically scoped so any approved coding-review worker can claim it without replanning.
-
-## Capabilities
-
-### New Capabilities
-- \`${capabilityName}\`: ${normalizeSentence(taskObjective)}
-
-### Modified Capabilities
-- None.
-
-${buildConventionalTitleSection({
-  requestTitle,
-  conventionalTitle,
-})}
-
-## Impact
-
-- Affected repository: \`${path.basename(repositoryPath)}\`
-- Coding-review execution: pooled workers with reusable worktrees from \`${describeWorktreePool(worktreeRoot)}\`
-- Planner deliverable: ${normalizeSentence(plannerDeliverable ?? plannerSummary ?? taskTitle)}
-`;
-};
-
-const buildDesignMarkdown = ({
-  proposalChangeName,
-  requestTitle,
-  conventionalTitle,
-  taskTitle,
-  taskObjective,
-  plannerDeliverable,
-  worktreeRoot,
-}: {
-  proposalChangeName: string;
-  requestTitle: string;
-  conventionalTitle: ConventionalTitleMetadata | null;
-  taskTitle: string;
-  taskObjective: string;
-  plannerDeliverable: string | null;
-  worktreeRoot: string;
-}): string => {
-  return `## Context
-
-This change captures proposal "${taskTitle}" as OpenSpec change \`${proposalChangeName}\`.
-Implementation starts only after human approval and is claimed by the next
-available coding-review worker from the shared pool.
-
-## Goals / Non-Goals
-
-**Goals:**
-- ${normalizeSentence(taskObjective)}
-- Preserve a reviewable OpenSpec contract before coding starts.
-- Keep the proposal logical enough that any pooled worker can execute it.
-- Reuse a managed worktree from \`${describeWorktreePool(worktreeRoot)}\` for cache-friendly execution.
-
-**Non-Goals:**
-- Bind this proposal to a specific branch or worker slot before approval.
-- Expand scope beyond the approved proposal without human feedback.
-- Merge sibling proposals into a single coding pass without replanning.
-
-## Decisions
-
-- Store the proposal as a dedicated OpenSpec change before coding begins.
-- Let the pooled coding-review runtime allocate execution branches and worktrees after approval.
-- Use planner output as the starting point for reviewer validation and follow-up tasks.
-- Prefer incremental implementation that can be requeued after machine review feedback.
-- Keep the canonical request/PR title as \`${requestTitle}\`.
-- Keep slash-delimited roadmap/topic scope in conventional-title metadata \`${describeConventionalTitleMetadata(conventionalTitle)}\` instead of \`branchPrefix\` or OpenSpec change paths.
-
-${buildConventionalTitleSection({
-  requestTitle,
-  conventionalTitle,
-})}
-
-## Risks / Trade-offs
-
-- [Proposal drift] -> Compare implementation against the approved OpenSpec artifacts before coding.
-- [Sibling proposal overlap] -> Send cross-proposal changes back to request-group replanning.
-- [Reusable worktree residue] -> Reset the managed worktree before each proposal run.
-- [Validation gaps] -> Require reviewer findings and task completion before treating work as complete.
-
-${plannerDeliverable ? `Planner deliverable reference: ${normalizeSentence(plannerDeliverable)}` : ""}
-`;
-};
-
-const buildSpecMarkdown = ({
-  proposalChangeName,
-  requestTitle,
-  conventionalTitle,
-  taskTitle,
-  taskObjective,
-  worktreeRoot,
-}: {
-  proposalChangeName: string;
-  requestTitle: string;
-  conventionalTitle: ConventionalTitleMetadata | null;
-  taskTitle: string;
-  taskObjective: string;
-  worktreeRoot: string;
-}): string => {
-  return `## ADDED Requirements
-
-### Requirement: ${taskTitle}
-The system SHALL implement the approved proposal recorded in OpenSpec change \`${proposalChangeName}\`
-and keep the work aligned with this proposal's objective: ${normalizeSentence(taskObjective)}
-
-#### Scenario: Approved proposal enters execution
-- **WHEN** a human approves the "${taskTitle}" proposal
-- **THEN** the system SHALL queue the proposal into the pooled coding and machine-review workflow
-
-### Requirement: Proposal execution stays isolated
-The system SHALL keep proposal execution isolated to the claimed implementation
-branch and reusable worktree until human feedback explicitly requests
-request-group replanning.
-
-#### Scenario: Dedicated execution workspace
-- **WHEN** the coder starts work on this proposal
-- **THEN** the system SHALL provide a dedicated implementation branch and a reusable worktree from \`${describeWorktreePool(worktreeRoot)}\`
-
-### Requirement: Conventional title metadata stays explicit
-The system SHALL carry the canonical request/PR title \`${requestTitle}\` and conventional-title metadata \`${describeConventionalTitleMetadata(conventionalTitle)}\`
-through the materialized OpenSpec artifacts without encoding slash-delimited roadmap/topic scope into \`branchPrefix\` or OpenSpec change paths.
-
-#### Scenario: Materialized artifacts mirror the approved scope
-- **WHEN** planner materializes this proposal
-- **THEN** the generated proposal, design, spec, and tasks SHALL reference the canonical request/PR title \`${requestTitle}\`
-- **AND** the slash-delimited roadmap/topic scope SHALL remain metadata instead of changing the proposal change path \`${proposalChangeName}\`
-`;
-};
-
-const buildTasksMarkdown = ({
-  requestTitle,
-  conventionalTitle,
-  taskTitle,
-  taskObjective,
-  worktreeRoot,
-}: {
-  requestTitle: string;
-  conventionalTitle: ConventionalTitleMetadata | null;
-  taskTitle: string;
-  taskObjective: string;
-  worktreeRoot: string;
-}): string => {
-  return `## 1. Proposal Alignment
-
-- [ ] 1.1 Review the approved OpenSpec artifacts for "${taskTitle}" and confirm the canonical request/PR title is \`${requestTitle}\`
-- [ ] 1.2 Confirm the proposal is ready for pooled execution, the reusable worktree from \`${describeWorktreePool(worktreeRoot)}\` can be claimed, and conventional-title metadata \`${describeConventionalTitleMetadata(conventionalTitle)}\` stays separate from \`branchPrefix\` and change paths
-
-## 2. Implementation
-
-- [ ] 2.1 Implement the approved objective: ${normalizeSentence(taskObjective)}
-- [ ] 2.2 Run validation and capture reviewer findings for "${taskTitle}"
-`;
+const isPathWithinProposalPath = (changedPath: string, proposalPath: string): boolean => {
+  const normalizedProposalPath = normalizeChangedPath(proposalPath);
+  return (
+    changedPath === normalizedProposalPath || changedPath.startsWith(`${normalizedProposalPath}/`)
+  );
 };
 
 const ensureOpenSpecChange = async ({
@@ -282,90 +74,368 @@ const ensureOpenSpecChange = async ({
   }
 };
 
-const writeProposalArtifacts = async ({
-  repositoryPath,
+const resetProposalMaterializationTarget = async ({
+  worktreePath,
+  proposalPath,
+}: {
+  worktreePath: string;
+  proposalPath: string;
+}): Promise<void> => {
+  await fs.rm(path.join(worktreePath, proposalPath), {
+    recursive: true,
+    force: true,
+  });
+};
+
+const hasFileAtPath = async (filePath: string): Promise<boolean> => {
+  try {
+    return (await fs.stat(filePath)).isFile();
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException).code;
+
+    if (errorCode === "ENOENT" || errorCode === "ENOTDIR") {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
+const assertMaterializedOpenSpecArtifacts = async ({
+  worktreePath,
   proposalChangeName,
   proposalPath,
-  requestTitle,
-  conventionalTitle,
-  taskTitle,
-  taskObjective,
-  plannerSummary,
-  plannerDeliverable,
-  requestInput,
-  workspacePath,
-  worktreeRoot,
+  reportedArtifacts,
 }: {
-  repositoryPath: string;
+  worktreePath: string;
   proposalChangeName: string;
   proposalPath: string;
-  requestTitle: string;
-  conventionalTitle: ConventionalTitleMetadata | null;
-  taskTitle: string;
-  taskObjective: string;
-  plannerSummary: string | null;
-  plannerDeliverable: string | null;
-  requestInput: string | null;
-  workspacePath: string;
-  worktreeRoot: string;
+  reportedArtifacts: string[];
 }): Promise<void> => {
-  const proposalRoot = path.join(workspacePath, proposalPath);
-  const capabilityName = buildCapabilityName(proposalChangeName);
-  const specDirectory = path.join(proposalRoot, "specs", capabilityName);
+  const expectedArtifacts = [
+    path.join(proposalPath, ".openspec.yaml"),
+    ...buildExpectedOpenSpecArtifactPaths({
+      proposalChangeName,
+      proposalPath,
+    }),
+  ].map(toPosixPath);
 
-  await fs.mkdir(specDirectory, { recursive: true });
+  const missingArtifacts = (
+    await Promise.all(
+      expectedArtifacts.map(async (artifactPath) => {
+        return (await hasFileAtPath(path.join(worktreePath, artifactPath))) ? null : artifactPath;
+      }),
+    )
+  ).filter((artifactPath): artifactPath is string => Boolean(artifactPath));
 
-  await fs.writeFile(
-    path.join(proposalRoot, "proposal.md"),
-    buildProposalMarkdown({
+  if (missingArtifacts.length === 0) {
+    return;
+  }
+
+  const reportedArtifactNote = reportedArtifacts.length
+    ? ` Reported artifacts: ${reportedArtifacts.join(", ")}.`
+    : "";
+
+  throw new Error(
+    `OpenSpec materializer did not produce the expected artifacts for ${proposalChangeName}: ${missingArtifacts.join(
+      ", ",
+    )}.${reportedArtifactNote}`,
+  );
+};
+
+const listNormalizedWorktreeChanges = async (worktreePath: string): Promise<string[]> => {
+  return (await listWorktreeChanges(worktreePath)).map(normalizeChangedPath);
+};
+
+const calculateChangedPathDelta = ({
+  beforePaths,
+  afterPaths,
+}: {
+  beforePaths: string[];
+  afterPaths: string[];
+}): string[] => {
+  const beforePathSet = new Set(beforePaths);
+  const afterPathSet = new Set(afterPaths);
+
+  return Array.from(
+    new Set([
+      ...beforePaths.filter((changedPath) => !afterPathSet.has(changedPath)),
+      ...afterPaths.filter((changedPath) => !beforePathSet.has(changedPath)),
+    ]),
+  ).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+};
+
+const assertProposalChangeDeltaIncludesMaterializedArtifacts = ({
+  changedPaths,
+  proposalChangeName,
+  proposalPath,
+}: {
+  changedPaths: string[];
+  proposalChangeName: string;
+  proposalPath: string;
+}): void => {
+  const materializedPaths = changedPaths.filter((changedPath) =>
+    isPathWithinProposalPath(changedPath, proposalPath),
+  );
+
+  if (materializedPaths.length > 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer must leave planner-owned worktree changes for ${proposalChangeName}; the planner worktree was clean after materialization.`,
+  );
+};
+
+const assertProposalChangeDeltaIsIsolated = ({
+  changedPaths,
+  proposalChangeName,
+  proposalPath,
+}: {
+  changedPaths: string[];
+  proposalChangeName: string;
+  proposalPath: string;
+}): void => {
+  const unexpectedPaths = changedPaths.filter(
+    (changedPath) => !isPathWithinProposalPath(changedPath, proposalPath),
+  );
+
+  if (unexpectedPaths.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer changed planner worktree paths outside ${proposalChangeName}: ${unexpectedPaths.join(
+      ", ",
+    )}.`,
+  );
+};
+
+const captureMaterializationGitState = async ({
+  repositoryPath,
+  plannerWorktreePath,
+  managedBranchNames,
+}: {
+  repositoryPath: string;
+  plannerWorktreePath: string;
+  managedBranchNames: string[];
+}): Promise<MaterializationGitState> => {
+  const uniqueManagedBranchNames = Array.from(
+    new Set(
+      managedBranchNames
+        .map((branchName) => branchName.trim())
+        .filter((branchName): branchName is string => branchName.length > 0),
+    ),
+  ).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+  const plannerHeadCommit = await getBranchHead({
+    repositoryPath: plannerWorktreePath,
+    branchName: "HEAD",
+  });
+
+  if (uniqueManagedBranchNames.length === 0) {
+    return {
+      plannerHeadCommit,
+      managedBranchHeads: {},
+    };
+  }
+
+  const existingManagedBranches = new Set(
+    await listExistingBranches({
       repositoryPath,
-      proposalChangeName,
-      requestTitle,
-      conventionalTitle,
-      taskTitle,
-      taskObjective,
-      plannerSummary,
-      plannerDeliverable,
-      requestInput,
-      worktreeRoot,
+      branchNames: uniqueManagedBranchNames,
     }),
-    "utf8",
   );
-  await fs.writeFile(
-    path.join(proposalRoot, "design.md"),
-    buildDesignMarkdown({
-      proposalChangeName,
-      requestTitle,
-      conventionalTitle,
-      taskTitle,
-      taskObjective,
-      plannerDeliverable,
-      worktreeRoot,
+  const managedBranchHeadEntries = await Promise.all(
+    uniqueManagedBranchNames.map(async (branchName) => {
+      if (!existingManagedBranches.has(branchName)) {
+        return [branchName, null] as const;
+      }
+
+      return [
+        branchName,
+        await getBranchHead({
+          repositoryPath,
+          branchName,
+        }),
+      ] as const;
     }),
-    "utf8",
   );
-  await fs.writeFile(
-    path.join(specDirectory, "spec.md"),
-    buildSpecMarkdown({
-      proposalChangeName,
-      requestTitle,
-      conventionalTitle,
-      taskTitle,
-      taskObjective,
-      worktreeRoot,
-    }),
-    "utf8",
+
+  return {
+    plannerHeadCommit,
+    managedBranchHeads: Object.fromEntries(managedBranchHeadEntries),
+  };
+};
+
+const formatGitHeadReference = (gitHead: string | null): string => {
+  return gitHead ? gitHead.slice(0, 12) : "missing";
+};
+
+const assertMaterializationGitStateRemainsPlannerOwned = ({
+  beforeState,
+  afterState,
+  proposalChangeName,
+}: {
+  beforeState: MaterializationGitState;
+  afterState: MaterializationGitState;
+  proposalChangeName: string;
+}): void => {
+  if (beforeState.plannerHeadCommit !== afterState.plannerHeadCommit) {
+    throw new Error(
+      `OpenSpec materializer must not create planner-side commits while materializing ${proposalChangeName}; planner HEAD changed from ${formatGitHeadReference(
+        beforeState.plannerHeadCommit,
+      )} to ${formatGitHeadReference(afterState.plannerHeadCommit)} before the planner commit flow ran.`,
+    );
+  }
+
+  const mutatedManagedBranches = Object.keys(beforeState.managedBranchHeads).filter(
+    (branchName) =>
+      beforeState.managedBranchHeads[branchName] !== afterState.managedBranchHeads[branchName],
   );
-  await fs.writeFile(
-    path.join(proposalRoot, "tasks.md"),
-    buildTasksMarkdown({
-      requestTitle,
-      conventionalTitle,
-      taskTitle,
-      taskObjective,
-      worktreeRoot,
+
+  if (mutatedManagedBranches.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer must not update planner-managed branch refs while materializing ${proposalChangeName}: ${mutatedManagedBranches
+      .map((branchName) => {
+        return `${branchName} (${formatGitHeadReference(
+          beforeState.managedBranchHeads[branchName],
+        )} -> ${formatGitHeadReference(afterState.managedBranchHeads[branchName])})`;
+      })
+      .join(", ")}.`,
+  );
+};
+
+const hashFileAtPath = async (filePath: string): Promise<string> => {
+  const content = await fs.readFile(filePath);
+  return createHash("sha256").update(content).digest("hex");
+};
+
+const listFilesRecursively = async (directoryPath: string): Promise<string[]> => {
+  let entries: Dirent[];
+
+  try {
+    entries = await fs.readdir(directoryPath, {
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const nestedPaths = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directoryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        return listFilesRecursively(entryPath);
+      }
+
+      if (entry.isFile()) {
+        return [entryPath];
+      }
+
+      return [];
     }),
-    "utf8",
+  );
+
+  return nestedPaths.flat();
+};
+
+const captureProposalSnapshot = async ({
+  worktreePath,
+  proposalPath,
+}: {
+  worktreePath: string;
+  proposalPath: string;
+}): Promise<MaterializedProposalSnapshot> => {
+  const absoluteProposalPath = path.join(worktreePath, proposalPath);
+  const filePaths = (await listFilesRecursively(absoluteProposalPath)).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+  const fileFingerprintEntries = await Promise.all(
+    filePaths.map(async (absoluteFilePath) => {
+      const relativeFilePath = toPosixPath(path.relative(worktreePath, absoluteFilePath));
+      return [relativeFilePath, await hashFileAtPath(absoluteFilePath)] as const;
+    }),
+  );
+
+  return {
+    proposalPath,
+    fileFingerprints: Object.fromEntries(fileFingerprintEntries),
+  };
+};
+
+const assertPriorProposalSnapshotsRemainUnchanged = async ({
+  worktreePath,
+  proposalChangeName,
+  priorSnapshots,
+}: {
+  worktreePath: string;
+  proposalChangeName: string;
+  priorSnapshots: MaterializedProposalSnapshot[];
+}): Promise<void> => {
+  const mutatedPaths: string[] = [];
+
+  for (const priorSnapshot of priorSnapshots) {
+    const currentSnapshot = await captureProposalSnapshot({
+      worktreePath,
+      proposalPath: priorSnapshot.proposalPath,
+    });
+    const trackedPaths = Array.from(
+      new Set([
+        ...Object.keys(priorSnapshot.fileFingerprints),
+        ...Object.keys(currentSnapshot.fileFingerprints),
+      ]),
+    ).sort((left, right) => {
+      if (left === right) {
+        return 0;
+      }
+
+      return left < right ? -1 : 1;
+    });
+
+    for (const trackedPath of trackedPaths) {
+      if (
+        priorSnapshot.fileFingerprints[trackedPath] !==
+        currentSnapshot.fileFingerprints[trackedPath]
+      ) {
+        mutatedPaths.push(trackedPath);
+      }
+    }
+  }
+
+  const uniqueMutatedPaths = Array.from(new Set(mutatedPaths));
+
+  if (uniqueMutatedPaths.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer modified previously materialized planner artifacts while processing ${proposalChangeName}: ${uniqueMutatedPaths.join(
+      ", ",
+    )}.`,
   );
 };
 
@@ -404,6 +474,8 @@ export const materializeAssignmentProposals = async ({
   worktreeRoot,
   plannerWorktreePath,
   lanes,
+  openSpecMaterializerAgent,
+  onEvent,
 }: {
   repositoryPath: string;
   baseBranch: string;
@@ -416,6 +488,8 @@ export const materializeAssignmentProposals = async ({
   worktreeRoot: string;
   plannerWorktreePath: string;
   lanes: ProposalLane[];
+  openSpecMaterializerAgent: Pick<OpenSpecMaterializerAgent, "run">;
+  onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<void> => {
   const activeLanes = lanes.filter(
     (
@@ -447,32 +521,99 @@ export const materializeAssignmentProposals = async ({
     branchName: canonicalBranchName,
     startPoint: baseBranch,
   });
+  const plannerWorktree = createWorktree({
+    path: plannerWorktreePath,
+    rootPath: worktreeRoot,
+  });
+  const materializedProposalSnapshots: MaterializedProposalSnapshot[] = [];
+  const managedBranchNames = activeLanes.map((lane) => lane.branchName);
 
   for (const lane of activeLanes) {
+    const changedPathsBeforeMaterialization =
+      await listNormalizedWorktreeChanges(plannerWorktreePath);
+
+    await resetProposalMaterializationTarget({
+      worktreePath: plannerWorktreePath,
+      proposalPath: lane.proposalPath,
+    });
     await ensureOpenSpecChange({
       worktreePath: plannerWorktreePath,
       proposalChangeName: lane.proposalChangeName,
     });
-    await writeProposalArtifacts({
+    const materializationGitStateBefore = await captureMaterializationGitState({
       repositoryPath,
+      plannerWorktreePath,
+      managedBranchNames,
+    });
+    const materializerResult = await openSpecMaterializerAgent.run({
+      worktree: plannerWorktree,
+      state: {
+        repositoryPath,
+        canonicalBranchName,
+        proposalBranchName: lane.branchName,
+        proposalChangeName: lane.proposalChangeName,
+        proposalPath: lane.proposalPath,
+        requestTitle,
+        conventionalTitle,
+        taskTitle: lane.taskTitle,
+        taskObjective: lane.taskObjective,
+        plannerSummary,
+        plannerDeliverable,
+        requestInput,
+        worktreeRoot,
+      },
+      onEvent,
+    });
+    await assertMaterializedOpenSpecArtifacts({
+      worktreePath: plannerWorktreePath,
       proposalChangeName: lane.proposalChangeName,
       proposalPath: lane.proposalPath,
-      requestTitle,
-      conventionalTitle,
-      taskTitle: lane.taskTitle,
-      taskObjective: lane.taskObjective,
-      plannerSummary,
-      plannerDeliverable,
-      requestInput,
-      workspacePath: plannerWorktreePath,
-      worktreeRoot,
+      reportedArtifacts: materializerResult.artifactsCreated,
     });
+    const materializationGitStateAfter = await captureMaterializationGitState({
+      repositoryPath,
+      plannerWorktreePath,
+      managedBranchNames,
+    });
+    assertMaterializationGitStateRemainsPlannerOwned({
+      beforeState: materializationGitStateBefore,
+      afterState: materializationGitStateAfter,
+      proposalChangeName: lane.proposalChangeName,
+    });
+    const changedPathsAfterMaterialization =
+      await listNormalizedWorktreeChanges(plannerWorktreePath);
+    const proposalChangeDelta = calculateChangedPathDelta({
+      beforePaths: changedPathsBeforeMaterialization,
+      afterPaths: changedPathsAfterMaterialization,
+    });
+    assertProposalChangeDeltaIncludesMaterializedArtifacts({
+      changedPaths: proposalChangeDelta,
+      proposalChangeName: lane.proposalChangeName,
+      proposalPath: lane.proposalPath,
+    });
+    await assertProposalChangeDeltaIsIsolated({
+      changedPaths: proposalChangeDelta,
+      proposalChangeName: lane.proposalChangeName,
+      proposalPath: lane.proposalPath,
+    });
+    await assertPriorProposalSnapshotsRemainUnchanged({
+      worktreePath: plannerWorktreePath,
+      proposalChangeName: lane.proposalChangeName,
+      priorSnapshots: materializedProposalSnapshots,
+    });
+    materializedProposalSnapshots.push(
+      await captureProposalSnapshot({
+        worktreePath: plannerWorktreePath,
+        proposalPath: lane.proposalPath,
+      }),
+    );
   }
 
   if (await hasWorktreeChanges(plannerWorktreePath)) {
     await commitWorktreeChanges({
       worktreePath: plannerWorktreePath,
       message: `planner: add openspec proposals for ${canonicalBranchName}`,
+      pathspecs: activeLanes.map((lane) => lane.proposalPath),
     });
   }
 

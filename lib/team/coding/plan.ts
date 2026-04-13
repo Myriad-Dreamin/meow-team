@@ -42,7 +42,10 @@ import {
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
 import { findConfiguredRepository } from "@/lib/team/repositories";
-import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
+import {
+  resolveTeamRoleDependencies,
+  type TeamRoleDependencies,
+} from "@/lib/team/roles/dependencies";
 import { plannerRole } from "@/lib/team/roles/planner";
 import type {
   InitialRequestMetadata,
@@ -99,6 +102,15 @@ const createLaneEvent = (actor: TeamWorkerEventActor, message: string, createdAt
     message,
     createdAt,
   };
+};
+
+const resolveOpenSpecMaterializerAgent = (
+  dependencies?: Pick<TeamRoleDependencies, "openSpecMaterializerAgent">,
+): TeamRoleDependencies["openSpecMaterializerAgent"] => {
+  return (
+    dependencies?.openSpecMaterializerAgent ??
+    resolveTeamRoleDependencies().openSpecMaterializerAgent
+  );
 };
 
 const createProposalLane = ({
@@ -181,6 +193,8 @@ export const createPlannerDispatchAssignment = async ({
   branchPrefix,
   tasks,
   deleteExistingBranches = false,
+  dependencies,
+  onMaterializerEvent,
 }: {
   threadId: string;
   assignmentNumber: number;
@@ -194,6 +208,8 @@ export const createPlannerDispatchAssignment = async ({
   branchPrefix: string;
   tasks: DispatchTask[];
   deleteExistingBranches?: boolean;
+  dependencies?: Pick<TeamRoleDependencies, "openSpecMaterializerAgent">;
+  onMaterializerEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<TeamDispatchAssignment> => {
   if (!repository) {
     throw new Error("Dispatching coder and reviewer lanes requires a selected repository.");
@@ -320,6 +336,8 @@ export const createPlannerDispatchAssignment = async ({
         worktreeRoot: resolvedWorktreeRoot,
         plannerWorktreePath: worktree.path,
         lanes: assignment.lanes,
+        openSpecMaterializerAgent: resolveOpenSpecMaterializerAgent(dependencies),
+        onEvent: onMaterializerEvent,
       });
 
       await updateTeamThreadRecord({
@@ -1108,6 +1126,8 @@ export const runMetadataGenerationStage = async (
         branchPrefix: plannerResponse.dispatch.branchPrefix,
         tasks: plannerResponse.dispatch.tasks,
         deleteExistingBranches: args.deleteExistingBranches,
+        dependencies: env.deps,
+        onMaterializerEvent: forwardPlannerEvent,
       });
     }
   } else {

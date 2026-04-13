@@ -5,6 +5,7 @@ import {
   type TeamStructuredExecutor,
 } from "@/lib/agent/executor";
 import { CoderAgent } from "@/lib/team/roles/coder";
+import { OpenSpecMaterializerAgent } from "@/lib/team/roles/openspec-materializer";
 import { PlannerAgent } from "@/lib/team/roles/planner";
 import { RequestTitleAgent } from "@/lib/team/roles/request-title";
 import { ReviewerAgent } from "@/lib/team/roles/reviewer";
@@ -13,6 +14,7 @@ export type TeamRoleDependencies = {
   executor: TeamStructuredExecutor;
   requestTitleAgent: Pick<RequestTitleAgent, "run">;
   plannerAgent: Pick<PlannerAgent, "run">;
+  openSpecMaterializerAgent: Pick<OpenSpecMaterializerAgent, "run">;
   coderAgent: Pick<CoderAgent, "run">;
   reviewerAgent: Pick<ReviewerAgent, "run">;
 };
@@ -28,6 +30,7 @@ const createDefaultRoleAgents = (
   return {
     requestTitleAgent: new RequestTitleAgent(executor),
     plannerAgent: new PlannerAgent(executor),
+    openSpecMaterializerAgent: new OpenSpecMaterializerAgent(executor),
     coderAgent: new CoderAgent(executor),
     reviewerAgent: new ReviewerAgent(executor),
   };
