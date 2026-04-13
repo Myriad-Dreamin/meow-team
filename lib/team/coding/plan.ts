@@ -755,7 +755,11 @@ const finalizeRequestMetadata = async ({
     }
   }
 
+  const shouldRefineSingleProposalTitle = Boolean(
+    tasks?.length === 1 && generatedMetadata?.requestTitle,
+  );
   const requestTitle =
+    (shouldRefineSingleProposalTitle ? generatedMetadata?.requestTitle : null) ??
     initialMetadata.requestTitle ??
     generatedMetadata?.requestTitle ??
     buildDeterministicRequestTitle(initialMetadata.requestText);

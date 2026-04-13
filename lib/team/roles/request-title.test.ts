@@ -4,7 +4,7 @@ import { createWorktree } from "@/lib/team/coding/worktree";
 import { RequestTitleAgent } from "@/lib/team/roles/request-title";
 
 describe("RequestTitleAgent", () => {
-  it("tells the model to emit scoped titles as lowercased verb phrases", async () => {
+  it("tells the model to emit conventional titles as lowercased verb phrases", async () => {
     const executor = vi.fn(async () => {
       return {
         title: "link lane commit activity to GitHub",
@@ -32,7 +32,7 @@ describe("RequestTitleAgent", () => {
     expect(executor).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining(
-          "When `scope` is not `null`:\n  - The title must begin with a lowercased verb phrase",
+          "When you set `conventionalTitle` to a non-null value:\n  - The title must begin with a lowercased verb phrase",
         ),
       }),
     );

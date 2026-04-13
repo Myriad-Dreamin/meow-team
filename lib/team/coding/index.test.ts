@@ -385,7 +385,7 @@ describe.sequential("runTeam", () => {
         });
 
         return {
-          title: "Dispatch Coordination",
+          title: "stabilize dispatch flow",
           conventionalTitle: {
             type: "dev" as const,
             scope: "dispatch/coordination",
@@ -454,7 +454,7 @@ describe.sequential("runTeam", () => {
     expect(materializeAssignmentProposalsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         repositoryPath: repository.path,
-        requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
+        requestTitle: "dev(dispatch/coordination): stabilize dispatch flow",
         conventionalTitle: {
           type: "dev",
           scope: "dispatch/coordination",
@@ -476,7 +476,7 @@ describe.sequential("runTeam", () => {
     if (!result) {
       throw new Error("Expected a planning summary.");
     }
-    expect(result.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(result.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
     expect(result.requestText).toBe("Ship reliable dispatch coordination.");
     expect(result.repository).toEqual(repository);
     expect(result.handoffs).toHaveLength(1);
@@ -493,7 +493,7 @@ describe.sequential("runTeam", () => {
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
     expect(thread?.data.conventionalTitle).toEqual({
       type: "dev",
       scope: "dispatch/coordination",
@@ -534,7 +534,7 @@ describe.sequential("runTeam", () => {
         ]);
 
         return {
-          title: "Dispatch Coordination",
+          title: "stabilize dispatch flow",
           conventionalTitle: {
             type: "dev" as const,
             scope: "dispatch/coordination",
@@ -594,7 +594,7 @@ describe.sequential("runTeam", () => {
     expect(materializeAssignmentProposalsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         repositoryPath: repository.path,
-        requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
+        requestTitle: "dev(dispatch/coordination): stabilize dispatch flow",
         conventionalTitle: {
           type: "dev",
           scope: "dispatch/coordination",
@@ -608,13 +608,13 @@ describe.sequential("runTeam", () => {
       "reviewing",
       "completed",
     ]);
-    expect(result?.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(result?.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
 
     const thread = await getTeamThreadRecord(
       teamConfig.storage.threadFile,
       "thread-stale-conventional-title",
     );
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
     expect(thread?.data.conventionalTitle).toEqual({
       type: "dev",
       scope: "dispatch/coordination",
@@ -841,7 +841,7 @@ describe.sequential("runTeam", () => {
     const requestTitleAgentMock = {
       run: vi.fn(async () => {
         return {
-          title: "Dispatch Coordination",
+          title: "stabilize dispatch flow",
           conventionalTitle: {
             type: "dev" as const,
             scope: "dispatch/coordination",
@@ -947,7 +947,7 @@ describe.sequential("runTeam", () => {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-replay");
     expect(thread?.dispatchAssignments).toHaveLength(1);
     expect(thread?.results).toHaveLength(1);
-    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): Stabilize dispatch flow");
+    expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
   });
 
   it("fails fast when all shared meow slots are already assigned to active threads", async () => {
