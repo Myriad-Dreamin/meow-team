@@ -3,6 +3,7 @@ import { teamConfig } from "@/team.config";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import {
   describeConventionalTitleMetadata,
@@ -56,7 +57,7 @@ export type PlannerRoleState = {
 };
 
 export type PlannerRoleInput = {
-  worktreePath: string;
+  worktree: Worktree;
   state: PlannerRoleState;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };
@@ -145,7 +146,7 @@ export class PlannerAgent {
     const { onEvent, ...roleInput } = input;
 
     return this.executor({
-      worktreePath: roleInput.worktreePath,
+      worktree: roleInput.worktree,
       prompt: buildPlannerPrompt(roleInput),
       responseSchema: plannerOutputSchema,
       codexHomePrefix: "planner",

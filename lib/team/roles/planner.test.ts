@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import { createWorktree } from "@/lib/team/coding/worktree";
 import { PlannerAgent, type PlannerRoleOutput } from "@/lib/team/roles/planner";
 
 describe("PlannerAgent", () => {
@@ -18,7 +19,7 @@ describe("PlannerAgent", () => {
     const agent = new PlannerAgent(executor);
 
     await agent.run({
-      worktreePath: "/tmp/meow-team",
+      worktree: createWorktree({ path: "/tmp/meow-team" }),
       state: {
         teamName: "Owner Harness Team",
         ownerName: "Your Team",

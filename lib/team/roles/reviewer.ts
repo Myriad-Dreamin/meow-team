@@ -92,7 +92,7 @@ const buildReviewerPrompt = ({ state, input }: ReviewerPromptInput): string => {
     taskTitle: state.taskTitle,
     teamName: state.teamName,
     workflow: state.workflow.join(" -> "),
-    worktreePath: state.worktreePath,
+    worktreePath: state.worktree.path,
   };
 
   return renderReviewerPrompt(templateArgs);
@@ -105,7 +105,7 @@ export class ReviewerAgent {
     const { onEvent, ...roleInput } = input;
 
     return this.executor({
-      worktreePath: roleInput.state.worktreePath,
+      worktree: roleInput.state.worktree,
       prompt: buildReviewerPrompt(roleInput),
       responseSchema: reviewerOutputSchema,
       codexHomePrefix: "lane",

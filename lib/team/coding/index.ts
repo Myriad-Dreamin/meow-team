@@ -4,12 +4,14 @@ import { resolveTeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import { runArchivingStage } from "@/lib/team/coding/archiving";
 import { runCodingStage } from "@/lib/team/coding/coding";
 import {
+  assignPendingDispatchThreadSlots,
+  assignPendingDispatchWorkerSlots,
+} from "@/lib/team/coding/dispatch-worktrees";
+import {
   DispatchThreadCapacityError,
   TeamThreadReplanError,
   approveLaneProposal,
   approveLanePullRequest,
-  assignPendingDispatchThreadSlots,
-  assignPendingDispatchWorkerSlots,
   createPlannerDispatchAssignment,
   ensurePendingDispatchWork,
   prepareAssignmentReplan,
@@ -31,8 +33,10 @@ import type {
   TeamRunMachineState,
   TeamRunResult,
 } from "@/lib/team/coding/shared";
+import { createWorktree } from "@/lib/team/coding/worktree";
 
 export type * from "@/lib/team/coding/shared";
+export type * from "@/lib/team/coding/worktree";
 export {
   DispatchThreadCapacityError,
   TeamThreadReplanError,
@@ -41,6 +45,7 @@ export {
   assignPendingDispatchThreadSlots,
   assignPendingDispatchWorkerSlots,
   createPlannerDispatchAssignment,
+  createWorktree,
   ensurePendingDispatchWork,
   prepareAssignmentReplan,
   queueLaneProposalForExecution,
@@ -59,15 +64,18 @@ export const createInitialTeamRunState = (args: TeamRunArgs): TeamRunMachineStat
 
 export const createTeamRunEnv = ({
   dependencies,
+  createWorktree: createWorktreeOverride,
   persistState,
   onPlannerLogEntry,
 }: {
   dependencies?: Parameters<typeof resolveTeamRoleDependencies>[0];
+  createWorktree?: TeamRunEnv["createWorktree"];
   persistState?: TeamRunEnv["persistState"];
   onPlannerLogEntry?: TeamRunEnv["onPlannerLogEntry"];
 } = {}): TeamRunEnv => {
   return {
     deps: resolveTeamRoleDependencies(dependencies),
+    createWorktree: createWorktreeOverride ?? createWorktree,
     persistState: persistState ?? noopPersistState,
     onPlannerLogEntry,
   };

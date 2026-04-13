@@ -100,6 +100,7 @@ import {
   approveLanePullRequest,
   assignPendingDispatchThreadSlots,
   assignPendingDispatchWorkerSlots,
+  createWorktree,
   createInitialTeamRunState,
   createPlannerDispatchAssignment,
   createTeamRunEnv,
@@ -148,6 +149,8 @@ const dispatchRepository: TeamRepositoryOption = {
   path: "/tmp/repository",
   relativePath: ".",
 };
+
+const createTestWorktree = (worktreePath: string) => createWorktree({ path: worktreePath });
 
 const createPersistStateMock = () => vi.fn<TeamRunEnv["persistState"]>(async () => undefined);
 
@@ -336,7 +339,7 @@ describe.sequential("runTeam", () => {
           expect(input).toMatchObject({
             input: "Ship reliable dispatch coordination.",
             requestText: "Ship reliable dispatch coordination.",
-            worktreePath: repository.path,
+            worktree: createTestWorktree(repository.path),
             tasks: null,
           });
 
@@ -349,7 +352,7 @@ describe.sequential("runTeam", () => {
         expect(input).toMatchObject({
           input: "Ship reliable dispatch coordination.",
           requestText: "Ship reliable dispatch coordination.",
-          worktreePath: repository.path,
+          worktree: createTestWorktree(repository.path),
           tasks: [
             {
               title: "Stabilize dispatch flow",
@@ -370,6 +373,7 @@ describe.sequential("runTeam", () => {
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         callOrder.push("planner");
+        expect(input.worktree).toEqual(createTestWorktree(repository.path));
         expect(input.state.requestTitle).toBe("Dispatch Coordination");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toEqual(repository);
@@ -447,6 +451,7 @@ describe.sequential("runTeam", () => {
     });
     expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
       threadId: "thread-1",
+      createWorktree: expect.any(Function),
       dependencies: expect.objectContaining({
         executor,
         requestTitleAgent: requestTitleAgentMock,
@@ -535,6 +540,7 @@ describe.sequential("runTeam", () => {
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         callOrder.push("planner");
+        expect(input.worktree).toEqual(createTestWorktree(repository.path));
         expect(input.state.requestTitle).toBe("Dispatch Coordination");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toEqual(repository);
@@ -630,6 +636,7 @@ describe.sequential("runTeam", () => {
     const requestTitleAgentMock = { run: vi.fn() };
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        expect(input.worktree).toEqual(createTestWorktree(process.cwd()));
         expect(input.state.requestTitle).toBe("Human Title");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toBeNull();
@@ -721,6 +728,7 @@ describe.sequential("runTeam", () => {
     const requestTitleAgentMock = { run: vi.fn() };
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        expect(input.worktree).toEqual(createTestWorktree(process.cwd()));
         expect(input.state.requestTitle).toBe("Persisted Title");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.requestText).toBe("Plan the persisted request.");
@@ -771,7 +779,7 @@ describe.sequential("runTeam", () => {
         expect(input).toMatchObject({
           input: "Plan the request.",
           requestText: "Plan the request.",
-          worktreePath: process.cwd(),
+          worktree: createTestWorktree(process.cwd()),
           tasks: null,
         });
 
@@ -783,6 +791,7 @@ describe.sequential("runTeam", () => {
     };
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        expect(input.worktree).toEqual(createTestWorktree(process.cwd()));
         expect(input.state.requestTitle).toBe("Planning Request");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toBeNull();
@@ -935,6 +944,7 @@ describe.sequential("runTeam", () => {
       },
       context: {
         threadId: "thread-replay",
+        worktree: createTestWorktree(repository.path),
         selectedRepository: repository,
         existingThread: null,
         shouldResetAssignment: true,
@@ -1195,6 +1205,7 @@ describe.sequential("runTeam", () => {
       threadId: "thread-approval",
       assignmentNumber: 2,
       laneId: "lane-3",
+      createWorktree: expect.any(Function),
       dependencies: expect.objectContaining({
         requestTitleAgent: expect.any(Object),
         plannerAgent: expect.any(Object),
@@ -1204,6 +1215,7 @@ describe.sequential("runTeam", () => {
     });
     expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
       threadId: "thread-approval",
+      createWorktree: expect.any(Function),
       dependencies: expect.objectContaining({
         requestTitleAgent: expect.any(Object),
         plannerAgent: expect.any(Object),
@@ -1239,6 +1251,7 @@ describe.sequential("runTeam", () => {
       threadId: "thread-finalize",
       assignmentNumber: 4,
       laneId: "lane-2",
+      createWorktree: expect.any(Function),
       dependencies: expect.objectContaining({
         requestTitleAgent: expect.any(Object),
         plannerAgent: expect.any(Object),
@@ -1329,6 +1342,7 @@ describe.sequential("runTeam", () => {
     expect(result).toBeNull();
     expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
       threadId: "thread-dispatch",
+      createWorktree: expect.any(Function),
       dependencies: expect.objectContaining({
         requestTitleAgent: expect.any(Object),
         plannerAgent: expect.any(Object),
@@ -2358,24 +2372,36 @@ describe.sequential("approveLaneProposal", () => {
   });
 
   it("creates a draft GitHub PR before coding and rebases cleanly onto main before readying the tracking PR", async () => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+    const laneWorktree = createWorktree({
+      path: `${worktreeRoot}/meow-1`,
+      rootPath: worktreeRoot,
+    });
     let resolveCoder: (
       value: Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>,
     ) => void = () => {
       throw new Error("Coder resolver was not initialized.");
     };
-    const coderRun = vi.fn(
-      () =>
-        new Promise<Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>>((resolve) => {
+    const coderRun = vi.fn((input: Parameters<TeamRoleDependencies["coderAgent"]["run"]>[0]) => {
+      expect(input.state.worktree).toEqual(laneWorktree);
+      return new Promise<Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>>(
+        (resolve) => {
           resolveCoder = resolve;
-        }),
-    ) as TeamRoleDependencies["coderAgent"]["run"];
-    const reviewerRun = vi.fn(async () => ({
-      summary: "Machine review approved the branch.",
-      deliverable: "Implementation looks correct.",
-      decision: "approved" as const,
-      pullRequestTitle: "Ship the feature",
-      pullRequestSummary: "Machine review approved the branch.",
-    })) as TeamRoleDependencies["reviewerAgent"]["run"];
+        },
+      );
+    }) as TeamRoleDependencies["coderAgent"]["run"];
+    const reviewerRun = vi.fn(
+      async (input: Parameters<TeamRoleDependencies["reviewerAgent"]["run"]>[0]) => {
+        expect(input.state.worktree).toEqual(laneWorktree);
+        return {
+          summary: "Machine review approved the branch.",
+          deliverable: "Implementation looks correct.",
+          decision: "approved" as const,
+          pullRequestTitle: "Ship the feature",
+          pullRequestSummary: "Machine review approved the branch.",
+        };
+      },
+    ) as TeamRoleDependencies["reviewerAgent"]["run"];
 
     getBranchHeadMock
       .mockResolvedValueOnce("proposal-commit")
@@ -2692,12 +2718,19 @@ describe.sequential("approveLanePullRequest", () => {
   it("routes final approval through the coder archive pass and refreshes the existing GitHub PR", async () => {
     const coderRun = vi.fn(
       async (input: Parameters<TeamRoleDependencies["coderAgent"]["run"]>[0]) => {
+        const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
         expect(input.input).toContain("/opsx:archive change-1");
         expect(input.input).toContain("not in an interactive context");
         expect(input.input).toContain("TBD");
         expect(input.state.executionPhase).toBe("final_archive");
         expect(input.state.archiveCommand).toBe("/opsx:archive change-1");
         expect(input.state.archivePathContext).toBe("openspec/changes/change-1");
+        expect(input.state.worktree).toEqual(
+          createWorktree({
+            path: `${worktreeRoot}/meow-1`,
+            rootPath: worktreeRoot,
+          }),
+        );
 
         return {
           summary: "Archived the approved OpenSpec change.",

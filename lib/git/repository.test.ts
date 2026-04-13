@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createWorktree } from "@/lib/team/coding/worktree";
 import { teamRepositoryContextSchema, teamRepositoryOptionSchema } from "./repository";
 
 const repository = {
@@ -23,14 +24,21 @@ describe("teamRepositoryContextSchema", () => {
         repository,
         branchName: "requests/example/a1-proposal-1",
         baseBranch: "main",
-        worktreePath: "/tmp/meow-team/.meow-team-worktrees/meow-1",
+        worktree: createWorktree({
+          path: "/tmp/meow-team/.meow-team-worktrees/meow-1",
+          rootPath: "/tmp/meow-team/.meow-team-worktrees",
+        }),
         implementationCommit: null,
       }),
     ).toMatchObject({
       repository,
       branchName: "requests/example/a1-proposal-1",
       baseBranch: "main",
-      worktreePath: "/tmp/meow-team/.meow-team-worktrees/meow-1",
+      worktree: {
+        path: "/tmp/meow-team/.meow-team-worktrees/meow-1",
+        rootPath: "/tmp/meow-team/.meow-team-worktrees",
+        slot: 1,
+      },
       implementationCommit: null,
     });
   });

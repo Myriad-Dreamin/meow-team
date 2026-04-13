@@ -108,7 +108,7 @@ const buildCoderPrompt = ({ state, input }: CoderPromptInput): string => {
     taskTitle: state.taskTitle,
     teamName: state.teamName,
     workflow: state.workflow.join(" -> "),
-    worktreePath: state.worktreePath,
+    worktreePath: state.worktree.path,
   };
 
   return renderCoderPrompt(templateArgs);
@@ -121,7 +121,7 @@ export class CoderAgent {
     const { onEvent, ...roleInput } = input;
 
     return this.executor({
-      worktreePath: roleInput.state.worktreePath,
+      worktree: roleInput.state.worktree,
       prompt: buildCoderPrompt(roleInput),
       responseSchema: coderOutputSchema,
       codexHomePrefix: "lane",

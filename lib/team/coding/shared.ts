@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type { CreateWorktree, Worktree } from "@/lib/team/coding/worktree";
 import type { TeamThreadRecord } from "@/lib/team/history";
 import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
@@ -84,6 +85,7 @@ export type TeamRunResult = TeamRunSummary | null;
 
 export type TeamRunEnv = {
   deps: TeamRoleDependencies;
+  createWorktree: CreateWorktree;
   persistState: (state: TeamRunMachineState) => Promise<void> | void;
   onPlannerLogEntry?: (entry: TeamCodexLogEntry) => Promise<void> | void;
 };
@@ -105,6 +107,7 @@ export type PersistedTeamThread = TeamThreadRecord;
 
 export type TeamRunPlanningContext = {
   threadId: string;
+  worktree: Worktree;
   selectedRepository: TeamRepositoryOption | null;
   existingThread: TeamThreadRecord | null;
   shouldResetAssignment: boolean;
