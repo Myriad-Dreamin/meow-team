@@ -2005,6 +2005,7 @@ describe.sequential("ensurePendingDispatchWork", () => {
   });
 
   it("does not erase a fresher slot claim when an older allocator pass finishes later", async () => {
+    const env = createTeamRunEnv();
     const threadStore: Record<string, TeamThreadRecord> = {
       "thread-1": createDispatchThreadRecord({
         threadId: "thread-1",
@@ -2084,7 +2085,7 @@ describe.sequential("ensurePendingDispatchWork", () => {
 
             pendingSnapshots.push(buildPendingAssignmentsSnapshot(["thread-1"]), [], []);
 
-            await ensurePendingDispatchWork();
+            await ensurePendingDispatchWork(env);
           }
 
           const thread = structuredClone(threadStore[threadId]);
@@ -2094,7 +2095,7 @@ describe.sequential("ensurePendingDispatchWork", () => {
         },
       );
 
-    await ensurePendingDispatchWork();
+    await ensurePendingDispatchWork(env);
 
     const lane = threadStore["thread-1"].dispatchAssignments[0]?.lanes[0];
     expect(nestedPassStarted).toBe(true);
@@ -2330,6 +2331,21 @@ describe.sequential("approveLaneProposal", () => {
     };
   };
 
+  const createExecutionEnv = ({
+    coderRun,
+    reviewerRun,
+  }: {
+    coderRun?: TeamRoleDependencies["coderAgent"]["run"];
+    reviewerRun?: TeamRoleDependencies["reviewerAgent"]["run"];
+  } = {}): TeamRunEnv => {
+    return createTeamRunEnv({
+      dependencies: createExecutionDependencies({
+        coderRun,
+        reviewerRun,
+      }),
+    });
+  };
+
   const createProposalApprovalLane = (
     overrides: Partial<TeamWorkerLaneRecord> = {},
   ): TeamWorkerLaneRecord => {
@@ -2502,13 +2518,13 @@ describe.sequential("approveLaneProposal", () => {
     });
 
     await approveLaneProposal({
-      threadId: "thread-proposal",
-      assignmentNumber: 1,
-      laneId: "lane-1",
-      dependencies: createExecutionDependencies({
+      env: createExecutionEnv({
         coderRun,
         reviewerRun,
       }),
+      threadId: "thread-proposal",
+      assignmentNumber: 1,
+      laneId: "lane-1",
     });
 
     await vi.waitFor(async () => {
@@ -2622,13 +2638,15 @@ describe.sequential("approveLaneProposal", () => {
       runStatus: "running",
     });
 
-    await ensurePendingDispatchWork({
-      threadId: "thread-conflict",
-      dependencies: createExecutionDependencies({
-        coderRun,
-        reviewerRun,
+    await ensurePendingDispatchWork(
+      createTeamRunEnv({
+        dependencies: createExecutionDependencies({
+          coderRun,
+          reviewerRun,
+        }),
       }),
-    });
+      "thread-conflict",
+    );
 
     await vi.waitFor(async () => {
       expect(secondCoderStarted).toBe(true);
@@ -2757,6 +2775,18 @@ describe.sequential("approveLanePullRequest", () => {
     };
   };
 
+  const createArchiveEnv = ({
+    coderRun,
+  }: {
+    coderRun?: TeamRoleDependencies["coderAgent"]["run"];
+  } = {}): TeamRunEnv => {
+    return createTeamRunEnv({
+      dependencies: createArchiveDependencies({
+        coderRun,
+      }),
+    });
+  };
+
   beforeEach(async () => {
     vi.clearAllMocks();
     originalThreadFile = teamConfig.storage.threadFile;
@@ -2827,12 +2857,12 @@ describe.sequential("approveLanePullRequest", () => {
     await writeApprovalThreadStore(createApprovalLane());
 
     await approveLanePullRequest({
+      env: createArchiveEnv({
+        coderRun,
+      }),
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
-      dependencies: createArchiveDependencies({
-        coderRun,
-      }),
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
@@ -2900,10 +2930,10 @@ describe.sequential("approveLanePullRequest", () => {
     });
 
     await approveLanePullRequest({
+      env: createArchiveEnv(),
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
-      dependencies: createArchiveDependencies(),
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
@@ -2969,12 +2999,12 @@ describe.sequential("approveLanePullRequest", () => {
     );
 
     await approveLanePullRequest({
+      env: createArchiveEnv({
+        coderRun: coderRun as TeamRoleDependencies["coderAgent"]["run"],
+      }),
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
-      dependencies: createArchiveDependencies({
-        coderRun: coderRun as TeamRoleDependencies["coderAgent"]["run"],
-      }),
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
@@ -3001,10 +3031,10 @@ describe.sequential("approveLanePullRequest", () => {
 
     await expect(
       approveLanePullRequest({
+        env: createArchiveEnv(),
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
-        dependencies: createArchiveDependencies(),
       }),
     ).rejects.toThrow("Final archive coder pass did not archive OpenSpec change change-1.");
 
@@ -3035,10 +3065,10 @@ describe.sequential("approveLanePullRequest", () => {
 
     await expect(
       approveLanePullRequest({
+        env: createArchiveEnv(),
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
-        dependencies: createArchiveDependencies(),
       }),
     ).rejects.toThrow("gh auth token missing");
 
@@ -3062,10 +3092,10 @@ describe.sequential("approveLanePullRequest", () => {
 
     await expect(
       approveLanePullRequest({
+        env: createArchiveEnv(),
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
-        dependencies: createArchiveDependencies(),
       }),
     ).rejects.toThrow("git user identity missing");
 

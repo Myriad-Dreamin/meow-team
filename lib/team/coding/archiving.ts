@@ -19,21 +19,17 @@ import {
 } from "@/lib/team/coding/shared";
 import { findPersistedLane, isLanePullRequestFinalized } from "@/lib/team/coding/plan";
 import { ensurePendingDispatchWork, waitForLaneRunCompletion } from "@/lib/team/coding/reviewing";
-import { createWorktree, type CreateWorktree } from "@/lib/team/coding/worktree";
-import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 
 export const approveLanePullRequest = async ({
+  env,
   threadId,
   assignmentNumber,
   laneId,
-  createWorktree: createWorktreeFactory = createWorktree,
-  dependencies,
 }: {
+  env: TeamRunEnv;
   threadId: string;
   assignmentNumber: number;
   laneId: string;
-  createWorktree?: CreateWorktree;
-  dependencies?: Partial<TeamRoleDependencies>;
 }): Promise<void> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
@@ -162,11 +158,7 @@ export const approveLanePullRequest = async ({
     },
   });
 
-  await ensurePendingDispatchWork({
-    threadId,
-    createWorktree: createWorktreeFactory,
-    dependencies,
-  });
+  await ensurePendingDispatchWork(env, threadId);
 
   await waitForLaneRunCompletion(threadId, assignmentNumber, laneId);
 
@@ -201,11 +193,10 @@ export const runArchivingStage = async (
 
   if (!persistedLane || !isLanePullRequestFinalized(persistedLane)) {
     await approveLanePullRequest({
+      env,
       threadId: currentState.args.threadId,
       assignmentNumber: currentState.args.assignmentNumber,
       laneId: currentState.args.laneId,
-      createWorktree: env.createWorktree,
-      dependencies: env.deps,
     });
   }
 

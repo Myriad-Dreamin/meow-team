@@ -43,7 +43,7 @@ import {
   type TeamRunReviewingStageState,
 } from "@/lib/team/coding/shared";
 import { buildLaneRunState } from "@/lib/team/coding/lane-state";
-import { createWorktree, type CreateWorktree } from "@/lib/team/coding/worktree";
+import type { CreateWorktree } from "@/lib/team/coding/worktree";
 import {
   getTeamThreadRecord,
   listPendingDispatchAssignments,
@@ -1386,11 +1386,14 @@ const ensureLaneRun = ({
       });
     } finally {
       activeLaneRuns.delete(key);
-      void ensurePendingDispatchWork({
+      void ensurePendingDispatchWork(
+        {
+          deps: dependencies,
+          createWorktree: createWorktreeFactory,
+          persistState: async () => undefined,
+        },
         threadId,
-        createWorktree: createWorktreeFactory,
-        dependencies,
-      });
+      );
     }
   })();
 
@@ -1409,16 +1412,11 @@ const prioritizeThreadIds = (threadIds: string[], prioritizedThreadId?: string):
   });
 };
 
-export const ensurePendingDispatchWork = async ({
-  threadId,
-  createWorktree: createWorktreeFactory = createWorktree,
-  dependencies,
-}: {
-  threadId?: string;
-  createWorktree?: CreateWorktree;
-  dependencies?: Partial<TeamRoleDependencies>;
-} = {}): Promise<void> => {
-  const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
+export const ensurePendingDispatchWork = async (
+  env: TeamRunEnv,
+  threadId?: string,
+): Promise<void> => {
+  const resolvedDependencies = resolveTeamRoleDependencies(env.deps);
   const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
   const expectedAssignmentStateByKey = new Map<string, AssignmentThreadSchedulingState>();
   const expectedLaneStateByKey = new Map<string, LanePoolSchedulingState>();
@@ -1573,7 +1571,7 @@ export const ensurePendingDispatchWork = async ({
           threadId: pending.threadId,
           assignmentNumber: pending.assignment.assignmentNumber,
           laneId: lane.laneId,
-          createWorktree: createWorktreeFactory,
+          createWorktree: env.createWorktree,
           dependencies: resolvedDependencies,
         });
       }
@@ -1585,11 +1583,7 @@ export const runReviewingStage = async (
   env: TeamRunEnv,
   currentState: TeamRunReviewingStageState,
 ): Promise<TeamRunCompletedState> => {
-  await ensurePendingDispatchWork({
-    threadId: currentState.threadId,
-    createWorktree: env.createWorktree,
-    dependencies: env.deps,
-  });
+  await ensurePendingDispatchWork(env, currentState.threadId);
 
   return {
     stage: "completed",
