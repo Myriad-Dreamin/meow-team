@@ -24,6 +24,7 @@ import {
 import { findPersistedLane, isLaneQueuedForExecution } from "@/lib/team/coding/plan";
 import { ensurePendingDispatchWork } from "@/lib/team/coding/reviewing";
 import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
 
 export const approveLaneProposal = async ({
@@ -31,11 +32,13 @@ export const approveLaneProposal = async ({
   threadId,
   assignmentNumber,
   laneId,
+  worktree,
 }: {
   env: TeamRunEnv;
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  worktree?: Worktree;
 }): Promise<void> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
@@ -55,6 +58,11 @@ export const approveLaneProposal = async ({
 
   if (!lane.branchName || !lane.baseBranch) {
     throw new Error("This proposal is missing the branch metadata required for approval.");
+  }
+
+  const threadWorktree = worktree ?? thread.data.threadWorktree;
+  if (!threadWorktree?.slot) {
+    throw new Error("This proposal is missing the claimed thread worktree required for approval.");
   }
 
   const pullRequestDraft = buildProposalApprovalPullRequestDraft({
@@ -119,7 +127,7 @@ export const approveLaneProposal = async ({
           "Human approved the proposal, refreshed the tracking GitHub draft PR, and queued coding plus machine review.";
         mutableLane.approvalGrantedAt = now;
         mutableLane.workerSlot = null;
-        mutableLane.worktreePath = null;
+        mutableLane.worktreePath = threadWorktree.path;
         mutableLane.queuedAt = now;
         mutableLane.pushedCommit = pushedCommit;
         mutableLane.lastError = null;
@@ -205,7 +213,7 @@ export const approveLaneProposal = async ({
           : "Human approval failed before the proposal branch could be pushed and tracked with a GitHub draft PR.";
         mutableLane.approvalGrantedAt = null;
         mutableLane.workerSlot = null;
-        mutableLane.worktreePath = null;
+        mutableLane.worktreePath = threadWorktree.path;
         mutableLane.queuedAt = null;
         mutableLane.pushedCommit = pushedCommit;
         mutableLane.lastError = errorSummary;
@@ -268,6 +276,7 @@ export const runCodingStage = async (
       threadId: currentState.args.threadId,
       assignmentNumber: currentState.args.assignmentNumber,
       laneId: currentState.args.laneId,
+      worktree: currentState.worktree,
     });
   } else if (!isLaneQueuedForExecution(persistedLane as TeamWorkerLaneRecord)) {
     throw new Error("This proposal is not waiting for human approval.");

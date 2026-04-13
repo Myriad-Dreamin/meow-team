@@ -9,7 +9,7 @@ import {
 } from "@/lib/team/request-title";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import type { LanePullRequestDraft } from "@/lib/team/coding/lane-state";
-import type { CreateWorktree, Worktree } from "@/lib/team/coding/worktree";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import type {
   TeamCodexLogEntry,
   TeamDispatchAssignment,
@@ -34,6 +34,7 @@ export type TeamRunState = {
   requestTitle: string | null;
   conventionalTitle: ConventionalTitleMetadata | null;
   requestText: string | null;
+  threadWorktree: Worktree | null;
   latestInput: string | null;
   forceReset: boolean;
 };
@@ -99,7 +100,6 @@ export type TeamRunResult = TeamRunSummary | null;
 
 export type TeamRunEnv = {
   deps: TeamRoleDependencies;
-  createWorktree: CreateWorktree;
   persistState: (state: TeamRunMachineState) => Promise<void> | void;
   onPlannerLogEntry?: (entry: TeamCodexLogEntry) => Promise<void> | void;
 };
@@ -151,6 +151,7 @@ export type TeamRunMetadataGenerationStageState = {
 export type TeamRunCodingStageState = {
   stage: "coding";
   args: TeamProposalApprovalRunArgs;
+  worktree: Worktree;
 };
 
 export type TeamRunReviewingStageState = {
@@ -163,6 +164,7 @@ export type TeamRunReviewingStageState = {
 export type TeamRunArchivingStageState = {
   stage: "archiving";
   args: TeamPullRequestApprovalRunArgs;
+  worktree: Worktree;
 };
 
 export type TeamRunCompletedState = {
@@ -185,7 +187,7 @@ export class DispatchThreadCapacityError extends Error {
 
   constructor(workerCount: number) {
     super(
-      `All ${workerCount} shared meow worktree slot${workerCount === 1 ? " is" : "s are"} already assigned to non-terminal threads. Wait for an active request group to finish before starting a new one.`,
+      `All ${workerCount} shared meow worktree slot${workerCount === 1 ? " is" : "s are"} already claimed by living repository-backed threads. Archive an inactive thread before starting a new repository-backed request.`,
     );
     this.name = "DispatchThreadCapacityError";
     this.workerCount = workerCount;

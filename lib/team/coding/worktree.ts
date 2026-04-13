@@ -16,6 +16,16 @@ export type CreateWorktreeInput = {
 
 export type CreateWorktree = (input: CreateWorktreeInput) => Worktree;
 
+const parseManagedWorktreeSlotName = (value: string): number | null => {
+  const match = /^meow-(\d+)$/u.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const slot = Number.parseInt(match[1] ?? "", 10);
+  return Number.isSafeInteger(slot) && slot > 0 ? slot : null;
+};
+
 const parseManagedWorktreeSlot = ({
   rootPath,
   path: worktreePath,
@@ -29,13 +39,7 @@ const parseManagedWorktreeSlot = ({
   }
 
   const normalizedRelativePath = relativePath.split(path.sep).join("/");
-  const match = /^meow-(\d+)$/u.exec(normalizedRelativePath);
-  if (!match) {
-    return null;
-  }
-
-  const slot = Number.parseInt(match[1] ?? "", 10);
-  return Number.isSafeInteger(slot) && slot > 0 ? slot : null;
+  return parseManagedWorktreeSlotName(normalizedRelativePath);
 };
 
 export const createWorktree: CreateWorktree = ({ path: worktreePath, rootPath = null }) => {
@@ -59,6 +63,45 @@ export const createManagedWorktree = ({
 }): Worktree => {
   return createWorktree({
     path: path.join(rootPath, `meow-${slot}`),
+    rootPath,
+  });
+};
+
+export const parseManagedWorktreeSlotFromPath = (worktreePath: string): number | null => {
+  return parseManagedWorktreeSlotName(path.basename(worktreePath));
+};
+
+export const resolveManagedWorktree = ({
+  rootPath,
+  path: worktreePath,
+  slot,
+}: {
+  rootPath: string;
+  path?: string | null;
+  slot?: number | null;
+}): Worktree | null => {
+  const resolvedSlot =
+    (typeof slot === "number" && slot > 0 ? slot : null) ??
+    (worktreePath
+      ? (parseManagedWorktreeSlot({
+          rootPath,
+          path: worktreePath,
+        }) ?? parseManagedWorktreeSlotFromPath(worktreePath))
+      : null);
+
+  if (resolvedSlot) {
+    return createManagedWorktree({
+      rootPath,
+      slot: resolvedSlot,
+    });
+  }
+
+  if (!worktreePath) {
+    return null;
+  }
+
+  return createWorktree({
+    path: worktreePath,
     rootPath,
   });
 };

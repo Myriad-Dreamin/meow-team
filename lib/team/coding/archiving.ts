@@ -19,17 +19,20 @@ import {
 } from "@/lib/team/coding/shared";
 import { findPersistedLane, isLanePullRequestFinalized } from "@/lib/team/coding/plan";
 import { ensurePendingDispatchWork, waitForLaneRunCompletion } from "@/lib/team/coding/reviewing";
+import type { Worktree } from "@/lib/team/coding/worktree";
 
 export const approveLanePullRequest = async ({
   env,
   threadId,
   assignmentNumber,
   laneId,
+  worktree,
 }: {
   env: TeamRunEnv;
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  worktree?: Worktree;
 }): Promise<void> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
@@ -63,6 +66,13 @@ export const approveLanePullRequest = async ({
   if (!lane.branchName || !lane.baseBranch || !lane.proposalChangeName) {
     throw new Error(
       "This reviewed branch is missing the branch or OpenSpec metadata required for final approval.",
+    );
+  }
+
+  const threadWorktree = worktree ?? thread.data.threadWorktree;
+  if (!threadWorktree?.slot) {
+    throw new Error(
+      "This reviewed branch is missing the claimed thread worktree required for final approval.",
     );
   }
 
@@ -133,6 +143,7 @@ export const approveLanePullRequest = async ({
       });
       mutableLane.lastError = null;
       mutableLane.workerSlot = null;
+      mutableLane.worktreePath = threadWorktree.path;
       mutableLane.queuedAt = now;
       mutableLane.finishedAt = null;
       mutableLane.pullRequest = {
@@ -197,6 +208,7 @@ export const runArchivingStage = async (
       threadId: currentState.args.threadId,
       assignmentNumber: currentState.args.assignmentNumber,
       laneId: currentState.args.laneId,
+      worktree: currentState.worktree,
     });
   }
 

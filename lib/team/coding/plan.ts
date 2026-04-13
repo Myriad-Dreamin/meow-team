@@ -12,16 +12,20 @@ import {
   deleteManagedBranches,
   ExistingBranchesRequireDeleteError,
 } from "@/lib/team/git";
-import { assignPendingDispatchThreadSlots } from "@/lib/team/coding/dispatch-worktrees";
 import {
   appendTeamExecutionStep,
-  countActiveDispatchThreads,
+  claimTeamThreadWorktree,
   getTeamThreadRecord,
-  listPendingDispatchAssignments,
+  listLivingThreadWorktreeClaims,
   synchronizeDispatchAssignment,
   updateTeamThreadRecord,
   upsertTeamThreadRun,
 } from "@/lib/team/history";
+import {
+  applyThreadOwnedWorktreeToAssignment,
+  claimThreadOwnedWorktree,
+  resolveThreadOwnedWorktree,
+} from "@/lib/team/coding/thread-worktree";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import {
   buildProposalChangeName,
@@ -54,7 +58,7 @@ import type {
   TeamRunSummary,
 } from "@/lib/team/coding/shared";
 import { DispatchThreadCapacityError } from "@/lib/team/coding/shared";
-import type { Worktree } from "@/lib/team/coding/worktree";
+import { createRepositoryWorktree, type Worktree } from "@/lib/team/coding/worktree";
 import type {
   TeamCodexEvent,
   TeamDispatchAssignment,
@@ -168,6 +172,7 @@ export const createPlannerDispatchAssignment = async ({
   threadId,
   assignmentNumber,
   repository,
+  worktree,
   requestTitle,
   conventionalTitle,
   requestText,
@@ -180,6 +185,7 @@ export const createPlannerDispatchAssignment = async ({
   threadId: string;
   assignmentNumber: number;
   repository: TeamRepositoryOption | null;
+  worktree: Worktree | null;
   requestTitle: string;
   conventionalTitle: TeamDispatchAssignment["conventionalTitle"];
   requestText: string;
@@ -191,6 +197,10 @@ export const createPlannerDispatchAssignment = async ({
 }): Promise<TeamDispatchAssignment> => {
   if (!repository) {
     throw new Error("Dispatching coder and reviewer lanes requires a selected repository.");
+  }
+
+  if (!worktree?.slot) {
+    throw new Error("Repository-backed planning requires a claimed thread worktree.");
   }
 
   return queuePlannerDispatchMaterialization(async () => {
@@ -250,31 +260,16 @@ export const createPlannerDispatchAssignment = async ({
       },
       now,
     );
-
-    const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
-    assignPendingDispatchThreadSlots({
-      pendingAssignments: [
-        ...pendingAssignments,
-        {
-          threadId,
-          assignment,
-        },
-      ],
-      workerCount: teamConfig.dispatch.workerCount,
-      resolveAssignmentWorktreeRoot: (pending) =>
-        path.isAbsolute(teamConfig.dispatch.worktreeRoot)
-          ? teamConfig.dispatch.worktreeRoot
-          : path.join(pending.assignment.repository?.path ?? "", teamConfig.dispatch.worktreeRoot),
+    applyThreadOwnedWorktreeToAssignment({
+      assignment,
+      worktree,
     });
-
-    if (!assignment.threadSlot || !assignment.plannerWorktreePath) {
-      throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
-    }
 
     await updateTeamThreadRecord({
       threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (thread) => {
+        thread.data.threadWorktree = worktree;
         thread.dispatchAssignments = [
           ...thread.dispatchAssignments.filter(
             (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
@@ -323,7 +318,7 @@ export const createPlannerDispatchAssignment = async ({
         plannerDeliverable,
         requestInput: requestText,
         worktreeRoot: resolvedWorktreeRoot,
-        plannerWorktreePath: assignment.plannerWorktreePath,
+        plannerWorktreePath: worktree.path,
         lanes: assignment.lanes,
       });
 
@@ -383,6 +378,7 @@ const buildInitialState = (
     requestTitle: null,
     conventionalTitle: null,
     requestText: null,
+    threadWorktree: null,
     latestInput: null,
     forceReset,
   };
@@ -566,10 +562,56 @@ const buildRunState = ({
       latestInput: input,
       handoffCounter: shouldResetAssignment ? 0 : storedData.handoffCounter,
       handoffs: shouldResetAssignment ? {} : filterWorkflowHandoffs(storedData),
+      threadWorktree: storedData.threadWorktree ?? null,
       forceReset: false,
     },
     shouldResetAssignment,
   };
+};
+
+const resolvePlanningWorktree = async ({
+  threadId,
+  selectedRepository,
+  existingThread,
+  currentWorktree = null,
+}: {
+  threadId: string;
+  selectedRepository: TeamRepositoryOption | null;
+  existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  currentWorktree?: Worktree | null;
+}): Promise<Worktree> => {
+  if (!selectedRepository) {
+    return createRepositoryWorktree({
+      path: process.cwd(),
+    });
+  }
+
+  const currentThreadWorktree = resolveThreadOwnedWorktree({
+    repository: selectedRepository,
+    configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
+    candidate: {
+      threadWorktree: currentWorktree ?? existingThread?.data.threadWorktree,
+      dispatchAssignments: existingThread?.dispatchAssignments ?? [],
+    },
+  });
+  if (currentThreadWorktree?.slot) {
+    return currentThreadWorktree;
+  }
+  const claimedWorktree = claimThreadOwnedWorktree({
+    repository: selectedRepository,
+    configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
+    currentWorktree: currentThreadWorktree,
+    livingClaims: await listLivingThreadWorktreeClaims(teamConfig.storage.threadFile, {
+      excludeThreadId: threadId,
+    }),
+    workerCount: teamConfig.dispatch.workerCount,
+  });
+
+  if (!claimedWorktree) {
+    throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
+  }
+
+  return claimedWorktree;
 };
 
 const resolveRequestMetadata = async ({
@@ -857,15 +899,6 @@ export const buildPlanningStageState = async (
     );
   }
 
-  if (selectedRepository) {
-    const activeDispatchThreadCount = await countActiveDispatchThreads(
-      teamConfig.storage.threadFile,
-    );
-    if (activeDispatchThreadCount >= teamConfig.dispatch.workerCount) {
-      throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
-    }
-  }
-
   const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, args.threadId);
   const { state, shouldResetAssignment } = buildRunState({
     input: args.input,
@@ -878,9 +911,23 @@ export const buildPlanningStageState = async (
     threadId: args.threadId,
     assignmentNumber: state.assignmentNumber,
   });
-  const worktree = env.createWorktree({
-    path: selectedRepository?.path ?? process.cwd(),
-  });
+  const worktree = selectedRepository
+    ? await claimTeamThreadWorktree({
+        threadFile: teamConfig.storage.threadFile,
+        threadId: args.threadId,
+        state,
+        input: args.input,
+      })
+    : await resolvePlanningWorktree({
+        threadId: args.threadId,
+        selectedRepository,
+        existingThread,
+      });
+  if (!worktree) {
+    throw new Error(
+      `Thread ${args.threadId} could not claim the required meow worktree before planning.`,
+    );
+  }
 
   const requestMetadata = await resolveRequestMetadata({
     input: args.input,
@@ -895,6 +942,7 @@ export const buildPlanningStageState = async (
   state.requestTitle = requestMetadata.requestTitle;
   state.conventionalTitle = requestMetadata.conventionalTitle;
   state.requestText = requestMetadata.requestText;
+  state.threadWorktree = selectedRepository ? worktree : null;
 
   return {
     stage: "planning",
@@ -917,8 +965,17 @@ export const runPlanningStage = async (
 ): Promise<TeamRunMetadataGenerationStageState> => {
   const {
     args,
-    context: { threadId, selectedRepository, state, worktree },
+    context: { threadId, selectedRepository, state },
   } = currentState;
+  const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  const worktree = await resolvePlanningWorktree({
+    threadId,
+    selectedRepository,
+    existingThread: existingThread ?? currentState.context.existingThread,
+    currentWorktree: currentState.context.worktree,
+  });
+  currentState.context.worktree = worktree;
+  state.threadWorktree = selectedRepository ? worktree : null;
   const forwardPlannerEvent = createPlannerEventForwarder({
     env,
     threadId,
@@ -967,9 +1024,23 @@ export const runMetadataGenerationStage = async (
   env: TeamRunEnv,
   currentState: TeamRunMetadataGenerationStageState,
 ): Promise<TeamRunReviewingStageState | TeamRunCompletedState> => {
+  const persistedThread = await getTeamThreadRecord(
+    teamConfig.storage.threadFile,
+    currentState.context.threadId,
+  );
+  const worktree = await resolvePlanningWorktree({
+    threadId: currentState.context.threadId,
+    selectedRepository: currentState.context.selectedRepository,
+    existingThread: persistedThread ?? currentState.context.existingThread,
+    currentWorktree: currentState.context.worktree,
+  });
+  currentState.context.worktree = worktree;
+  currentState.context.state.threadWorktree = currentState.context.selectedRepository
+    ? worktree
+    : null;
   const {
     args,
-    context: { threadId, selectedRepository, requestMetadata, state, worktree },
+    context: { threadId, selectedRepository, requestMetadata, state },
     plannerResponse,
     plannerRoleName,
   } = currentState;
@@ -978,7 +1049,6 @@ export const runMetadataGenerationStage = async (
     threadId,
     assignmentNumber: state.assignmentNumber,
   });
-  const persistedThread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   const persistedAssignment = findPersistedAssignment(persistedThread, state.assignmentNumber);
   const persistedPlannerStep = getPersistedPlannerStep({
     thread: persistedThread,
@@ -1029,6 +1099,7 @@ export const runMetadataGenerationStage = async (
         threadId,
         assignmentNumber: state.assignmentNumber,
         repository: selectedRepository,
+        worktree,
         requestTitle: canonicalRequestTitle,
         conventionalTitle: finalizedRequestMetadata.conventionalTitle,
         requestText: finalizedRequestMetadata.requestText,
