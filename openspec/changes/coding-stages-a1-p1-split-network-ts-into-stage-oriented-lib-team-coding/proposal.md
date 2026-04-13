@@ -1,0 +1,30 @@
+## Why
+
+Create `lib/team/coding/index.ts` as the primary orchestration entrypoint, move the current `lib/team/network.ts` implementation into stage-oriented files such as `plan.ts` plus a `shared.ts` for shared run-state types/helpers, update internal callers/tests/docs/spec references to the new boundary, and preserve existing planner, scheduling, approval, and archive behavior. Keep `lib/team/network.ts` only as a thin compatibility shim if the migration genuinely requires it. Move the team orchestration module from `lib/team/network.ts` into `lib/team/coding` stage files, update imports/docs, and preserve current behavior. This proposal is one candidate implementation for the request: Refactor `network.ts`: - move code to `/lib/team/coding/index.ts` - split code by stage, e.g. `/lib/team/coding/plan.ts` - shared code are put in `/lib/team/coding/shared.ts`.
+
+## What Changes
+
+- Introduce the `coding-stages-a1-p1-split-network-ts-into-stage-oriented-lib-team-coding` OpenSpec change for proposal "Split `network.ts` into stage-oriented `lib/team/coding` modules".
+- Create `lib/team/coding/index.ts` as the primary orchestration entrypoint, move the current `lib/team/network.ts` implementation into stage-oriented files such as `plan.ts` plus a `shared.ts` for shared run-state types/helpers, update internal callers/tests/docs/spec references to the new boundary, and preserve existing planner, scheduling, approval, and archive behavior. Keep `lib/team/network.ts` only as a thin compatibility shim if the migration genuinely requires it.
+- Keep the proposal logically scoped so any approved coding-review worker can claim it without replanning.
+
+## Capabilities
+
+### New Capabilities
+- `coding-stages-a1-p1-split-network-ts-into-stage-oriented-lib-team-coding`: Create `lib/team/coding/index.ts` as the primary orchestration entrypoint, move the current `lib/team/network.ts` implementation into stage-oriented files such as `plan.ts` plus a `shared.ts` for shared run-state types/helpers, update internal callers/tests/docs/spec references to the new boundary, and preserve existing planner, scheduling, approval, and archive behavior. Keep `lib/team/network.ts` only as a thin compatibility shim if the migration genuinely requires it.
+
+### Modified Capabilities
+- None.
+
+## Conventional Title
+
+- Canonical request/PR title: `refactor(team/coding): Split `network.ts` into stage-oriented`
+- Conventional title metadata: `refactor(team/coding)`
+- Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter `branchPrefix` or OpenSpec change paths.
+
+
+## Impact
+
+- Affected repository: `meow-team`
+- Coding-review execution: pooled workers with reusable worktrees from `/home/kamiyoru/work/ts/meow-team/.meow-team-worktrees/meow-N`
+- Planner deliverable: Proposal: Split team coding orchestration into stage modules Suggested OpenSpec seed: `split-coding-stages` Objective: Move the current server-only orchestration surface out of `lib/team/network.ts` into `lib/team/coding/index.ts`, split the implementation by run stage, and isolate shared contracts/helpers in `lib/team/coding/shared.ts` without changing request execution behavior. Why this stays one proposal: - The module move, stage extraction, and import-path cleanup only make sense together. - Tests and docs need the new boundary in the same change so the repository does not stay split between `network.ts` and `coding/*`. - This is structural refactoring, not multiple independently valuable feature slices. Implementation shape: 1. Create `lib/team/coding/index.ts` as the primary public entrypoint for `runTeam`, `createInitialTeamRunState`, `createTeamRunEnv`, `persistTeamRunState`, approval helpers, and any exported run-state types that remain part of the public surface. 2. Move shared run-state contracts and cross-stage helpers into `lib/team/coding/shared.ts`; downstream type-only consumers such as `lib/team/history.ts` should depend on that shared surface instead of the barrel when appropriate. 3. Split the state-machine logic into stage-oriented modules beginning with `lib/team/coding/plan.ts`; place the remaining coding, reviewing, and archiving stage handlers in peer files, keeping `index.ts` limited to orchestration wiring and stage dispatch. 4. Keep lane allocator, approval, and dispatch helpers with the stage module that owns them, or in `shared.ts` only when they are genuinely reused across stages. Avoid recreating another monolithic internal file. 5. Update internal imports across API routes, UI consumers, tests, and docs/specs that currently reference `@/lib/team/network`. If migration safety requires it, leave `lib/team/network.ts` as a temporary thin re-export, but the implementation home should be `lib/team/coding/*`. 6. Preserve `server-only` boundaries, existing exported behavior, and regression coverage; adjust mocks/tests where the split changes import seams. Scope boundaries: - No intended change to planner outputs, request-title behavior, lane scheduling, approval/archive semantics, persisted thread schema, or API contracts. - No prompt/template changes and no workflow redesign. - Do not edit archived OpenSpec change history; instead, add a new change that supersedes the active single-module guidance and update current docs/roadmap/spec references. Assumptions and risks: - The repository currently documents `lib/team/network.ts` as the unified coordinator, so approved work must intentionally update that guidance to the new `lib/team/coding` architecture. - `lib/team/history.ts` imports `TeamRunState` from `network.ts` today; moving shared types cleanly is part of the refactor, not follow-up cleanup. - The main regression risk is accidental behavior drift while extracting approval and background lane execution helpers that are tightly coupled to thread persistence. Validation: - Run `pnpm fmt`, `pnpm lint`, targeted Vitest coverage for the moved orchestration surface, and `pnpm build` if exported boundaries or route wiring move. Approval note: - Materialize this as one OpenSpec change. Keep the shared coder/reviewer pool idle until the owner approves it.
