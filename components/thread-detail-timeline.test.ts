@@ -362,6 +362,15 @@ describe("pickActiveTimelineAnchorId", () => {
       ),
     ).toBe("request");
   });
+
+  it("keeps dense anchor lists aligned with the last visible timeline section", () => {
+    const anchorOffsets = Array.from({ length: 160 }, (_, index) => ({
+      id: `anchor-${index + 1}`,
+      top: index * 48,
+    }));
+
+    expect(pickActiveTimelineAnchorId(anchorOffsets, 48 * 137 + 12)).toBe("anchor-138");
+  });
 });
 
 describe("buildTimelineTaskOutputBundles", () => {
