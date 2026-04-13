@@ -43,7 +43,6 @@ import {
   type TeamRunReviewingStageState,
 } from "@/lib/team/coding/shared";
 import { buildLaneRunState } from "@/lib/team/coding/lane-state";
-import type { CreateWorktree } from "@/lib/team/coding/worktree";
 import {
   getTeamThreadRecord,
   listPendingDispatchAssignments,
@@ -53,10 +52,6 @@ import {
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { coderRole } from "@/lib/team/roles/coder";
-import {
-  resolveTeamRoleDependencies,
-  type TeamRoleDependencies,
-} from "@/lib/team/roles/dependencies";
 import { reviewerRole } from "@/lib/team/roles/reviewer";
 import type { TeamRoleHandoff, TeamWorkerLaneRecord } from "@/lib/team/types";
 
@@ -220,14 +215,12 @@ const runFinalArchiveCycle = async ({
   threadId,
   assignmentNumber,
   laneId,
-  createWorktree: createWorktreeFactory,
-  dependencies,
+  env,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
-  createWorktree: CreateWorktree;
-  dependencies: TeamRoleDependencies;
+  env: TeamRunEnv;
 }): Promise<void> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
@@ -252,7 +245,7 @@ const runFinalArchiveCycle = async ({
   const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
     ? teamConfig.dispatch.worktreeRoot
     : path.join(repositoryPath, teamConfig.dispatch.worktreeRoot);
-  const laneWorktree = createWorktreeFactory({
+  const laneWorktree = env.createWorktree({
     path: lane.worktreePath ?? laneWorktreeRoot,
     rootPath: laneWorktreeRoot,
   });
@@ -342,7 +335,7 @@ const runFinalArchiveCycle = async ({
           assignmentNumber,
         }),
       });
-      const coderResponse = await dependencies.coderAgent.run({
+      const coderResponse = await env.deps.coderAgent.run({
         state: coderState,
         input: buildFinalArchiveInput({
           lane,
@@ -596,14 +589,12 @@ const runLaneCycle = async ({
   threadId,
   assignmentNumber,
   laneId,
-  createWorktree: createWorktreeFactory,
-  dependencies,
+  env,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
-  createWorktree: CreateWorktree;
-  dependencies: TeamRoleDependencies;
+  env: TeamRunEnv;
 }): Promise<void> => {
   while (true) {
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
@@ -628,7 +619,7 @@ const runLaneCycle = async ({
     const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
       ? teamConfig.dispatch.worktreeRoot
       : path.join(assignment.repository.path, teamConfig.dispatch.worktreeRoot);
-    const laneWorktree = createWorktreeFactory({
+    const laneWorktree = env.createWorktree({
       path: lane.worktreePath ?? laneWorktreeRoot,
       rootPath: laneWorktreeRoot,
     });
@@ -638,8 +629,7 @@ const runLaneCycle = async ({
         threadId,
         assignmentNumber,
         laneId,
-        createWorktree: createWorktreeFactory,
-        dependencies,
+        env,
       });
       return;
     }
@@ -696,7 +686,7 @@ const runLaneCycle = async ({
         assignmentNumber,
       }),
     });
-    const coderResponse = await dependencies.coderAgent.run({
+    const coderResponse = await env.deps.coderAgent.run({
       state: coderState,
       input:
         lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
@@ -849,7 +839,7 @@ const runLaneCycle = async ({
         coder: coderHandoff,
       },
     });
-    const reviewerResponse = await dependencies.reviewerAgent.run({
+    const reviewerResponse = await env.deps.reviewerAgent.run({
       state: reviewerState,
       input:
         lane.taskObjective ??
@@ -1313,14 +1303,12 @@ const ensureLaneRun = ({
   threadId,
   assignmentNumber,
   laneId,
-  createWorktree: createWorktreeFactory,
-  dependencies,
+  env,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
-  createWorktree: CreateWorktree;
-  dependencies: TeamRoleDependencies;
+  env: TeamRunEnv;
 }): void => {
   const key = laneRunKey(threadId, assignmentNumber, laneId);
   if (activeLaneRuns.has(key)) {
@@ -1333,8 +1321,7 @@ const ensureLaneRun = ({
         threadId,
         assignmentNumber,
         laneId,
-        createWorktree: createWorktreeFactory,
-        dependencies,
+        env,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Background lane execution failed.";
@@ -1386,14 +1373,7 @@ const ensureLaneRun = ({
       });
     } finally {
       activeLaneRuns.delete(key);
-      void ensurePendingDispatchWork(
-        {
-          deps: dependencies,
-          createWorktree: createWorktreeFactory,
-          persistState: async () => undefined,
-        },
-        threadId,
-      );
+      void ensurePendingDispatchWork(env, threadId);
     }
   })();
 
@@ -1416,18 +1396,9 @@ export const ensurePendingDispatchWork = async (
   env: TeamRunEnv,
   threadId?: string,
 ): Promise<void> => {
-  const resolvedDependencies = resolveTeamRoleDependencies(env.deps);
   const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
-  const expectedAssignmentStateByKey = new Map<string, AssignmentThreadSchedulingState>();
   const expectedLaneStateByKey = new Map<string, LanePoolSchedulingState>();
   for (const pending of pendingAssignments) {
-    expectedAssignmentStateByKey.set(
-      buildAssignmentThreadPoolStateKey({
-        threadId: pending.threadId,
-        assignmentNumber: pending.assignment.assignmentNumber,
-      }),
-      captureAssignmentThreadSchedulingState(pending.assignment),
-    );
     for (const lane of pending.assignment.lanes) {
       expectedLaneStateByKey.set(
         buildLanePoolStateKey({
@@ -1465,7 +1436,7 @@ export const ensurePendingDispatchWork = async (
       threadId: pending.threadId,
       assignmentNumber: pending.assignment.assignmentNumber,
     });
-    const expectedAssignmentState = expectedAssignmentStateByKey.get(assignmentThreadPoolStateKey);
+    const expectedAssignmentState = captureAssignmentThreadSchedulingState(pending.assignment);
     if (expectedAssignmentState) {
       plannedAssignmentStateByKey.set(assignmentThreadPoolStateKey, {
         expected: expectedAssignmentState,
@@ -1571,8 +1542,7 @@ export const ensurePendingDispatchWork = async (
           threadId: pending.threadId,
           assignmentNumber: pending.assignment.assignmentNumber,
           laneId: lane.laneId,
-          createWorktree: env.createWorktree,
-          dependencies: resolvedDependencies,
+          env,
         });
       }
     }
