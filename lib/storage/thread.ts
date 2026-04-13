@@ -59,6 +59,12 @@ type TeamThreadStorageUpdateResult<T> = {
   value: T;
 };
 
+type TeamThreadStorageMutationContext = {
+  getRecord: (threadId: string) => TeamThreadStorageRecord | null;
+  listRecords: (limit?: number) => TeamThreadStorageRecord[];
+  upsertRecord: (record: TeamThreadStorageRecord) => void;
+};
+
 const LEGACY_JSON_READ_RETRY_COUNT = 3;
 const LEGACY_JSON_READ_RETRY_DELAY_MS = 25;
 
@@ -371,6 +377,26 @@ export const updateTeamThreadStorageRecord = async <T>({
 
       upsertThreadRow(database, nextRecord);
       return value;
+    }),
+  );
+};
+
+export const mutateTeamThreadStorage = async <T>({
+  threadFile: target,
+  task,
+}: {
+  threadFile: TeamThreadStorageTarget;
+  task: (context: TeamThreadStorageMutationContext) => Promise<T> | T;
+}): Promise<T> => {
+  return queueSqliteStorageMutation(target, () =>
+    withTeamThreadDatabase(target, async (database) => {
+      return task({
+        getRecord: (threadId) => getThreadRow(database, threadId),
+        listRecords: (limit) => listThreadRows(database, limit),
+        upsertRecord: (record) => {
+          upsertThreadRow(database, record);
+        },
+      });
     }),
   );
 };

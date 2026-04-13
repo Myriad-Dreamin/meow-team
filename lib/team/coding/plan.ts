@@ -14,6 +14,7 @@ import {
 } from "@/lib/team/git";
 import {
   appendTeamExecutionStep,
+  claimTeamThreadWorktree,
   getTeamThreadRecord,
   listLivingThreadWorktreeClaims,
   synchronizeDispatchAssignment,
@@ -593,6 +594,9 @@ const resolvePlanningWorktree = async ({
       dispatchAssignments: existingThread?.dispatchAssignments ?? [],
     },
   });
+  if (currentThreadWorktree?.slot) {
+    return currentThreadWorktree;
+  }
   const claimedWorktree = claimThreadOwnedWorktree({
     repository: selectedRepository,
     configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
@@ -907,11 +911,23 @@ export const buildPlanningStageState = async (
     threadId: args.threadId,
     assignmentNumber: state.assignmentNumber,
   });
-  const worktree = await resolvePlanningWorktree({
-    threadId: args.threadId,
-    selectedRepository,
-    existingThread,
-  });
+  const worktree = selectedRepository
+    ? await claimTeamThreadWorktree({
+        threadFile: teamConfig.storage.threadFile,
+        threadId: args.threadId,
+        state,
+        input: args.input,
+      })
+    : await resolvePlanningWorktree({
+        threadId: args.threadId,
+        selectedRepository,
+        existingThread,
+      });
+  if (!worktree) {
+    throw new Error(
+      `Thread ${args.threadId} could not claim the required meow worktree before planning.`,
+    );
+  }
 
   const requestMetadata = await resolveRequestMetadata({
     input: args.input,

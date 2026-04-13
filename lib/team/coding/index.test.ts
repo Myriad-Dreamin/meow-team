@@ -1218,6 +1218,107 @@ describe.sequential("runTeam", () => {
     );
   });
 
+  it("rejects a concurrent second planning run before it can reuse the same claimed meow worktree", async () => {
+    teamConfig.dispatch.workerCount = 1;
+    findConfiguredRepositoryMock.mockResolvedValue(repository);
+
+    let releaseFirstRequestTitle: (() => void) | null = null;
+    let signalFirstRequestTitleStarted: (() => void) | null = null;
+    const firstRequestTitleStarted = new Promise<void>((resolve) => {
+      signalFirstRequestTitleStarted = resolve;
+    });
+    const requestTitleAgentMock = {
+      run: vi.fn(async (input: RequestTitleAgentArgs[0]) => {
+        if (!input.tasks?.length && input.input === "Plan thread one.") {
+          signalFirstRequestTitleStarted?.();
+          signalFirstRequestTitleStarted = null;
+          await new Promise<void>((resolve) => {
+            releaseFirstRequestTitle = resolve;
+          });
+        }
+
+        return {
+          title: input.input === "Plan thread two." ? "Thread Two" : "Thread One",
+          conventionalTitle: null,
+        };
+      }),
+    };
+    const plannerAgentMock = {
+      run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        expect(input.worktree).toEqual(createManagedPlanningWorktree(repository.path));
+        return {
+          handoff: {
+            summary: "Planner summary",
+            deliverable: "Planner deliverable",
+            decision: "continue" as const,
+          },
+          dispatch: {
+            planSummary: "Plan summary",
+            plannerDeliverable: "Plan deliverable",
+            branchPrefix: "thread-one",
+            tasks: [
+              {
+                title: "Use the claimed worktree",
+                objective: "Keep the meow slot exclusive while planning is in flight.",
+              },
+            ],
+          },
+        };
+      }),
+    };
+    const env = createTeamRunEnv({
+      dependencies: {
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+      },
+      persistState: createPersistStateMock(),
+    });
+
+    const firstRun = runTeam(
+      env,
+      createInitialTeamRunState({
+        kind: "planning",
+        input: "Plan thread one.",
+        repositoryId: repository.id,
+        threadId: "thread-one",
+      }),
+    );
+    await firstRequestTitleStarted;
+
+    const claimedThread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-one");
+    expect(claimedThread?.data.threadWorktree).toEqual(
+      createManagedPlanningWorktree(repository.path),
+    );
+    expect(plannerAgentMock.run).not.toHaveBeenCalled();
+
+    await expect(
+      runTeam(
+        env,
+        createInitialTeamRunState({
+          kind: "planning",
+          input: "Plan thread two.",
+          repositoryId: repository.id,
+          threadId: "thread-two",
+        }),
+      ),
+    ).rejects.toThrow(
+      "All 1 shared meow worktree slot is already claimed by living repository-backed threads.",
+    );
+    expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
+
+    if (!releaseFirstRequestTitle) {
+      throw new Error("The first request-title run never blocked as expected.");
+    }
+
+    releaseFirstRequestTitle();
+
+    const result = await firstRun;
+    expect(result?.threadId).toBe("thread-one");
+
+    const secondThread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-two");
+    expect(secondThread).toBeNull();
+  });
+
   it("reuses a legacy claimed meow worktree when replanning the same thread", async () => {
     teamConfig.dispatch.workerCount = 1;
     findConfiguredRepositoryMock.mockResolvedValue(repository);

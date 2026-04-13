@@ -354,11 +354,13 @@ const queueStorageMutation = async <T>(
 ): Promise<T> => {
   const previous = mutationQueues.get(sqlitePath) ?? Promise.resolve();
   const mutation = previous.catch(() => undefined).then(task);
-  const tracked = mutation.finally(() => {
-    if (mutationQueues.get(sqlitePath) === tracked) {
-      mutationQueues.delete(sqlitePath);
-    }
-  });
+  const tracked = mutation
+    .catch(() => undefined)
+    .finally(() => {
+      if (mutationQueues.get(sqlitePath) === tracked) {
+        mutationQueues.delete(sqlitePath);
+      }
+    });
 
   mutationQueues.set(sqlitePath, tracked);
   return mutation;

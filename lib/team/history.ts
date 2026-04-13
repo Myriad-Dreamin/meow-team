@@ -2,8 +2,11 @@ import "server-only";
 
 import { teamConfig } from "@/team.config";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
-import type { TeamRunState } from "@/lib/team/coding/shared";
-import { resolveThreadOwnedWorktree } from "@/lib/team/coding/thread-worktree";
+import { DispatchThreadCapacityError, type TeamRunState } from "@/lib/team/coding/shared";
+import {
+  claimThreadOwnedWorktree,
+  resolveThreadOwnedWorktree,
+} from "@/lib/team/coding/thread-worktree";
 import {
   buildTeamRepositoryPickerModel,
   type TeamRepositoryPickerModel,
@@ -17,6 +20,7 @@ import {
 import {
   getTeamThreadStorageRecord,
   listTeamThreadStorageRecords,
+  mutateTeamThreadStorage,
   type TeamThreadStorageTarget,
   type TeamThreadStorageRecord,
   updateTeamThreadStorageRecord,
@@ -402,6 +406,78 @@ const filterHandoffsForWorkflow = (state: TeamRunState): TeamRunState["handoffs"
   return Object.fromEntries(
     Object.entries(state.handoffs).filter(([roleId]) => state.workflow.includes(roleId)),
   );
+};
+
+const buildUpsertedThreadRecord = ({
+  threadId,
+  existingThread,
+  state,
+  input,
+  now,
+  appendUserMessage,
+}: {
+  threadId: string;
+  existingThread: TeamThreadRecord | null;
+  state: TeamRunState;
+  input: string;
+  now: string;
+  appendUserMessage: boolean;
+}): TeamThreadRecord => {
+  return {
+    threadId,
+    data: {
+      ...state,
+      latestInput: input,
+      handoffs: filterHandoffsForWorkflow(state),
+    },
+    results: existingThread?.results ?? [],
+    userMessages: appendUserMessage
+      ? [
+          ...(existingThread?.userMessages ?? []),
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: input,
+            timestamp: now,
+          },
+        ]
+      : (existingThread?.userMessages ?? []),
+    dispatchAssignments: existingThread?.dispatchAssignments ?? [],
+    archivedAt: existingThread?.archivedAt ?? null,
+    run: {
+      status: "running",
+      startedAt: existingThread?.run?.startedAt ?? now,
+      finishedAt: null,
+      lastError: null,
+    },
+    createdAt: existingThread?.createdAt ?? now,
+    updatedAt: now,
+  };
+};
+
+const collectLivingThreadWorktreeClaims = (
+  storedRecords: TeamThreadStorageRecord[],
+  { excludeThreadId }: { excludeThreadId?: string } = {},
+): TeamThreadWorktreeClaim[] => {
+  return storedRecords.reduce<TeamThreadWorktreeClaim[]>((claims, storedRecord) => {
+    const storedThread = readStoredThreadFromRecord(storedRecord);
+    const thread = synchronizeTeamThreadRun(
+      normalizeStoredThread(storedThread),
+      storedThread.updatedAt,
+    );
+
+    if (thread.threadId === excludeThreadId || isArchivedThread(thread)) {
+      return claims;
+    }
+
+    claims.push({
+      threadId: thread.threadId,
+      repository: thread.data.selectedRepository,
+      worktree: thread.data.threadWorktree,
+    });
+
+    return claims;
+  }, []);
 };
 
 const getOrderedHandoffs = (state: TeamRunState): TeamRoleHandoff[] => {
@@ -1008,25 +1084,71 @@ export const listLivingThreadWorktreeClaims = async (
   { excludeThreadId }: { excludeThreadId?: string } = {},
 ): Promise<TeamThreadWorktreeClaim[]> => {
   const storedThreads = await listTeamThreadStorageRecords(threadFile);
-  return storedThreads.reduce<TeamThreadWorktreeClaim[]>((claims, storedRecord) => {
-    const storedThread = readStoredThreadFromRecord(storedRecord);
-    const thread = synchronizeTeamThreadRun(
-      normalizeStoredThread(storedThread),
-      storedThread.updatedAt,
-    );
+  return collectLivingThreadWorktreeClaims(storedThreads, {
+    excludeThreadId,
+  });
+};
 
-    if (thread.threadId === excludeThreadId || isArchivedThread(thread)) {
-      return claims;
-    }
+export const claimTeamThreadWorktree = async ({
+  threadFile,
+  threadId,
+  state,
+  input,
+}: {
+  threadFile: TeamThreadStorageTarget;
+  threadId: string;
+  state: TeamRunState;
+  input: string;
+}): Promise<TeamRunState["threadWorktree"]> => {
+  return mutateTeamThreadStorage({
+    threadFile,
+    task: ({ getRecord, listRecords, upsertRecord }) => {
+      const now = new Date().toISOString();
+      const storedRecord = getRecord(threadId);
+      const existingThread = storedRecord
+        ? normalizeStoredThread(readStoredThreadFromRecord(storedRecord))
+        : null;
+      const repository = state.selectedRepository;
+      const claimedWorktree = repository
+        ? claimThreadOwnedWorktree({
+            repository,
+            configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
+            currentWorktree: resolveThreadOwnedWorktree({
+              repository,
+              configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
+              candidate: {
+                threadWorktree: state.threadWorktree ?? existingThread?.data.threadWorktree,
+                dispatchAssignments: existingThread?.dispatchAssignments ?? [],
+              },
+            }),
+            livingClaims: collectLivingThreadWorktreeClaims(listRecords(), {
+              excludeThreadId: threadId,
+            }),
+            workerCount: teamConfig.dispatch.workerCount,
+          })
+        : null;
 
-    claims.push({
-      threadId: thread.threadId,
-      repository: thread.data.selectedRepository,
-      worktree: thread.data.threadWorktree,
-    });
+      if (repository && !claimedWorktree) {
+        throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
+      }
 
-    return claims;
-  }, []);
+      const thread = buildUpsertedThreadRecord({
+        threadId,
+        existingThread,
+        state: {
+          ...state,
+          threadWorktree: claimedWorktree,
+        },
+        input,
+        now,
+        appendUserMessage: false,
+      });
+      synchronizeTeamThreadRun(thread, now);
+      upsertRecord(serializeStoredThreadRecord(thread));
+
+      return thread.data.threadWorktree;
+    },
+  });
 };
 
 export const markTeamThreadFailed = async ({
@@ -1124,35 +1246,14 @@ export const upsertTeamThreadRun = async ({
       const existingThread = storedRecord
         ? normalizeStoredThread(readStoredThreadFromRecord(storedRecord))
         : null;
-
-      const thread: TeamThreadRecord = {
+      const thread = buildUpsertedThreadRecord({
         threadId,
-        data: {
-          ...state,
-          latestInput: input,
-          handoffs: filterHandoffsForWorkflow(state),
-        },
-        results: existingThread?.results ?? [],
-        userMessages: [
-          ...(existingThread?.userMessages ?? []),
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            content: input,
-            timestamp: now,
-          },
-        ],
-        dispatchAssignments: existingThread?.dispatchAssignments ?? [],
-        archivedAt: existingThread?.archivedAt ?? null,
-        run: {
-          status: "running",
-          startedAt: existingThread?.run?.startedAt ?? now,
-          finishedAt: null,
-          lastError: null,
-        },
-        createdAt: existingThread?.createdAt ?? now,
-        updatedAt: now,
-      };
+        existingThread,
+        state,
+        input,
+        now,
+        appendUserMessage: true,
+      });
 
       synchronizeTeamThreadRun(thread, now);
 
