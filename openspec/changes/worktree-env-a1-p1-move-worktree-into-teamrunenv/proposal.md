@@ -1,0 +1,30 @@
+## Why
+
+Extract worktree-specific logic from `lib/team/coding/dispatch.ts` into dedicated `lib/team/coding/*` helpers, introduce a narrow shared `Worktree` abstraction, and rewire planner/request-title/coder/reviewer execution so `TeamRunEnv` constructs and passes that worktree context instead of raw `worktreePath` strings while preserving existing dispatch behavior and regression coverage. Extract worktree handling from `lib/team/coding/dispatch.ts` into dedicated coding modules and route a shared `Worktree` object through `TeamRunEnv` to planner and lane agents. This proposal is one candidate implementation for the request: Refactor `/lib/team/coding/`: - extract code about `Worktree` in `dispatch.ts` to `/lib/team/coding/` - construct `Worktree` and pass it to agents via `TeamRunEnv`.
+
+## What Changes
+
+- Introduce the `worktree-env-a1-p1-move-worktree-into-teamrunenv` OpenSpec change for proposal "Move worktree into TeamRunEnv".
+- Extract worktree-specific logic from `lib/team/coding/dispatch.ts` into dedicated `lib/team/coding/*` helpers, introduce a narrow shared `Worktree` abstraction, and rewire planner/request-title/coder/reviewer execution so `TeamRunEnv` constructs and passes that worktree context instead of raw `worktreePath` strings while preserving existing dispatch behavior and regression coverage.
+- Keep the proposal logically scoped so any approved coding-review worker can claim it without replanning.
+
+## Capabilities
+
+### New Capabilities
+- `worktree-env-a1-p1-move-worktree-into-teamrunenv`: Extract worktree-specific logic from `lib/team/coding/dispatch.ts` into dedicated `lib/team/coding/*` helpers, introduce a narrow shared `Worktree` abstraction, and rewire planner/request-title/coder/reviewer execution so `TeamRunEnv` constructs and passes that worktree context instead of raw `worktreePath` strings while preserving existing dispatch behavior and regression coverage.
+
+### Modified Capabilities
+- None.
+
+## Conventional Title
+
+- Canonical request/PR title: `refactor(team/coding): Move worktree into TeamRunEnv`
+- Conventional title metadata: `refactor(team/coding)`
+- Slash-delimited roadmap/topic scope stays in conventional-title metadata and does not alter `branchPrefix` or OpenSpec change paths.
+
+
+## Impact
+
+- Affected repository: `meow-team`
+- Coding-review execution: pooled workers with reusable worktrees from `/home/kamiyoru/work/ts/meow-team/.meow-team-worktrees/meow-N`
+- Planner deliverable: Recommended proposal set: 1 proposal. Proposal: `Move worktree into TeamRunEnv` Suggested OpenSpec seed: `move-worktree-into-teamrunenv` Why this stays one proposal: - The request is a single boundary refactor across the same execution path: planning metadata, dispatch lane execution, and role-agent invocation all currently pass raw worktree paths or compute them inline. - Splitting extraction from env plumbing would force an interim duplicate API where some stages use `Worktree` and others still use strings, which raises migration risk without producing an independently reviewable slice. Objective: - Extract the worktree-specific coordination now embedded in `lib/team/coding/dispatch.ts` into focused `lib/team/coding/*` module(s), then make `TeamRunEnv` the shared source that constructs and carries a `Worktree` object into planner, request-title, coder, and reviewer agent runs. Implementation shape: 1. Define a narrow `Worktree` abstraction under `lib/team/coding/` that captures the checkout path plus the minimum metadata agents and executors need; keep it small instead of turning every git operation into instance methods. 2. Move dispatch-local worktree helpers and state assembly out of `lib/team/coding/dispatch.ts` into dedicated worktree-focused helpers so dispatch orchestration stops owning path construction and inline fallback logic. 3. Extend `TeamRunEnv`, stage helpers, and shared run-state builders so planning and lane execution construct a `Worktree` once and pass that object onward rather than threading bare `worktreePath` strings through `plan.ts`, `dispatch.ts`, and the role modules. 4. Update the agent and executor surfaces that currently require `worktreePath` to accept the new worktree context while preserving current prompt content and Codex CLI working-directory behavior. 5. Preserve current scheduling and lifecycle behavior: no intended change to thread slot allocation, lane slot reuse, planner proposal materialization, PR synchronization, or archive sequencing beyond the refactor required to use the new abstraction. 6. Expand regression coverage around `createTeamRunEnv`, planning metadata generation, lane execution, and role dependency wiring so tests prove the correct worktree object or path reaches each agent and existing worktree lifecycle behavior stays the same. Scope boundaries: - Do not redesign the planner -> coder -> reviewer workflow. - Do not broaden this into a large git-wrapper rewrite unless a minimal helper move is required to support the new boundary. - Keep persisted thread data stable unless a small compatibility addition is unavoidable. Assumptions and risks: - The minimal useful `Worktree` API is not explicit in the codebase yet; the approved implementation should keep it value-oriented and avoid hiding orchestration decisions inside a stateful class unless the code proves that necessary. - Request-title and planner runs also depend on a worktree path today, so the change must cover planning-stage agent calls, not only coder and reviewer lane execution. - The main regression risk is half-migrated tests or dispatch helpers still reconstructing raw paths after `TeamRunEnv` becomes the source of truth. Validation: - Run `pnpm fmt`, `pnpm lint`, targeted Vitest coverage for `lib/team/coding/index.test.ts`, role dependency or role tests, and any new worktree module tests, plus `pnpm build` because shared orchestration contracts change. Approval note: - Materialize this as one OpenSpec change. The shared coder/reviewer pool should remain idle until human approval arrives.
