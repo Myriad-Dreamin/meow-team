@@ -3,14 +3,14 @@
 Meow Team currently exposes its operator experience through the Next.js app,
 which keeps the product browser-first even when a native Android surface would
 make the UI easier to deliver on mobile devices. A bootstrap Android shell lets
-the team validate a new client surface in `crates/meow-team-android` without
+the team validate a new client surface in `projects/meow-team-apk` without
 moving orchestration, persistence, or workflow logic out of Next.js.
 
 ## What Changes
 
 - Introduce the `android-app-ui-a1-p1-bootstrap-nextjs-backed-android-shell`
   OpenSpec change for proposal "Bootstrap Next.js-backed Android shell".
-- Plan an Android application package under `crates/meow-team-android` that
+- Plan an Android application package under `projects/meow-team-apk` that
   starts as a `cargo-ndk` hello-world app and grows into the first meow-team
   mobile UI shell.
 - Keep runtime orchestration and data APIs in the existing Next.js backend,
@@ -28,7 +28,7 @@ moving orchestration, persistence, or workflow logic out of Next.js.
 ### New Capabilities
 
 - `android-app-workspace-ui`: Provide an Android application package in
-  `crates/meow-team-android` with an initial meow-team UI shell, connection
+  `projects/meow-team-apk` with an initial meow-team UI shell, connection
   state, and a crate boundary that stays separate from the Next.js backend.
 - `android-app-http-bridge`: Provide the Android-to-Next.js transport contract
   for explicit HTTP GET/POST requests, configurable backend base URLs, and
@@ -50,7 +50,7 @@ moving orchestration, persistence, or workflow logic out of Next.js.
 
 - Affected repository: `meow-team`
 - Affected code and docs: `docs/roadmap/android-app/*`,
-  `crates/meow-team-android`, repository workspace wiring for a new Android
+  `projects/meow-team-apk`, repository workspace wiring for a new Android
   crate, and the Next.js HTTP endpoints consumed by the app
 - Affected systems: Android toolchain and emulator/device workflow,
   `cargo-ndk`-driven packaging, the existing Next.js backend, and the local

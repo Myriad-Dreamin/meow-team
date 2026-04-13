@@ -3,7 +3,7 @@
 ### Requirement: Host the meow-team workspace inside an Android app
 
 The system SHALL provide an Android application package in
-`crates/meow-team-android` that opens a meow-team mobile shell instead of
+`projects/meow-team-apk` that opens a meow-team mobile shell instead of
 requiring the owner to work exclusively in the browser.
 
 #### Scenario: Owner opens the workspace from Android
@@ -21,7 +21,7 @@ the repository can produce and validate the first hello-world mobile shell.
 
 - **WHEN** the developer runs the documented Android build workflow
 - **THEN** the repository SHALL compile the Rust Android package in
-  `crates/meow-team-android` through `cargo-ndk`
+  `projects/meow-team-apk` through `cargo-ndk`
 - **AND** the resulting bootstrap app SHALL render a minimal hello-world
   experience
 

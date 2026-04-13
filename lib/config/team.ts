@@ -29,7 +29,7 @@ const dispatchConfigSchema = z.object({
   worktreeRoot: z.string().trim().min(1),
 });
 
-const notificationTargetSchema = z.enum(["browser", "vscode"]);
+const notificationTargetSchema = z.enum(["browser", "vscode", "android"]);
 
 const notificationsConfigSchema = z
   .object({

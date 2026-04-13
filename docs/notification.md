@@ -1,13 +1,13 @@
----
-title: Desktop Notifications
+title: Attention Notifications
 outline: deep
+
 ---
 
-# Desktop notifications
+# Attention notifications
 
 The repository routes attention-needed alerts through a backend-owned target.
 This guide documents the exact prerequisites, trigger rules, dedupe behavior,
-and how browser and VS Code delivery differ.
+and how browser, VS Code, and Android delivery differ.
 
 ## Notification target
 
@@ -16,6 +16,8 @@ and how browser and VS Code delivery differ.
 - `browser`: the web UI can raise browser desktop notifications.
 - `vscode`: the VS Code extension polls `GET /api/team/notifications` and the
   browser stays silent.
+- `android`: the Android app polls `GET /api/team/notifications` and both the
+  browser plus the VS Code extension stay silent.
 
 The backend classifies approval and failure attention states in
 `lib/team/notifications.ts` and publishes the active snapshot through both
@@ -35,6 +37,10 @@ Browser desktop alerts only fire when all of the following are true:
 VS Code alerts require the extension to be installed and activated. The
 extension starts polling on editor startup and uses the same backend snapshot,
 so approval and failure alerts can continue without the browser page open.
+
+Android alerts require the Android app to be open and connected to the same
+backend base URL. The app polls the same snapshot and raises native Android
+system notifications when `team.config.ts` keeps `notifications.target === "android"`.
 
 ## Exact trigger rules
 
@@ -67,6 +73,7 @@ Each client dedupes by fingerprint inside its own local storage:
 
 - The browser stores delivered fingerprints in local storage.
 - The VS Code extension stores delivered fingerprints in extension state.
+- The Android app stores delivered fingerprints in shared preferences.
 
 A new alert is eligible when the underlying state changes enough to produce a
 new fingerprint, for example after a requeue, a new approval request, or a new
@@ -80,6 +87,7 @@ Alerts should not fire in these cases:
 - Permission is blocked or has not been granted yet.
 - The workspace toggle is off.
 - The backend target is `vscode`, which reserves delivery for the extension.
+- The backend target is `android`, which reserves delivery for the Android app.
 - The thread is not in one of the approval or failure states listed above.
 - The same fingerprint was already delivered in this browser profile.
 - An attention state disappeared before notifications became available again.
@@ -94,4 +102,6 @@ The browser now stores only fingerprints that were actually delivered by
 `window.Notification`, and only when the backend target is `browser`. The VS
 Code extension follows the same backend snapshot but stores its own delivered
 fingerprints in extension state and shows warning or error messages when the
-target is `vscode`.
+target is `vscode`. The Android app follows the same snapshot, persists its own
+delivered fingerprints in shared preferences, and raises native system
+notifications when the target is `android`.

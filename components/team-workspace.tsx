@@ -143,7 +143,7 @@ const isWorkspaceResponse = (value: unknown): value is TeamWorkspaceResponse => 
 };
 
 const isNotificationTarget = (value: unknown): value is TeamNotificationsResponse["target"] => {
-  return value === "browser" || value === "vscode";
+  return value === "browser" || value === "vscode" || value === "android";
 };
 
 const isAttentionNotification = (value: unknown): value is TeamAttentionNotification => {
@@ -475,6 +475,18 @@ export function TeamWorkspace({
         badgeClassName: "status-approved",
         copy: "The backend routes approval and failure alerts to the VS Code extension. Browser desktop alerts stay silent for this workspace.",
         heading: "Alerts handled by VS Code",
+        label: "Attention Alerts",
+        tone: "idle",
+      } as const;
+    }
+
+    if (notificationSnapshot.target === "android") {
+      return {
+        action: null,
+        badge: "Android",
+        badgeClassName: "status-approved",
+        copy: "The backend routes approval and failure alerts to the Android app. Browser desktop alerts stay silent for this workspace.",
+        heading: "Alerts handled by Android",
         label: "Attention Alerts",
         tone: "idle",
       } as const;

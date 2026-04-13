@@ -34,6 +34,9 @@ pnpm dev
 
 Open `http://localhost:3000`.
 
+Android setup and APK build notes live in
+[`docs/android.md`](/home/kamiyoru/work/ts/meow-team/docs/android.md).
+
 ## Runtime Configuration
 
 The app reads your Codex user settings by default instead of requiring a
@@ -81,6 +84,9 @@ the environment provides a model override.
 - [`editors/vscode`](/home/kamiyoru/work/ts/meow-team/editors/vscode):
   VS Code extension package bundled with esbuild to `out/extension.js` and
   packaged locally as a VSIX.
+- [`projects/meow-team-apk`](/home/kamiyoru/work/ts/meow-team/projects/meow-team-apk):
+  Android shell that hosts the workspace in a WebView, polls the backend
+  notification snapshot, and packages directly as an APK without an NDK step.
 - [`app/api/team/run/route.ts`](/home/kamiyoru/work/ts/meow-team/app/api/team/run/route.ts):
   API endpoint that runs the team for a prompt and returns the handoffs.
 
@@ -119,6 +125,8 @@ selection on every run.
   in the web UI.
 - Set `notifications.target` to `"vscode"` to route those alerts through the
   VS Code extension and keep the browser silent.
+- Set `notifications.target` to `"android"` to route those alerts through the
+  Android app and keep the browser plus VS Code extension silent.
 
 ## Adding a Role
 
@@ -141,6 +149,10 @@ prompt text.
 - `pnpm dev` starts the Next.js app.
 - `pnpm build` builds the production app.
 - `pnpm start` runs the production server.
+- `pnpm android:install-deps` installs repo-local Android SDK, JDK 17, and Gradle dependencies under `build/deps`.
+- `pnpm android:doctor` checks Java 17+, Android SDK discovery, and Gradle availability.
+- `pnpm android:assemble` builds the Android debug APK.
+- `pnpm android:install` installs the Android debug APK to a connected device or emulator.
 - `pnpm lint` runs ESLint.
 - `pnpm meow-prompt:sync-types` refreshes generated prompt declarations.
 - `pnpm typecheck` runs TypeScript without emitting files.

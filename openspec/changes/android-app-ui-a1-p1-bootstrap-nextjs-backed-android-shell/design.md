@@ -3,7 +3,7 @@
 Meow Team currently exposes its operator experience through the Next.js app and
 already serves the core workflow surface through `app/api/team/*` routes such
 as status, threads, run, approval, feedback, and logs. This change adds a new
-Android delivery surface under `crates/meow-team-android`, but the backend,
+Android delivery surface under `projects/meow-team-apk`, but the backend,
 persistence, and workflow orchestration remain in the existing app. The design
 challenge is deciding how to bootstrap an Android shell with `cargo-ndk`
 without pretending the repository is suddenly mobile-first or moving business
@@ -13,7 +13,7 @@ logic out of the Next.js server.
 
 **Goals:**
 
-- Add a plan for an Android application package under `crates/meow-team-android`.
+- Add a plan for an Android application package under `projects/meow-team-apk`.
 - Bootstrap the package as a `cargo-ndk` hello-world app that proves the repo
   can build and launch the first Android shell.
 - Keep the existing Next.js backend as the source of truth for reads and
@@ -34,9 +34,9 @@ logic out of the Next.js server.
 
 ## Decisions
 
-### Place the Android surface in `crates/meow-team-android`
+### Place the Android surface in `projects/meow-team-apk`
 
-The Android application package will live in `crates/meow-team-android` so the
+The Android application package will live in `projects/meow-team-apk` so the
 platform-specific files, toolchain notes, and app entry points stay isolated
 from the current TypeScript web app.
 
@@ -50,7 +50,7 @@ The first implementation should focus on a buildable hello-world Android shell
 that proves `cargo-ndk` can compile the Rust package and that the app can be
 launched on an emulator or device. Any Android wrapper files needed to host the
 Rust build output should stay colocated with the crate under
-`crates/meow-team-android`.
+`projects/meow-team-apk`.
 
 Alternative considered: start by designing the full meow-team mobile UI before
 proving the toolchain. This was rejected because the highest risk is the new
@@ -114,7 +114,7 @@ surface harder to discover, document, and validate.
 
 1. Create the roadmap and OpenSpec artifacts for the `android/workspace-ui`
    scope.
-2. Scaffold `crates/meow-team-android` with the Android shell, Rust package,
+2. Scaffold `projects/meow-team-apk` with the Android shell, Rust package,
    and the first documented `cargo-ndk` build path.
 3. Add the configurable HTTP bridge for reading and mutating state against the
    Next.js backend.

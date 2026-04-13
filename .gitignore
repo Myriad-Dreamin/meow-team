@@ -13,6 +13,10 @@ editors/vscode/*.vsix
 /build
 .vitepress/cache
 .vitepress/dist
+projects/meow-team-apk/android/.gradle
+projects/meow-team-apk/android/build
+projects/meow-team-apk/android/app/build
+projects/meow-team-apk/android/local.properties
 
 # logs
 npm-debug.log*

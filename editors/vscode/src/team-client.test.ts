@@ -170,4 +170,26 @@ describe("getNotifications", () => {
     expect(response.notifications).toHaveLength(1);
     expect(response.notifications[0]?.reason).toBe("awaiting_human_approval");
   });
+
+  it("accepts the Android notification target", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          generatedAt: "2026-04-14T00:00:00.000Z",
+          target: "android",
+          notifications: [],
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+    const response = await getNotifications("http://127.0.0.1:3000");
+
+    expect(response.target).toBe("android");
+    expect(response.notifications).toEqual([]);
+  });
 });

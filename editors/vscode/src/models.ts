@@ -21,7 +21,7 @@ export type TeamWorkerLaneStatus =
 export type TeamHumanFeedbackScope = "assignment" | "proposal";
 
 export type TeamApprovalTarget = "proposal" | "pull_request";
-export type TeamNotificationTarget = "browser" | "vscode";
+export type TeamNotificationTarget = "browser" | "vscode" | "android";
 export type TeamAttentionNotificationReason =
   | "awaiting_human_approval"
   | "lane_failed"
@@ -312,7 +312,7 @@ const isStringArray = (value: unknown): value is string[] => {
 };
 
 const isNotificationTarget = (value: unknown): value is TeamNotificationTarget => {
-  return value === "browser" || value === "vscode";
+  return value === "browser" || value === "vscode" || value === "android";
 };
 
 const isRepositoryOption = (value: unknown): value is TeamRepositoryOption => {

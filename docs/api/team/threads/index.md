@@ -73,7 +73,8 @@ The full objects are serialized `TeamThreadSummary` records from
 - `repositoryPicker` contains the current suggested and remaining repository
   ordering for the run form.
 - `notifications` embeds the current attention-notification snapshot used by
-  the browser workspace settings panel and alert delivery.
+  the browser workspace settings panel plus the Android and VS Code alert
+  clients.
 
 ## Failure modes
 

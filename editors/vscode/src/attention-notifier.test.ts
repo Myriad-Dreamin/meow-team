@@ -153,4 +153,29 @@ describe("VscodeAttentionNotifier", () => {
     expect(api.window.showErrorMessage).not.toHaveBeenCalled();
     expect(state.update).not.toHaveBeenCalled();
   });
+
+  it("skips delivery when the backend routes notifications to the Android app", async () => {
+    const { api, notifier, state } = createNotifier();
+    getNotificationsMock.mockResolvedValue({
+      generatedAt: "2026-04-14T00:00:00.000Z",
+      target: "android",
+      notifications: [
+        {
+          body: "Proposal 1 is waiting for human approval in thread thread-1.",
+          fingerprint: "fingerprint-approval",
+          laneId: "lane-1",
+          reason: "awaiting_human_approval",
+          tag: "thread-attention:lane-1:awaiting_human_approval",
+          threadId: "thread-1",
+          title: "Example request requires approval",
+        },
+      ],
+    });
+
+    await notifier.refresh();
+
+    expect(api.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(api.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(state.update).not.toHaveBeenCalled();
+  });
 });

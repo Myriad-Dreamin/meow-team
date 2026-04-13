@@ -29,7 +29,7 @@ export const teamConfig = defineTeamConfig({
     worktreeRoot: ".meow-team-worktrees",
   },
   notifications: {
-    target: "browser",
+    target: "android",
   },
   repositories: {
     roots: [

@@ -8,11 +8,14 @@ hero:
   tagline: Guides for current workspace behavior, roadmap topics, and reference pages for the owner harness team routes under `app/api/team`.
   actions:
     - theme: brand
-      text: Open desktop notifications
+      text: Open attention notifications
       link: /notification
     - theme: alt
       text: Browse roadmaps
       link: /roadmap/
+    - theme: alt
+      text: Android setup
+      link: /android
     - theme: alt
       text: Open the API guide
       link: /api
@@ -22,7 +25,7 @@ hero:
 
 features:
   - title: Notification trigger guide
-    details: Desktop notification prerequisites, exact approval and failure triggers, and dedupe behavior are documented in one place.
+    details: Browser, VS Code, and Android notification prerequisites, exact approval and failure triggers, and dedupe behavior are documented in one place.
   - title: Roadmap-aware planning
     details: Roadmap topics now live under `docs/roadmap` with alias-aware topic routing and archived spec backlinks.
   - title: Scoped to existing routes

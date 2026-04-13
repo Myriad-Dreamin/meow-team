@@ -1,11 +1,11 @@
 ## 1. Bootstrap Scope
 
-- [ ] 1.1 Confirm the `android/workspace-ui` scope, the `crates/meow-team-android` package boundary, and the Android wrapper shape needed for the first `cargo-ndk` hello-world app
+- [ ] 1.1 Confirm the `android/workspace-ui` scope, the `projects/meow-team-apk` package boundary, and the Android wrapper shape needed for the first `cargo-ndk` hello-world app
 - [ ] 1.2 Confirm the initial backend contract by selecting the existing Next.js endpoints, base URL handling, and any local authentication assumptions the Android shell will use
 
 ## 2. Android Shell
 
-- [ ] 2.1 Scaffold `crates/meow-team-android` with the Rust crate, Android project glue, and repository scripts or docs needed to build through `cargo-ndk`
+- [ ] 2.1 Scaffold `projects/meow-team-apk` with the Rust crate, Android project glue, and repository scripts or docs needed to build through `cargo-ndk`
 - [ ] 2.2 Build and launch the hello-world Android shell on an emulator or device, including visible backend endpoint or connection-state UI
 
 ## 3. HTTP Bridge
