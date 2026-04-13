@@ -4,6 +4,7 @@ import {
   getTeamRepositoryPickerModel,
   getTeamWorkspaceThreadSummaryLists,
 } from "@/lib/team/history";
+import { buildTeamNotificationsResponse } from "@/lib/team/notifications";
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
@@ -33,10 +34,15 @@ export async function GET() {
       threadFile: serverState.threadStorage,
       repositories,
     });
+    const notifications = buildTeamNotificationsResponse({
+      threads: threadSummaryLists.threads,
+      target: teamConfig.notifications.target,
+    });
 
     return NextResponse.json({
       threads: threadSummaryLists.threads,
       archivedThreads: threadSummaryLists.archivedThreads,
+      notifications,
       repositoryPicker,
     });
   } catch (error) {

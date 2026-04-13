@@ -17,11 +17,13 @@
     "workflow",
     "webview"
   ],
-  "main": "./dist/extension.js",
+  "main": "./out/extension.js",
+  "browser": "./out/extension.web.js",
   "extensionKind": [
     "workspace"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:meowTeam.workspace",
     "onCommand:meowTeam.openWorkspace",
     "onCommand:meowTeam.refreshWorkspace",
@@ -65,7 +67,7 @@
       "properties": {
         "meowTeam.backendBaseUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:21125",
+          "default": "http://127.0.0.1:3000",
           "markdownDescription": "Base URL for the Next.js backend that serves `/api/team/*`.",
           "pattern": "^https?://.+"
         }
@@ -73,9 +75,12 @@
     }
   },
   "scripts": {
-    "build": "pnpm exec tsc -p tsconfig.build.json",
+    "build": "pnpm check && node ./scripts/esbuild.mjs",
     "check": "pnpm exec tsc -p tsconfig.build.json --noEmit",
     "package": "pnpm build && node ./scripts/package.mjs",
     "install-local": "pnpm package && node ./scripts/install-local.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.21.5"
   }
 }

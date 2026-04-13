@@ -29,6 +29,16 @@ const dispatchConfigSchema = z.object({
   worktreeRoot: z.string().trim().min(1),
 });
 
+const notificationTargetSchema = z.enum(["browser", "vscode"]);
+
+const notificationsConfigSchema = z
+  .object({
+    target: notificationTargetSchema.default("browser"),
+  })
+  .default({
+    target: "browser",
+  });
+
 export const teamConfigSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
@@ -48,6 +58,7 @@ export const teamConfigSchema = z.object({
     threadFile: z.string().trim().min(1),
   }),
   dispatch: dispatchConfigSchema,
+  notifications: notificationsConfigSchema,
   repositories: z
     .object({
       roots: z
@@ -61,8 +72,10 @@ export const teamConfigSchema = z.object({
     .optional(),
 });
 
-export type TeamConfig = z.infer<typeof teamConfigSchema>;
+export type TeamConfigInput = z.input<typeof teamConfigSchema>;
+export type TeamConfig = z.output<typeof teamConfigSchema>;
+export type TeamNotificationTarget = z.infer<typeof notificationTargetSchema>;
 
-export const defineTeamConfig = (input: TeamConfig): TeamConfig => {
+export const defineTeamConfig = (input: TeamConfigInput): TeamConfig => {
   return teamConfigSchema.parse(input);
 };

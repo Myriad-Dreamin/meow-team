@@ -1,11 +1,11 @@
 ## 1. Proposal Alignment
 
-- [x] 1.1 Confirm the `vsc/workspace-ui` scope, the `packages/vscode-extension` package boundary, and the first meow-team workflows that must appear in the extension
+- [x] 1.1 Confirm the `vsc/workspace-ui` scope, the `editors/vscode` package boundary, and the first meow-team workflows that must appear in the extension
 - [x] 1.2 Confirm the backend endpoints, base URL configuration flow, and any authentication assumptions the extension depends on
 
 ## 2. Extension Shell
 
-- [x] 2.1 Scaffold the VS Code extension package, manifest, build pipeline, and `pnpm` workspace wiring under `packages/vscode-extension`
+- [x] 2.1 Scaffold the VS Code extension package, manifest, build pipeline, and `pnpm` workspace wiring under `editors/vscode`
 - [x] 2.2 Add commands, settings, and a primary workspace webview entry point for the meow-team UI
 
 ## 3. Backend Bridge

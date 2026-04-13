@@ -3,6 +3,7 @@ import {
   isBranchDeleteRequiredStreamEvent,
   isCodexEventStreamEvent,
   isErrorStreamEvent,
+  isNotificationsResponse,
   isResultStreamEvent,
   isThreadDetailResponse,
   isWorkspaceResponse,
@@ -11,6 +12,7 @@ import {
   type TeamFeedbackRequest,
   type TeamRunRequest,
   type TeamRunSummary,
+  type TeamNotificationsResponse,
   type TeamThreadDetail,
   type TeamWorkspaceResponse,
 } from "./models";
@@ -199,6 +201,15 @@ const fetchOk = async (baseUrl: string, path: string, init: RequestInit): Promis
 
 export const getWorkspace = async (baseUrl: string): Promise<TeamWorkspaceResponse> => {
   return fetchJson(baseUrl, "/api/team/threads", { cache: "no-store" }, isWorkspaceResponse);
+};
+
+export const getNotifications = async (baseUrl: string): Promise<TeamNotificationsResponse> => {
+  return fetchJson(
+    baseUrl,
+    "/api/team/notifications",
+    { cache: "no-store" },
+    isNotificationsResponse,
+  );
 };
 
 export const getThreadDetail = async (

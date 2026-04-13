@@ -78,6 +78,9 @@ the environment provides a model override.
   persistent thread storage for continuous runs.
 - [`lib/team/repositories.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/repositories.ts):
   safe server-side repository discovery limited to configured directories.
+- [`editors/vscode`](/home/kamiyoru/work/ts/meow-team/editors/vscode):
+  VS Code extension package bundled with esbuild to `out/extension.js` and
+  packaged locally as a VSIX.
 - [`app/api/team/run/route.ts`](/home/kamiyoru/work/ts/meow-team/app/api/team/run/route.ts):
   API endpoint that runs the team for a prompt and returns the handoffs.
 
@@ -107,6 +110,15 @@ The app scans each configured directory itself plus its direct child
 directories for a `.git` entry. Only repositories discovered inside those
 configured directories appear in the selector, and the API revalidates the
 selection on every run.
+
+## Notification Routing
+
+`team.config.ts` owns the attention-notification target:
+
+- Set `notifications.target` to `"browser"` to keep approval and failure alerts
+  in the web UI.
+- Set `notifications.target` to `"vscode"` to route those alerts through the
+  VS Code extension and keep the browser silent.
 
 ## Adding a Role
 

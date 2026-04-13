@@ -10,7 +10,6 @@ import {
   type ThreadRepositoryGroup,
 } from "@/components/team-workspace-sidebar";
 import {
-  collectThreadAttentionNotifications,
   mergeStoredAttentionFingerprints,
   selectUndeliveredAttentionNotifications,
 } from "@/components/thread-attention-utils";
@@ -18,6 +17,10 @@ import { ThreadDetailPanel } from "@/components/thread-detail-panel";
 import { formatThreadId, threadStatusLabels } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type {
+  TeamAttentionNotification,
+  TeamNotificationsResponse,
+} from "@/lib/team/notifications";
 import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
 
 type TeamWorkspaceProps = {
@@ -25,6 +28,7 @@ type TeamWorkspaceProps = {
   initialArchivedThreads: TeamThreadSummary[];
   initialPrompt: string;
   initialLogThreadId: string | null;
+  initialNotifications: TeamNotificationsResponse;
   initialRepositoryPicker: TeamRepositoryPickerModel;
   initialThreads: TeamThreadSummary[];
   workerCount: number;
@@ -48,6 +52,7 @@ type SelectedTab =
 
 type TeamWorkspaceResponse = {
   archivedThreads: TeamThreadSummary[];
+  notifications: TeamNotificationsResponse;
   threads: TeamThreadSummary[];
   repositoryPicker: TeamRepositoryPickerModel;
 };
@@ -132,7 +137,35 @@ const isWorkspaceResponse = (value: unknown): value is TeamWorkspaceResponse => 
     isRecord(value) &&
     Array.isArray(value.archivedThreads) &&
     Array.isArray(value.threads) &&
+    isNotificationsResponse(value.notifications) &&
     isRepositoryPickerModel(value.repositoryPicker)
+  );
+};
+
+const isNotificationTarget = (value: unknown): value is TeamNotificationsResponse["target"] => {
+  return value === "browser" || value === "vscode";
+};
+
+const isAttentionNotification = (value: unknown): value is TeamAttentionNotification => {
+  return (
+    isRecord(value) &&
+    typeof value.body === "string" &&
+    typeof value.fingerprint === "string" &&
+    (value.laneId === null || typeof value.laneId === "string") &&
+    typeof value.reason === "string" &&
+    typeof value.tag === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.title === "string"
+  );
+};
+
+const isNotificationsResponse = (value: unknown): value is TeamNotificationsResponse => {
+  return (
+    isRecord(value) &&
+    typeof value.generatedAt === "string" &&
+    isNotificationTarget(value.target) &&
+    Array.isArray(value.notifications) &&
+    value.notifications.every(isAttentionNotification)
   );
 };
 
@@ -226,12 +259,14 @@ export function TeamWorkspace({
   initialArchivedThreads,
   initialPrompt,
   initialLogThreadId,
+  initialNotifications,
   initialRepositoryPicker,
   initialThreads,
   workerCount,
 }: TeamWorkspaceProps) {
   const [threads, setThreads] = useState(initialThreads);
   const [archivedThreads, setArchivedThreads] = useState(initialArchivedThreads);
+  const [notificationSnapshot, setNotificationSnapshot] = useState(initialNotifications);
   const [repositoryPicker, setRepositoryPicker] = useState(initialRepositoryPicker);
   const [selectedTab, setSelectedTab] = useState<SelectedTab>(() => {
     if (typeof window === "undefined") {
@@ -268,6 +303,7 @@ export function TeamWorkspace({
         const nextState = await fetchWorkspaceState();
         if (!isCancelled) {
           setArchivedThreads(nextState.archivedThreads);
+          setNotificationSnapshot(nextState.notifications);
           setThreads(nextState.threads);
           setRepositoryPicker(nextState.repositoryPicker);
           setRefreshError(null);
@@ -339,14 +375,14 @@ export function TeamWorkspace({
   }, []);
 
   useEffect(() => {
-    const activeAttentionNotifications = collectThreadAttentionNotifications(threads);
     const deliveryAvailable =
+      notificationSnapshot.target === "browser" &&
       desktopNotificationsEnabled &&
       notificationPermission === "granted" &&
       isNotificationSupported();
     const deliveredFingerprints = deliveredAttentionFingerprintsRef.current;
     const attentionNotificationsToDeliver = selectUndeliveredAttentionNotifications({
-      nextNotifications: activeAttentionNotifications,
+      nextNotifications: notificationSnapshot.notifications,
       deliveredFingerprints,
       deliveryAvailable,
     });
@@ -378,7 +414,7 @@ export function TeamWorkspace({
     );
     deliveredAttentionFingerprintsRef.current = nextDeliveredFingerprints;
     persistDeliveredAttentionFingerprints(nextDeliveredFingerprints);
-  }, [desktopNotificationsEnabled, notificationPermission, threads]);
+  }, [desktopNotificationsEnabled, notificationPermission, notificationSnapshot]);
 
   const selectedLivingThread =
     resolvedSelectedTab.type === "thread"
@@ -432,6 +468,18 @@ export function TeamWorkspace({
   };
 
   const desktopNotificationPanelState = (() => {
+    if (notificationSnapshot.target === "vscode") {
+      return {
+        action: null,
+        badge: "VS Code",
+        badgeClassName: "status-approved",
+        copy: "The backend routes approval and failure alerts to the VS Code extension. Browser desktop alerts stay silent for this workspace.",
+        heading: "Alerts handled by VS Code",
+        label: "Attention Alerts",
+        tone: "idle",
+      } as const;
+    }
+
     if (notificationPermission === "unsupported") {
       return {
         action: null,
@@ -439,6 +487,7 @@ export function TeamWorkspace({
         badgeClassName: "status-idle",
         copy: "This browser does not expose the Notification API for approval and failure alerts.",
         heading: "Desktop alerts unavailable",
+        label: "Desktop Alerts",
         tone: "unsupported",
       } as const;
     }
@@ -450,6 +499,7 @@ export function TeamWorkspace({
         badgeClassName: "status-failed",
         copy: "Allow notifications in browser settings to receive current and new proposal approval and failure alerts.",
         heading: "Desktop alerts blocked",
+        label: "Desktop Alerts",
         tone: "blocked",
       } as const;
     }
@@ -465,6 +515,7 @@ export function TeamWorkspace({
         badgeClassName: "status-approved",
         copy: "Current and new proposal approvals and failures notify once per active state.",
         heading: "Desktop alerts on",
+        label: "Desktop Alerts",
         tone: "enabled",
       } as const;
     }
@@ -480,6 +531,7 @@ export function TeamWorkspace({
         badgeClassName: "status-awaiting_human_approval",
         copy: "Approve the browser prompt to turn on desktop alerts for current and new proposal approvals and failures.",
         heading: "Requesting permission",
+        label: "Desktop Alerts",
         tone: "pending",
       } as const;
     }
@@ -494,6 +546,7 @@ export function TeamWorkspace({
       badgeClassName: "status-idle",
       copy: "Opt in to browser notifications for current and new proposal approval waits and failures.",
       heading: "Desktop alerts off",
+      label: "Desktop Alerts",
       tone: "idle",
     } as const;
   })();
@@ -541,6 +594,7 @@ export function TeamWorkspace({
   const handleRefreshThreads = async () => {
     const nextState = await fetchWorkspaceState();
     setArchivedThreads(nextState.archivedThreads);
+    setNotificationSnapshot(nextState.notifications);
     setThreads(nextState.threads);
     setRepositoryPicker(nextState.repositoryPicker);
     setRefreshError(null);
@@ -747,7 +801,9 @@ export function TeamWorkspace({
               >
                 <div className="workspace-notification-head">
                   <div>
-                    <p className="workspace-notification-label">Desktop Alerts</p>
+                    <p className="workspace-notification-label">
+                      {desktopNotificationPanelState.label}
+                    </p>
                     <p className="workspace-notification-title">
                       {desktopNotificationPanelState.heading}
                     </p>

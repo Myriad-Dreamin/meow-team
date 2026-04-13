@@ -49,7 +49,17 @@ This route does not accept a body or query parameters.
       "requestTitle": "Retire the legacy docs sync",
       "updatedAt": "2026-04-12T01:30:00.000Z"
     }
-  ]
+  ],
+  "repositoryPicker": {
+    "suggestedRepositories": [],
+    "remainingRepositories": [],
+    "orderedRepositories": []
+  },
+  "notifications": {
+    "generatedAt": "2026-04-14T00:00:00.000Z",
+    "target": "browser",
+    "notifications": []
+  }
 }
 ```
 
@@ -60,6 +70,10 @@ The full objects are serialized `TeamThreadSummary` records from
   is applied after archived threads are removed from this list.
 - `archivedThreads` contains archived thread summaries separately so archived
   history does not skew living-thread counts or list limits.
+- `repositoryPicker` contains the current suggested and remaining repository
+  ordering for the run form.
+- `notifications` embeds the current attention-notification snapshot used by
+  the browser workspace settings panel and alert delivery.
 
 ## Failure modes
 
