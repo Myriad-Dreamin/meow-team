@@ -1,11 +1,25 @@
 import "server-only";
 
+import { teamConfig } from "@/team.config";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
-import type { CreateWorktree, Worktree } from "@/lib/team/coding/worktree";
 import type { TeamThreadRecord } from "@/lib/team/history";
-import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
+import {
+  buildLanePullRequestTitle,
+  type ConventionalTitleMetadata,
+} from "@/lib/team/request-title";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
-import type { TeamCodexLogEntry, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
+import type { LanePullRequestDraft } from "@/lib/team/coding/lane-state";
+import type { CreateWorktree, Worktree } from "@/lib/team/coding/worktree";
+import type {
+  TeamCodexLogEntry,
+  TeamDispatchAssignment,
+  TeamExecutionStep,
+  TeamPlannerNote,
+  TeamPullRequestRecord,
+  TeamRoleHandoff,
+  TeamWorkerEventActor,
+  TeamWorkerLaneRecord,
+} from "@/lib/team/types";
 
 export type TeamRunState = {
   teamId: string;
@@ -165,3 +179,221 @@ export type TeamRunMachineState =
   | TeamRunReviewingStageState
   | TeamRunArchivingStageState
   | TeamRunCompletedState;
+
+export class DispatchThreadCapacityError extends Error {
+  workerCount: number;
+
+  constructor(workerCount: number) {
+    super(
+      `All ${workerCount} shared meow worktree slot${workerCount === 1 ? " is" : "s are"} already assigned to non-terminal threads. Wait for an active request group to finish before starting a new one.`,
+    );
+    this.name = "DispatchThreadCapacityError";
+    this.workerCount = workerCount;
+  }
+}
+
+export class TeamThreadReplanError extends Error {
+  readonly code: "not_found" | "archived" | "superseded" | "active_queue";
+  readonly statusCode: 404 | 409;
+
+  constructor(
+    code: "not_found" | "archived" | "superseded" | "active_queue",
+    message: string,
+    statusCode: 404 | 409,
+  ) {
+    super(message);
+    this.name = "TeamThreadReplanError";
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+const createLaneEvent = (actor: TeamWorkerEventActor, message: string, createdAt: string) => {
+  return {
+    id: crypto.randomUUID(),
+    actor,
+    message,
+    createdAt,
+  };
+};
+
+const createPlannerNote = (message: string, createdAt: string): TeamPlannerNote => {
+  return {
+    id: crypto.randomUUID(),
+    message,
+    createdAt,
+  };
+};
+
+export const findAssignment = (
+  dispatchAssignments: TeamDispatchAssignment[],
+  assignmentNumber: number,
+): TeamDispatchAssignment => {
+  const assignment = dispatchAssignments.find(
+    (candidate) => candidate.assignmentNumber === assignmentNumber,
+  );
+
+  if (!assignment) {
+    throw new Error(`Assignment #${assignmentNumber} was not found.`);
+  }
+
+  return assignment;
+};
+
+export const findLane = (
+  assignment: TeamDispatchAssignment,
+  laneId: string,
+): TeamWorkerLaneRecord => {
+  const lane = assignment.lanes.find((candidate) => candidate.laneId === laneId);
+  if (!lane) {
+    throw new Error(`Lane ${laneId} was not found in assignment #${assignment.assignmentNumber}.`);
+  }
+
+  return lane;
+};
+
+export const appendPlannerNote = (
+  assignment: TeamDispatchAssignment,
+  message: string,
+  now: string,
+): void => {
+  assignment.plannerNotes = [...assignment.plannerNotes, createPlannerNote(message, now)];
+};
+
+export const appendLaneEvent = (
+  lane: TeamWorkerLaneRecord,
+  actor: TeamWorkerEventActor,
+  message: string,
+  now: string,
+): void => {
+  lane.events = [...lane.events, createLaneEvent(actor, message, now)];
+};
+
+export const isFinalArchivePhase = (
+  lane: Pick<TeamWorkerLaneRecord, "executionPhase">,
+): lane is Pick<TeamWorkerLaneRecord, "executionPhase"> & { executionPhase: "final_archive" } => {
+  return lane.executionPhase === "final_archive";
+};
+
+export const buildFinalArchiveApprovalActivity = ({
+  lane,
+  isRetry,
+  isResume,
+}: {
+  lane: Pick<TeamWorkerLaneRecord, "proposalPath">;
+  isRetry: boolean;
+  isResume: boolean;
+}): string => {
+  if (isRetry) {
+    return lane.proposalPath?.startsWith("openspec/changes/archive/")
+      ? "Retrying final approval for the archived OpenSpec change and GitHub PR refresh."
+      : "Retrying final approval through the coder archive pass and GitHub PR refresh.";
+  }
+
+  if (isResume) {
+    return lane.proposalPath?.startsWith("openspec/changes/archive/")
+      ? "Resuming final approval for the archived OpenSpec change and GitHub PR refresh."
+      : "Resuming final approval through the coder archive pass and GitHub PR refresh.";
+  }
+
+  return lane.proposalPath?.startsWith("openspec/changes/archive/")
+    ? "Human approved the archived machine-reviewed branch. Refreshing the GitHub PR."
+    : "Human approved the machine-reviewed branch. Queueing the coder archive pass before refreshing the GitHub PR.";
+};
+
+export const summarizeGitFailure = (message: string): string => {
+  return (
+    message
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? "Git operation failed."
+  );
+};
+
+const countAssignedLaneTasks = (assignment: Pick<TeamDispatchAssignment, "lanes">): number => {
+  return assignment.lanes.filter((lane) => lane.taskTitle || lane.taskObjective).length || 1;
+};
+
+export const buildCanonicalLanePullRequestDraft = ({
+  assignment,
+  lane,
+  summary,
+}: {
+  assignment: Pick<TeamDispatchAssignment, "conventionalTitle" | "lanes" | "requestTitle">;
+  lane: Pick<TeamWorkerLaneRecord, "laneIndex" | "taskTitle">;
+  summary: string;
+}): LanePullRequestDraft => {
+  return {
+    title: buildLanePullRequestTitle({
+      requestTitle: assignment.requestTitle,
+      taskTitle: lane.taskTitle ?? `Proposal ${lane.laneIndex}`,
+      taskCount: countAssignedLaneTasks(assignment),
+      conventionalTitle: assignment.conventionalTitle,
+    }),
+    summary,
+  };
+};
+
+export const buildProposalApprovalPullRequestDraft = ({
+  assignment,
+  lane,
+}: {
+  assignment: Pick<TeamDispatchAssignment, "conventionalTitle" | "lanes" | "requestTitle"> &
+    Pick<TeamDispatchAssignment, "plannerSummary">;
+  lane: Pick<TeamWorkerLaneRecord, "laneIndex" | "taskObjective" | "taskTitle">;
+}): LanePullRequestDraft => {
+  const summary =
+    lane.taskObjective?.trim() ||
+    assignment.plannerSummary?.trim() ||
+    `Proposal ${lane.laneIndex} is approved for implementation.`;
+
+  return buildCanonicalLanePullRequestDraft({
+    assignment,
+    lane,
+    summary,
+  });
+};
+
+export const createPullRequestRecord = ({
+  threadId,
+  assignmentNumber,
+  lane,
+  draft,
+  now,
+  provider = "local-ci",
+  status = "awaiting_human_approval",
+  requestedAt = now,
+  humanApprovalRequestedAt = now,
+  humanApprovedAt = null,
+  machineReviewedAt = now,
+  url = null,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  lane: TeamWorkerLaneRecord;
+  draft: LanePullRequestDraft;
+  now: string;
+  provider?: TeamPullRequestRecord["provider"];
+  status?: TeamPullRequestRecord["status"];
+  requestedAt?: string;
+  humanApprovalRequestedAt?: string | null;
+  humanApprovedAt?: string | null;
+  machineReviewedAt?: string | null;
+  url?: string | null;
+}): TeamPullRequestRecord => {
+  return {
+    id: `pr-${threadId.slice(0, 8)}-a${assignmentNumber}-lane-${lane.laneIndex}`,
+    provider,
+    title: draft.title,
+    summary: draft.summary,
+    branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
+    baseBranch: lane.baseBranch ?? teamConfig.dispatch.baseBranch,
+    status,
+    requestedAt,
+    humanApprovalRequestedAt,
+    humanApprovedAt,
+    machineReviewedAt,
+    updatedAt: now,
+    url,
+  };
+};

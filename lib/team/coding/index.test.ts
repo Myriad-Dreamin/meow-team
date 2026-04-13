@@ -92,26 +92,24 @@ import {
   getTeamThreadRecord,
   type PendingDispatchAssignment,
   type TeamThreadRecord,
-  updateTeamThreadRecord,
   upsertTeamThreadRun,
 } from "@/lib/team/history";
 import {
-  approveLaneProposal,
-  approveLanePullRequest,
   assignPendingDispatchThreadSlots,
   assignPendingDispatchWorkerSlots,
   createWorktree,
   createInitialTeamRunState,
-  createPlannerDispatchAssignment,
   createTeamRunEnv,
-  ensurePendingDispatchWork,
   persistTeamRunState,
   prepareAssignmentReplan,
   runTeam,
-  teamNetworkDispatchOps,
   TeamThreadReplanError,
   type TeamRunEnv,
 } from "@/lib/team/coding";
+import { approveLanePullRequest } from "@/lib/team/coding/archiving";
+import { approveLaneProposal } from "@/lib/team/coding/coding";
+import { createPlannerDispatchAssignment } from "@/lib/team/coding/plan";
+import { ensurePendingDispatchWork } from "@/lib/team/coding/reviewing";
 import {
   resetTeamThreadStorageStateCacheForTests,
   updateTeamThreadStorageRecord,
@@ -124,13 +122,6 @@ type RequestTitleAgentArgs = Parameters<TeamRoleDependencies["requestTitleAgent"
 type PlannerAgentArgs = Parameters<TeamRoleDependencies["plannerAgent"]["run"]>;
 type PlannerAgentResult = Awaited<ReturnType<TeamRoleDependencies["plannerAgent"]["run"]>>;
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
-const createPlannerDispatchAssignmentSpy = vi.spyOn(
-  teamNetworkDispatchOps,
-  "createPlannerDispatchAssignment",
-);
-const approveLaneProposalSpy = vi.spyOn(teamNetworkDispatchOps, "approveLaneProposal");
-const approveLanePullRequestSpy = vi.spyOn(teamNetworkDispatchOps, "approveLanePullRequest");
-const ensurePendingDispatchWorkSpy = vi.spyOn(teamNetworkDispatchOps, "ensurePendingDispatchWork");
 
 const repository: TeamRepositoryOption = {
   id: "repo-1",
@@ -300,16 +291,48 @@ describe.sequential("runTeam", () => {
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), "run-team-"));
     teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
 
-    createPlannerDispatchAssignmentSpy.mockReset();
-    createPlannerDispatchAssignmentSpy.mockResolvedValue({} as never);
-    approveLaneProposalSpy.mockReset();
-    approveLaneProposalSpy.mockResolvedValue(undefined);
-    approveLanePullRequestSpy.mockReset();
-    approveLanePullRequestSpy.mockResolvedValue(undefined);
-    ensurePendingDispatchWorkSpy.mockReset();
-    ensurePendingDispatchWorkSpy.mockResolvedValue(undefined);
     findConfiguredRepositoryMock.mockReset();
     findConfiguredRepositoryMock.mockResolvedValue(null);
+    deleteManagedBranchesMock.mockReset();
+    deleteManagedBranchesMock.mockResolvedValue(undefined);
+    listExistingBranchesMock.mockReset();
+    listExistingBranchesMock.mockResolvedValue([]);
+    materializeAssignmentProposalsMock.mockReset();
+    materializeAssignmentProposalsMock.mockResolvedValue(undefined);
+    resolveRepositoryBaseBranchMock.mockReset();
+    resolveRepositoryBaseBranchMock.mockResolvedValue("main");
+    pushLaneBranchMock.mockReset();
+    pushLaneBranchMock.mockResolvedValue({
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "proposal-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+      remoteName: "origin",
+    });
+    synchronizePullRequestMock.mockReset();
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/42",
+    });
+    getBranchHeadMock.mockReset();
+    getBranchHeadMock.mockResolvedValue("proposal-commit");
+    ensureLaneWorktreeMock.mockReset();
+    ensureLaneWorktreeMock.mockResolvedValue(undefined);
+    tryRebaseWorktreeBranchMock.mockReset();
+    tryRebaseWorktreeBranchMock.mockResolvedValue({
+      applied: true,
+      error: null,
+    });
+    hasWorktreeChangesMock.mockReset();
+    hasWorktreeChangesMock.mockResolvedValue(false);
+    detectBranchConflictMock.mockReset();
+    detectBranchConflictMock.mockResolvedValue(false);
+    commitWorktreeChangesMock.mockReset();
+    commitWorktreeChangesMock.mockResolvedValue(undefined);
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: false,
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+    });
   });
 
   afterEach(async () => {
@@ -428,38 +451,20 @@ describe.sequential("runTeam", () => {
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(coderAgentMock.run).not.toHaveBeenCalled();
     expect(reviewerAgentMock.run).not.toHaveBeenCalled();
-    expect(createPlannerDispatchAssignmentSpy).toHaveBeenCalledWith({
-      threadId: "thread-1",
-      assignmentNumber: 1,
-      repository,
-      requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
-      conventionalTitle: {
-        type: "dev",
-        scope: "dispatch/coordination",
-      },
-      requestText: "Ship reliable dispatch coordination.",
-      plannerSummary: "Plan summary",
-      plannerDeliverable: "Plan deliverable",
-      branchPrefix: "dispatch-coordination",
-      tasks: [
-        {
-          title: "Stabilize dispatch flow",
-          objective: "Inject role dependencies into the scheduler.",
+    expect(materializeAssignmentProposalsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryPath: repository.path,
+        requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
+        conventionalTitle: {
+          type: "dev",
+          scope: "dispatch/coordination",
         },
-      ],
-      deleteExistingBranches: undefined,
-    });
-    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
-      threadId: "thread-1",
-      createWorktree: expect.any(Function),
-      dependencies: expect.objectContaining({
-        executor,
-        requestTitleAgent: requestTitleAgentMock,
-        plannerAgent: plannerAgentMock,
-        coderAgent: coderAgentMock,
-        reviewerAgent: reviewerAgentMock,
+        requestInput: "Ship reliable dispatch coordination.",
+        plannerSummary: "Plan summary",
+        plannerDeliverable: "Plan deliverable",
+        canonicalBranchName: expect.stringMatching(/^requests\/dispatch-coordination\//),
       }),
-    });
+    );
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "planning",
@@ -586,27 +591,16 @@ describe.sequential("runTeam", () => {
     expect(callOrder).toEqual(["request-title:initial", "planner", "request-title:metadata"]);
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(2);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
-    expect(createPlannerDispatchAssignmentSpy).toHaveBeenCalledWith({
-      threadId: "thread-stale-conventional-title",
-      assignmentNumber: 1,
-      repository,
-      requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
-      conventionalTitle: {
-        type: "dev",
-        scope: "dispatch/coordination",
-      },
-      requestText: "Ship reliable dispatch coordination.",
-      plannerSummary: "Plan summary",
-      plannerDeliverable: "Plan deliverable",
-      branchPrefix: "dispatch-coordination",
-      tasks: [
-        {
-          title: "Stabilize dispatch flow",
-          objective: "Inject role dependencies into the scheduler.",
+    expect(materializeAssignmentProposalsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryPath: repository.path,
+        requestTitle: "dev(dispatch/coordination): Stabilize dispatch flow",
+        conventionalTitle: {
+          type: "dev",
+          scope: "dispatch/coordination",
         },
-      ],
-      deleteExistingBranches: undefined,
-    });
+      }),
+    );
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "planning",
@@ -678,7 +672,7 @@ describe.sequential("runTeam", () => {
     expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(executorMock).not.toHaveBeenCalled();
-    expect(createPlannerDispatchAssignmentSpy).not.toHaveBeenCalled();
+    expect(materializeAssignmentProposalsMock).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "planning",
@@ -825,7 +819,7 @@ describe.sequential("runTeam", () => {
 
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
-    expect(createPlannerDispatchAssignmentSpy).not.toHaveBeenCalled();
+    expect(materializeAssignmentProposalsMock).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "planning",
@@ -902,38 +896,6 @@ describe.sequential("runTeam", () => {
       input: "Ship reliable dispatch coordination.",
     });
 
-    createPlannerDispatchAssignmentSpy.mockImplementationOnce(async (input) => {
-      await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
-        threadId: input.threadId,
-        updater: (thread) => {
-          thread.dispatchAssignments = [
-            createReplayAssignment(
-              createReplayLane({
-                laneId: "lane-1",
-                taskTitle: input.tasks[0]?.title ?? "Replay task",
-                taskObjective: input.tasks[0]?.objective ?? "Replay the persisted stage safely.",
-                branchName: "requests/dispatch-coordination/a1-proposal-1",
-              }),
-              {
-                assignmentNumber: input.assignmentNumber,
-                repository,
-                requestTitle: input.requestTitle,
-                conventionalTitle: input.conventionalTitle ?? null,
-                requestText: input.requestText,
-                plannerSummary: input.plannerSummary,
-                plannerDeliverable: input.plannerDeliverable,
-                branchPrefix: input.branchPrefix,
-                canonicalBranchName: "requests/dispatch-coordination/a1",
-              },
-            ),
-          ];
-        },
-      });
-
-      return {} as never;
-    });
-
     const persistedStage = {
       stage: "metadata-generation",
       args: {
@@ -980,8 +942,7 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
 
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
-    expect(createPlannerDispatchAssignmentSpy).toHaveBeenCalledTimes(1);
-    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledTimes(2);
+    expect(materializeAssignmentProposalsMock).toHaveBeenCalledTimes(1);
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-replay");
     expect(thread?.dispatchAssignments).toHaveLength(1);
@@ -1109,7 +1070,7 @@ describe.sequential("runTeam", () => {
 
     expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
     expect(plannerAgentMock.run).not.toHaveBeenCalled();
-    expect(createPlannerDispatchAssignmentSpy).not.toHaveBeenCalled();
+    expect(materializeAssignmentProposalsMock).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual(["init"]);
   });
 
@@ -1124,6 +1085,9 @@ describe.sequential("runTeam", () => {
       assignmentNumber: 2,
       lane: createReplayLane({
         laneId: "lane-3",
+        status: "queued",
+        approvalGrantedAt: FIXED_TIMESTAMP,
+        queuedAt: FIXED_TIMESTAMP,
         branchName: "requests/replay/a2-proposal-1",
       }),
       assignmentOverrides: {
@@ -1133,37 +1097,6 @@ describe.sequential("runTeam", () => {
         requestText: "Queue the lane once.",
       },
     });
-
-    approveLaneProposalSpy.mockImplementationOnce(
-      async ({
-        threadId,
-        assignmentNumber,
-        laneId,
-      }: {
-        threadId: string;
-        assignmentNumber: number;
-        laneId: string;
-      }) => {
-        await updateTeamThreadRecord({
-          threadFile: teamConfig.storage.threadFile,
-          threadId,
-          updater: (thread) => {
-            const assignment = thread.dispatchAssignments.find(
-              (candidate) => candidate.assignmentNumber === assignmentNumber,
-            );
-            const lane = assignment?.lanes.find((candidate) => candidate.laneId === laneId);
-            if (!assignment || !lane) {
-              throw new Error("Expected a persisted lane to queue.");
-            }
-
-            lane.status = "queued";
-            lane.approvalGrantedAt = FIXED_TIMESTAMP;
-            lane.queuedAt = FIXED_TIMESTAMP;
-            lane.updatedAt = FIXED_TIMESTAMP;
-          },
-        });
-      },
-    );
 
     const persistedStage = {
       stage: "coding",
@@ -1178,18 +1111,83 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
     await runTeam(env, structuredClone(persistedStage));
 
-    expect(approveLaneProposalSpy).toHaveBeenCalledTimes(1);
-    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledTimes(2);
-
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-coding-replay");
-    expect(thread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("queued");
+    expect(["queued", "coding", "reviewing"]).toContain(
+      thread?.dispatchAssignments[0]?.lanes[0]?.status,
+    );
+    expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
+      "reviewing",
+      "completed",
+      "reviewing",
+      "completed",
+    ]);
   });
 
   it("routes proposal approval through coding and reviewing stages", async () => {
+    getBranchHeadMock.mockReset();
+    getBranchHeadMock.mockResolvedValue("proposal-commit");
+
     const persistStateMock = createPersistStateMock();
     const env = createTeamRunEnv({
+      dependencies: {
+        executor: vi.fn() as TeamRoleDependencies["executor"],
+        requestTitleAgent: { run: vi.fn() },
+        plannerAgent: { run: vi.fn() },
+        coderAgent: {
+          run: vi.fn(async () => ({
+            summary: "Implemented the approved proposal.",
+            deliverable: "Implementation is ready for machine review.",
+            decision: "continue" as const,
+            pullRequestTitle: null,
+            pullRequestSummary: null,
+          })),
+        },
+        reviewerAgent: {
+          run: vi.fn(async () => ({
+            summary: "Machine review approved the branch.",
+            deliverable: "Implementation looks correct.",
+            decision: "approved" as const,
+            pullRequestTitle: "Ship the feature",
+            pullRequestSummary: "Machine review approved the branch.",
+          })),
+        },
+      },
       persistState: persistStateMock,
     });
+    await writeStoredThreadRecord(
+      createDispatchThreadRecord({
+        threadId: "thread-approval",
+        assignment: createDispatchAssignment({
+          assignmentNumber: 2,
+          repository: dispatchRepository,
+          status: "awaiting_human_approval",
+          requestTitle: "Ship the feature",
+          requestText: "Implement the approved proposal.",
+          plannerSummary: "Planner summary",
+          branchPrefix: "example",
+          canonicalBranchName: "requests/example/a2",
+          workerCount: 1,
+          threadSlot: 1,
+          plannerWorktreePath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+          lanes: [
+            createDispatchLane({
+              laneId: "lane-3",
+              laneIndex: 1,
+              status: "awaiting_human_approval",
+              branchName: "requests/example/a2-proposal-1",
+              baseBranch: "main",
+              taskTitle: "Ship the feature",
+              taskObjective: "Implement the approved proposal.",
+              proposalChangeName: "change-1",
+              proposalPath: "openspec/changes/change-1",
+              approvalRequestedAt: FIXED_TIMESTAMP,
+              queuedAt: null,
+            }),
+          ],
+        }),
+        runStatus: "awaiting_human_approval",
+      }),
+    );
     const initialState = createInitialTeamRunState({
       kind: "proposal-approval",
       threadId: "thread-approval",
@@ -1201,41 +1199,109 @@ describe.sequential("runTeam", () => {
     const result = await runTeam(env, initialState);
 
     expect(result).toBeNull();
-    expect(approveLaneProposalSpy).toHaveBeenCalledWith({
-      threadId: "thread-approval",
-      assignmentNumber: 2,
-      laneId: "lane-3",
-      createWorktree: expect.any(Function),
-      dependencies: expect.objectContaining({
-        requestTitleAgent: expect.any(Object),
-        plannerAgent: expect.any(Object),
-        coderAgent: expect.any(Object),
-        reviewerAgent: expect.any(Object),
-      }),
-    });
-    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
-      threadId: "thread-approval",
-      createWorktree: expect.any(Function),
-      dependencies: expect.objectContaining({
-        requestTitleAgent: expect.any(Object),
-        plannerAgent: expect.any(Object),
-        coderAgent: expect.any(Object),
-        reviewerAgent: expect.any(Object),
-      }),
-    });
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "coding",
       "reviewing",
       "completed",
     ]);
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-approval");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+    expect(lane?.approvalGrantedAt).toBeTruthy();
+    expect(lane?.pullRequest).not.toBeNull();
+    expect(lane?.status).not.toBe("awaiting_human_approval");
   });
 
   it("routes final approval through the archiving stage", async () => {
+    getBranchHeadMock.mockReset();
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
+      sourcePath: "openspec/changes/change-1",
+      sourceExists: false,
+      archivedPath: "openspec/changes/archive/2026-04-11-change-1",
+    });
+
     const persistStateMock = createPersistStateMock();
     const env = createTeamRunEnv({
+      dependencies: {
+        executor: vi.fn() as TeamRoleDependencies["executor"],
+        requestTitleAgent: { run: vi.fn() },
+        plannerAgent: { run: vi.fn() },
+        coderAgent: {
+          run: vi.fn(async () => ({
+            summary: "Archived the approved OpenSpec change.",
+            deliverable: "Final archive pass completed.",
+            decision: "continue" as const,
+            pullRequestTitle: null,
+            pullRequestSummary: null,
+          })),
+        },
+        reviewerAgent: { run: vi.fn() },
+      },
       persistState: persistStateMock,
     });
+    await writeStoredThreadRecord(
+      createDispatchThreadRecord({
+        threadId: "thread-finalize",
+        assignment: createDispatchAssignment({
+          assignmentNumber: 4,
+          repository: dispatchRepository,
+          status: "approved",
+          requestTitle: "Ship the feature",
+          requestText: "Finalize the reviewed branch.",
+          branchPrefix: "example",
+          canonicalBranchName: "requests/example/a4",
+          workerCount: 1,
+          lanes: [
+            createDispatchLane({
+              laneId: "lane-2",
+              laneIndex: 1,
+              status: "approved",
+              branchName: "requests/example/a4-proposal-1",
+              baseBranch: "main",
+              taskTitle: "Ship the feature",
+              taskObjective: "Archive the approved proposal and open a GitHub PR.",
+              proposalChangeName: "change-1",
+              proposalPath: "openspec/changes/archive/2026-04-11-change-1",
+              worktreePath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+              latestImplementationCommit: "review-commit",
+              pushedCommit: {
+                ...basePushedCommit,
+                branchUrl:
+                  "https://github.com/example/meow-team/tree/requests/example/a4-proposal-1",
+                commitHash: "review-commit",
+                commitUrl: "https://github.com/example/meow-team/commit/review-commit",
+              },
+              latestDecision: "approved",
+              latestReviewerSummary: "Machine review approved the branch.",
+              latestActivity: "Waiting for final human approval.",
+              approvalRequestedAt: FIXED_TIMESTAMP,
+              approvalGrantedAt: FIXED_TIMESTAMP,
+              queuedAt: FIXED_TIMESTAMP,
+              runCount: 1,
+              pullRequest: {
+                id: "pr-1",
+                provider: "github",
+                title: "Ship the feature",
+                summary: "Machine review approved the branch.",
+                branchName: "requests/example/a4-proposal-1",
+                baseBranch: "main",
+                status: "awaiting_human_approval",
+                requestedAt: FIXED_TIMESTAMP,
+                humanApprovalRequestedAt: FIXED_TIMESTAMP,
+                humanApprovedAt: null,
+                machineReviewedAt: FIXED_TIMESTAMP,
+                updatedAt: FIXED_TIMESTAMP,
+                url: "https://github.com/example/meow-team/pull/42",
+              },
+            }),
+          ],
+        }),
+        runStatus: "approved",
+      }),
+    );
     const initialState = createInitialTeamRunState({
       kind: "pull-request-approval",
       threadId: "thread-finalize",
@@ -1247,25 +1313,14 @@ describe.sequential("runTeam", () => {
     const result = await runTeam(env, initialState);
 
     expect(result).toBeNull();
-    expect(approveLanePullRequestSpy).toHaveBeenCalledWith({
-      threadId: "thread-finalize",
-      assignmentNumber: 4,
-      laneId: "lane-2",
-      createWorktree: expect.any(Function),
-      dependencies: expect.objectContaining({
-        requestTitleAgent: expect.any(Object),
-        plannerAgent: expect.any(Object),
-        coderAgent: expect.any(Object),
-        reviewerAgent: expect.any(Object),
-      }),
-    });
-    expect(approveLaneProposalSpy).not.toHaveBeenCalled();
-    expect(ensurePendingDispatchWorkSpy).not.toHaveBeenCalled();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "archiving",
       "completed",
     ]);
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-finalize");
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.pullRequest?.status).toBe("approved");
   });
 
   it("does not replay archiving once the pull request is already finalized", async () => {
@@ -1323,7 +1378,11 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
     await runTeam(env, structuredClone(persistedStage));
 
-    expect(approveLanePullRequestSpy).not.toHaveBeenCalled();
+    const thread = await getTeamThreadRecord(
+      teamConfig.storage.threadFile,
+      "thread-archiving-replay",
+    );
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.pullRequest?.status).toBe("approved");
   });
 
   it("resumes pending dispatch work through the reviewing stage", async () => {
@@ -1340,16 +1399,6 @@ describe.sequential("runTeam", () => {
     const result = await runTeam(env, initialState);
 
     expect(result).toBeNull();
-    expect(ensurePendingDispatchWorkSpy).toHaveBeenCalledWith({
-      threadId: "thread-dispatch",
-      createWorktree: expect.any(Function),
-      dependencies: expect.objectContaining({
-        requestTitleAgent: expect.any(Object),
-        plannerAgent: expect.any(Object),
-        coderAgent: expect.any(Object),
-        reviewerAgent: expect.any(Object),
-      }),
-    });
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "init",
       "reviewing",
@@ -2059,6 +2108,7 @@ describe.sequential("ensurePendingDispatchWork", () => {
 
 describe.sequential("createPlannerDispatchAssignment", () => {
   let originalThreadFile: string;
+  let originalWorktreeRoot: string;
   let tempDirectory: string;
 
   const plannerInput = {
@@ -2108,6 +2158,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     originalThreadFile = teamConfig.storage.threadFile;
+    originalWorktreeRoot = teamConfig.dispatch.worktreeRoot;
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), "dispatch-materialize-"));
     teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
     deleteManagedBranchesMock.mockResolvedValue(undefined);
@@ -2119,6 +2170,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
   afterEach(async () => {
     await resetTeamThreadStorageStateCacheForTests();
     teamConfig.storage.threadFile = originalThreadFile;
+    teamConfig.dispatch.worktreeRoot = originalWorktreeRoot;
     await rm(tempDirectory, {
       force: true,
       recursive: true,
@@ -2213,6 +2265,24 @@ describe.sequential("createPlannerDispatchAssignment", () => {
     expect(assignment.canonicalBranchName).not.toContain("vsc/command");
     expect(assignment.lanes[0]?.proposalChangeName).not.toContain("vsc/command");
     expect(assignment.conventionalTitle).toEqual(plannerInput.conventionalTitle);
+  });
+
+  it("passes absolute managed worktree roots through without rebasing them on the repository", async () => {
+    await writePlannerThread("thread-absolute-root");
+    teamConfig.dispatch.worktreeRoot = path.join(tempDirectory, "shared-worktrees");
+
+    const assignment = await createPlannerDispatchAssignment({
+      threadId: "thread-absolute-root",
+      ...plannerInput,
+    });
+
+    expect(materializeAssignmentProposalsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktreeRoot: teamConfig.dispatch.worktreeRoot,
+        plannerWorktreePath: `${teamConfig.dispatch.worktreeRoot}/meow-1`,
+      }),
+    );
+    expect(assignment.plannerWorktreePath).toBe(`${teamConfig.dispatch.worktreeRoot}/meow-1`);
   });
 });
 

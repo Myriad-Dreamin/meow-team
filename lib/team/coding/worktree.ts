@@ -62,35 +62,3 @@ export const createManagedWorktree = ({
     rootPath,
   });
 };
-
-export const resolveManagedWorktreeRoot = ({
-  repositoryPath,
-  worktreeRoot,
-}: {
-  repositoryPath: string;
-  worktreeRoot: string;
-}): string => {
-  return path.isAbsolute(worktreeRoot) ? worktreeRoot : path.join(repositoryPath, worktreeRoot);
-};
-
-export const resolveLaneWorktree = ({
-  repositoryPath,
-  worktreeRoot,
-  worktreePath,
-  create = createWorktree,
-}: {
-  repositoryPath: string;
-  worktreeRoot: string;
-  worktreePath: string | null | undefined;
-  create?: CreateWorktree;
-}): Worktree => {
-  const rootPath = resolveManagedWorktreeRoot({
-    repositoryPath,
-    worktreeRoot,
-  });
-
-  return create({
-    path: worktreePath ?? rootPath,
-    rootPath,
-  });
-};

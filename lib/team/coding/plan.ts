@@ -1,17 +1,33 @@
 import "server-only";
 
+import path from "node:path";
+
 import { teamConfig } from "@/team.config";
 import { applyHandoff } from "@/lib/team/agent-helpers";
+import { listExistingBranches, resolveRepositoryBaseBranch } from "@/lib/git/ops";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
-import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
+import {
+  buildCanonicalBranchName,
+  buildLaneBranchName,
+  deleteManagedBranches,
+  ExistingBranchesRequireDeleteError,
+} from "@/lib/team/git";
+import { assignPendingDispatchThreadSlots } from "@/lib/team/coding/dispatch-worktrees";
 import {
   appendTeamExecutionStep,
   countActiveDispatchThreads,
   getTeamThreadRecord,
+  listPendingDispatchAssignments,
+  synchronizeDispatchAssignment,
   updateTeamThreadRecord,
   upsertTeamThreadRun,
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
+import {
+  buildProposalChangeName,
+  buildProposalPath,
+  materializeAssignmentProposals,
+} from "@/lib/team/openspec";
 import {
   buildCanonicalRequestTitle,
   buildDeterministicRequestTitle,
@@ -24,7 +40,6 @@ import {
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import { plannerRole } from "@/lib/team/roles/planner";
-import { DispatchThreadCapacityError, teamNetworkDispatchOps } from "@/lib/team/coding/dispatch";
 import type {
   InitialRequestMetadata,
   PersistedTeamThread,
@@ -38,8 +53,310 @@ import type {
   TeamRunState,
   TeamRunSummary,
 } from "@/lib/team/coding/shared";
+import { DispatchThreadCapacityError } from "@/lib/team/coding/shared";
 import type { Worktree } from "@/lib/team/coding/worktree";
-import type { TeamCodexEvent, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
+import type {
+  TeamCodexEvent,
+  TeamDispatchAssignment,
+  TeamExecutionStep,
+  TeamRoleHandoff,
+  TeamWorkerEventActor,
+  TeamWorkerLaneRecord,
+} from "@/lib/team/types";
+
+type DispatchTask = {
+  title: string;
+  objective: string;
+};
+
+let plannerDispatchQueue = Promise.resolve();
+
+const queuePlannerDispatchMaterialization = async <T>(task: () => Promise<T>): Promise<T> => {
+  const queuedTask = plannerDispatchQueue.catch(() => undefined).then(task);
+  plannerDispatchQueue = queuedTask.then(
+    () => undefined,
+    () => undefined,
+  );
+  return queuedTask;
+};
+
+const createPlannerNote = (message: string, createdAt: string) => {
+  return {
+    id: crypto.randomUUID(),
+    message,
+    createdAt,
+  };
+};
+
+const createLaneEvent = (actor: TeamWorkerEventActor, message: string, createdAt: string) => {
+  return {
+    id: crypto.randomUUID(),
+    actor,
+    message,
+    createdAt,
+  };
+};
+
+const createProposalLane = ({
+  threadId,
+  laneIndex,
+  task,
+  branchPrefix,
+  assignmentNumber,
+  baseBranch,
+}: {
+  threadId: string;
+  laneIndex: number;
+  task: DispatchTask;
+  branchPrefix: string;
+  assignmentNumber: number;
+  baseBranch: string;
+}): TeamWorkerLaneRecord => {
+  const laneId = `lane-${laneIndex}`;
+  const now = new Date().toISOString();
+
+  const branchName = buildLaneBranchName({
+    threadId,
+    branchPrefix,
+    assignmentNumber,
+    laneIndex,
+  });
+  const proposalChangeName = buildProposalChangeName({
+    branchPrefix,
+    assignmentNumber,
+    laneIndex,
+    taskTitle: task.title,
+  });
+
+  return {
+    laneId,
+    laneIndex,
+    status: "awaiting_human_approval",
+    executionPhase: null,
+    taskTitle: task.title,
+    taskObjective: task.objective,
+    proposalChangeName,
+    proposalPath: buildProposalPath(proposalChangeName),
+    workerSlot: null,
+    branchName,
+    baseBranch,
+    worktreePath: null,
+    latestImplementationCommit: null,
+    pushedCommit: null,
+    latestCoderHandoff: null,
+    latestReviewerHandoff: null,
+    latestDecision: null,
+    latestCoderSummary: null,
+    latestReviewerSummary: null,
+    latestActivity: "Proposal is waiting for human approval before coding and review begin.",
+    approvalRequestedAt: now,
+    approvalGrantedAt: null,
+    queuedAt: null,
+    runCount: 0,
+    revisionCount: 0,
+    requeueReason: null,
+    lastError: null,
+    pullRequest: null,
+    events: [createLaneEvent("planner", `Planner proposed: ${task.title}`, now)],
+    startedAt: null,
+    finishedAt: null,
+    updatedAt: now,
+  };
+};
+
+export const createPlannerDispatchAssignment = async ({
+  threadId,
+  assignmentNumber,
+  repository,
+  requestTitle,
+  conventionalTitle,
+  requestText,
+  plannerSummary,
+  plannerDeliverable,
+  branchPrefix,
+  tasks,
+  deleteExistingBranches = false,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  repository: TeamRepositoryOption | null;
+  requestTitle: string;
+  conventionalTitle: TeamDispatchAssignment["conventionalTitle"];
+  requestText: string;
+  plannerSummary: string;
+  plannerDeliverable: string;
+  branchPrefix: string;
+  tasks: DispatchTask[];
+  deleteExistingBranches?: boolean;
+}): Promise<TeamDispatchAssignment> => {
+  if (!repository) {
+    throw new Error("Dispatching coder and reviewer lanes requires a selected repository.");
+  }
+
+  return queuePlannerDispatchMaterialization(async () => {
+    const now = new Date().toISOString();
+    const resolvedBaseBranch = await resolveRepositoryBaseBranch(
+      repository.path,
+      teamConfig.dispatch.baseBranch,
+    );
+    const resolvedWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
+      ? teamConfig.dispatch.worktreeRoot
+      : path.join(repository.path, teamConfig.dispatch.worktreeRoot);
+    const canonicalBranchName = buildCanonicalBranchName({
+      threadId,
+      branchPrefix,
+      assignmentNumber,
+    });
+
+    const assignment: TeamDispatchAssignment = synchronizeDispatchAssignment(
+      {
+        assignmentNumber,
+        status: "planning",
+        repository,
+        requestTitle,
+        conventionalTitle,
+        requestText,
+        requestedAt: now,
+        startedAt: now,
+        finishedAt: null,
+        updatedAt: now,
+        plannerSummary,
+        plannerDeliverable,
+        branchPrefix,
+        canonicalBranchName,
+        baseBranch: resolvedBaseBranch,
+        threadSlot: null,
+        plannerWorktreePath: null,
+        workerCount: teamConfig.dispatch.workerCount,
+        lanes: tasks.map((task, index) =>
+          createProposalLane({
+            threadId,
+            laneIndex: index + 1,
+            task,
+            branchPrefix,
+            assignmentNumber,
+            baseBranch: resolvedBaseBranch,
+          }),
+        ),
+        plannerNotes: [
+          createPlannerNote(
+            `Planner created ${tasks.length} proposal${tasks.length === 1 ? "" : "s"} and is waiting for human approval before the coding-review queue starts.`,
+            now,
+          ),
+        ],
+        humanFeedback: [],
+        supersededAt: null,
+        supersededReason: null,
+      },
+      now,
+    );
+
+    const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
+    assignPendingDispatchThreadSlots({
+      pendingAssignments: [
+        ...pendingAssignments,
+        {
+          threadId,
+          assignment,
+        },
+      ],
+      workerCount: teamConfig.dispatch.workerCount,
+      resolveAssignmentWorktreeRoot: (pending) =>
+        path.isAbsolute(teamConfig.dispatch.worktreeRoot)
+          ? teamConfig.dispatch.worktreeRoot
+          : path.join(pending.assignment.repository?.path ?? "", teamConfig.dispatch.worktreeRoot),
+    });
+
+    if (!assignment.threadSlot || !assignment.plannerWorktreePath) {
+      throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
+    }
+
+    await updateTeamThreadRecord({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      updater: (thread) => {
+        thread.dispatchAssignments = [
+          ...thread.dispatchAssignments.filter(
+            (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
+          ),
+          assignment,
+        ].sort((left, right) => left.assignmentNumber - right.assignmentNumber);
+      },
+    });
+
+    try {
+      const targetBranchNames = [
+        canonicalBranchName,
+        ...assignment.lanes.flatMap((lane) => (lane.branchName ? [lane.branchName] : [])),
+      ];
+      const existingBranches = await listExistingBranches({
+        repositoryPath: repository.path,
+        branchNames: targetBranchNames,
+      });
+
+      if (existingBranches.length > 0) {
+        if (!deleteExistingBranches) {
+          throw new ExistingBranchesRequireDeleteError(existingBranches);
+        }
+
+        await deleteManagedBranches({
+          repositoryPath: repository.path,
+          worktreeRoot: resolvedWorktreeRoot,
+          branchNames: existingBranches,
+        });
+        assignment.plannerNotes = [
+          createPlannerNote(
+            `Human confirmed deletion of existing branches before rematerializing proposals: ${existingBranches.join(", ")}.`,
+            now,
+          ),
+          ...assignment.plannerNotes,
+        ];
+      }
+
+      await materializeAssignmentProposals({
+        repositoryPath: repository.path,
+        baseBranch: resolvedBaseBranch,
+        canonicalBranchName,
+        requestTitle,
+        conventionalTitle,
+        plannerSummary,
+        plannerDeliverable,
+        requestInput: requestText,
+        worktreeRoot: resolvedWorktreeRoot,
+        plannerWorktreePath: assignment.plannerWorktreePath,
+        lanes: assignment.lanes,
+      });
+
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (thread) => {
+          thread.dispatchAssignments = [
+            ...thread.dispatchAssignments.filter(
+              (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
+            ),
+            assignment,
+          ].sort((left, right) => left.assignmentNumber - right.assignmentNumber);
+        },
+      });
+
+      return assignment;
+    } catch (error) {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (thread) => {
+          thread.dispatchAssignments = thread.dispatchAssignments.filter(
+            (candidate) => candidate.assignmentNumber !== assignment.assignmentNumber,
+          );
+        },
+      });
+
+      throw error;
+    }
+  });
+};
+
 const normalizeRequestText = (value: string | null | undefined): string | null => {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -708,7 +1025,7 @@ export const runMetadataGenerationStage = async (
     }
 
     if (!persistedAssignment) {
-      await teamNetworkDispatchOps.createPlannerDispatchAssignment({
+      await createPlannerDispatchAssignment({
         threadId,
         assignmentNumber: state.assignmentNumber,
         repository: selectedRepository,
