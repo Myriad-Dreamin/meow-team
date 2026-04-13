@@ -30,7 +30,7 @@ const loadModules = async () => {
   const [{ execCliCommand }, { runGit }, { runGh }, { runOpenSpec }] = await Promise.all([
     import("@/lib/cli-tools/exec"),
     import("@/lib/cli-tools/git"),
-    import("@/lib/cli-tools/gh"),
+    import("@/lib/platform/gh/cli"),
     import("@/lib/cli-tools/openspec"),
   ]);
 

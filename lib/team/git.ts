@@ -7,9 +7,9 @@ import {
   ensureWorktreeCheckout,
   listExistingBranches,
   listGitWorktrees,
-  pushBranch,
   removeWorktreeDirectory,
 } from "@/lib/git/ops";
+import { publishBranch } from "@/lib/platform";
 import type { TeamPushedCommitRecord } from "@/lib/team/types";
 
 export class ExistingBranchesRequireDeleteError extends Error {
@@ -258,7 +258,7 @@ export const pushLaneBranch = async ({
   remoteName?: string;
   pushedAt?: string;
 }): Promise<TeamPushedCommitRecord> => {
-  return pushBranch({
+  return publishBranch({
     repositoryPath,
     branchName,
     commitHash,

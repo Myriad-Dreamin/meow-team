@@ -1,3 +1,5 @@
+import "server-only";
+
 import { execCliCommand } from "@/lib/cli-tools/exec";
 
 export const runGh = async (

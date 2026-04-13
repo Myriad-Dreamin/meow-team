@@ -5,7 +5,6 @@ import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
 import { applyHandoff, type TeamRoleState } from "@/lib/team/agent-helpers";
 import {
   commitWorktreeChanges,
-  createOrUpdateGitHubPullRequest,
   detectBranchConflict,
   getBranchHead,
   hasWorktreeChanges,
@@ -15,6 +14,7 @@ import {
   tryRebaseWorktreeBranch,
 } from "@/lib/git/ops";
 import type { TeamRepositoryContext, TeamRepositoryOption } from "@/lib/git/repository";
+import { synchronizePullRequest } from "@/lib/platform";
 import {
   buildCanonicalBranchName,
   buildLaneBranchName,
@@ -1510,7 +1510,7 @@ const runFinalArchiveCycle = async ({
     const finalizedCommitHash = latestImplementationCommit;
     const finalizedPushedCommit = updatedPushedCommit;
 
-    const gitHubPullRequest = await createOrUpdateGitHubPullRequest({
+    const synchronizedPullRequest = await synchronizePullRequest({
       repositoryPath: lane.worktreePath,
       branchName: lane.branchName,
       baseBranch: lane.baseBranch,
@@ -1556,7 +1556,7 @@ const runFinalArchiveCycle = async ({
           status: "approved",
           humanApprovedAt,
           updatedAt: now,
-          url: gitHubPullRequest.url,
+          url: synchronizedPullRequest.url,
         };
         mutableLane.updatedAt = now;
         mutableLane.finishedAt = now;
@@ -1589,12 +1589,12 @@ const runFinalArchiveCycle = async ({
         appendLaneEvent(
           mutableLane,
           "system",
-          `GitHub PR refreshed: ${gitHubPullRequest.url}`,
+          `GitHub PR refreshed: ${synchronizedPullRequest.url}`,
           now,
         );
         appendPlannerNote(
           mutableAssignment,
-          `Human approved proposal ${mutableLane.laneIndex}; ${archivedProposalPath} is archived on ${mutableLane.branchName ?? lane.branchName}, and the GitHub PR was refreshed at ${gitHubPullRequest.url}.`,
+          `Human approved proposal ${mutableLane.laneIndex}; ${archivedProposalPath} is archived on ${mutableLane.branchName ?? lane.branchName}, and the GitHub PR was refreshed at ${synchronizedPullRequest.url}.`,
           now,
         );
         synchronizeDispatchAssignment(mutableAssignment, now);
@@ -2200,10 +2200,9 @@ const runLaneCycle = async ({
       return;
     }
 
-    let gitHubPullRequest: Awaited<ReturnType<typeof createOrUpdateGitHubPullRequest>> | null =
-      null;
+    let synchronizedPullRequest: Awaited<ReturnType<typeof synchronizePullRequest>> | null = null;
     try {
-      gitHubPullRequest = await createOrUpdateGitHubPullRequest({
+      synchronizedPullRequest = await synchronizePullRequest({
         repositoryPath: lane.worktreePath,
         branchName: lane.branchName,
         baseBranch: lane.baseBranch,
@@ -2338,7 +2337,7 @@ const runLaneCycle = async ({
           humanApprovalRequestedAt: mutableNow,
           humanApprovedAt: null,
           machineReviewedAt: mutableNow,
-          url: gitHubPullRequest?.url ?? trackingPullRequest.url,
+          url: synchronizedPullRequest?.url ?? trackingPullRequest.url,
         };
         mutableLane.updatedAt = mutableNow;
         mutableLane.finishedAt = mutableNow;
@@ -2368,7 +2367,7 @@ const runLaneCycle = async ({
         appendLaneEvent(
           mutableLane,
           "system",
-          `GitHub PR ready: ${gitHubPullRequest?.url ?? trackingPullRequest.url ?? "Not available"}`,
+          `GitHub PR ready: ${synchronizedPullRequest?.url ?? trackingPullRequest.url ?? "Not available"}`,
           mutableNow,
         );
         appendLaneEvent(
@@ -2749,7 +2748,7 @@ export const approveLaneProposal = async ({
       commitHash: proposalCommit,
     });
 
-    const gitHubPullRequest = await createOrUpdateGitHubPullRequest({
+    const synchronizedPullRequest = await synchronizePullRequest({
       repositoryPath: assignment.repository.path,
       branchName: lane.branchName,
       baseBranch: lane.baseBranch,
@@ -2784,7 +2783,7 @@ export const approveLaneProposal = async ({
             status: "draft",
             humanApprovalRequestedAt: null,
             machineReviewedAt: null,
-            url: gitHubPullRequest.url,
+            url: synchronizedPullRequest.url,
           });
 
         mutableLane.status = "queued";
@@ -2807,7 +2806,7 @@ export const approveLaneProposal = async ({
           humanApprovedAt: null,
           machineReviewedAt: null,
           updatedAt: now,
-          url: gitHubPullRequest.url,
+          url: synchronizedPullRequest.url,
         };
         mutableLane.updatedAt = now;
         mutableLane.finishedAt = null;
@@ -2831,12 +2830,12 @@ export const approveLaneProposal = async ({
         appendLaneEvent(
           mutableLane,
           "system",
-          `GitHub draft PR ready: ${gitHubPullRequest.url}`,
+          `GitHub draft PR ready: ${synchronizedPullRequest.url}`,
           now,
         );
         appendPlannerNote(
           mutableAssignment,
-          `Human approved proposal ${mutableLane.laneIndex}; ${mutableLane.branchName ?? lane.branchName} was pushed and is now tracked by draft GitHub PR ${gitHubPullRequest.url} while coding plus machine review run.`,
+          `Human approved proposal ${mutableLane.laneIndex}; ${mutableLane.branchName ?? lane.branchName} was pushed and is now tracked by draft GitHub PR ${synchronizedPullRequest.url} while coding plus machine review run.`,
           now,
         );
         synchronizeDispatchAssignment(mutableAssignment, now);
