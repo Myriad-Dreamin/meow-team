@@ -7,7 +7,9 @@ import { runOpenSpec } from "@/lib/cli-tools/openspec";
 import {
   commitWorktreeChanges,
   ensureBranchRef,
+  getBranchHead,
   hasWorktreeChanges,
+  listExistingBranches,
   listWorktreeChanges,
 } from "@/lib/git/ops";
 import { createWorktree } from "@/lib/team/coding/worktree";
@@ -27,6 +29,11 @@ type ProposalLane = Pick<
 type MaterializedProposalSnapshot = {
   proposalPath: string;
   fileFingerprints: Record<string, string>;
+};
+
+type MaterializationGitState = {
+  plannerHeadCommit: string;
+  managedBranchHeads: Record<string, string | null>;
 };
 
 const toPosixPath = (value: string): string => {
@@ -207,6 +214,109 @@ const assertProposalChangeDeltaIsIsolated = ({
     `OpenSpec materializer changed planner worktree paths outside ${proposalChangeName}: ${unexpectedPaths.join(
       ", ",
     )}.`,
+  );
+};
+
+const captureMaterializationGitState = async ({
+  repositoryPath,
+  plannerWorktreePath,
+  managedBranchNames,
+}: {
+  repositoryPath: string;
+  plannerWorktreePath: string;
+  managedBranchNames: string[];
+}): Promise<MaterializationGitState> => {
+  const uniqueManagedBranchNames = Array.from(
+    new Set(
+      managedBranchNames
+        .map((branchName) => branchName.trim())
+        .filter((branchName): branchName is string => branchName.length > 0),
+    ),
+  ).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+  const plannerHeadCommit = await getBranchHead({
+    repositoryPath: plannerWorktreePath,
+    branchName: "HEAD",
+  });
+
+  if (uniqueManagedBranchNames.length === 0) {
+    return {
+      plannerHeadCommit,
+      managedBranchHeads: {},
+    };
+  }
+
+  const existingManagedBranches = new Set(
+    await listExistingBranches({
+      repositoryPath,
+      branchNames: uniqueManagedBranchNames,
+    }),
+  );
+  const managedBranchHeadEntries = await Promise.all(
+    uniqueManagedBranchNames.map(async (branchName) => {
+      if (!existingManagedBranches.has(branchName)) {
+        return [branchName, null] as const;
+      }
+
+      return [
+        branchName,
+        await getBranchHead({
+          repositoryPath,
+          branchName,
+        }),
+      ] as const;
+    }),
+  );
+
+  return {
+    plannerHeadCommit,
+    managedBranchHeads: Object.fromEntries(managedBranchHeadEntries),
+  };
+};
+
+const formatGitHeadReference = (gitHead: string | null): string => {
+  return gitHead ? gitHead.slice(0, 12) : "missing";
+};
+
+const assertMaterializationGitStateRemainsPlannerOwned = ({
+  beforeState,
+  afterState,
+  proposalChangeName,
+}: {
+  beforeState: MaterializationGitState;
+  afterState: MaterializationGitState;
+  proposalChangeName: string;
+}): void => {
+  if (beforeState.plannerHeadCommit !== afterState.plannerHeadCommit) {
+    throw new Error(
+      `OpenSpec materializer must not create planner-side commits while materializing ${proposalChangeName}; planner HEAD changed from ${formatGitHeadReference(
+        beforeState.plannerHeadCommit,
+      )} to ${formatGitHeadReference(afterState.plannerHeadCommit)} before the planner commit flow ran.`,
+    );
+  }
+
+  const mutatedManagedBranches = Object.keys(beforeState.managedBranchHeads).filter(
+    (branchName) =>
+      beforeState.managedBranchHeads[branchName] !== afterState.managedBranchHeads[branchName],
+  );
+
+  if (mutatedManagedBranches.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer must not update planner-managed branch refs while materializing ${proposalChangeName}: ${mutatedManagedBranches
+      .map((branchName) => {
+        return `${branchName} (${formatGitHeadReference(
+          beforeState.managedBranchHeads[branchName],
+        )} -> ${formatGitHeadReference(afterState.managedBranchHeads[branchName])})`;
+      })
+      .join(", ")}.`,
   );
 };
 
@@ -416,6 +526,7 @@ export const materializeAssignmentProposals = async ({
     rootPath: worktreeRoot,
   });
   const materializedProposalSnapshots: MaterializedProposalSnapshot[] = [];
+  const managedBranchNames = activeLanes.map((lane) => lane.branchName);
 
   for (const lane of activeLanes) {
     const changedPathsBeforeMaterialization =
@@ -428,6 +539,11 @@ export const materializeAssignmentProposals = async ({
     await ensureOpenSpecChange({
       worktreePath: plannerWorktreePath,
       proposalChangeName: lane.proposalChangeName,
+    });
+    const materializationGitStateBefore = await captureMaterializationGitState({
+      repositoryPath,
+      plannerWorktreePath,
+      managedBranchNames,
     });
     const materializerResult = await openSpecMaterializerAgent.run({
       worktree: plannerWorktree,
@@ -453,6 +569,16 @@ export const materializeAssignmentProposals = async ({
       proposalChangeName: lane.proposalChangeName,
       proposalPath: lane.proposalPath,
       reportedArtifacts: materializerResult.artifactsCreated,
+    });
+    const materializationGitStateAfter = await captureMaterializationGitState({
+      repositoryPath,
+      plannerWorktreePath,
+      managedBranchNames,
+    });
+    assertMaterializationGitStateRemainsPlannerOwned({
+      beforeState: materializationGitStateBefore,
+      afterState: materializationGitStateAfter,
+      proposalChangeName: lane.proposalChangeName,
     });
     const changedPathsAfterMaterialization =
       await listNormalizedWorktreeChanges(plannerWorktreePath);
