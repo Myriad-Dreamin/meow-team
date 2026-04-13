@@ -2,5 +2,5 @@ src/**
 scripts/**
 tsconfig.build.json
 *.tsbuildinfo
-dist/**/*.vsix
+dist/**
 out/**/*.map
