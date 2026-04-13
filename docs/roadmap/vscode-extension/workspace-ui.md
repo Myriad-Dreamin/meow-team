@@ -34,3 +34,5 @@ Next.js app, including `pnpm vscode:build`, `pnpm vscode:package`,
 offline or misconfigured.
 
 ## Related Specs
+
+- [vscode-ui-a1-p1-implement-the-vs-code-workspace-extension-and-local-inst](../../../openspec/changes/archive/2026-04-13-vscode-ui-a1-p1-implement-the-vs-code-workspace-extension-and-local-inst/specs/vscode-ui-a1-p1-implement-the-vs-code-workspace-extension-and-local-inst/spec.md)
