@@ -11,9 +11,9 @@ contracts that keep multi-lane runs deterministic.
 
 ## Design Notes
 
-- Keep `lib/team/network.ts` as the execution coordinator while topic files
-  capture the longer-running responsibilities behind each subsystem.
-- Use the Network topic for dispatch, stage transitions, and archive-time
+- Keep `lib/team/coding/index.ts` as the execution coordinator while topic
+  files capture the longer-running responsibilities behind each subsystem.
+- Use the Coding topic for dispatch, stage transitions, and archive-time
   control flow.
 - Keep role behavior consolidated in the statically imported prompt templates
   and modules under `lib/team/roles`.
@@ -30,7 +30,7 @@ contracts that keep multi-lane runs deterministic.
 
 ## Topics
 
-- [Network](/roadmap/team/network)
+- [Coding](/roadmap/team/coding)
 - [Roles](/roadmap/team/roles)
 - [Storage](/roadmap/team/storage)
 - [Worktree](/roadmap/team/worktree)

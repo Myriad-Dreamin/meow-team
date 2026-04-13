@@ -70,8 +70,8 @@ the environment provides a model override.
 - [`lib/team/roles`](/home/kamiyoru/work/ts/meow-team/lib/team/roles):
   colocated role agents plus the `*.prompt.md` templates that carry both role
   metadata and runtime prompt text.
-- [`lib/team/network.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/network.ts):
-  planner orchestration and thread state management.
+- [`lib/team/coding/index.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/coding/index.ts):
+  stage-oriented planner orchestration, dispatch approvals, and thread state management.
 - [`lib/agent/codex-cli.ts`](/home/kamiyoru/work/ts/meow-team/lib/agent/codex-cli.ts):
   structured Codex CLI execution helpers plus temporary skill exposure.
 - [`lib/team/history.ts`](/home/kamiyoru/work/ts/meow-team/lib/team/history.ts):

@@ -9,7 +9,7 @@ import {
   createTeamRunEnv,
   persistTeamRunState,
   runTeam,
-} from "@/lib/team/network";
+} from "@/lib/team/coding";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
 import { getTeamServerState } from "@/lib/team/server-state";
 import { teamConfig } from "@/team.config";

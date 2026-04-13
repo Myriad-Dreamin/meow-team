@@ -4,14 +4,17 @@
 
 Define the team network orchestration capability so staged run control, lane
 dispatch, approval handling, feedback replanning, and regression coverage live
-under `lib/team/network.ts` as one server-only module.
+under `lib/team/coding/*` as the primary server-only module boundary, with
+`lib/team/network.ts` retained only as a compatibility shim.
 
 ## Requirements
 
 ### Requirement: Merge team dispatch orchestration into network
 
-The system SHALL implement the approved proposal recorded in OpenSpec change `dispatch-network-a1-p1-merge-team-dispatch-orchestration-into-network`
-and keep the work aligned with this proposal's objective: Consolidate `lib/team/dispatch.ts` into `lib/team/network.ts`, move route and internal callers to the unified module, preserve current planning/approval/replan behavior, and merge all dispatch regression suites into `lib/team/network.test.ts` before deleting the standalone dispatch module and tests.
+The system SHALL preserve the unified orchestration capability approved in
+OpenSpec change `dispatch-network-a1-p1-merge-team-dispatch-orchestration-into-network`,
+now implemented under `lib/team/coding/*`, while keeping the planning,
+approval, dispatch, and replanning behavior introduced by that proposal.
 
 #### Scenario: Approved proposal enters execution
 

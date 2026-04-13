@@ -1,0 +1,821 @@
+import "server-only";
+
+import { teamConfig } from "@/team.config";
+import { applyHandoff } from "@/lib/team/agent-helpers";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
+import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
+import {
+  appendTeamExecutionStep,
+  countActiveDispatchThreads,
+  getTeamThreadRecord,
+  updateTeamThreadRecord,
+  upsertTeamThreadRun,
+} from "@/lib/team/history";
+import { appendTeamCodexLogEvent } from "@/lib/team/logs";
+import {
+  buildCanonicalRequestTitle,
+  buildDeterministicRequestTitle,
+  describeConventionalTitleMetadata,
+  normalizeConventionalTitleMetadata,
+  normalizeRequestTitle,
+  parseConventionalTitle,
+  type ConventionalTitleMetadata,
+} from "@/lib/team/request-title";
+import { findConfiguredRepository } from "@/lib/team/repositories";
+import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
+import { plannerRole } from "@/lib/team/roles/planner";
+import { DispatchThreadCapacityError, teamNetworkDispatchOps } from "@/lib/team/coding/dispatch";
+import type {
+  InitialRequestMetadata,
+  PersistedTeamThread,
+  ResolvedRequestMetadata,
+  TeamPlanningRunArgs,
+  TeamRunCompletedState,
+  TeamRunEnv,
+  TeamRunMetadataGenerationStageState,
+  TeamRunPlanningStageState,
+  TeamRunReviewingStageState,
+  TeamRunState,
+  TeamRunSummary,
+} from "@/lib/team/coding/shared";
+import type { TeamCodexEvent, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
+const normalizeRequestText = (value: string | null | undefined): string | null => {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+};
+
+const describeUnknownError = (error: unknown): string => {
+  return error instanceof Error ? error.message : "Unknown error.";
+};
+
+const buildInitialState = (
+  forceReset: boolean,
+  selectedRepository: TeamRepositoryOption | null,
+): TeamRunState => {
+  return {
+    teamId: teamConfig.id,
+    teamName: teamConfig.name,
+    ownerName: teamConfig.owner.name,
+    objective: teamConfig.owner.objective,
+    selectedRepository,
+    workflow: teamConfig.workflow,
+    handoffs: {},
+    handoffCounter: 0,
+    assignmentNumber: 1,
+    requestTitle: null,
+    conventionalTitle: null,
+    requestText: null,
+    latestInput: null,
+    forceReset,
+  };
+};
+
+const filterWorkflowHandoffs = (state: TeamRunState): Partial<Record<string, TeamRoleHandoff>> => {
+  return Object.fromEntries(
+    Object.entries(state.handoffs).filter(([roleId]) => state.workflow.includes(roleId)),
+  );
+};
+
+const getOrderedHandoffs = (state: TeamRunState): TeamRoleHandoff[] => {
+  return Object.values(filterWorkflowHandoffs(state))
+    .filter((handoff): handoff is TeamRoleHandoff => Boolean(handoff))
+    .sort((left, right) => left.sequence - right.sequence);
+};
+
+const createPlannerStep = ({
+  agentName,
+  deliverable,
+}: {
+  agentName: string;
+  deliverable: string;
+}): TeamExecutionStep => {
+  return {
+    agentName,
+    createdAt: new Date().toISOString(),
+    text: deliverable,
+  };
+};
+
+const findPersistedAssignment = (
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>,
+  assignmentNumber: number,
+): PersistedTeamThread["dispatchAssignments"][number] | null => {
+  return (
+    thread?.dispatchAssignments.find(
+      (candidate) => candidate.assignmentNumber === assignmentNumber,
+    ) ?? null
+  );
+};
+
+export const findPersistedLane = (
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>,
+  assignmentNumber: number,
+  laneId: string,
+): PersistedTeamThread["dispatchAssignments"][number]["lanes"][number] | null => {
+  return (
+    findPersistedAssignment(thread, assignmentNumber)?.lanes.find(
+      (candidate) => candidate.laneId === laneId,
+    ) ?? null
+  );
+};
+
+const getPersistedPlannerStep = ({
+  thread,
+  assignmentNumber,
+}: {
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  assignmentNumber: number;
+}): TeamExecutionStep | null => {
+  const plannerHandoff = thread?.data.handoffs.planner;
+  if (!plannerHandoff || plannerHandoff.assignmentNumber !== assignmentNumber) {
+    return null;
+  }
+
+  return thread.results.at(-1) ?? null;
+};
+
+const resolvePersistedRequestMetadata = ({
+  thread,
+  assignment,
+  fallbackRequestText,
+}: {
+  thread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  assignment: PersistedTeamThread["dispatchAssignments"][number] | null;
+  fallbackRequestText: string;
+}): ResolvedRequestMetadata => {
+  const requestText =
+    normalizeRequestText(assignment?.requestText ?? thread?.data.requestText) ??
+    fallbackRequestText;
+  const requestTitle =
+    normalizeRequestTitle(assignment?.requestTitle ?? thread?.data.requestTitle) ??
+    buildDeterministicRequestTitle(requestText);
+  const conventionalTitle =
+    normalizeConventionalTitleMetadata(
+      assignment?.conventionalTitle ?? thread?.data.conventionalTitle,
+    ) ?? null;
+
+  return {
+    requestTitle,
+    conventionalTitle,
+    requestText,
+  };
+};
+
+const buildPlanningResult = ({
+  threadId,
+  state,
+  selectedRepository,
+  requestMetadata,
+  step,
+}: {
+  threadId: string;
+  state: TeamRunState;
+  selectedRepository: TeamRepositoryOption | null;
+  requestMetadata: ResolvedRequestMetadata;
+  step: TeamExecutionStep;
+}): TeamRunSummary => {
+  return {
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+    requestTitle: state.requestTitle ?? requestMetadata.requestTitle,
+    requestText: requestMetadata.requestText,
+    approved: false,
+    repository: selectedRepository,
+    workflow: state.workflow,
+    handoffs: getOrderedHandoffs(state),
+    steps: [step],
+  };
+};
+
+export const isLaneQueuedForExecution = (
+  lane: PersistedTeamThread["dispatchAssignments"][number]["lanes"][number],
+): boolean => {
+  return (
+    lane.status === "queued" ||
+    lane.status === "coding" ||
+    lane.status === "reviewing" ||
+    lane.status === "approved" ||
+    lane.status === "failed" ||
+    lane.approvalGrantedAt !== null ||
+    lane.queuedAt !== null
+  );
+};
+
+export const isLanePullRequestFinalized = (
+  lane: PersistedTeamThread["dispatchAssignments"][number]["lanes"][number],
+): boolean => {
+  return lane.status === "approved" && lane.pullRequest?.status === "approved";
+};
+
+const buildRunState = ({
+  input,
+  reset,
+  selectedRepository,
+  existingThread,
+}: {
+  input: string;
+  reset: boolean;
+  selectedRepository: TeamRepositoryOption | null;
+  existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+}): {
+  state: TeamRunState;
+  shouldResetAssignment: boolean;
+} => {
+  const baseState = buildInitialState(reset, selectedRepository);
+  if (!existingThread) {
+    return {
+      state: {
+        ...baseState,
+        latestInput: input,
+        forceReset: false,
+      },
+      shouldResetAssignment: true,
+    };
+  }
+
+  const storedData = existingThread.data;
+  const shouldResetAssignment =
+    reset ||
+    storedData.latestInput !== input ||
+    (storedData.selectedRepository?.id ?? null) !== (selectedRepository?.id ?? null);
+
+  return {
+    state: {
+      ...baseState,
+      assignmentNumber: shouldResetAssignment
+        ? (storedData.assignmentNumber ?? 0) + 1
+        : storedData.assignmentNumber,
+      latestInput: input,
+      handoffCounter: shouldResetAssignment ? 0 : storedData.handoffCounter,
+      handoffs: shouldResetAssignment ? {} : filterWorkflowHandoffs(storedData),
+      forceReset: false,
+    },
+    shouldResetAssignment,
+  };
+};
+
+const resolveRequestMetadata = async ({
+  input,
+  providedTitle,
+  providedRequestText,
+  existingThread,
+  shouldResetAssignment,
+  worktreePath,
+  dependencies,
+  logEvent,
+}: {
+  input: string;
+  providedTitle?: string;
+  providedRequestText?: string;
+  existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
+  shouldResetAssignment: boolean;
+  worktreePath: string;
+  dependencies: TeamRoleDependencies;
+  logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
+}): Promise<InitialRequestMetadata> => {
+  const requestText =
+    normalizeRequestText(providedRequestText) ??
+    (shouldResetAssignment ? null : normalizeRequestText(existingThread?.data.requestText)) ??
+    input.trim();
+  const humanTitle = normalizeRequestTitle(providedTitle);
+  const humanConventionalTitle = parseConventionalTitle(humanTitle)?.metadata ?? null;
+
+  if (humanTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Using human request title: ${humanTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+
+    return {
+      requestTitle: humanTitle,
+      conventionalTitle: humanConventionalTitle,
+      requestText,
+    };
+  }
+
+  const preservedTitle = shouldResetAssignment
+    ? null
+    : normalizeRequestTitle(existingThread?.data.requestTitle);
+  const preservedConventionalTitle = shouldResetAssignment
+    ? null
+    : (normalizeConventionalTitleMetadata(existingThread?.data.conventionalTitle) ??
+      parseConventionalTitle(existingThread?.data.requestTitle)?.metadata ??
+      null);
+  if (preservedTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Reusing request title: ${preservedTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+
+    return {
+      requestTitle: preservedTitle,
+      conventionalTitle: preservedConventionalTitle,
+      requestText,
+    };
+  }
+
+  try {
+    const generatedMetadata = await generateRequestMetadata({
+      input,
+      requestText,
+      tasks: null,
+      worktreePath,
+      dependencies,
+    });
+
+    if (generatedMetadata.requestTitle) {
+      await logEvent?.({
+        source: "system",
+        message: `Generated request title: ${generatedMetadata.requestTitle}`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return {
+        requestTitle: generatedMetadata.requestTitle,
+        conventionalTitle: generatedMetadata.conventionalTitle,
+        requestText,
+      };
+    }
+  } catch (error) {
+    await logEvent?.({
+      source: "system",
+      message: `Request title generation fell back to a deterministic title: ${describeUnknownError(
+        error,
+      )}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const fallbackTitle = buildDeterministicRequestTitle(requestText);
+  await logEvent?.({
+    source: "system",
+    message: `Using deterministic request title fallback: ${fallbackTitle}`,
+    createdAt: new Date().toISOString(),
+  });
+
+  return {
+    requestTitle: fallbackTitle,
+    conventionalTitle: null,
+    requestText,
+  };
+};
+
+const generateRequestMetadata = async ({
+  input,
+  requestText,
+  tasks,
+  worktreePath,
+  dependencies,
+}: {
+  input: string;
+  requestText: string;
+  tasks?: Array<{
+    title: string;
+    objective: string;
+  }> | null;
+  worktreePath: string;
+  dependencies: TeamRoleDependencies;
+}): Promise<{
+  requestTitle: string | null;
+  conventionalTitle: ConventionalTitleMetadata | null;
+}> => {
+  const generatedTitleResponse = await dependencies.requestTitleAgent.run({
+    input,
+    requestText,
+    worktreePath,
+    tasks,
+  });
+
+  return {
+    requestTitle: normalizeRequestTitle(generatedTitleResponse.title),
+    conventionalTitle: tasks?.length
+      ? normalizeConventionalTitleMetadata(generatedTitleResponse.conventionalTitle)
+      : null,
+  };
+};
+
+const finalizeRequestMetadata = async ({
+  initialMetadata,
+  input,
+  tasks,
+  worktreePath,
+  dependencies,
+  logEvent,
+}: {
+  initialMetadata: InitialRequestMetadata;
+  input: string;
+  tasks?: Array<{
+    title: string;
+    objective: string;
+  }> | null;
+  worktreePath: string;
+  dependencies: TeamRoleDependencies;
+  logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
+}): Promise<ResolvedRequestMetadata> => {
+  const shouldGenerateTitle = !initialMetadata.requestTitle;
+  const shouldGenerateConventionalTitle =
+    Boolean(tasks?.length) && !initialMetadata.conventionalTitle;
+  let generatedMetadata: {
+    requestTitle: string | null;
+    conventionalTitle: ConventionalTitleMetadata | null;
+  } | null = null;
+  let generationError: unknown = null;
+
+  if (shouldGenerateTitle || shouldGenerateConventionalTitle) {
+    try {
+      generatedMetadata = await generateRequestMetadata({
+        input,
+        requestText: initialMetadata.requestText,
+        tasks,
+        worktreePath,
+        dependencies,
+      });
+    } catch (error) {
+      generationError = error;
+    }
+  }
+
+  const requestTitle =
+    initialMetadata.requestTitle ??
+    generatedMetadata?.requestTitle ??
+    buildDeterministicRequestTitle(initialMetadata.requestText);
+  const conventionalTitle =
+    initialMetadata.conventionalTitle ??
+    (tasks?.length ? (generatedMetadata?.conventionalTitle ?? null) : null);
+
+  if (shouldGenerateTitle && generatedMetadata?.requestTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Generated request title: ${generatedMetadata.requestTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  if (shouldGenerateTitle && !generatedMetadata?.requestTitle) {
+    if (generationError) {
+      await logEvent?.({
+        source: "system",
+        message: `Request title generation fell back to a deterministic title: ${describeUnknownError(
+          generationError,
+        )}`,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    await logEvent?.({
+      source: "system",
+      message: `Using deterministic request title fallback: ${requestTitle}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  if (shouldGenerateConventionalTitle && generatedMetadata?.conventionalTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Generated conventional title metadata: ${describeConventionalTitleMetadata(
+        generatedMetadata.conventionalTitle,
+      )}`,
+      createdAt: new Date().toISOString(),
+    });
+  } else if (shouldGenerateConventionalTitle && generationError && !shouldGenerateTitle) {
+    await logEvent?.({
+      source: "system",
+      message: `Conventional title metadata generation was skipped: ${describeUnknownError(
+        generationError,
+      )}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    requestTitle,
+    conventionalTitle,
+    requestText: initialMetadata.requestText,
+  };
+};
+
+const createPlannerEventForwarder = ({
+  env,
+  threadId,
+  assignmentNumber,
+}: {
+  env: TeamRunEnv;
+  threadId: string;
+  assignmentNumber: number;
+}) => {
+  return async (event: TeamCodexEvent): Promise<void> => {
+    const entry = await appendTeamCodexLogEvent({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      assignmentNumber,
+      roleId: "planner",
+      laneId: null,
+      event,
+    });
+
+    try {
+      await env.onPlannerLogEntry?.(entry);
+    } catch (error) {
+      console.error(
+        `[team-run:${threadId}] Unable to forward planner log entry: ${
+          error instanceof Error ? error.message : "Unknown error."
+        }`,
+      );
+    }
+  };
+};
+
+export const buildPlanningStageState = async (
+  env: TeamRunEnv,
+  args: TeamPlanningRunArgs,
+): Promise<TeamRunPlanningStageState> => {
+  const selectedRepository = await findConfiguredRepository(teamConfig, args.repositoryId);
+
+  if (args.repositoryId && !selectedRepository) {
+    throw new Error(
+      "Selected repository is not available. Only repositories discovered from directories listed in team.config.ts can be used.",
+    );
+  }
+
+  if (selectedRepository) {
+    const activeDispatchThreadCount = await countActiveDispatchThreads(
+      teamConfig.storage.threadFile,
+    );
+    if (activeDispatchThreadCount >= teamConfig.dispatch.workerCount) {
+      throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
+    }
+  }
+
+  const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, args.threadId);
+  const { state, shouldResetAssignment } = buildRunState({
+    input: args.input,
+    reset: Boolean(args.reset),
+    selectedRepository,
+    existingThread,
+  });
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId: args.threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
+
+  const requestMetadata = await resolveRequestMetadata({
+    input: args.input,
+    providedTitle: args.title,
+    providedRequestText: args.requestText,
+    existingThread,
+    shouldResetAssignment,
+    worktreePath: selectedRepository?.path ?? process.cwd(),
+    dependencies: env.deps,
+    logEvent: forwardPlannerEvent,
+  });
+  state.requestTitle = requestMetadata.requestTitle;
+  state.conventionalTitle = requestMetadata.conventionalTitle;
+  state.requestText = requestMetadata.requestText;
+
+  return {
+    stage: "planning",
+    args,
+    context: {
+      threadId: args.threadId,
+      selectedRepository,
+      existingThread,
+      shouldResetAssignment,
+      state,
+      requestMetadata,
+    },
+  };
+};
+
+export const runPlanningStage = async (
+  env: TeamRunEnv,
+  currentState: TeamRunPlanningStageState,
+): Promise<TeamRunMetadataGenerationStageState> => {
+  const {
+    args,
+    context: { threadId, selectedRepository, state },
+  } = currentState;
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
+
+  await upsertTeamThreadRun({
+    threadFile: teamConfig.storage.threadFile,
+    threadId,
+    state,
+    input: args.input,
+  });
+
+  const plannerResponse = await env.deps.plannerAgent.run({
+    worktreePath: selectedRepository?.path ?? process.cwd(),
+    state,
+    onEvent: forwardPlannerEvent,
+  });
+
+  applyHandoff({
+    state,
+    role: plannerRole,
+    summary: plannerResponse.handoff.summary,
+    deliverable: plannerResponse.handoff.deliverable,
+    decision: plannerResponse.handoff.decision,
+  });
+
+  if (!selectedRepository && plannerResponse.dispatch) {
+    throw new Error("Planner produced dispatch proposals without a selected repository.");
+  }
+
+  if (selectedRepository && !plannerResponse.dispatch) {
+    throw new Error("Planner completed without dispatch proposals.");
+  }
+
+  return {
+    stage: "metadata-generation",
+    args,
+    context: currentState.context,
+    plannerResponse,
+    plannerRoleName: plannerRole.name,
+  };
+};
+
+export const runMetadataGenerationStage = async (
+  env: TeamRunEnv,
+  currentState: TeamRunMetadataGenerationStageState,
+): Promise<TeamRunReviewingStageState | TeamRunCompletedState> => {
+  const {
+    args,
+    context: { threadId, selectedRepository, requestMetadata, state },
+    plannerResponse,
+    plannerRoleName,
+  } = currentState;
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
+  const persistedThread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  const persistedAssignment = findPersistedAssignment(persistedThread, state.assignmentNumber);
+  const persistedPlannerStep = getPersistedPlannerStep({
+    thread: persistedThread,
+    assignmentNumber: state.assignmentNumber,
+  });
+  const finalizedRequestMetadata =
+    persistedAssignment || persistedPlannerStep
+      ? resolvePersistedRequestMetadata({
+          thread: persistedThread,
+          assignment: persistedAssignment,
+          fallbackRequestText: requestMetadata.requestText,
+        })
+      : await finalizeRequestMetadata({
+          initialMetadata: requestMetadata,
+          input: args.input,
+          tasks: plannerResponse.dispatch?.tasks ?? null,
+          worktreePath: selectedRepository?.path ?? process.cwd(),
+          dependencies: env.deps,
+          logEvent: forwardPlannerEvent,
+        });
+  state.requestText = finalizedRequestMetadata.requestText;
+
+  if (selectedRepository && plannerResponse.dispatch) {
+    const canonicalRequestTitle =
+      normalizeRequestTitle(persistedAssignment?.requestTitle) ??
+      buildCanonicalRequestTitle({
+        requestTitle: finalizedRequestMetadata.requestTitle,
+        taskTitle: plannerResponse.dispatch.tasks[0]?.title ?? null,
+        taskCount: plannerResponse.dispatch.tasks.length,
+        conventionalTitle: finalizedRequestMetadata.conventionalTitle,
+      });
+
+    state.requestTitle = canonicalRequestTitle;
+    state.conventionalTitle =
+      normalizeConventionalTitleMetadata(persistedAssignment?.conventionalTitle) ??
+      finalizedRequestMetadata.conventionalTitle;
+
+    if (!persistedAssignment && canonicalRequestTitle !== finalizedRequestMetadata.requestTitle) {
+      await forwardPlannerEvent({
+        source: "system",
+        message: `Normalized canonical request title: ${canonicalRequestTitle}`,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    if (!persistedAssignment) {
+      await teamNetworkDispatchOps.createPlannerDispatchAssignment({
+        threadId,
+        assignmentNumber: state.assignmentNumber,
+        repository: selectedRepository,
+        requestTitle: canonicalRequestTitle,
+        conventionalTitle: finalizedRequestMetadata.conventionalTitle,
+        requestText: finalizedRequestMetadata.requestText,
+        plannerSummary: plannerResponse.dispatch.planSummary,
+        plannerDeliverable: plannerResponse.dispatch.plannerDeliverable,
+        branchPrefix: plannerResponse.dispatch.branchPrefix,
+        tasks: plannerResponse.dispatch.tasks,
+        deleteExistingBranches: args.deleteExistingBranches,
+      });
+    }
+  } else {
+    state.requestTitle =
+      normalizeRequestTitle(persistedThread?.data.requestTitle) ??
+      finalizedRequestMetadata.requestTitle;
+    state.conventionalTitle =
+      normalizeConventionalTitleMetadata(persistedThread?.data.conventionalTitle) ??
+      finalizedRequestMetadata.conventionalTitle;
+  }
+
+  const step =
+    persistedPlannerStep ??
+    createPlannerStep({
+      agentName: plannerRoleName,
+      deliverable: plannerResponse.handoff.deliverable,
+    });
+  if (!persistedPlannerStep) {
+    await appendTeamExecutionStep({
+      threadFile: teamConfig.storage.threadFile,
+      threadId,
+      state,
+      step,
+    });
+  }
+
+  const result = buildPlanningResult({
+    threadId,
+    state,
+    selectedRepository,
+    requestMetadata: finalizedRequestMetadata,
+    step,
+  });
+
+  if (selectedRepository && plannerResponse.dispatch) {
+    return {
+      stage: "reviewing",
+      args,
+      threadId,
+      result,
+    };
+  }
+
+  return {
+    stage: "completed",
+    args,
+    result,
+  };
+};
+
+export const isPlanningMachineState = (
+  state: TeamRunPlanningStageState | TeamRunMetadataGenerationStageState | { stage: string },
+): state is TeamRunPlanningStageState | TeamRunMetadataGenerationStageState => {
+  return state.stage === "planning" || state.stage === "metadata-generation";
+};
+
+export const handlePlanningStageError = async ({
+  env,
+  currentState,
+  error,
+}: {
+  env: TeamRunEnv;
+  currentState: TeamRunPlanningStageState | TeamRunMetadataGenerationStageState;
+  error: unknown;
+}): Promise<void> => {
+  const { threadId, state } = currentState.context;
+  const forwardPlannerEvent = createPlannerEventForwarder({
+    env,
+    threadId,
+    assignmentNumber: state.assignmentNumber,
+  });
+
+  if (error instanceof ExistingBranchesRequireDeleteError) {
+    try {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (thread, now) => {
+          thread.run = {
+            status: "completed",
+            startedAt: thread.run?.startedAt ?? thread.createdAt,
+            finishedAt: now,
+            lastError: error.message,
+          };
+        },
+      });
+    } catch {
+      // The thread may not have been created yet.
+    }
+
+    await forwardPlannerEvent({
+      source: "system",
+      message: error.message,
+      createdAt: new Date().toISOString(),
+    });
+    return;
+  }
+
+  await forwardPlannerEvent({
+    source: "system",
+    message: `Planner run failed: ${error instanceof Error ? error.message : "Unknown error."}`,
+    createdAt: new Date().toISOString(),
+  });
+};

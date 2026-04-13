@@ -12,7 +12,7 @@ import {
   isTeamCodexLogEntry,
   mergeLogEntries,
 } from "@/components/thread-log-panel";
-import type { TeamRunSummary } from "@/lib/team/network";
+import type { TeamRunSummary } from "@/lib/team/coding";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
