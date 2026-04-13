@@ -11,6 +11,7 @@ export default defineConfig({
     alias: {
       "@": rootDirectory,
       "server-only": path.join(rootDirectory, "test-support/server-only.ts"),
+      vscode: path.join(rootDirectory, "test-support/vscode.ts"),
     },
   },
   test: {

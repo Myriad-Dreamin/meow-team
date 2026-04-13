@@ -1,0 +1,81 @@
+{
+  "name": "meow-team-workspace",
+  "displayName": "Meow Team Workspace",
+  "description": "VS Code workspace surface for the meow-team engineering harness.",
+  "version": "0.1.0",
+  "publisher": "meow-team",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "meow-team",
+    "codex",
+    "workflow",
+    "webview"
+  ],
+  "main": "./dist/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onView:meowTeam.workspace",
+    "onCommand:meowTeam.openWorkspace",
+    "onCommand:meowTeam.refreshWorkspace",
+    "onCommand:meowTeam.openBackendSettings"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "meowTeam",
+          "title": "Meow Team",
+          "icon": "media/activity-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "meowTeam": [
+        {
+          "id": "meowTeam.workspace",
+          "type": "webview",
+          "name": "Workspace"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "meowTeam.openWorkspace",
+        "title": "Meow Team: Open Workspace"
+      },
+      {
+        "command": "meowTeam.refreshWorkspace",
+        "title": "Meow Team: Refresh Workspace"
+      },
+      {
+        "command": "meowTeam.openBackendSettings",
+        "title": "Meow Team: Open Backend Settings"
+      }
+    ],
+    "configuration": {
+      "title": "Meow Team",
+      "properties": {
+        "meowTeam.backendBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3000",
+          "markdownDescription": "Base URL for the Next.js backend that serves `/api/team/*`.",
+          "pattern": "^https?://.+"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "pnpm exec tsc -p tsconfig.build.json",
+    "check": "pnpm exec tsc -p tsconfig.build.json --noEmit",
+    "package": "pnpm build && node ./scripts/package.mjs",
+    "install-local": "pnpm package && node ./scripts/install-local.mjs"
+  }
+}
