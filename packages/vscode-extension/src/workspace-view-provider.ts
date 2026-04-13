@@ -21,6 +21,7 @@ import type {
   TeamFeedbackRequest,
   TeamHumanFeedbackScope,
   TeamThreadDetail,
+  TeamRunRequest,
   TeamWorkspaceResponse,
 } from "./models";
 
@@ -71,14 +72,7 @@ type WebviewRequestMessage =
     }
   | {
       type: "run";
-      payload: {
-        input: string;
-        title?: string;
-        threadId?: string;
-        repositoryId?: string;
-        reset?: boolean;
-        deleteExistingBranches?: boolean;
-      };
+      payload: TeamRunRequest;
     }
   | {
       type: "select-thread";
@@ -101,6 +95,32 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
 
 const readThreadId = (value: unknown): string | null => {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+};
+
+const readOptionalRunField = (value: string | undefined): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const normalizeRunRequest = (payload: TeamRunRequest): TeamRunRequest => {
+  const title = readOptionalRunField(payload.title);
+  const threadId = readOptionalRunField(payload.threadId);
+  const repositoryId = readOptionalRunField(payload.repositoryId);
+
+  return {
+    input: payload.input,
+    ...(title ? { title } : {}),
+    ...(threadId ? { threadId } : {}),
+    ...(repositoryId ? { repositoryId } : {}),
+    ...(typeof payload.reset === "boolean" ? { reset: payload.reset } : {}),
+    ...(typeof payload.deleteExistingBranches === "boolean"
+      ? { deleteExistingBranches: payload.deleteExistingBranches }
+      : {}),
+  };
 };
 
 const formatBackendError = (error: unknown): string => {
@@ -441,9 +461,13 @@ export class MeowTeamWorkspaceViewProvider
       }
       case "run": {
         await this.withAction("run", "Starting planner run", async () => {
-          const result = await runTeam(this.state.backendBaseUrl, message.payload, (event) => {
-            this.handleRunProgress(event);
-          });
+          const result = await runTeam(
+            this.state.backendBaseUrl,
+            normalizeRunRequest(message.payload),
+            (event) => {
+              this.handleRunProgress(event);
+            },
+          );
           this.state.selectedThreadId = result.acceptedThreadId ?? result.result.threadId ?? null;
           this.state.notice = `Assignment ${result.result.assignmentNumber} updated for ${result.result.requestTitle}.`;
           await this.refresh();
