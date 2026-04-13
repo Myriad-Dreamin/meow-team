@@ -24,12 +24,10 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
   private lateinit var backendConfigStore: BackendConfigStore
-  private lateinit var notificationPoller: NotificationPoller
   private lateinit var backendUrlInput: TextInputEditText
   private lateinit var connectionStatusText: TextView
   private lateinit var notificationRouteText: TextView
   private lateinit var workspaceWebView: WebView
-  private var activeBackendBaseUrl: String? = null
 
   private val notificationPermissionRequest =
     registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -43,7 +41,6 @@ class MainActivity : AppCompatActivity() {
     setContentView(R.layout.activity_main)
 
     backendConfigStore = BackendConfigStore(this)
-    notificationPoller = NotificationPoller(this, lifecycleScope)
     backendUrlInput = findViewById(R.id.backendUrlInput)
     connectionStatusText = findViewById(R.id.connectionStatusText)
     notificationRouteText = findViewById(R.id.notificationRouteText)
@@ -83,16 +80,6 @@ class MainActivity : AppCompatActivity() {
     val launchBackendOverride = readBackendBaseUrlOverride(intent) ?: return
     backendUrlInput.setText(launchBackendOverride)
     connect(loadWorkspace = true)
-  }
-
-  override fun onStart() {
-    super.onStart()
-    activeBackendBaseUrl?.let(notificationPoller::start)
-  }
-
-  override fun onStop() {
-    notificationPoller.stop()
-    super.onStop()
   }
 
   override fun onDestroy() {
@@ -139,6 +126,7 @@ class MainActivity : AppCompatActivity() {
       }
 
     backendConfigStore.writeBackendBaseUrl(normalizedBackendBaseUrl)
+    NotificationMonitorService.start(this, normalizedBackendBaseUrl)
     connectionStatusText.text =
       getString(R.string.connection_status_connecting_format, normalizedBackendBaseUrl)
     notificationRouteText.text = getString(R.string.notification_route_pending)
@@ -149,24 +137,22 @@ class MainActivity : AppCompatActivity() {
           BackendClient.fetchWorkspaceSummary(normalizedBackendBaseUrl)
         }
       }.onSuccess { summary ->
-        activeBackendBaseUrl = summary.backendBaseUrl
+        backendConfigStore.writeBackendBaseUrl(summary.backendBaseUrl)
         backendUrlInput.setText(summary.backendBaseUrl)
         notificationRouteText.text =
           getString(R.string.notification_route_format, summary.notificationTarget.displayName)
         connectionStatusText.text =
           getString(R.string.connection_status_connected_format, summary.backendBaseUrl)
-        notificationPoller.start(summary.backendBaseUrl)
+        NotificationMonitorService.start(this@MainActivity, summary.backendBaseUrl)
 
         if (loadWorkspace) {
           workspaceWebView.loadUrl(summary.workspaceUrl)
         }
       }.onFailure { error ->
-        activeBackendBaseUrl = null
-        notificationPoller.stop()
         notificationRouteText.text = getString(R.string.notification_route_unavailable)
         connectionStatusText.text =
           getString(
-            R.string.connection_status_failed_format,
+            R.string.connection_status_failed_retrying_format,
             normalizedBackendBaseUrl,
             error.message ?: getString(R.string.connection_failed_unknown),
           )
@@ -195,6 +181,7 @@ class MainActivity : AppCompatActivity() {
           <h2>Backend unavailable</h2>
           <p>Unable to reach $encodedBaseUrl.</p>
           <p>$encodedError</p>
+          <p>Background monitoring stays active and will keep retrying.</p>
         </body>
       </html>
     """.trimIndent()

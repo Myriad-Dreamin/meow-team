@@ -92,7 +92,13 @@ pnpm android:install
 ## Local backend URL
 
 The app now stays on the configuration screen on first launch until a backend
-URL is saved. After that, it reconnects automatically with the stored value.
+URL is saved.
+
+Saving a backend URL also starts Android background monitoring. The app keeps a
+low-priority ongoing system notification visible while that monitoring service
+is active, which lets approval and failure alerts continue while the app is
+backgrounded or the device is locked. You can stop that monitoring from the
+ongoing notification and restart it the next time you save a backend URL.
 
 For the Android emulator, use `http://10.0.2.2:3000` as the backend URL when
 the Next.js app is running locally with `pnpm dev`.

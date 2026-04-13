@@ -1,5 +1,6 @@
 package team.meow.android
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -97,6 +98,7 @@ class NotificationPoller(
           .setAutoCancel(true)
           .setContentIntent(pendingIntent)
           .setPriority(priority)
+          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
           .build()
 
       try {
@@ -124,6 +126,7 @@ class NotificationPoller(
         NotificationManager.IMPORTANCE_DEFAULT,
       ).apply {
         description = context.getString(R.string.notification_channel_description)
+        lockscreenVisibility = Notification.VISIBILITY_PUBLIC
       }
 
     val notificationManager =

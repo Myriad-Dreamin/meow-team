@@ -38,9 +38,12 @@ VS Code alerts require the extension to be installed and activated. The
 extension starts polling on editor startup and uses the same backend snapshot,
 so approval and failure alerts can continue without the browser page open.
 
-Android alerts require the Android app to be open and connected to the same
-backend base URL. The app polls the same snapshot and raises native Android
-system notifications when `team.config.ts` keeps `notifications.target === "android"`.
+Android alerts require the Android app to save a backend URL and keep its
+background monitoring service active. The app polls the same snapshot through a
+foreground service, shows a low-priority ongoing Android system notification
+while monitoring stays active, and can continue raising native Android alerts
+when the device is locked or the app is backgrounded as long as
+`team.config.ts` keeps `notifications.target === "android"`.
 
 ## Exact trigger rules
 
