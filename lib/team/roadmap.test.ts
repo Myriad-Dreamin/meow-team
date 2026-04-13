@@ -297,3 +297,39 @@ Track command surface changes here.
     await expect(fs.readFile(todoPath, "utf8")).resolves.toBe(todoContent);
   });
 });
+
+describe("roadmap topic docs", () => {
+  it("require an opening frontmatter fence on topic pages", async () => {
+    const roadmapRoot = path.join(process.cwd(), "docs/roadmap");
+    const roadmapEntries = await fs.readdir(roadmapRoot, { withFileTypes: true });
+
+    for (const roadmapEntry of roadmapEntries) {
+      if (!roadmapEntry.isDirectory()) {
+        continue;
+      }
+
+      const topicEntries = await fs.readdir(path.join(roadmapRoot, roadmapEntry.name), {
+        withFileTypes: true,
+      });
+
+      for (const topicEntry of topicEntries) {
+        if (
+          !topicEntry.isFile() ||
+          topicEntry.name === "index.md" ||
+          !topicEntry.name.endsWith(".md")
+        ) {
+          continue;
+        }
+
+        const topicPath = path.join(roadmapRoot, roadmapEntry.name, topicEntry.name);
+        const topicContent = await fs.readFile(topicPath, "utf8");
+        const [firstLine = ""] = topicContent.split(/\r?\n/u);
+
+        expect(
+          firstLine,
+          `${roadmapEntry.name}/${topicEntry.name} must start with an opening frontmatter fence.`,
+        ).toBe("---");
+      }
+    }
+  });
+});
