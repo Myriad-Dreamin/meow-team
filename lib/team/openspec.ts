@@ -67,6 +67,19 @@ const ensureOpenSpecChange = async ({
   }
 };
 
+const resetProposalMaterializationTarget = async ({
+  worktreePath,
+  proposalPath,
+}: {
+  worktreePath: string;
+  proposalPath: string;
+}): Promise<void> => {
+  await fs.rm(path.join(worktreePath, proposalPath), {
+    recursive: true,
+    force: true,
+  });
+};
+
 const assertMaterializedOpenSpecArtifacts = async ({
   worktreePath,
   proposalChangeName,
@@ -377,6 +390,10 @@ export const materializeAssignmentProposals = async ({
     const changedPathsBeforeMaterialization =
       await listNormalizedWorktreeChanges(plannerWorktreePath);
 
+    await resetProposalMaterializationTarget({
+      worktreePath: plannerWorktreePath,
+      proposalPath: lane.proposalPath,
+    });
     await ensureOpenSpecChange({
       worktreePath: plannerWorktreePath,
       proposalChangeName: lane.proposalChangeName,

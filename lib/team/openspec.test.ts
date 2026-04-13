@@ -663,4 +663,73 @@ describe("materializeAssignmentProposals", () => {
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
     expect(ensureBranchRefMock).not.toHaveBeenCalled();
   });
+
+  it("fails when rematerializing an existing proposal without rewriting its stale artifacts", async () => {
+    const repositoryPath = await createTemporaryDirectory();
+    const worktreeRoot = path.join(repositoryPath, "worktrees");
+    const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
+    const proposalChangeName = "change-1";
+    const proposalPath = "openspec/changes/change-1";
+    const staleArtifacts = await writeExpectedProposalArtifacts({
+      worktreePath: plannerWorktreePath,
+      proposalChangeName,
+      proposalPath,
+      contentByPath: {
+        [`${proposalPath}/proposal.md`]: "# Stale proposal\n",
+        [`${proposalPath}/design.md`]: "# Stale design\n",
+        [`${proposalPath}/tasks.md`]: "- [ ] stale task\n",
+        [`${proposalPath}/specs/${proposalChangeName}/spec.md`]: "# Stale spec\n",
+      },
+    });
+
+    const openSpecMaterializerAgent: {
+      run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
+    } = {
+      run: vi.fn(async () => {
+        await expect(
+          fs.access(path.join(plannerWorktreePath, `${proposalPath}/proposal.md`)),
+        ).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+
+        return {
+          summary: "Reused the existing proposal artifacts.",
+          deliverable: "Reported the expected artifact paths without rewriting any files.",
+          artifactsCreated: staleArtifacts,
+        };
+      }),
+    };
+
+    await expect(
+      materializeAssignmentProposals({
+        repositoryPath,
+        baseBranch: "main",
+        canonicalBranchName: "requests/example/thread-1/a1",
+        requestTitle: "feat(dispatch): Materialize proposal artifacts",
+        conventionalTitle: {
+          type: "feat",
+          scope: "dispatch",
+        },
+        plannerSummary: "Planner summary",
+        plannerDeliverable: "Planner deliverable",
+        requestInput: "Materialize proposal artifacts through the agent.",
+        worktreeRoot,
+        plannerWorktreePath,
+        lanes: [
+          {
+            laneIndex: 1,
+            taskTitle: "Materialize proposal artifacts",
+            taskObjective: "Rewrite the existing proposal files from the agent.",
+            proposalChangeName,
+            proposalPath,
+            branchName: "requests/example/thread-1/a1-proposal-1",
+          },
+        ],
+        openSpecMaterializerAgent,
+      }),
+    ).rejects.toThrow("OpenSpec materializer did not produce the expected artifacts for change-1");
+
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(ensureBranchRefMock).not.toHaveBeenCalled();
+  });
 });
