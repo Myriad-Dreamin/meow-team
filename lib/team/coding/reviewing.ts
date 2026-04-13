@@ -24,7 +24,6 @@ import {
   captureAssignmentThreadSchedulingState,
   captureLanePoolSchedulingState,
   lanePoolSchedulingStateMatches,
-  type AssignmentThreadSchedulingState,
   type LanePoolSchedulingState,
   type PlannedAssignmentThreadState,
   type PlannedLanePoolState,

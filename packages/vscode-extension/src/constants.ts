@@ -1,0 +1,10 @@
+export const EXTENSION_CONTAINER_ID = "meowTeam";
+export const WORKSPACE_VIEW_ID = "meowTeam.workspace";
+export const OPEN_WORKSPACE_COMMAND = "meowTeam.openWorkspace";
+export const REFRESH_WORKSPACE_COMMAND = "meowTeam.refreshWorkspace";
+export const OPEN_BACKEND_SETTINGS_COMMAND = "meowTeam.openBackendSettings";
+export const EXTENSION_CONTEXT_KEY = "meowTeam.workspaceEnabled";
+export const CONFIG_SECTION = "meowTeam";
+export const BACKEND_BASE_URL_SETTING = "backendBaseUrl";
+export const DEFAULT_BACKEND_BASE_URL = "http://127.0.0.1:3000";
+export const WORKSPACE_POLL_INTERVAL_MS = 5000;

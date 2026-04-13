@@ -7,11 +7,11 @@ outline: deep
 
 # VS Code Extension
 
-This roadmap tracks the editor-native meow-team surface that will live in
-`editors/vscode` while continuing to rely on the existing Next.js app as the
-backend. The current topic focuses on the initial workspace UI: how the
-extension hosts the experience inside VS Code and how it talks to the backend
-through explicit HTTP requests.
+This roadmap tracks the editor-native meow-team surface that lives in
+`packages/vscode-extension` while continuing to rely on the existing Next.js
+app as the backend. The current topic focuses on the initial workspace UI:
+how the extension hosts the experience inside VS Code and how it talks to the
+backend through explicit HTTP requests.
 
 ## Design Notes
 
@@ -21,8 +21,8 @@ through explicit HTTP requests.
   status, and configuration.
 - Prefer explicit GET/POST contracts over hidden in-process coupling between
   the extension host and the web app runtime.
-- Keep the extension package isolated under `editors/vscode` so editor delivery
-  can evolve without reshaping the backend app.
+- Keep the extension package isolated under `packages/vscode-extension` so
+  editor delivery can evolve without reshaping the backend app.
 
 ## Topics
 

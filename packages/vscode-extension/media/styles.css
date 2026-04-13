@@ -1,0 +1,311 @@
+:root {
+  color-scheme: dark light;
+  font-family: var(--vscode-font-family);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--vscode-foreground);
+  background:
+    radial-gradient(circle at top, color-mix(in srgb, var(--vscode-button-background) 18%, transparent), transparent 42%),
+    var(--vscode-editor-background);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  padding: 0.55rem 0.8rem;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+button:hover:enabled {
+  background: var(--vscode-button-hoverBackground);
+  transform: translateY(-1px);
+}
+
+button.secondary {
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 86%, transparent);
+  border-color: var(--vscode-widget-border);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border));
+  background: color-mix(in srgb, var(--vscode-input-background) 90%, transparent);
+  color: var(--vscode-input-foreground);
+  padding: 0.7rem 0.8rem;
+}
+
+textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.app {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.hero,
+.card {
+  border: 1px solid color-mix(in srgb, var(--vscode-widget-border) 80%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 92%, transparent);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+}
+
+.hero {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.hero-top,
+.card-header,
+.toolbar,
+.thread-header,
+.lane-header,
+.form-row,
+.button-row,
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.hero-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.hero h1,
+.card h2,
+.card h3,
+.card h4 {
+  margin: 0;
+}
+
+.hero p,
+.card p,
+.card li,
+.card pre {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+  border: 1px solid color-mix(in srgb, var(--vscode-widget-border) 82%, transparent);
+  background: color-mix(in srgb, var(--vscode-editorHoverWidget-background) 88%, transparent);
+}
+
+.status-pill.connected {
+  color: var(--vscode-testing-iconPassed);
+}
+
+.status-pill.error {
+  color: var(--vscode-errorForeground);
+}
+
+.status-pill.pending {
+  color: var(--vscode-testing-iconQueued);
+}
+
+.connection-copy {
+  color: var(--vscode-descriptionForeground);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.column {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.card {
+  padding: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.thread-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.thread-button {
+  width: 100%;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--vscode-widget-border) 80%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 64%, transparent);
+  padding: 0.8rem;
+  color: inherit;
+}
+
+.thread-button.active {
+  border-color: var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-button-background) 18%, var(--vscode-editorWidget-background) 82%);
+}
+
+.thread-button h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+.thread-meta,
+.lane-meta,
+.details-grid {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85rem;
+}
+
+.thread-group {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.empty-state,
+.muted {
+  color: var(--vscode-descriptionForeground);
+}
+
+.callout {
+  border-radius: 14px;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--vscode-widget-border) 80%, transparent);
+}
+
+.callout.notice {
+  background: color-mix(in srgb, var(--vscode-inputOption-activeBackground) 18%, transparent);
+}
+
+.callout.error {
+  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground) 30%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-errorForeground) 42%, transparent);
+}
+
+.details-grid {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.details-grid strong {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--vscode-foreground);
+}
+
+.lane-list,
+.note-list,
+.handoff-list,
+.step-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.lane,
+.note,
+.handoff,
+.step {
+  display: grid;
+  gap: 0.65rem;
+  border-radius: 14px;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--vscode-widget-border) 78%, transparent);
+  background: color-mix(in srgb, var(--vscode-editor-background) 50%, transparent);
+}
+
+.lane-header {
+  align-items: flex-start;
+}
+
+.lane-title {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.lane-meta code,
+.thread-meta code,
+.connection-copy code {
+  font-family: var(--vscode-editor-font-family);
+}
+
+.field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.feedback-actions,
+.lane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.feedback-area {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.text-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: var(--vscode-editor-font-family);
+}
+
+.toolbar {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
