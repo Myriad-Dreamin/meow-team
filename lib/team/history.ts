@@ -1,7 +1,9 @@
 import "server-only";
 
+import { teamConfig } from "@/team.config";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/coding/shared";
+import { resolveThreadOwnedWorktree } from "@/lib/team/coding/thread-worktree";
 import {
   buildTeamRepositoryPickerModel,
   type TeamRepositoryPickerModel,
@@ -144,6 +146,12 @@ export type TeamWorkspaceThreadSummaryLists = {
 export type PendingDispatchAssignment = {
   threadId: string;
   assignment: TeamDispatchAssignment;
+};
+
+export type TeamThreadWorktreeClaim = {
+  threadId: string;
+  repository: TeamRepositoryOption | null;
+  worktree: TeamRunState["threadWorktree"];
 };
 
 const getLatestThreadRequestTimestamp = (thread: TeamThreadRecord): string => {
@@ -334,17 +342,59 @@ const normalizeRunState = (state: TeamRunState): TeamRunState => {
       parseConventionalTitle(state.requestTitle)?.metadata ??
       null,
     requestText: state.requestText ?? null,
+    threadWorktree: state.threadWorktree ?? null,
     latestInput: state.latestInput ?? null,
   };
 };
 
+const sortAssignmentsAscending = (
+  assignments: TeamDispatchAssignment[],
+): TeamDispatchAssignment[] => {
+  return [...assignments].sort((left, right) => left.assignmentNumber - right.assignmentNumber);
+};
+
+const resolveThreadRepository = ({
+  state,
+  assignments,
+}: {
+  state: TeamRunState;
+  assignments: TeamDispatchAssignment[];
+}): TeamRepositoryOption | null => {
+  if (state.selectedRepository) {
+    return state.selectedRepository;
+  }
+
+  return sortAssignmentsAscending(assignments).at(-1)?.repository ?? null;
+};
+
 const normalizeStoredThread = (thread: StoredThread): TeamThreadRecord => {
+  const normalizedAssignments = (thread.dispatchAssignments ?? []).map(normalizeDispatchAssignment);
+  const normalizedState = normalizeRunState(thread.data);
+  const archivedAt = normalizeArchivedAt(thread.archivedAt);
+  const selectedRepository = resolveThreadRepository({
+    state: normalizedState,
+    assignments: normalizedAssignments,
+  });
+
   return {
     ...thread,
-    data: normalizeRunState(thread.data),
+    data: {
+      ...normalizedState,
+      selectedRepository,
+      threadWorktree: archivedAt
+        ? null
+        : resolveThreadOwnedWorktree({
+            repository: selectedRepository,
+            configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
+            candidate: {
+              threadWorktree: normalizedState.threadWorktree,
+              dispatchAssignments: normalizedAssignments,
+            },
+          }),
+    },
     results: (thread.results ?? []).map(normalizeExecutionStep),
-    dispatchAssignments: (thread.dispatchAssignments ?? []).map(normalizeDispatchAssignment),
-    archivedAt: normalizeArchivedAt(thread.archivedAt),
+    dispatchAssignments: normalizedAssignments,
+    archivedAt,
   };
 };
 
@@ -945,9 +995,38 @@ export const threadHasActiveDispatchAssignment = async (
 
 export const countActiveDispatchThreads = async (
   threadFile: TeamThreadStorageTarget,
+  { excludeThreadId }: { excludeThreadId?: string } = {},
 ): Promise<number> => {
-  const pendingAssignments = await listPendingDispatchAssignments(threadFile);
-  return new Set(pendingAssignments.map((pending) => pending.threadId)).size;
+  const claims = await listLivingThreadWorktreeClaims(threadFile, {
+    excludeThreadId,
+  });
+  return claims.filter((claim) => claim.worktree?.slot).length;
+};
+
+export const listLivingThreadWorktreeClaims = async (
+  threadFile: TeamThreadStorageTarget,
+  { excludeThreadId }: { excludeThreadId?: string } = {},
+): Promise<TeamThreadWorktreeClaim[]> => {
+  const storedThreads = await listTeamThreadStorageRecords(threadFile);
+  return storedThreads.reduce<TeamThreadWorktreeClaim[]>((claims, storedRecord) => {
+    const storedThread = readStoredThreadFromRecord(storedRecord);
+    const thread = synchronizeTeamThreadRun(
+      normalizeStoredThread(storedThread),
+      storedThread.updatedAt,
+    );
+
+    if (thread.threadId === excludeThreadId || isArchivedThread(thread)) {
+      return claims;
+    }
+
+    claims.push({
+      threadId: thread.threadId,
+      repository: thread.data.selectedRepository,
+      worktree: thread.data.threadWorktree,
+    });
+
+    return claims;
+  }, []);
 };
 
 export const markTeamThreadFailed = async ({
@@ -1010,6 +1089,7 @@ export const archiveTeamThread = async ({
     threadId,
     updater: (nextThread, now) => {
       nextThread.archivedAt = now;
+      nextThread.data.threadWorktree = null;
     },
   });
 

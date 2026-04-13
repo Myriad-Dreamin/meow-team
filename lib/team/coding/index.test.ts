@@ -109,7 +109,7 @@ import {
 import { approveLanePullRequest } from "@/lib/team/coding/archiving";
 import { approveLaneProposal } from "@/lib/team/coding/coding";
 import { createPlannerDispatchAssignment } from "@/lib/team/coding/plan";
-import { ensurePendingDispatchWork } from "@/lib/team/coding/reviewing";
+import { ensurePendingDispatchWork, waitForLaneRunCompletion } from "@/lib/team/coding/reviewing";
 import {
   resetTeamThreadStorageStateCacheForTests,
   updateTeamThreadStorageRecord,
@@ -142,6 +142,15 @@ const dispatchRepository: TeamRepositoryOption = {
 };
 
 const createTestWorktree = (worktreePath: string) => createWorktree({ path: worktreePath });
+const createManagedPlanningWorktree = (repositoryPath: string, slot = 1) => {
+  const rootPath = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
+    ? teamConfig.dispatch.worktreeRoot
+    : path.join(repositoryPath, teamConfig.dispatch.worktreeRoot);
+  return createWorktree({
+    path: `${rootPath}/meow-${slot}`,
+    rootPath,
+  });
+};
 
 const createPersistStateMock = () => vi.fn<TeamRunEnv["persistState"]>(async () => undefined);
 
@@ -258,6 +267,7 @@ const writeReplayThreadStore = async ({
       requestTitle: assignmentOverrides.requestTitle ?? "Replay Request",
       conventionalTitle: assignmentOverrides.conventionalTitle ?? null,
       requestText: assignmentOverrides.requestText ?? "Replay the persisted stage.",
+      threadWorktree: null,
       latestInput: assignmentOverrides.requestText ?? "Replay the persisted stage.",
       forceReset: false,
     },
@@ -362,7 +372,7 @@ describe.sequential("runTeam", () => {
           expect(input).toMatchObject({
             input: "Ship reliable dispatch coordination.",
             requestText: "Ship reliable dispatch coordination.",
-            worktree: createTestWorktree(repository.path),
+            worktree: createManagedPlanningWorktree(repository.path),
             tasks: null,
           });
 
@@ -375,7 +385,7 @@ describe.sequential("runTeam", () => {
         expect(input).toMatchObject({
           input: "Ship reliable dispatch coordination.",
           requestText: "Ship reliable dispatch coordination.",
-          worktree: createTestWorktree(repository.path),
+          worktree: createManagedPlanningWorktree(repository.path),
           tasks: [
             {
               title: "Stabilize dispatch flow",
@@ -396,7 +406,7 @@ describe.sequential("runTeam", () => {
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         callOrder.push("planner");
-        expect(input.worktree).toEqual(createTestWorktree(repository.path));
+        expect(input.worktree).toEqual(createManagedPlanningWorktree(repository.path));
         expect(input.state.requestTitle).toBe("Dispatch Coordination");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toEqual(repository);
@@ -545,7 +555,7 @@ describe.sequential("runTeam", () => {
     const plannerAgentMock = {
       run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
         callOrder.push("planner");
-        expect(input.worktree).toEqual(createTestWorktree(repository.path));
+        expect(input.worktree).toEqual(createManagedPlanningWorktree(repository.path));
         expect(input.state.requestTitle).toBe("Dispatch Coordination");
         expect(input.state.conventionalTitle).toBeNull();
         expect(input.state.selectedRepository).toEqual(repository);
@@ -713,6 +723,7 @@ describe.sequential("runTeam", () => {
         requestTitle: "Persisted Title",
         conventionalTitle: null,
         requestText: "Plan the persisted request.",
+        threadWorktree: null,
         latestInput: "Plan the persisted request.",
         forceReset: false,
       },
@@ -881,6 +892,7 @@ describe.sequential("runTeam", () => {
       requestTitle: "Dispatch Coordination",
       conventionalTitle: null,
       requestText: "Ship reliable dispatch coordination.",
+      threadWorktree: null,
       latestInput: "Ship reliable dispatch coordination.",
       forceReset: false,
     };
@@ -906,7 +918,7 @@ describe.sequential("runTeam", () => {
       },
       context: {
         threadId: "thread-replay",
-        worktree: createTestWorktree(repository.path),
+        worktree: createManagedPlanningWorktree(repository.path),
         selectedRepository: repository,
         existingThread: null,
         shouldResetAssignment: true,
@@ -969,6 +981,7 @@ describe.sequential("runTeam", () => {
         requestTitle: "Existing request",
         conventionalTitle: null,
         requestText: "Keep the current slot busy.",
+        threadWorktree: null,
         latestInput: "Keep the current slot busy.",
         forceReset: false,
       },
@@ -1065,7 +1078,7 @@ describe.sequential("runTeam", () => {
     await persistTeamRunState(env, initialState);
 
     await expect(runTeam(env, initialState)).rejects.toThrow(
-      "All 1 shared meow worktree slot is already assigned to non-terminal threads.",
+      "All 1 shared meow worktree slot is already claimed by living repository-backed threads.",
     );
 
     expect(requestTitleAgentMock.run).not.toHaveBeenCalled();
@@ -1074,9 +1087,297 @@ describe.sequential("runTeam", () => {
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual(["init"]);
   });
 
+  it("blocks new repository-backed planning while a completed thread still owns its meow worktree", async () => {
+    teamConfig.dispatch.workerCount = 1;
+    findConfiguredRepositoryMock.mockResolvedValue(repository);
+    const claimedWorktree = createManagedPlanningWorktree(repository.path);
+
+    await writeStoredThreadRecord({
+      threadId: "completed-thread",
+      data: {
+        teamId: teamConfig.id,
+        teamName: teamConfig.name,
+        ownerName: teamConfig.owner.name,
+        objective: teamConfig.owner.objective,
+        selectedRepository: repository,
+        workflow: ["planner", "coder", "reviewer"],
+        handoffs: {},
+        handoffCounter: 0,
+        assignmentNumber: 1,
+        requestTitle: "Completed request",
+        conventionalTitle: null,
+        requestText: "Hold the claimed meow worktree until archive.",
+        threadWorktree: null,
+        latestInput: "Hold the claimed meow worktree until archive.",
+        forceReset: false,
+      },
+      results: [],
+      userMessages: [],
+      dispatchAssignments: [
+        {
+          assignmentNumber: 1,
+          status: "completed",
+          repository,
+          requestTitle: "Completed request",
+          conventionalTitle: null,
+          requestText: "Hold the claimed meow worktree until archive.",
+          requestedAt: FIXED_TIMESTAMP,
+          startedAt: FIXED_TIMESTAMP,
+          finishedAt: FIXED_TIMESTAMP,
+          updatedAt: FIXED_TIMESTAMP,
+          plannerSummary: "Completed summary",
+          plannerDeliverable: "Completed deliverable",
+          branchPrefix: "completed",
+          canonicalBranchName: "requests/completed/a1",
+          baseBranch: "main",
+          threadSlot: claimedWorktree.slot,
+          plannerWorktreePath: claimedWorktree.path,
+          workerCount: 1,
+          lanes: [
+            {
+              laneId: "lane-1",
+              laneIndex: 1,
+              status: "approved",
+              executionPhase: null,
+              taskTitle: "Completed task",
+              taskObjective: "Keep the thread-scoped worktree claimed until archive.",
+              proposalChangeName: "completed-change",
+              proposalPath: "openspec/changes/archive/2026-04-11-completed-change",
+              workerSlot: null,
+              branchName: "requests/completed/a1-proposal-1",
+              baseBranch: "main",
+              worktreePath: claimedWorktree.path,
+              latestImplementationCommit: "completed-commit",
+              pushedCommit: null,
+              latestCoderHandoff: null,
+              latestReviewerHandoff: null,
+              latestDecision: "approved",
+              latestCoderSummary: null,
+              latestReviewerSummary: "Machine review approved the branch.",
+              latestActivity: "Completed and awaiting archive.",
+              approvalRequestedAt: FIXED_TIMESTAMP,
+              approvalGrantedAt: FIXED_TIMESTAMP,
+              queuedAt: FIXED_TIMESTAMP,
+              runCount: 1,
+              revisionCount: 0,
+              requeueReason: null,
+              lastError: null,
+              pullRequest: {
+                id: "pr-completed",
+                provider: "github",
+                title: "Completed request",
+                summary: "Machine review approved the branch.",
+                branchName: "requests/completed/a1-proposal-1",
+                baseBranch: "main",
+                status: "approved",
+                requestedAt: FIXED_TIMESTAMP,
+                humanApprovalRequestedAt: FIXED_TIMESTAMP,
+                humanApprovedAt: FIXED_TIMESTAMP,
+                machineReviewedAt: FIXED_TIMESTAMP,
+                updatedAt: FIXED_TIMESTAMP,
+                url: "https://github.com/example/meow-team/pull/100",
+              },
+              events: [],
+              startedAt: FIXED_TIMESTAMP,
+              finishedAt: FIXED_TIMESTAMP,
+              updatedAt: FIXED_TIMESTAMP,
+            },
+          ],
+          plannerNotes: [],
+          humanFeedback: [],
+          supersededAt: null,
+          supersededReason: null,
+        },
+      ],
+      run: {
+        status: "completed",
+        startedAt: FIXED_TIMESTAMP,
+        finishedAt: FIXED_TIMESTAMP,
+        lastError: null,
+      },
+      createdAt: FIXED_TIMESTAMP,
+      updatedAt: FIXED_TIMESTAMP,
+    });
+
+    const env = createTeamRunEnv({
+      dependencies: {
+        requestTitleAgent: { run: vi.fn() },
+        plannerAgent: { run: vi.fn() },
+      },
+      persistState: createPersistStateMock(),
+    });
+    const initialState = createInitialTeamRunState({
+      kind: "planning",
+      input: "Start another request.",
+      repositoryId: repository.id,
+      threadId: "thread-over-capacity-completed",
+    });
+
+    await expect(runTeam(env, initialState)).rejects.toThrow(
+      "All 1 shared meow worktree slot is already claimed by living repository-backed threads.",
+    );
+  });
+
+  it("reuses a legacy claimed meow worktree when replanning the same thread", async () => {
+    teamConfig.dispatch.workerCount = 1;
+    findConfiguredRepositoryMock.mockResolvedValue(repository);
+    const claimedWorktree = createManagedPlanningWorktree(repository.path);
+
+    await writeStoredThreadRecord({
+      threadId: "thread-replan-legacy-worktree",
+      data: {
+        teamId: teamConfig.id,
+        teamName: teamConfig.name,
+        ownerName: teamConfig.owner.name,
+        objective: teamConfig.owner.objective,
+        selectedRepository: repository,
+        workflow: [...teamConfig.workflow],
+        handoffs: {},
+        handoffCounter: 0,
+        assignmentNumber: 1,
+        requestTitle: "Legacy request",
+        conventionalTitle: null,
+        requestText: "Reuse the previously claimed meow worktree.",
+        threadWorktree: null,
+        latestInput: "Reuse the previously claimed meow worktree.",
+        forceReset: false,
+      },
+      results: [],
+      userMessages: [],
+      dispatchAssignments: [
+        createDispatchAssignment({
+          assignmentNumber: 1,
+          repository,
+          status: "failed",
+          threadSlot: claimedWorktree.slot,
+          plannerWorktreePath: claimedWorktree.path,
+          lanes: [
+            createDispatchLane({
+              laneId: "lane-1",
+              laneIndex: 1,
+              status: "failed",
+              worktreePath: claimedWorktree.path,
+              lastError: "Legacy failure.",
+              finishedAt: FIXED_TIMESTAMP,
+            }),
+          ],
+        }),
+      ],
+      run: {
+        status: "failed",
+        startedAt: FIXED_TIMESTAMP,
+        finishedAt: FIXED_TIMESTAMP,
+        lastError: "Legacy failure.",
+      },
+      createdAt: FIXED_TIMESTAMP,
+      updatedAt: FIXED_TIMESTAMP,
+    });
+
+    const requestTitleAgentMock = {
+      run: vi.fn(async (input: RequestTitleAgentArgs[0]) => {
+        expect(input.worktree).toEqual(claimedWorktree);
+        return {
+          title: "Legacy request",
+          conventionalTitle: null,
+        };
+      }),
+    };
+    const plannerAgentMock = {
+      run: vi.fn(async (input: PlannerAgentArgs[0]): Promise<PlannerAgentResult> => {
+        expect(input.worktree).toEqual(claimedWorktree);
+        return {
+          handoff: {
+            summary: "Planner summary",
+            deliverable: "Planner deliverable",
+            decision: "continue" as const,
+          },
+          dispatch: {
+            planSummary: "Plan summary",
+            plannerDeliverable: "Plan deliverable",
+            branchPrefix: "legacy-replan",
+            tasks: [
+              {
+                title: "Replan task",
+                objective: "Reuse the claimed meow worktree.",
+              },
+            ],
+          },
+        };
+      }),
+    };
+
+    const env = createTeamRunEnv({
+      dependencies: {
+        requestTitleAgent: requestTitleAgentMock,
+        plannerAgent: plannerAgentMock,
+      },
+      persistState: createPersistStateMock(),
+    });
+
+    await runTeam(
+      env,
+      createInitialTeamRunState({
+        kind: "planning",
+        input: "Use the same meow worktree again.",
+        repositoryId: repository.id,
+        threadId: "thread-replan-legacy-worktree",
+      }),
+    );
+
+    const thread = await getTeamThreadRecord(
+      teamConfig.storage.threadFile,
+      "thread-replan-legacy-worktree",
+    );
+
+    expect(thread?.data.threadWorktree).toEqual(claimedWorktree);
+    expect(materializeAssignmentProposalsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plannerWorktreePath: claimedWorktree.path,
+      }),
+    );
+  });
+
   it("does not replay coding-stage queueing when resuming the same persisted stage", async () => {
+    getBranchHeadMock.mockReset();
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("review-commit")
+      .mockResolvedValueOnce("rebased-review-commit");
+    pushLaneBranchMock.mockReset();
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitHash: "rebased-review-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/rebased-review-commit",
+    });
+    synchronizePullRequestMock.mockReset();
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/42",
+    });
     const persistStateMock = createPersistStateMock();
     const env = createTeamRunEnv({
+      dependencies: {
+        executor: vi.fn() as TeamRoleDependencies["executor"],
+        requestTitleAgent: { run: vi.fn() },
+        plannerAgent: { run: vi.fn() },
+        coderAgent: {
+          run: vi.fn(async () => ({
+            summary: "Implemented the approved proposal.",
+            deliverable: "Implementation is ready for machine review.",
+            decision: "continue" as const,
+            pullRequestTitle: null,
+            pullRequestSummary: null,
+          })),
+        },
+        reviewerAgent: {
+          run: vi.fn(async () => ({
+            summary: "Machine review approved the branch.",
+            deliverable: "Implementation looks correct.",
+            decision: "approved" as const,
+            pullRequestTitle: "Replay Queueing",
+            pullRequestSummary: "Machine review approved the branch.",
+          })),
+        },
+      },
       persistState: persistStateMock,
     });
 
@@ -1106,15 +1407,18 @@ describe.sequential("runTeam", () => {
         assignmentNumber: 2,
         laneId: "lane-3",
       },
+      worktree: createWorktree({
+        path: "/tmp/worktrees/meow-1",
+        rootPath: "/tmp/worktrees",
+      }),
     } satisfies Parameters<typeof runTeam>[1];
 
     await runTeam(env, structuredClone(persistedStage));
     await runTeam(env, structuredClone(persistedStage));
+    await waitForLaneRunCompletion("thread-coding-replay", 2, "lane-3");
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-coding-replay");
-    expect(["queued", "coding", "reviewing"]).toContain(
-      thread?.dispatchAssignments[0]?.lanes[0]?.status,
-    );
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("approved");
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
       "reviewing",
       "completed",
@@ -1125,7 +1429,30 @@ describe.sequential("runTeam", () => {
 
   it("routes proposal approval through coding and reviewing stages", async () => {
     getBranchHeadMock.mockReset();
-    getBranchHeadMock.mockResolvedValue("proposal-commit");
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("review-commit")
+      .mockResolvedValueOnce("rebased-review-commit");
+    pushLaneBranchMock.mockReset();
+    pushLaneBranchMock
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        commitHash: "proposal-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+      })
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        commitHash: "rebased-review-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/rebased-review-commit",
+      });
+    synchronizePullRequestMock.mockReset();
+    synchronizePullRequestMock
+      .mockResolvedValueOnce({
+        url: "https://github.com/example/meow-team/pull/42",
+      })
+      .mockResolvedValueOnce({
+        url: "https://github.com/example/meow-team/pull/42",
+      });
 
     const persistStateMock = createPersistStateMock();
     const env = createTeamRunEnv({
@@ -1197,6 +1524,7 @@ describe.sequential("runTeam", () => {
     await persistTeamRunState(env, initialState);
 
     const result = await runTeam(env, initialState);
+    await waitForLaneRunCompletion("thread-approval", 2, "lane-3");
 
     expect(result).toBeNull();
     expect(persistStateMock.mock.calls.map(([state]) => state.stage)).toEqual([
@@ -1210,7 +1538,10 @@ describe.sequential("runTeam", () => {
     const lane = thread?.dispatchAssignments[0]?.lanes[0];
     expect(lane?.approvalGrantedAt).toBeTruthy();
     expect(lane?.pullRequest).not.toBeNull();
-    expect(lane?.status).not.toBe("awaiting_human_approval");
+    expect(lane?.status).toBe("approved");
+    expect(lane?.worktreePath).toBe(
+      `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+    );
   });
 
   it("routes final approval through the archiving stage", async () => {
@@ -1373,6 +1704,10 @@ describe.sequential("runTeam", () => {
         assignmentNumber: 4,
         laneId: "lane-2",
       },
+      worktree: createWorktree({
+        path: "/tmp/worktrees/meow-1",
+        rootPath: "/tmp/worktrees",
+      }),
     } satisfies Parameters<typeof runTeam>[1];
 
     await runTeam(env, structuredClone(persistedStage));
@@ -1615,6 +1950,7 @@ const createDispatchThreadRecord = ({
       requestTitle: assignment.requestTitle,
       conventionalTitle: assignment.conventionalTitle,
       requestText: assignment.requestText,
+      threadWorktree: null,
       latestInput: assignment.requestText,
       forceReset: false,
     },
@@ -2006,11 +2342,22 @@ describe.sequential("ensurePendingDispatchWork", () => {
 
   it("does not erase a fresher slot claim when an older allocator pass finishes later", async () => {
     const env = createTeamRunEnv();
+    const claimedWorktreePath = path.join(
+      dispatchRepository.path,
+      teamConfig.dispatch.worktreeRoot,
+      "meow-1",
+    );
+    const claimedWorktree = createWorktree({
+      path: claimedWorktreePath,
+      rootPath: path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot),
+    });
     const threadStore: Record<string, TeamThreadRecord> = {
       "thread-1": createDispatchThreadRecord({
         threadId: "thread-1",
         assignment: createDispatchAssignment({
           assignmentNumber: 1,
+          threadSlot: 1,
+          plannerWorktreePath: claimedWorktreePath,
           workerCount: 1,
           lanes: [
             createDispatchLane({
@@ -2025,6 +2372,8 @@ describe.sequential("ensurePendingDispatchWork", () => {
         threadId: "thread-2",
         assignment: createDispatchAssignment({
           assignmentNumber: 1,
+          threadSlot: 1,
+          plannerWorktreePath: claimedWorktreePath,
           workerCount: 1,
           lanes: [
             createDispatchLane({
@@ -2038,6 +2387,8 @@ describe.sequential("ensurePendingDispatchWork", () => {
         }),
       }),
     };
+    threadStore["thread-1"].data.threadWorktree = claimedWorktree;
+    threadStore["thread-2"].data.threadWorktree = claimedWorktree;
 
     const buildPendingAssignmentsSnapshot = (threadIds: string[]): PendingDispatchAssignment[] => {
       return threadIds.map((threadId) => ({
@@ -2050,6 +2401,10 @@ describe.sequential("ensurePendingDispatchWork", () => {
       buildPendingAssignmentsSnapshot(["thread-1", "thread-2"]),
     ];
     let nestedPassStarted = false;
+
+    getTeamThreadRecordSpy.mockImplementation(async (_threadFile, currentThreadId) => {
+      return structuredClone(threadStore[currentThreadId] ?? null);
+    });
 
     listPendingDispatchAssignmentsSpy = vi
       .spyOn(historyModule, "listPendingDispatchAssignments")
@@ -2149,6 +2504,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
         requestTitle: plannerInput.requestTitle,
         conventionalTitle: plannerInput.conventionalTitle,
         requestText: plannerInput.requestText,
+        threadWorktree: null,
         latestInput: plannerInput.requestText,
         forceReset: false,
       },
@@ -2184,10 +2540,12 @@ describe.sequential("createPlannerDispatchAssignment", () => {
 
     const alphaAssignment = await createPlannerDispatchAssignment({
       threadId: "thread-alpha",
+      worktree: createManagedPlanningWorktree(dispatchRepository.path, 1),
       ...plannerInput,
     });
     const betaAssignment = await createPlannerDispatchAssignment({
       threadId: "thread-beta",
+      worktree: createManagedPlanningWorktree(dispatchRepository.path, 2),
       ...plannerInput,
     });
     const plannerWorktreeRoot = path.join(
@@ -2243,10 +2601,12 @@ describe.sequential("createPlannerDispatchAssignment", () => {
 
     const firstAssignment = await createPlannerDispatchAssignment({
       threadId: "thread-alpha",
+      worktree: createManagedPlanningWorktree(dispatchRepository.path, 1),
       ...plannerInput,
     });
     const secondAssignment = await createPlannerDispatchAssignment({
       threadId: "thread-alpha",
+      worktree: createManagedPlanningWorktree(dispatchRepository.path, 1),
       ...plannerInput,
     });
 
@@ -2259,6 +2619,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
 
     const assignment = await createPlannerDispatchAssignment({
       threadId: "thread-scope",
+      worktree: createManagedPlanningWorktree(dispatchRepository.path, 1),
       ...plannerInput,
     });
 
@@ -2274,6 +2635,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
 
     const assignment = await createPlannerDispatchAssignment({
       threadId: "thread-absolute-root",
+      worktree: createManagedPlanningWorktree(dispatchRepository.path, 1),
       ...plannerInput,
     });
 
@@ -2674,6 +3036,7 @@ describe.sequential("approveLanePullRequest", () => {
     lane: TeamWorkerLaneRecord,
     assignmentOverrides: Partial<TeamDispatchAssignment> = {},
   ) => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
     const assignment = createDispatchAssignment({
       assignmentNumber: 1,
       repository: dispatchRepository,
@@ -2687,6 +3050,8 @@ describe.sequential("approveLanePullRequest", () => {
       branchPrefix: assignmentOverrides.branchPrefix ?? "example",
       canonicalBranchName: assignmentOverrides.canonicalBranchName ?? "requests/example/a1",
       workerCount: assignmentOverrides.workerCount ?? 1,
+      threadSlot: assignmentOverrides.threadSlot ?? 1,
+      plannerWorktreePath: assignmentOverrides.plannerWorktreePath ?? `${worktreeRoot}/meow-1`,
       lanes: [lane],
     });
 
@@ -2897,6 +3262,7 @@ describe.sequential("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.status).toBe("approved");
     expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/42");
     expect(lane?.pullRequest?.humanApprovedAt).toBeTruthy();
+    expect(lane?.worktreePath).toBe(`${worktreeRoot}/meow-1`);
     expect(
       lane?.events.some((event) => event.message.includes("Coder completed final archive pass")),
     ).toBe(true);
@@ -2949,6 +3315,7 @@ describe.sequential("approveLanePullRequest", () => {
 
   it("resumes archived final approval without duplicating the human approval event", async () => {
     const coderRun = vi.fn();
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
     hasWorktreeChangesMock.mockResolvedValue(false);
     inspectOpenSpecChangeArchiveStateMock.mockReset();
     inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
@@ -2969,6 +3336,7 @@ describe.sequential("approveLanePullRequest", () => {
     await writeApprovalThreadStore(
       createApprovalLane({
         proposalPath: "openspec/changes/archive/2026-04-11-change-1",
+        worktreePath: null,
         latestActivity:
           "Human approved the machine-reviewed branch. Queueing the coder archive pass before refreshing the GitHub PR.",
         pullRequest: {
@@ -3013,6 +3381,7 @@ describe.sequential("approveLanePullRequest", () => {
     expect(coderRun).not.toHaveBeenCalled();
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
     expect(lane?.events.filter((event) => event.actor === "human")).toHaveLength(1);
+    expect(lane?.worktreePath).toBe(`${worktreeRoot}/meow-1`);
     expect(lane?.pullRequest?.status).toBe("approved");
     expect(lane?.pullRequest?.humanApprovedAt).toBe(FIXED_TIMESTAMP);
     expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/88");

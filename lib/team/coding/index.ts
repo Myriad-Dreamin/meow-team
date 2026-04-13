@@ -240,6 +240,17 @@ export const prepareAssignmentReplan = async ({
   };
 };
 
+const resolveThreadRunWorktree = async (threadId: string) => {
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  if (!thread?.data.threadWorktree?.slot) {
+    throw new Error(
+      `Thread ${threadId} is missing the claimed meow worktree required for repository-backed execution.`,
+    );
+  }
+
+  return thread.data.threadWorktree;
+};
+
 export const createInitialTeamRunState = (args: TeamRunArgs): TeamRunMachineState => {
   return {
     stage: "init",
@@ -249,18 +260,15 @@ export const createInitialTeamRunState = (args: TeamRunArgs): TeamRunMachineStat
 
 export const createTeamRunEnv = ({
   dependencies,
-  createWorktree: createWorktreeOverride,
   persistState,
   onPlannerLogEntry,
 }: {
   dependencies?: Parameters<typeof resolveTeamRoleDependencies>[0];
-  createWorktree?: TeamRunEnv["createWorktree"];
   persistState?: TeamRunEnv["persistState"];
   onPlannerLogEntry?: TeamRunEnv["onPlannerLogEntry"];
 } = {}): TeamRunEnv => {
   return {
     deps: resolveTeamRoleDependencies(dependencies),
-    createWorktree: createWorktreeOverride ?? createWorktree,
     persistState: persistState ?? noopPersistState,
     onPlannerLogEntry,
   };
@@ -286,6 +294,7 @@ const advanceTeamRunState = async (
           return {
             stage: "coding",
             args: currentState.args,
+            worktree: await resolveThreadRunWorktree(currentState.args.threadId),
           };
         case "dispatch":
           return {
@@ -298,6 +307,7 @@ const advanceTeamRunState = async (
           return {
             stage: "archiving",
             args: currentState.args,
+            worktree: await resolveThreadRunWorktree(currentState.args.threadId),
           };
       }
     case "planning":

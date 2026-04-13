@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   archiveTeamThread,
+  countActiveDispatchThreads,
   getTeamRepositoryPickerModel,
   getTeamThreadRecord,
   getTeamWorkspaceThreadSummaryLists,
@@ -55,6 +56,7 @@ const createRunState = (): TeamRunState => {
     requestTitle: null,
     conventionalTitle: null,
     requestText: "Implement the request.",
+    threadWorktree: null,
     latestInput: "Implement the request.",
     forceReset: false,
   };
@@ -447,6 +449,71 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
         threadId: "awaiting-final-approval",
       }),
     ).rejects.toThrow("Only inactive threads can be archived.");
+  });
+
+  it("releases a claimed meow worktree when archiving an inactive thread", async () => {
+    const storePath = createSqliteStorePath("team-history-archive-release");
+    trackTemporaryStore(storePath);
+    const repository = createRepository("workspace:repo-claimed");
+    const claimedRoot = path.join(repository.path, ".meow-team-worktrees");
+    const claimedWorktree = {
+      path: `${claimedRoot}/meow-1`,
+      rootPath: claimedRoot,
+      slot: 1,
+    };
+    const completedThread = createStoredThread({
+      threadId: "claimed-thread",
+      status: "completed",
+      repository,
+      dispatchAssignments: [
+        createAssignment({
+          repository,
+          status: "completed",
+          lanes: [
+            {
+              ...createLane({
+                laneId: "claimed-lane-1",
+                laneIndex: 1,
+                status: "approved",
+              }),
+              worktreePath: claimedWorktree.path,
+              pullRequest: {
+                id: "pr-claimed",
+                provider: "github",
+                title: "Archive me",
+                summary: "Ready for archive.",
+                branchName: "requests/claimed/a1-proposal-1",
+                baseBranch: "main",
+                status: "approved",
+                requestedAt: FIXED_TIMESTAMP,
+                humanApprovalRequestedAt: FIXED_TIMESTAMP,
+                humanApprovedAt: FIXED_TIMESTAMP,
+                machineReviewedAt: FIXED_TIMESTAMP,
+                updatedAt: FIXED_TIMESTAMP,
+                url: "https://github.com/example/meow-team/pull/200",
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    completedThread.data.threadWorktree = claimedWorktree;
+    completedThread.dispatchAssignments[0].threadSlot = claimedWorktree.slot;
+    completedThread.dispatchAssignments[0].plannerWorktreePath = claimedWorktree.path;
+
+    await writeStoredThreadToSqlite(storePath, completedThread);
+
+    expect(await countActiveDispatchThreads(storePath)).toBe(1);
+
+    await archiveTeamThread({
+      threadFile: storePath,
+      threadId: "claimed-thread",
+    });
+
+    expect(await countActiveDispatchThreads(storePath)).toBe(0);
+    const archivedThread = await getTeamThreadRecord(storePath, "claimed-thread");
+    expect(archivedThread?.archivedAt).not.toBeNull();
+    expect(archivedThread?.data.threadWorktree).toBeNull();
   });
 
   it("imports a legacy JSON store once and persists later updates in SQLite", async () => {

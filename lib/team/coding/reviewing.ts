@@ -16,19 +16,14 @@ import {
 import { synchronizePullRequest } from "@/lib/platform";
 import { ensureLaneWorktree, pushLaneBranch } from "@/lib/team/git";
 import {
-  assignPendingDispatchThreadSlots,
   assignPendingDispatchWorkerSlots,
-  assignmentThreadSchedulingStateMatches,
-  buildAssignmentThreadPoolStateKey,
   buildLanePoolStateKey,
-  captureAssignmentThreadSchedulingState,
   captureLanePoolSchedulingState,
   lanePoolSchedulingStateMatches,
-  type AssignmentThreadSchedulingState,
   type LanePoolSchedulingState,
-  type PlannedAssignmentThreadState,
   type PlannedLanePoolState,
 } from "@/lib/team/coding/dispatch-worktrees";
+import { applyThreadOwnedWorktreeToAssignment } from "@/lib/team/coding/thread-worktree";
 import {
   appendLaneEvent,
   appendPlannerNote,
@@ -53,6 +48,7 @@ import {
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import { coderRole } from "@/lib/team/roles/coder";
 import { reviewerRole } from "@/lib/team/roles/reviewer";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamRoleHandoff, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const activeLaneRuns = new Map<string, Promise<void>>();
@@ -71,6 +67,22 @@ export const waitForLaneRunCompletion = async (
 
 const getLaneWorkflow = (): string[] => {
   return teamConfig.workflow.filter((roleId) => roleId === "coder" || roleId === "reviewer");
+};
+
+const getThreadOwnedWorktreeOrThrow = ({
+  threadId,
+  worktree,
+}: {
+  threadId: string;
+  worktree: Worktree | null;
+}): Worktree => {
+  if (!worktree?.slot) {
+    throw new Error(
+      `Thread ${threadId} is missing the claimed meow worktree required for repository-backed execution.`,
+    );
+  }
+
+  return worktree;
 };
 
 const inferReviewerDecisionFromLane = (
@@ -229,10 +241,13 @@ const runFinalArchiveCycle = async ({
 
   const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
   const lane = findLane(assignment, laneId);
+  const laneWorktree = getThreadOwnedWorktreeOrThrow({
+    threadId,
+    worktree: thread.data.threadWorktree,
+  });
 
   if (
     !assignment.repository ||
-    !lane.worktreePath ||
     !lane.branchName ||
     !lane.baseBranch ||
     !lane.proposalChangeName ||
@@ -245,10 +260,6 @@ const runFinalArchiveCycle = async ({
   const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
     ? teamConfig.dispatch.worktreeRoot
     : path.join(repositoryPath, teamConfig.dispatch.worktreeRoot);
-  const laneWorktree = env.createWorktree({
-    path: lane.worktreePath ?? laneWorktreeRoot,
-    rootPath: laneWorktreeRoot,
-  });
   const laneBranchName = lane.branchName;
   const pullRequestSummary =
     lane.pullRequest.summary?.trim() ||
@@ -608,21 +619,21 @@ const runLaneCycle = async ({
       return;
     }
 
-    if (!lane.workerSlot || !lane.worktreePath) {
+    if (!lane.workerSlot) {
       return;
     }
 
-    if (!assignment.repository || !lane.worktreePath || !lane.branchName || !lane.baseBranch) {
+    if (!assignment.repository || !lane.branchName || !lane.baseBranch) {
       throw new Error("Lane is missing repository, branch, or worktree metadata.");
     }
 
+    const laneWorktree = getThreadOwnedWorktreeOrThrow({
+      threadId,
+      worktree: thread.data.threadWorktree,
+    });
     const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
       ? teamConfig.dispatch.worktreeRoot
       : path.join(assignment.repository.path, teamConfig.dispatch.worktreeRoot);
-    const laneWorktree = env.createWorktree({
-      path: lane.worktreePath ?? laneWorktreeRoot,
-      rootPath: laneWorktreeRoot,
-    });
 
     if (isFinalArchivePhase(lane)) {
       await runFinalArchiveCycle({
@@ -745,7 +756,7 @@ const runLaneCycle = async ({
           mutableLane.lastError = noBranchOutputMessage;
           mutableLane.runCount += 1;
           mutableLane.workerSlot = null;
-          mutableLane.worktreePath = null;
+          mutableLane.worktreePath = laneWorktree.path;
           if (mutableLane.pullRequest) {
             mutableLane.pullRequest = {
               ...mutableLane.pullRequest,
@@ -1397,6 +1408,14 @@ export const ensurePendingDispatchWork = async (
   threadId?: string,
 ): Promise<void> => {
   const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
+  for (const pending of pendingAssignments) {
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, pending.threadId);
+    applyThreadOwnedWorktreeToAssignment({
+      assignment: pending.assignment,
+      worktree: thread?.data.threadWorktree ?? null,
+    });
+  }
+
   const expectedLaneStateByKey = new Map<string, LanePoolSchedulingState>();
   for (const pending of pendingAssignments) {
     for (const lane of pending.assignment.lanes) {
@@ -1411,15 +1430,6 @@ export const ensurePendingDispatchWork = async (
     }
   }
 
-  assignPendingDispatchThreadSlots({
-    pendingAssignments,
-    workerCount: teamConfig.dispatch.workerCount,
-    resolveAssignmentWorktreeRoot: (pending) =>
-      path.isAbsolute(teamConfig.dispatch.worktreeRoot)
-        ? teamConfig.dispatch.worktreeRoot
-        : path.join(pending.assignment.repository?.path ?? "", teamConfig.dispatch.worktreeRoot),
-  });
-
   assignPendingDispatchWorkerSlots({
     pendingAssignments,
     resolveAssignmentWorktreeRoot: (pending) =>
@@ -1428,25 +1438,9 @@ export const ensurePendingDispatchWork = async (
         : path.join(pending.assignment.repository?.path ?? "", teamConfig.dispatch.worktreeRoot),
   });
 
-  const plannedAssignmentStateByKey = new Map<string, PlannedAssignmentThreadState>();
   const plannedLaneStateByKey = new Map<string, PlannedLanePoolState>();
   const pendingAssignmentsByThread = new Map<string, PendingDispatchAssignment[]>();
   for (const pending of pendingAssignments) {
-    const assignmentThreadPoolStateKey = buildAssignmentThreadPoolStateKey({
-      threadId: pending.threadId,
-      assignmentNumber: pending.assignment.assignmentNumber,
-    });
-    const expectedAssignmentState = captureAssignmentThreadSchedulingState(pending.assignment);
-    if (expectedAssignmentState) {
-      plannedAssignmentStateByKey.set(assignmentThreadPoolStateKey, {
-        expected: expectedAssignmentState,
-        planned: {
-          threadSlot: pending.assignment.threadSlot ?? null,
-          plannerWorktreePath: pending.assignment.plannerWorktreePath ?? null,
-        },
-      });
-    }
-
     for (const lane of pending.assignment.lanes) {
       const lanePoolStateKey = buildLanePoolStateKey({
         threadId: pending.threadId,
@@ -1490,19 +1484,10 @@ export const ensurePendingDispatchWork = async (
             thread.dispatchAssignments,
             pending.assignment.assignmentNumber,
           );
-          const plannedAssignmentState = plannedAssignmentStateByKey.get(
-            buildAssignmentThreadPoolStateKey({
-              threadId: currentThreadId,
-              assignmentNumber: assignment.assignmentNumber,
-            }),
-          );
-          if (
-            plannedAssignmentState &&
-            assignmentThreadSchedulingStateMatches(assignment, plannedAssignmentState.expected)
-          ) {
-            assignment.threadSlot = plannedAssignmentState.planned.threadSlot;
-            assignment.plannerWorktreePath = plannedAssignmentState.planned.plannerWorktreePath;
-          }
+          applyThreadOwnedWorktreeToAssignment({
+            assignment,
+            worktree: thread.data.threadWorktree ?? null,
+          });
 
           for (const lane of assignment.lanes) {
             const plannedLaneState = plannedLaneStateByKey.get(

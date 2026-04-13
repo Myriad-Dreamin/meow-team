@@ -102,7 +102,12 @@ export async function POST(request: Request) {
     }
 
     if (selectedRepository) {
-      const activeDispatchThreadCount = await countActiveDispatchThreads(serverState.threadStorage);
+      const activeDispatchThreadCount = await countActiveDispatchThreads(
+        serverState.threadStorage,
+        {
+          excludeThreadId: body.threadId,
+        },
+      );
       if (activeDispatchThreadCount >= teamConfig.dispatch.workerCount) {
         const capacityError = new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
         return NextResponse.json(
