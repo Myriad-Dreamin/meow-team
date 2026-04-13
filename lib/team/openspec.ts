@@ -80,6 +80,20 @@ const resetProposalMaterializationTarget = async ({
   });
 };
 
+const hasFileAtPath = async (filePath: string): Promise<boolean> => {
+  try {
+    return (await fs.stat(filePath)).isFile();
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException).code;
+
+    if (errorCode === "ENOENT" || errorCode === "ENOTDIR") {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
 const assertMaterializedOpenSpecArtifacts = async ({
   worktreePath,
   proposalChangeName,
@@ -102,12 +116,7 @@ const assertMaterializedOpenSpecArtifacts = async ({
   const missingArtifacts = (
     await Promise.all(
       expectedArtifacts.map(async (artifactPath) => {
-        try {
-          await fs.access(path.join(worktreePath, artifactPath));
-          return null;
-        } catch {
-          return artifactPath;
-        }
+        return (await hasFileAtPath(path.join(worktreePath, artifactPath))) ? null : artifactPath;
       }),
     )
   ).filter((artifactPath): artifactPath is string => Boolean(artifactPath));
