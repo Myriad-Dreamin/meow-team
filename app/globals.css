@@ -445,6 +445,12 @@ main {
   min-width: 0;
 }
 
+.workspace-status-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .workspace-status-group-right {
   margin-left: auto;
   padding-left: 14px;
@@ -453,6 +459,7 @@ main {
 }
 
 .workspace-icon-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -488,6 +495,23 @@ main {
 
 .workspace-status-icon-button {
   flex-shrink: 0;
+}
+
+.workspace-icon-button-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid rgba(7, 18, 33, 0.9);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(125, 242, 198, 0.88);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
 }
 
 .workspace-status-inline-metric {
@@ -929,6 +953,29 @@ main {
   min-height: 0;
 }
 
+.thread-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(9, 23, 40, 0.82);
+}
+
+.thread-detail-actions-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.thread-detail-action-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .thread-detail-hero {
   padding: 24px;
   border: 1px solid var(--line);
@@ -1252,7 +1299,7 @@ main {
 
 .thread-chat-rail-links {
   display: grid;
-  gap: .25em;
+  gap: 0.25em;
 }
 
 .thread-chat-lane-card,
@@ -2213,6 +2260,11 @@ main {
 
   .workspace-editor-meta {
     justify-content: flex-start;
+  }
+
+  .thread-detail-actions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .thread-chat-bubble {

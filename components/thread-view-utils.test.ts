@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  canArchiveThread,
+  canRestartPlanning,
   describeLane,
   formatPoolSlot,
   formatCommitHash,
@@ -12,6 +14,7 @@ import {
   mergeThreadLogGroups,
   selectPrimaryLane,
 } from "@/components/thread-view-utils";
+import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamCodexLogCursorEntry, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
@@ -73,6 +76,49 @@ const createLogEntry = (
   };
 };
 
+const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSummary => {
+  return {
+    threadId: "thread-1",
+    assignmentNumber: 1,
+    status: "completed",
+    archivedAt: null,
+    requestTitle: "Archive thread",
+    requestText: "Archive the finished thread.",
+    latestInput: "Archive the finished thread.",
+    repository: null,
+    workflow: ["planner", "coder", "reviewer"],
+    latestRoleId: "reviewer",
+    latestRoleName: "Reviewer",
+    nextRoleId: null,
+    latestDecision: "approved",
+    handoffCount: 3,
+    stepCount: 3,
+    userMessageCount: 1,
+    startedAt: FIXED_TIMESTAMP,
+    finishedAt: FIXED_TIMESTAMP,
+    updatedAt: FIXED_TIMESTAMP,
+    lastError: null,
+    latestAssignmentStatus: "completed",
+    latestPlanSummary: "Thread is complete.",
+    latestBranchPrefix: "requests/archive-thread",
+    latestCanonicalBranchName: "requests/archive-thread/a1-proposal-1",
+    dispatchWorkerCount: 1,
+    workerCounts: {
+      idle: 0,
+      queued: 0,
+      coding: 0,
+      reviewing: 0,
+      awaitingHumanApproval: 0,
+      approved: 1,
+      failed: 0,
+    },
+    workerLanes: [],
+    plannerNotes: [],
+    humanFeedback: [],
+    ...overrides,
+  };
+};
+
 describe("thread view commit helpers", () => {
   it("formats review commits when the lane has not been pushed yet", () => {
     const lane = createLane();
@@ -129,7 +175,8 @@ describe("thread view approval helpers", () => {
       target: "proposal",
       buttonLabel: "Approve Proposal",
       pendingLabel: "Queueing proposal...",
-      successNotice: "Proposal approval recorded. The coding-review queue is refreshing.",
+      successNotice:
+        "Proposal approval recorded. The draft GitHub PR is synced and the coding-review queue is refreshing.",
       errorFallback: "Unable to approve this proposal.",
     });
     expect(describeLane(lane)).toContain("waiting for human approval");
@@ -156,13 +203,13 @@ describe("thread view approval helpers", () => {
 
     expect(getLaneApprovalAction(lane)).toEqual({
       target: "pull_request",
-      buttonLabel: "Approve and Open PR",
+      buttonLabel: "Approve and Archive",
       pendingLabel: "Queueing archive pass...",
       successNotice:
         "Final approval recorded. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
       errorFallback: "Unable to finalize this reviewed branch.",
     });
-    expect(describeLane(lane)).toContain("open or refresh the GitHub PR");
+    expect(describeLane(lane)).toContain("refresh the existing GitHub PR");
 
     expect(
       getLaneApprovalAction({
@@ -296,6 +343,36 @@ describe("thread view primary lane helpers", () => {
     ]);
 
     expect(primaryLane?.laneId).toBe("queued-lane");
+  });
+});
+
+describe("thread visibility helpers", () => {
+  it("blocks replanning for archived thread summaries", () => {
+    expect(canRestartPlanning(createThread())).toBe(true);
+    expect(canRestartPlanning(createThread({ archivedAt: FIXED_TIMESTAMP }))).toBe(false);
+    expect(
+      canRestartPlanning(
+        createThread({
+          workerCounts: {
+            idle: 0,
+            queued: 1,
+            coding: 0,
+            reviewing: 0,
+            awaitingHumanApproval: 0,
+            approved: 0,
+            failed: 0,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("only allows archiving inactive, unarchived thread summaries", () => {
+    expect(canArchiveThread(createThread())).toBe(true);
+    expect(canArchiveThread(createThread({ status: "running" }))).toBe(false);
+    expect(canArchiveThread(createThread({ status: "planning" }))).toBe(false);
+    expect(canArchiveThread(createThread({ latestAssignmentStatus: "approved" }))).toBe(false);
+    expect(canArchiveThread(createThread({ archivedAt: FIXED_TIMESTAMP }))).toBe(false);
   });
 });
 

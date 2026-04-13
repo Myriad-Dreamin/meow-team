@@ -6,7 +6,9 @@ import type { TeamStatusSnapshotResponse } from "@/lib/team/status";
 type RefreshState = "loading" | "live" | "stale" | "error";
 
 type TeamStatusBarProps = {
+  isArchivedThreadsRevealed: boolean;
   isSettingsSelected: boolean;
+  onToggleArchivedThreads: () => void;
   onSelectSettings: () => void;
 };
 
@@ -83,6 +85,7 @@ const isStatusResponse = (value: unknown): value is TeamStatusSnapshotResponse =
   return (
     isFiniteNumber(value.workspace.activeThreadCount) &&
     isFiniteNumber(value.workspace.livingThreadCount) &&
+    isFiniteNumber(value.workspace.archivedThreadCount) &&
     isFiniteNumber(laneCounts.idle) &&
     isFiniteNumber(laneCounts.queued) &&
     isFiniteNumber(laneCounts.coding) &&
@@ -158,7 +161,30 @@ const SettingsIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function TeamStatusBar({ isSettingsSelected, onSelectSettings }: TeamStatusBarProps) {
+const ArchiveIcon = ({ className }: { className?: string }) => (
+  <svg
+    aria-hidden="true"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth="1.75"
+    viewBox="0 0 20 20"
+  >
+    <path d="M3 6.5h14" />
+    <path d="M4.5 6.5 5.6 16h8.8l1.1-9.5" />
+    <path d="M6 4h8l1 2.5H5L6 4Z" />
+    <path d="M7.5 10h5" />
+  </svg>
+);
+
+export function TeamStatusBar({
+  isArchivedThreadsRevealed,
+  isSettingsSelected,
+  onToggleArchivedThreads,
+  onSelectSettings,
+}: TeamStatusBarProps) {
   const [snapshot, setSnapshot] = useState<TeamStatusSnapshotResponse | null>(null);
   const [refreshState, setRefreshState] = useState<RefreshState>("loading");
 
@@ -201,6 +227,7 @@ export function TeamStatusBar({ isSettingsSelected, onSelectSettings }: TeamStat
   }, []);
 
   const activeThreadCount = snapshot?.workspace.activeThreadCount ?? null;
+  const archivedThreadCount = snapshot?.workspace.archivedThreadCount ?? null;
   const livingThreadCount = snapshot?.workspace.livingThreadCount ?? null;
   const laneTotals =
     snapshot === null
@@ -230,20 +257,51 @@ export function TeamStatusBar({ isSettingsSelected, onSelectSettings }: TeamStat
     snapshot === null
       ? "--"
       : `${snapshot.host.memoryPercent.toFixed(1)}% • ${formatBytes(snapshot.host.usedMemoryBytes)} / ${formatBytes(snapshot.host.totalMemoryBytes)}`;
+  const archivedThreadButtonLabel =
+    archivedThreadCount === null
+      ? "Archived Threads"
+      : archivedThreadCount === 1
+        ? "1 Archived Thread"
+        : `${archivedThreadCount} Archived Threads`;
 
   return (
     <section aria-label="Workspace status" className="workspace-status-bar">
       <div className="workspace-status-group">
-        <button
-          aria-pressed={isSettingsSelected}
-          className={`workspace-icon-button workspace-status-icon-button ${isSettingsSelected ? "workspace-icon-button-active" : ""}`}
-          title="Settings"
-          type="button"
-          onClick={onSelectSettings}
-        >
-          <SettingsIcon className="workspace-icon" />
-          <span className="sr-only">Settings</span>
-        </button>
+        <div className="workspace-status-actions">
+          <button
+            aria-pressed={isSettingsSelected}
+            className={`workspace-icon-button workspace-status-icon-button ${isSettingsSelected ? "workspace-icon-button-active" : ""}`}
+            title="Settings"
+            type="button"
+            onClick={onSelectSettings}
+          >
+            <SettingsIcon className="workspace-icon" />
+            <span className="sr-only">Settings</span>
+          </button>
+          <button
+            aria-pressed={isArchivedThreadsRevealed}
+            className={`workspace-icon-button workspace-status-icon-button ${isArchivedThreadsRevealed ? "workspace-icon-button-active" : ""}`}
+            title={
+              isArchivedThreadsRevealed
+                ? `Hide ${archivedThreadButtonLabel}`
+                : `Show ${archivedThreadButtonLabel}`
+            }
+            type="button"
+            onClick={onToggleArchivedThreads}
+          >
+            <ArchiveIcon className="workspace-icon" />
+            {archivedThreadCount && archivedThreadCount > 0 ? (
+              <span className="workspace-icon-button-badge">
+                {archivedThreadCount > 99 ? "99+" : archivedThreadCount}
+              </span>
+            ) : null}
+            <span className="sr-only">
+              {isArchivedThreadsRevealed
+                ? `Hide ${archivedThreadButtonLabel}`
+                : `Show ${archivedThreadButtonLabel}`}
+            </span>
+          </button>
+        </div>
         <div className="workspace-status-inline-metric">
           <span className="workspace-status-inline-value">
             {activeThreadCount === null ? "--" : activeThreadCount}

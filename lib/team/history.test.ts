@@ -3,8 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  archiveTeamThread,
   getTeamRepositoryPickerModel,
   getTeamThreadRecord,
+  getTeamWorkspaceThreadSummaryLists,
   getTeamWorkspaceStatusSnapshot,
   updateTeamThreadRecord,
 } from "@/lib/team/history";
@@ -155,12 +157,14 @@ const createStoredThread = ({
   status,
   dispatchAssignments = [],
   repository = null,
+  archivedAt = null,
   timestamp = FIXED_TIMESTAMP,
 }: {
   threadId: string;
   status: TeamThreadStatus;
   dispatchAssignments?: TeamDispatchAssignment[];
   repository?: TeamRepositoryOption | null;
+  archivedAt?: string | null;
   timestamp?: string;
 }) => {
   const state = createRunState();
@@ -179,6 +183,7 @@ const createStoredThread = ({
       },
     ],
     dispatchAssignments,
+    archivedAt,
     run: {
       status,
       startedAt: timestamp,
@@ -289,6 +294,14 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
         }),
       ],
       [
+        "archived-completed",
+        createStoredThread({
+          threadId: "archived-completed",
+          status: "completed",
+          archivedAt: "2026-04-11T10:00:00.000Z",
+        }),
+      ],
+      [
         "machine-reviewed",
         createStoredThread({
           threadId: "machine-reviewed",
@@ -316,6 +329,7 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     expect(snapshot).toEqual({
       activeThreadCount: 26,
       livingThreadCount: 27,
+      archivedThreadCount: 1,
       laneCounts: {
         idle: 0,
         queued: 0,
@@ -326,6 +340,113 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
         failed: 0,
       },
     });
+  });
+
+  it("splits living and archived summaries before applying the living thread limit", async () => {
+    const storePath = createSqliteStorePath("team-history-archives");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      "archived-newer-1": createStoredThread({
+        threadId: "archived-newer-1",
+        status: "completed",
+        archivedAt: "2026-04-11T12:00:00.000Z",
+        timestamp: "2026-04-11T12:00:00.000Z",
+      }),
+      "archived-newer-2": createStoredThread({
+        threadId: "archived-newer-2",
+        status: "completed",
+        archivedAt: "2026-04-11T11:00:00.000Z",
+        timestamp: "2026-04-11T11:00:00.000Z",
+      }),
+      "living-older": createStoredThread({
+        threadId: "living-older",
+        status: "completed",
+        timestamp: "2026-04-11T10:00:00.000Z",
+      }),
+    });
+
+    const threadLists = await getTeamWorkspaceThreadSummaryLists(storePath, {
+      livingLimit: 1,
+    });
+
+    expect(threadLists.threads.map((thread) => thread.threadId)).toEqual(["living-older"]);
+    expect(threadLists.archivedThreads.map((thread) => thread.threadId)).toEqual([
+      "archived-newer-1",
+      "archived-newer-2",
+    ]);
+  });
+
+  it("archives inactive threads and rejects active threads", async () => {
+    const storePath = createSqliteStorePath("team-history-archive-thread");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      inactive: createStoredThread({
+        threadId: "inactive",
+        status: "completed",
+      }),
+      active: createStoredThread({
+        threadId: "active",
+        status: "running",
+      }),
+      "awaiting-final-approval": createStoredThread({
+        threadId: "awaiting-final-approval",
+        status: "approved",
+        dispatchAssignments: [
+          createAssignment({
+            status: "approved",
+            lanes: [
+              {
+                ...createLane({
+                  laneId: "awaiting-final-approval-lane-1",
+                  laneIndex: 1,
+                  status: "approved",
+                }),
+                pullRequest: {
+                  id: "pr-awaiting-final-approval",
+                  provider: "local-ci",
+                  title: "Await final approval",
+                  summary: "Machine review approved the branch.",
+                  branchName: "requests/example/a1-proposal-1",
+                  baseBranch: "main",
+                  status: "awaiting_human_approval",
+                  requestedAt: FIXED_TIMESTAMP,
+                  humanApprovalRequestedAt: FIXED_TIMESTAMP,
+                  humanApprovedAt: null,
+                  machineReviewedAt: FIXED_TIMESTAMP,
+                  updatedAt: FIXED_TIMESTAMP,
+                  url: null,
+                },
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    const archivedThread = await archiveTeamThread({
+      threadFile: storePath,
+      threadId: "inactive",
+    });
+    const threadLists = await getTeamWorkspaceThreadSummaryLists(storePath);
+
+    expect(archivedThread.summary.archivedAt).not.toBeNull();
+    expect(threadLists.threads.map((thread) => thread.threadId)).not.toContain("inactive");
+    expect(threadLists.archivedThreads.map((thread) => thread.threadId)).toContain("inactive");
+
+    await expect(
+      archiveTeamThread({
+        threadFile: storePath,
+        threadId: "active",
+      }),
+    ).rejects.toThrow("Only inactive threads can be archived.");
+    await expect(
+      archiveTeamThread({
+        threadFile: storePath,
+        threadId: "awaiting-final-approval",
+      }),
+    ).rejects.toThrow("Only inactive threads can be archived.");
   });
 
   it("imports a legacy JSON store once and persists later updates in SQLite", async () => {

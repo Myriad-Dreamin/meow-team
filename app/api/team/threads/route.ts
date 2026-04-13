@@ -1,6 +1,9 @@
 // API docs: docs/api/team/threads/index.md
 import { NextResponse } from "next/server";
-import { getTeamRepositoryPickerModel, listTeamThreadSummaries } from "@/lib/team/history";
+import {
+  getTeamRepositoryPickerModel,
+  getTeamWorkspaceThreadSummaryLists,
+} from "@/lib/team/history";
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
@@ -22,8 +25,8 @@ export async function GET() {
     await persistTeamRunState(env, initialState);
     await runTeam(env, initialState);
     const serverState = await getTeamServerState();
-    const [threads, repositories] = await Promise.all([
-      listTeamThreadSummaries(serverState.threadStorage),
+    const [threadSummaryLists, repositories] = await Promise.all([
+      getTeamWorkspaceThreadSummaryLists(serverState.threadStorage),
       listConfiguredRepositories(teamConfig),
     ]);
     const repositoryPicker = await getTeamRepositoryPickerModel({
@@ -32,13 +35,14 @@ export async function GET() {
     });
 
     return NextResponse.json({
-      threads,
+      threads: threadSummaryLists.threads,
+      archivedThreads: threadSummaryLists.archivedThreads,
       repositoryPicker,
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to load living threads.",
+        error: error instanceof Error ? error.message : "Unable to load workspace threads.",
       },
       { status: 500 },
     );

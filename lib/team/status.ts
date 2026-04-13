@@ -3,6 +3,7 @@ import type { TeamWorkerLaneCounts } from "@/lib/team/types";
 export type TeamWorkspaceStatusSnapshot = {
   activeThreadCount: number;
   livingThreadCount: number;
+  archivedThreadCount: number;
   laneCounts: TeamWorkerLaneCounts;
 };
 

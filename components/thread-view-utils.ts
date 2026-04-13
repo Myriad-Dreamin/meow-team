@@ -161,9 +161,21 @@ export const buildFeedbackKey = (
 
 export const canRestartPlanning = (thread: TeamThreadSummary): boolean => {
   return (
+    !thread.archivedAt &&
     thread.workerCounts.queued === 0 &&
     thread.workerCounts.coding === 0 &&
     thread.workerCounts.reviewing === 0
+  );
+};
+
+export const canArchiveThread = (thread: TeamThreadSummary): boolean => {
+  return (
+    !thread.archivedAt &&
+    thread.latestAssignmentStatus !== "approved" &&
+    (thread.status === "completed" ||
+      thread.status === "approved" ||
+      thread.status === "needs_revision" ||
+      thread.status === "failed")
   );
 };
 

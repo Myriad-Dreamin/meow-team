@@ -78,6 +78,7 @@ type StoredThread = {
   results: Array<TeamExecutionStep | StoredLegacyResult>;
   userMessages: StoredUserMessage[];
   dispatchAssignments?: TeamDispatchAssignment[];
+  archivedAt?: string | null;
   run?: StoredRun;
   createdAt: string;
   updatedAt: string;
@@ -89,6 +90,7 @@ export type TeamThreadRecord = {
   results: TeamExecutionStep[];
   userMessages: StoredUserMessage[];
   dispatchAssignments: TeamDispatchAssignment[];
+  archivedAt: string | null;
   run?: StoredRun;
   createdAt: string;
   updatedAt: string;
@@ -98,6 +100,7 @@ export type TeamThreadSummary = {
   threadId: string;
   assignmentNumber: number;
   status: TeamThreadStatus;
+  archivedAt: string | null;
   requestTitle: string;
   requestText: string | null;
   latestInput: string | null;
@@ -131,6 +134,11 @@ export type TeamThreadDetail = {
   steps: TeamExecutionStep[];
   handoffs: TeamRoleHandoff[];
   dispatchAssignments: TeamDispatchAssignment[];
+};
+
+export type TeamWorkspaceThreadSummaryLists = {
+  threads: TeamThreadSummary[];
+  archivedThreads: TeamThreadSummary[];
 };
 
 export type PendingDispatchAssignment = {
@@ -168,6 +176,16 @@ const collectRepositoryUsageRecords = (thread: TeamThreadRecord): TeamRepository
 
 const describeThreadStorageTarget = (target: TeamThreadStorageTarget): string => {
   return typeof target === "string" ? target : target.location.inputPath;
+};
+
+const normalizeArchivedAt = (value: unknown): string | null => {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+};
+
+const isArchivedThread = (
+  thread: Pick<TeamThreadRecord, "archivedAt"> | Pick<TeamThreadSummary, "archivedAt">,
+): boolean => {
+  return Boolean(thread.archivedAt);
 };
 
 const readStoredThreadFromRecord = (record: TeamThreadStorageRecord): StoredThread => {
@@ -326,6 +344,7 @@ const normalizeStoredThread = (thread: StoredThread): TeamThreadRecord => {
     data: normalizeRunState(thread.data),
     results: (thread.results ?? []).map(normalizeExecutionStep),
     dispatchAssignments: (thread.dispatchAssignments ?? []).map(normalizeDispatchAssignment),
+    archivedAt: normalizeArchivedAt(thread.archivedAt),
   };
 };
 
@@ -475,6 +494,12 @@ export const synchronizeDispatchAssignment = (
   return assignment;
 };
 
+const hasActiveDispatchAssignment = (thread: TeamThreadRecord): boolean => {
+  return thread.dispatchAssignments.some(
+    (assignment) => !isTerminalDispatchAssignmentStatus(deriveDispatchAssignmentStatus(assignment)),
+  );
+};
+
 const getLatestDispatchAssignment = (thread: TeamThreadRecord): TeamDispatchAssignment | null => {
   if (thread.dispatchAssignments.length === 0) {
     return null;
@@ -597,6 +622,7 @@ const summarizeThreadRecord = (thread: TeamThreadRecord): TeamThreadSummary => {
     threadId: thread.threadId,
     assignmentNumber: thread.data.assignmentNumber,
     status,
+    archivedAt: thread.archivedAt,
     requestTitle: resolveDisplayRequestTitle({
       requestTitle: latestAssignment?.requestTitle ?? thread.data.requestTitle,
       requestText,
@@ -637,12 +663,116 @@ const summarizeThread = (storedThread: StoredThread): TeamThreadSummary => {
   return summarizeThreadRecord(thread);
 };
 
+const normalizeThreadSummaryLimit = (limit: number | null | undefined): number | null => {
+  if (limit == null) {
+    return null;
+  }
+
+  if (!Number.isFinite(limit)) {
+    return null;
+  }
+
+  return Math.max(0, Math.trunc(limit));
+};
+
+const buildTeamWorkspaceThreadSummaryLists = (
+  storedThreads: TeamThreadStorageRecord[],
+  {
+    livingLimit = 24,
+    archivedLimit = null,
+  }: {
+    livingLimit?: number | null;
+    archivedLimit?: number | null;
+  } = {},
+): TeamWorkspaceThreadSummaryLists => {
+  const normalizedLivingLimit = normalizeThreadSummaryLimit(livingLimit);
+  const normalizedArchivedLimit = normalizeThreadSummaryLimit(archivedLimit);
+  const threads: TeamThreadSummary[] = [];
+  const archivedThreads: TeamThreadSummary[] = [];
+
+  for (const storedRecord of storedThreads) {
+    const summary = summarizeThread(readStoredThreadFromRecord(storedRecord));
+
+    if (summary.archivedAt) {
+      if (normalizedArchivedLimit === null || archivedThreads.length < normalizedArchivedLimit) {
+        archivedThreads.push(summary);
+      }
+    } else if (normalizedLivingLimit === null || threads.length < normalizedLivingLimit) {
+      threads.push(summary);
+    }
+
+    if (
+      normalizedLivingLimit !== null &&
+      normalizedArchivedLimit !== null &&
+      threads.length >= normalizedLivingLimit &&
+      archivedThreads.length >= normalizedArchivedLimit
+    ) {
+      break;
+    }
+  }
+
+  return {
+    threads,
+    archivedThreads,
+  };
+};
+
+const isArchivableThread = (thread: TeamThreadRecord): boolean => {
+  const latestAssignment = getLatestDispatchAssignment(thread);
+  const latestAssignmentStatus = latestAssignment
+    ? deriveDispatchAssignmentStatus(latestAssignment)
+    : null;
+
+  return (
+    !isArchivedThread(thread) &&
+    !hasActiveDispatchAssignment(thread) &&
+    latestAssignmentStatus !== "approved" &&
+    isTerminalThreadStatus(deriveThreadStatus(thread))
+  );
+};
+
+export class TeamThreadArchiveError extends Error {
+  readonly code: "not_found" | "already_archived" | "active";
+  readonly statusCode: 404 | 409;
+
+  constructor(
+    code: "not_found" | "already_archived" | "active",
+    message: string,
+    statusCode: 404 | 409,
+  ) {
+    super(message);
+    this.name = "TeamThreadArchiveError";
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
 export const listTeamThreadSummaries = async (
   threadFile: TeamThreadStorageTarget,
   limit = 24,
 ): Promise<TeamThreadSummary[]> => {
-  const storedThreads = await listTeamThreadStorageRecords(threadFile, limit);
-  return storedThreads.map((record) => summarizeThread(readStoredThreadFromRecord(record)));
+  const storedThreads = await listTeamThreadStorageRecords(threadFile);
+  return buildTeamWorkspaceThreadSummaryLists(storedThreads, {
+    livingLimit: limit,
+    archivedLimit: 0,
+  }).threads;
+};
+
+export const getTeamWorkspaceThreadSummaryLists = async (
+  threadFile: TeamThreadStorageTarget,
+  {
+    livingLimit = 24,
+    archivedLimit = null,
+  }: {
+    livingLimit?: number | null;
+    archivedLimit?: number | null;
+  } = {},
+): Promise<TeamWorkspaceThreadSummaryLists> => {
+  const storedThreads = await listTeamThreadStorageRecords(threadFile);
+  return buildTeamWorkspaceThreadSummaryLists(storedThreads, {
+    livingLimit,
+    archivedLimit,
+  });
 };
 
 export const getTeamRepositoryPickerModel = async ({
@@ -678,6 +808,11 @@ export const getTeamWorkspaceStatusSnapshot = async (
     (snapshot, storedRecord) => {
       const summary = summarizeThread(readStoredThreadFromRecord(storedRecord));
 
+      if (isArchivedThread(summary)) {
+        snapshot.archivedThreadCount += 1;
+        return snapshot;
+      }
+
       snapshot.livingThreadCount += 1;
 
       if (isTerminalThreadStatus(summary.status)) {
@@ -692,6 +827,7 @@ export const getTeamWorkspaceStatusSnapshot = async (
     {
       activeThreadCount: 0,
       livingThreadCount: 0,
+      archivedThreadCount: 0,
       laneCounts: createEmptyWorkerLaneCounts(),
     },
   );
@@ -804,9 +940,7 @@ export const threadHasActiveDispatchAssignment = async (
     return false;
   }
 
-  return thread.dispatchAssignments.some(
-    (assignment) => !isTerminalDispatchAssignmentStatus(assignment.status),
-  );
+  return hasActiveDispatchAssignment(thread);
 };
 
 export const countActiveDispatchThreads = async (
@@ -837,6 +971,58 @@ export const markTeamThreadFailed = async ({
       };
     },
   });
+};
+
+export const archiveTeamThread = async ({
+  threadFile,
+  threadId,
+}: {
+  threadFile: TeamThreadStorageTarget;
+  threadId: string;
+}): Promise<TeamThreadDetail> => {
+  const thread = await getTeamThreadRecord(threadFile, threadId);
+  if (!thread) {
+    throw new TeamThreadArchiveError(
+      "not_found",
+      `Thread ${threadId} was not found in ${describeThreadStorageTarget(threadFile)}.`,
+      404,
+    );
+  }
+
+  if (isArchivedThread(thread)) {
+    throw new TeamThreadArchiveError(
+      "already_archived",
+      `Thread ${threadId} is already archived.`,
+      409,
+    );
+  }
+
+  if (!isArchivableThread(thread)) {
+    throw new TeamThreadArchiveError(
+      "active",
+      `Thread ${threadId} is still active. Only inactive threads can be archived.`,
+      409,
+    );
+  }
+
+  await updateTeamThreadRecord({
+    threadFile,
+    threadId,
+    updater: (nextThread, now) => {
+      nextThread.archivedAt = now;
+    },
+  });
+
+  const updatedThread = await getTeamThreadDetail(threadFile, threadId);
+  if (!updatedThread) {
+    throw new TeamThreadArchiveError(
+      "not_found",
+      `Thread ${threadId} was not found after archiving.`,
+      404,
+    );
+  }
+
+  return updatedThread;
 };
 
 export const upsertTeamThreadRun = async ({
@@ -877,6 +1063,7 @@ export const upsertTeamThreadRun = async ({
           },
         ],
         dispatchAssignments: existingThread?.dispatchAssignments ?? [],
+        archivedAt: existingThread?.archivedAt ?? null,
         run: {
           status: "running",
           startedAt: existingThread?.run?.startedAt ?? now,

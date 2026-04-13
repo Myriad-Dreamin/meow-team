@@ -37,7 +37,9 @@ The route returns `202 Accepted` and immediately starts a new planning run.
 
 ## Failure modes
 
-| Status | When                                                              |
-| ------ | ----------------------------------------------------------------- |
-| `400`  | The request body fails validation.                                |
-| `500`  | Runtime configuration is incomplete or feedback processing fails. |
+| Status | When                                                               |
+| ------ | ------------------------------------------------------------------ |
+| `400`  | The request body fails validation.                                 |
+| `404`  | The target thread does not exist.                                  |
+| `409`  | The thread is archived, superseded, or still has active lane work. |
+| `500`  | Runtime configuration is incomplete or feedback processing fails.  |

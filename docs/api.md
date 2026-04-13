@@ -10,7 +10,8 @@ exist under `app/api/team`.
 
 ## What is documented
 
-- Control routes for starting runs, approving work, and sending feedback
+- Control routes for starting runs, approving work, archiving threads, and
+  sending feedback
 - Read routes for status, logs, thread summaries, and thread detail
 - Route-to-doc mapping conventions so markdown pages stay aligned with code
 
@@ -20,6 +21,7 @@ exist under `app/api/team`.
 - [POST /api/team/run](/api/team/run)
 - [GET /api/team/status](/api/team/status)
 - [GET /api/team/threads](/api/team/threads/)
+- [POST /api/team/threads/:threadId/archive](/api/team/threads/threadId/archive)
 
 ## Mapping convention
 
