@@ -13,6 +13,7 @@ export const runReviewingStage = async (
 ): Promise<TeamRunCompletedState> => {
   await teamNetworkDispatchOps.ensurePendingDispatchWork({
     threadId: currentState.threadId,
+    createWorktree: env.createWorktree,
     dependencies: env.deps,
   });
 

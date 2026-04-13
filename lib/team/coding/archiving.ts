@@ -29,6 +29,7 @@ export const runArchivingStage = async (
       threadId: currentState.args.threadId,
       assignmentNumber: currentState.args.assignmentNumber,
       laneId: currentState.args.laneId,
+      createWorktree: env.createWorktree,
       dependencies: env.deps,
     });
   }

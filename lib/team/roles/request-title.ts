@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import {
   CONVENTIONAL_TITLE_SCOPE_PATTERN,
   CONVENTIONAL_TITLE_TYPES,
@@ -27,7 +28,7 @@ export type RequestTitleTask = {
 export type RequestTitleRoleInput = {
   input: string;
   requestText: string;
-  worktreePath: string;
+  worktree: Worktree;
   tasks?: RequestTitleTask[] | null;
 };
 
@@ -55,7 +56,7 @@ export class RequestTitleAgent {
 
   async run(input: RequestTitleRoleInput): Promise<RequestTitleRoleOutput> {
     return this.executor({
-      worktreePath: input.worktreePath,
+      worktree: input.worktree,
       prompt: buildRequestTitlePrompt(input),
       responseSchema: requestTitleOutputSchema,
       codexHomePrefix: "request-title",

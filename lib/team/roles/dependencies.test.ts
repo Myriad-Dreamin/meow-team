@@ -41,6 +41,7 @@ vi.mock("@/lib/agent/codex-cli", () => ({
 }));
 
 import type { TeamRoleDependencies } from "./dependencies";
+import { createWorktree } from "@/lib/team/coding/worktree";
 import { resolveTeamRoleDependencies } from "./dependencies";
 
 type Deferred<T> = {
@@ -87,13 +88,13 @@ describe("resolveTeamRoleDependencies", () => {
     let maxActiveCount = 0;
 
     runCodexStructuredOutputMock.mockImplementation(
-      async ({ worktreePath }: { worktreePath: string }) => {
-        const deferred = deferredByPath.get(worktreePath);
+      async ({ worktree }: { worktree: { path: string } }) => {
+        const deferred = deferredByPath.get(worktree.path);
         if (!deferred) {
-          throw new Error(`Missing deferred executor result for ${worktreePath}.`);
+          throw new Error(`Missing deferred executor result for ${worktree.path}.`);
         }
 
-        started.push(worktreePath);
+        started.push(worktree.path);
         activeCount += 1;
         maxActiveCount = Math.max(maxActiveCount, activeCount);
 
@@ -111,12 +112,12 @@ describe("resolveTeamRoleDependencies", () => {
     const firstPromise = firstDependencies.requestTitleAgent.run({
       input: "Queue the first request.",
       requestText: "Queue the first request.",
-      worktreePath: "/tmp/meow-1",
+      worktree: createWorktree({ path: "/tmp/meow-1" }),
     });
     const secondPromise = secondDependencies.requestTitleAgent.run({
       input: "Queue the second request.",
       requestText: "Queue the second request.",
-      worktreePath: "/tmp/meow-2",
+      worktree: createWorktree({ path: "/tmp/meow-2" }),
     });
 
     expect(firstDependencies.executor).toBe(secondDependencies.executor);
@@ -167,7 +168,7 @@ describe("resolveTeamRoleDependencies", () => {
       dependencies.requestTitleAgent.run({
         input: "Ship reliable dispatch coordination.",
         requestText: "Ship reliable dispatch coordination.",
-        worktreePath: "/tmp/meow-team",
+        worktree: createWorktree({ path: "/tmp/meow-team" }),
       }),
     ).resolves.toEqual({
       title: "Injected Title",
@@ -176,7 +177,7 @@ describe("resolveTeamRoleDependencies", () => {
 
     expect(executor).toHaveBeenCalledWith(
       expect.objectContaining({
-        worktreePath: "/tmp/meow-team",
+        worktree: createWorktree({ path: "/tmp/meow-team" }),
         codexHomePrefix: "request-title",
       }),
     );

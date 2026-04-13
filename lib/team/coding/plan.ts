@@ -38,6 +38,7 @@ import type {
   TeamRunState,
   TeamRunSummary,
 } from "@/lib/team/coding/shared";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamCodexEvent, TeamExecutionStep, TeamRoleHandoff } from "@/lib/team/types";
 const normalizeRequestText = (value: string | null | undefined): string | null => {
   const normalized = value?.trim();
@@ -260,7 +261,7 @@ const resolveRequestMetadata = async ({
   providedRequestText,
   existingThread,
   shouldResetAssignment,
-  worktreePath,
+  worktree,
   dependencies,
   logEvent,
 }: {
@@ -269,7 +270,7 @@ const resolveRequestMetadata = async ({
   providedRequestText?: string;
   existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
   shouldResetAssignment: boolean;
-  worktreePath: string;
+  worktree: Worktree;
   dependencies: TeamRoleDependencies;
   logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<InitialRequestMetadata> => {
@@ -321,7 +322,7 @@ const resolveRequestMetadata = async ({
       input,
       requestText,
       tasks: null,
-      worktreePath,
+      worktree,
       dependencies,
     });
 
@@ -366,7 +367,7 @@ const generateRequestMetadata = async ({
   input,
   requestText,
   tasks,
-  worktreePath,
+  worktree,
   dependencies,
 }: {
   input: string;
@@ -375,7 +376,7 @@ const generateRequestMetadata = async ({
     title: string;
     objective: string;
   }> | null;
-  worktreePath: string;
+  worktree: Worktree;
   dependencies: TeamRoleDependencies;
 }): Promise<{
   requestTitle: string | null;
@@ -384,7 +385,7 @@ const generateRequestMetadata = async ({
   const generatedTitleResponse = await dependencies.requestTitleAgent.run({
     input,
     requestText,
-    worktreePath,
+    worktree,
     tasks,
   });
 
@@ -400,7 +401,7 @@ const finalizeRequestMetadata = async ({
   initialMetadata,
   input,
   tasks,
-  worktreePath,
+  worktree,
   dependencies,
   logEvent,
 }: {
@@ -410,7 +411,7 @@ const finalizeRequestMetadata = async ({
     title: string;
     objective: string;
   }> | null;
-  worktreePath: string;
+  worktree: Worktree;
   dependencies: TeamRoleDependencies;
   logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<ResolvedRequestMetadata> => {
@@ -429,7 +430,7 @@ const finalizeRequestMetadata = async ({
         input,
         requestText: initialMetadata.requestText,
         tasks,
-        worktreePath,
+        worktree,
         dependencies,
       });
     } catch (error) {
@@ -560,6 +561,9 @@ export const buildPlanningStageState = async (
     threadId: args.threadId,
     assignmentNumber: state.assignmentNumber,
   });
+  const worktree = env.createWorktree({
+    path: selectedRepository?.path ?? process.cwd(),
+  });
 
   const requestMetadata = await resolveRequestMetadata({
     input: args.input,
@@ -567,7 +571,7 @@ export const buildPlanningStageState = async (
     providedRequestText: args.requestText,
     existingThread,
     shouldResetAssignment,
-    worktreePath: selectedRepository?.path ?? process.cwd(),
+    worktree,
     dependencies: env.deps,
     logEvent: forwardPlannerEvent,
   });
@@ -580,6 +584,7 @@ export const buildPlanningStageState = async (
     args,
     context: {
       threadId: args.threadId,
+      worktree,
       selectedRepository,
       existingThread,
       shouldResetAssignment,
@@ -595,7 +600,7 @@ export const runPlanningStage = async (
 ): Promise<TeamRunMetadataGenerationStageState> => {
   const {
     args,
-    context: { threadId, selectedRepository, state },
+    context: { threadId, selectedRepository, state, worktree },
   } = currentState;
   const forwardPlannerEvent = createPlannerEventForwarder({
     env,
@@ -611,7 +616,7 @@ export const runPlanningStage = async (
   });
 
   const plannerResponse = await env.deps.plannerAgent.run({
-    worktreePath: selectedRepository?.path ?? process.cwd(),
+    worktree,
     state,
     onEvent: forwardPlannerEvent,
   });
@@ -647,7 +652,7 @@ export const runMetadataGenerationStage = async (
 ): Promise<TeamRunReviewingStageState | TeamRunCompletedState> => {
   const {
     args,
-    context: { threadId, selectedRepository, requestMetadata, state },
+    context: { threadId, selectedRepository, requestMetadata, state, worktree },
     plannerResponse,
     plannerRoleName,
   } = currentState;
@@ -673,7 +678,7 @@ export const runMetadataGenerationStage = async (
           initialMetadata: requestMetadata,
           input: args.input,
           tasks: plannerResponse.dispatch?.tasks ?? null,
-          worktreePath: selectedRepository?.path ?? process.cwd(),
+          worktree,
           dependencies: env.deps,
           logEvent: forwardPlannerEvent,
         });

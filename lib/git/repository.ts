@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { worktreeSchema } from "@/lib/team/coding/worktree";
 
 export const teamRepositoryOptionSchema = z.object({
   id: z.string().trim().min(1),
@@ -15,7 +16,7 @@ export const teamRepositoryContextSchema = z.object({
   repository: teamRepositoryOptionSchema,
   branchName: z.string().trim().min(1),
   baseBranch: z.string().trim().min(1),
-  worktreePath: z.string().trim().min(1),
+  worktree: worktreeSchema,
   implementationCommit: z.string().trim().min(1).nullable(),
 });
 

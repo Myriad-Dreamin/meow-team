@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import { createWorktree } from "@/lib/team/coding/worktree";
 import { ReviewerAgent, reviewerRole, type ReviewerRoleOutput } from "@/lib/team/roles/reviewer";
 
 describe("ReviewerAgent", () => {
@@ -29,7 +30,10 @@ describe("ReviewerAgent", () => {
         },
         branchName: "requests/inline-role-prompts/example",
         baseBranch: "main",
-        worktreePath: "/worktrees/meow-1",
+        worktree: createWorktree({
+          path: "/worktrees/meow-1",
+          rootPath: "/worktrees",
+        }),
         implementationCommit: "abc1234",
         teamName: "Owner Harness Team",
         ownerName: "Your Team",

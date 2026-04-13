@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
+import { createWorktree } from "@/lib/team/coding/worktree";
 import { RequestTitleAgent } from "@/lib/team/roles/request-title";
 
 describe("RequestTitleAgent", () => {
@@ -19,7 +20,7 @@ describe("RequestTitleAgent", () => {
     await agent.run({
       input: "Link lane commit activity to GitHub.",
       requestText: "Link lane commit activity to GitHub.",
-      worktreePath: "/tmp/meow-team",
+      worktree: createWorktree({ path: "/tmp/meow-team" }),
       tasks: [
         {
           title: "Link lane commit activity to GitHub",

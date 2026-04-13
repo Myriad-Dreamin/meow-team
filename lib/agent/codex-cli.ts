@@ -7,6 +7,7 @@ import path from "node:path";
 import { z } from "zod";
 import { teamConfig } from "@/team.config";
 import { teamRuntimeConfig } from "@/lib/config/runtime";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamCodexEvent, TeamCodexLogSource } from "@/lib/team/types";
 
 const ERROR_OUTPUT_LINE_LIMIT = 80;
@@ -80,12 +81,12 @@ const createCodexEvent = ({
 };
 
 const buildCodexExecArgs = ({
-  worktreePath,
+  worktree,
   schemaPath,
   outputPath,
   prompt,
 }: {
-  worktreePath: string;
+  worktree: Worktree;
   schemaPath: string;
   outputPath: string;
   prompt: string;
@@ -93,7 +94,7 @@ const buildCodexExecArgs = ({
   const args = [
     "exec",
     "--cd",
-    worktreePath,
+    worktree.path,
     "--sandbox",
     "workspace-write",
     "--ephemeral",
@@ -213,19 +214,19 @@ const prepareCodexHome = async ({ codexHome }: { codexHome: string }): Promise<v
 };
 
 export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
-  worktreePath,
+  worktree,
   prompt,
   responseSchema,
   codexHomePrefix,
   onEvent,
 }: {
-  worktreePath: string;
+  worktree: Worktree;
   prompt: string;
   responseSchema: TSchema;
   codexHomePrefix: string;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<z.infer<TSchema>> => {
-  const codexHomeRoot = path.join(path.dirname(worktreePath), ".codex-runner-home");
+  const codexHomeRoot = path.join(path.dirname(worktree.path), ".codex-runner-home");
   await fs.mkdir(codexHomeRoot, { recursive: true });
   const codexHome = await fs.mkdtemp(path.join(codexHomeRoot, `${codexHomePrefix}-`));
   const schemaPath = path.join(codexHome, "output-schema.json");
@@ -240,7 +241,7 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
 
   try {
     const args = buildCodexExecArgs({
-      worktreePath,
+      worktree,
       schemaPath,
       outputPath,
       prompt,
@@ -321,13 +322,13 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
     queueEvent(
       createCodexEvent({
         source: "system",
-        message: `Launching Codex CLI in ${worktreePath}.`,
+        message: `Launching Codex CLI in ${worktree.path}.`,
       }),
     );
 
     const exitCode = await new Promise<number>((resolve, reject) => {
       const child = spawn("codex", args, {
-        cwd: worktreePath,
+        cwd: worktree.path,
         env: {
           ...process.env,
           CODEX_HOME: codexHome,
@@ -430,16 +431,16 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
 };
 
 export const runCodexLaneRole = async ({
-  worktreePath,
+  worktree,
   prompt,
   onEvent,
 }: {
-  worktreePath: string;
+  worktree: Worktree;
   prompt: string;
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<CodexLaneResponse> => {
   return runCodexStructuredOutput({
-    worktreePath,
+    worktree,
     prompt,
     responseSchema: codexLaneResponseSchema,
     codexHomePrefix: "lane",

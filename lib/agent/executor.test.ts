@@ -4,6 +4,7 @@ import {
   createQueuedTeamStructuredExecutor,
   type TeamStructuredExecutor,
 } from "@/lib/agent/executor";
+import { createWorktree } from "@/lib/team/coding/worktree";
 
 const responseSchema = z.object({
   value: z.string(),
@@ -31,7 +32,7 @@ const createDeferred = <T>(): Deferred<T> => {
 };
 
 const createExecutorInput = (worktreePath: string) => ({
-  worktreePath,
+  worktree: createWorktree({ path: worktreePath }),
   prompt: `Run for ${worktreePath}`,
   responseSchema,
   codexHomePrefix: "lane",
@@ -53,13 +54,13 @@ describe("createQueuedTeamStructuredExecutor", () => {
     let activeCount = 0;
     let maxActiveCount = 0;
 
-    const executor = vi.fn(async ({ worktreePath }) => {
-      const deferred = deferredByPath.get(worktreePath);
+    const executor = vi.fn(async ({ worktree }) => {
+      const deferred = deferredByPath.get(worktree.path);
       if (!deferred) {
-        throw new Error(`Missing deferred executor result for ${worktreePath}.`);
+        throw new Error(`Missing deferred executor result for ${worktree.path}.`);
       }
 
-      started.push(worktreePath);
+      started.push(worktree.path);
       activeCount += 1;
       maxActiveCount = Math.max(maxActiveCount, activeCount);
 
@@ -122,13 +123,13 @@ describe("createQueuedTeamStructuredExecutor", () => {
     ]);
     const started: string[] = [];
 
-    const executor = vi.fn(async ({ worktreePath }) => {
-      const deferred = deferredByPath.get(worktreePath);
+    const executor = vi.fn(async ({ worktree }) => {
+      const deferred = deferredByPath.get(worktree.path);
       if (!deferred) {
-        throw new Error(`Missing deferred executor result for ${worktreePath}.`);
+        throw new Error(`Missing deferred executor result for ${worktree.path}.`);
       }
 
-      started.push(worktreePath);
+      started.push(worktree.path);
       return deferred.promise;
     }) as unknown as TeamStructuredExecutor;
 

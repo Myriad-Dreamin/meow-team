@@ -30,6 +30,7 @@ export const runCodingStage = async (
       threadId: currentState.args.threadId,
       assignmentNumber: currentState.args.assignmentNumber,
       laneId: currentState.args.laneId,
+      createWorktree: env.createWorktree,
       dependencies: env.deps,
     });
   } else if (!isLaneQueuedForExecution(persistedLane as TeamWorkerLaneRecord)) {

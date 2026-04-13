@@ -2,7 +2,7 @@ import "server-only";
 
 import { teamConfig } from "@/team.config";
 import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
-import { applyHandoff, type TeamRoleState } from "@/lib/team/agent-helpers";
+import { applyHandoff } from "@/lib/team/agent-helpers";
 import {
   commitWorktreeChanges,
   detectBranchConflict,
@@ -13,20 +13,30 @@ import {
   resolveRepositoryBaseBranch,
   tryRebaseWorktreeBranch,
 } from "@/lib/git/ops";
-import type { TeamRepositoryContext, TeamRepositoryOption } from "@/lib/git/repository";
+import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { synchronizePullRequest } from "@/lib/platform";
 import {
   buildCanonicalBranchName,
   buildLaneBranchName,
-  buildLaneWorktreePath,
-  buildPlannerWorktreePath,
   deleteManagedBranches,
   ensureLaneWorktree,
   ExistingBranchesRequireDeleteError,
-  parseManagedWorktreeSlot,
   pushLaneBranch,
-  resolveWorktreeRoot,
 } from "@/lib/team/git";
+import {
+  assignPendingDispatchThreadSlots,
+  assignPendingDispatchWorkerSlots,
+  assignmentThreadSchedulingStateMatches,
+  buildAssignmentThreadPoolStateKey,
+  buildLanePoolStateKey,
+  captureAssignmentThreadSchedulingState,
+  captureLanePoolSchedulingState,
+  lanePoolSchedulingStateMatches,
+  type AssignmentThreadSchedulingState,
+  type LanePoolSchedulingState,
+  type PlannedAssignmentThreadState,
+  type PlannedLanePoolState,
+} from "@/lib/team/coding/dispatch-worktrees";
 import {
   getTeamThreadRecord,
   listPendingDispatchAssignments,
@@ -45,6 +55,13 @@ import {
   resolveTeamRoleDependencies,
   type TeamRoleDependencies,
 } from "@/lib/team/roles/dependencies";
+import { buildLaneRunState, type LanePullRequestDraft } from "@/lib/team/coding/lane-state";
+import {
+  createWorktree,
+  resolveLaneWorktree,
+  resolveManagedWorktreeRoot,
+  type CreateWorktree,
+} from "@/lib/team/coding/worktree";
 import { coderRole } from "@/lib/team/roles/coder";
 import { reviewerRole } from "@/lib/team/roles/reviewer";
 import type {
@@ -60,31 +77,6 @@ type DispatchTask = {
   title: string;
   objective: string;
 };
-
-type LanePullRequestDraft = {
-  title: string;
-  summary: string;
-};
-
-type LaneRunState = TeamRoleState &
-  TeamRepositoryContext & {
-    teamName: string;
-    ownerName: string;
-    objective: string;
-    laneId: string;
-    laneIndex: number;
-    executionPhase: TeamWorkerLaneRecord["executionPhase"];
-    taskTitle: string;
-    taskObjective: string;
-    requestTitle: string;
-    conventionalTitle: TeamDispatchAssignment["conventionalTitle"];
-    planSummary: string;
-    planDeliverable: string;
-    conflictNote: string | null;
-    archiveCommand: string | null;
-    archivePathContext: string | null;
-    pullRequestDraft: LanePullRequestDraft | null;
-  };
 
 export class DispatchThreadCapacityError extends Error {
   workerCount: number;
@@ -218,12 +210,6 @@ const isFinalArchivePhase = (
   return lane.executionPhase === "final_archive";
 };
 
-const getHighestHandoffSequence = (handoffs: Partial<Record<string, TeamRoleHandoff>>): number => {
-  return Object.values(handoffs).reduce((highestSequence, handoff) => {
-    return handoff ? Math.max(highestSequence, handoff.sequence) : highestSequence;
-  }, 0);
-};
-
 const inferReviewerDecisionFromLane = (
   lane: Pick<
     TeamWorkerLaneRecord,
@@ -309,62 +295,6 @@ const buildLanePersistedHandoffs = ({
   }
 
   return handoffs;
-};
-
-const buildLaneInitialState = ({
-  repository,
-  lane,
-  assignment,
-  workflow,
-  handoffs,
-}: {
-  repository: TeamRepositoryOption;
-  lane: TeamWorkerLaneRecord;
-  assignment: TeamDispatchAssignment;
-  workflow: string[];
-  handoffs: Partial<Record<string, TeamRoleHandoff>>;
-}): LaneRunState => {
-  const archiveCommand =
-    lane.executionPhase === "final_archive" && lane.proposalChangeName
-      ? `/opsx:archive ${lane.proposalChangeName}`
-      : null;
-
-  return {
-    teamName: teamConfig.name,
-    ownerName: teamConfig.owner.name,
-    objective: teamConfig.owner.objective,
-    repository,
-    laneId: lane.laneId,
-    laneIndex: lane.laneIndex,
-    executionPhase: lane.executionPhase ?? "implementation",
-    taskTitle: lane.taskTitle ?? `Lane ${lane.laneIndex} task`,
-    taskObjective:
-      lane.taskObjective ?? assignment.plannerSummary ?? "Implement the assigned task.",
-    requestTitle: assignment.requestTitle ?? lane.taskTitle ?? `Proposal ${lane.laneIndex}`,
-    conventionalTitle: assignment.conventionalTitle ?? null,
-    planSummary: assignment.plannerSummary ?? "No planner summary provided.",
-    planDeliverable: assignment.plannerDeliverable ?? "No planner deliverable provided.",
-    branchName: lane.branchName ?? `lane-${lane.laneIndex}`,
-    baseBranch: lane.baseBranch ?? teamConfig.dispatch.baseBranch,
-    worktreePath:
-      lane.worktreePath ??
-      resolveWorktreeRoot({
-        repositoryPath: repository.path,
-        worktreeRoot: teamConfig.dispatch.worktreeRoot,
-      }),
-    implementationCommit: lane.latestImplementationCommit,
-    conflictNote:
-      lane.requeueReason === "planner_detected_conflict"
-        ? "Planner detected a pull request conflict. Resolve the branch and prepare it for review again."
-        : null,
-    archiveCommand,
-    archivePathContext: lane.proposalPath,
-    workflow,
-    handoffs,
-    handoffCounter: getHighestHandoffSequence(handoffs),
-    assignmentNumber: assignment.assignmentNumber,
-    pullRequestDraft: null,
-  } as LaneRunState;
 };
 
 const buildCoderCommitMessage = ({
@@ -643,7 +573,7 @@ export const createPlannerDispatchAssignment = async ({
       repository.path,
       teamConfig.dispatch.baseBranch,
     );
-    const resolvedWorktreeRoot = resolveWorktreeRoot({
+    const resolvedWorktreeRoot = resolveManagedWorktreeRoot({
       repositoryPath: repository.path,
       worktreeRoot: teamConfig.dispatch.worktreeRoot,
     });
@@ -707,7 +637,7 @@ export const createPlannerDispatchAssignment = async ({
       ],
       workerCount: teamConfig.dispatch.workerCount,
       resolveAssignmentWorktreeRoot: (pending) =>
-        resolveWorktreeRoot({
+        resolveManagedWorktreeRoot({
           repositoryPath: pending.assignment.repository?.path ?? "",
           worktreeRoot: teamConfig.dispatch.worktreeRoot,
         }),
@@ -803,352 +733,17 @@ export const createPlannerDispatchAssignment = async ({
   });
 };
 
-const isPoolOccupyingLaneStatus = (status: TeamWorkerLaneRecord["status"]): boolean => {
-  return status === "queued" || status === "coding" || status === "reviewing";
-};
-
-type PendingDispatchLaneAllocation = {
-  pending: PendingDispatchAssignment;
-  lane: TeamWorkerLaneRecord;
-  worktreeRoot: string;
-};
-
-type PendingDispatchAssignmentAllocation = {
-  pending: PendingDispatchAssignment;
-  worktreeRoot: string;
-};
-
-type AssignmentThreadSchedulingState = Pick<
-  TeamDispatchAssignment,
-  "status" | "threadSlot" | "plannerWorktreePath"
->;
-
-type LanePoolSchedulingState = Pick<TeamWorkerLaneRecord, "status" | "workerSlot" | "worktreePath">;
-
-type PlannedAssignmentThreadState = {
-  expected: AssignmentThreadSchedulingState;
-  planned: Pick<TeamDispatchAssignment, "threadSlot" | "plannerWorktreePath">;
-};
-
-type PlannedLanePoolState = {
-  expected: LanePoolSchedulingState;
-  planned: Pick<TeamWorkerLaneRecord, "workerSlot" | "worktreePath">;
-};
-
-const buildAssignmentThreadPoolStateKey = ({
-  threadId,
-  assignmentNumber,
-}: {
-  threadId: string;
-  assignmentNumber: number;
-}): string => {
-  return `${threadId}:${assignmentNumber}`;
-};
-
-const buildLanePoolStateKey = ({
-  threadId,
-  assignmentNumber,
-  laneId,
-}: {
-  threadId: string;
-  assignmentNumber: number;
-  laneId: string;
-}): string => {
-  return `${threadId}:${assignmentNumber}:${laneId}`;
-};
-
-const captureAssignmentThreadSchedulingState = (
-  assignment: TeamDispatchAssignment,
-): AssignmentThreadSchedulingState => {
-  return {
-    status: assignment.status,
-    threadSlot: assignment.threadSlot ?? null,
-    plannerWorktreePath: assignment.plannerWorktreePath ?? null,
-  };
-};
-
-const captureLanePoolSchedulingState = (lane: TeamWorkerLaneRecord): LanePoolSchedulingState => {
-  return {
-    status: lane.status,
-    workerSlot: lane.workerSlot,
-    worktreePath: lane.worktreePath,
-  };
-};
-
-const assignmentThreadSchedulingStateMatches = (
-  assignment: TeamDispatchAssignment,
-  expected: AssignmentThreadSchedulingState,
-): boolean => {
-  return (
-    assignment.status === expected.status &&
-    (assignment.threadSlot ?? null) === expected.threadSlot &&
-    (assignment.plannerWorktreePath ?? null) === expected.plannerWorktreePath
-  );
-};
-
-const lanePoolSchedulingStateMatches = (
-  lane: TeamWorkerLaneRecord,
-  expected: LanePoolSchedulingState,
-): boolean => {
-  return (
-    lane.status === expected.status &&
-    lane.workerSlot === expected.workerSlot &&
-    lane.worktreePath === expected.worktreePath
-  );
-};
-
-const comparePendingDispatchAssignmentAllocation = (
-  left: PendingDispatchAssignmentAllocation,
-  right: PendingDispatchAssignmentAllocation,
-): number => {
-  const leftRequestedAt =
-    left.pending.assignment.startedAt ??
-    left.pending.assignment.requestedAt ??
-    left.pending.assignment.updatedAt;
-  const rightRequestedAt =
-    right.pending.assignment.startedAt ??
-    right.pending.assignment.requestedAt ??
-    right.pending.assignment.updatedAt;
-
-  return (
-    leftRequestedAt.localeCompare(rightRequestedAt) ||
-    left.pending.threadId.localeCompare(right.pending.threadId) ||
-    left.pending.assignment.assignmentNumber - right.pending.assignment.assignmentNumber
-  );
-};
-
-const comparePendingDispatchLaneAllocation = (
-  left: PendingDispatchLaneAllocation,
-  right: PendingDispatchLaneAllocation,
-): number => {
-  const leftQueuedAt = left.lane.queuedAt ?? left.lane.updatedAt;
-  const rightQueuedAt = right.lane.queuedAt ?? right.lane.updatedAt;
-
-  return (
-    leftQueuedAt.localeCompare(rightQueuedAt) ||
-    left.pending.threadId.localeCompare(right.pending.threadId) ||
-    left.pending.assignment.assignmentNumber - right.pending.assignment.assignmentNumber ||
-    left.lane.laneIndex - right.lane.laneIndex
-  );
-};
-
-const applyAssignmentThreadSlot = ({
-  assignment,
-  worktreeRoot,
-  threadSlot,
-}: {
-  assignment: TeamDispatchAssignment;
-  worktreeRoot: string;
-  threadSlot: number | null;
-}): void => {
-  assignment.threadSlot = threadSlot;
-  assignment.plannerWorktreePath = threadSlot
-    ? buildPlannerWorktreePath({
-        worktreeRoot,
-        threadSlot,
-      })
-    : null;
-};
-
-const resolvePreservedAssignmentThreadSlot = ({
-  assignment,
-  worktreeRoot,
-}: {
-  assignment: TeamDispatchAssignment;
-  worktreeRoot: string;
-}): number | null => {
-  if (assignment.threadSlot) {
-    return assignment.threadSlot;
-  }
-
-  if (assignment.plannerWorktreePath) {
-    const plannerSlot = parseManagedWorktreeSlot({
-      worktreeRoot,
-      worktreePath: assignment.plannerWorktreePath,
-    });
-    if (plannerSlot) {
-      return plannerSlot;
-    }
-  }
-
-  for (const lane of assignment.lanes) {
-    if (!isPoolOccupyingLaneStatus(lane.status)) {
-      continue;
-    }
-
-    if (lane.workerSlot) {
-      return lane.workerSlot;
-    }
-
-    if (!lane.worktreePath) {
-      continue;
-    }
-
-    const laneSlot = parseManagedWorktreeSlot({
-      worktreeRoot,
-      worktreePath: lane.worktreePath,
-    });
-    if (laneSlot) {
-      return laneSlot;
-    }
-  }
-
-  return null;
-};
-
-export const assignPendingDispatchThreadSlots = ({
-  pendingAssignments,
-  workerCount,
-  resolveAssignmentWorktreeRoot,
-}: {
-  pendingAssignments: PendingDispatchAssignment[];
-  workerCount: number;
-  resolveAssignmentWorktreeRoot: (pending: PendingDispatchAssignment) => string;
-}): void => {
-  const occupiedSlots = new Set<number>();
-  let preservedAssignmentCount = 0;
-  const unassignedAssignments: PendingDispatchAssignmentAllocation[] = [];
-
-  for (const pending of pendingAssignments) {
-    if (!pending.assignment.repository) {
-      continue;
-    }
-
-    const worktreeRoot = resolveAssignmentWorktreeRoot(pending);
-    const preservedThreadSlot = resolvePreservedAssignmentThreadSlot({
-      assignment: pending.assignment,
-      worktreeRoot,
-    });
-
-    if (!preservedThreadSlot) {
-      applyAssignmentThreadSlot({
-        assignment: pending.assignment,
-        worktreeRoot,
-        threadSlot: null,
-      });
-      unassignedAssignments.push({
-        pending,
-        worktreeRoot,
-      });
-      continue;
-    }
-
-    preservedAssignmentCount += 1;
-    if (preservedThreadSlot >= 1 && preservedThreadSlot <= workerCount) {
-      occupiedSlots.add(preservedThreadSlot);
-    }
-    applyAssignmentThreadSlot({
-      assignment: pending.assignment,
-      worktreeRoot,
-      threadSlot: preservedThreadSlot,
-    });
-  }
-
-  const remainingCapacity = Math.max(0, workerCount - preservedAssignmentCount);
-  const availableSlots = Array.from({ length: workerCount }, (_, index) => index + 1)
-    .filter((slot) => !occupiedSlots.has(slot))
-    .slice(0, remainingCapacity);
-
-  for (const { pending, worktreeRoot } of unassignedAssignments.sort(
-    comparePendingDispatchAssignmentAllocation,
-  )) {
-    const threadSlot = availableSlots.shift();
-    if (!threadSlot) {
-      break;
-    }
-
-    applyAssignmentThreadSlot({
-      assignment: pending.assignment,
-      worktreeRoot,
-      threadSlot,
-    });
-  }
-};
-
-export const assignPendingDispatchWorkerSlots = ({
-  pendingAssignments,
-  resolveAssignmentWorktreeRoot,
-}: {
-  pendingAssignments: PendingDispatchAssignment[];
-  resolveAssignmentWorktreeRoot: (pending: PendingDispatchAssignment) => string;
-}): void => {
-  for (const pending of pendingAssignments) {
-    if (!pending.assignment.repository) {
-      continue;
-    }
-
-    const worktreeRoot = resolveAssignmentWorktreeRoot(pending);
-    let hasAssignedLane = false;
-    const slotlessQueuedLanes: PendingDispatchLaneAllocation[] = [];
-
-    for (const lane of pending.assignment.lanes) {
-      if (!isPoolOccupyingLaneStatus(lane.status)) {
-        continue;
-      }
-
-      const preservedLaneSlot =
-        lane.workerSlot ??
-        (lane.worktreePath
-          ? parseManagedWorktreeSlot({
-              worktreeRoot,
-              worktreePath: lane.worktreePath,
-            })
-          : null);
-
-      if (preservedLaneSlot) {
-        lane.workerSlot = preservedLaneSlot;
-        lane.worktreePath ??= buildLaneWorktreePath({
-          worktreeRoot,
-          laneIndex: preservedLaneSlot,
-        });
-        hasAssignedLane = true;
-        continue;
-      }
-
-      if (lane.status === "queued") {
-        lane.workerSlot = null;
-        lane.worktreePath = null;
-        slotlessQueuedLanes.push({
-          pending,
-          lane,
-          worktreeRoot,
-        });
-      }
-    }
-
-    if (hasAssignedLane) {
-      continue;
-    }
-
-    const threadSlot = pending.assignment.threadSlot ?? null;
-    if (!threadSlot || threadSlot < 1) {
-      continue;
-    }
-
-    const nextQueuedLane = slotlessQueuedLanes.sort(comparePendingDispatchLaneAllocation)[0];
-    if (!nextQueuedLane) {
-      continue;
-    }
-
-    nextQueuedLane.lane.workerSlot = threadSlot;
-    nextQueuedLane.lane.worktreePath =
-      pending.assignment.plannerWorktreePath ??
-      buildLaneWorktreePath({
-        worktreeRoot,
-        laneIndex: threadSlot,
-      });
-  }
-};
-
 const runFinalArchiveCycle = async ({
   threadId,
   assignmentNumber,
   laneId,
+  createWorktree: createWorktreeFactory,
   dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  createWorktree: CreateWorktree;
   dependencies: TeamRoleDependencies;
 }): Promise<void> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
@@ -1171,6 +766,12 @@ const runFinalArchiveCycle = async ({
   }
 
   const repositoryPath = assignment.repository.path;
+  const laneWorktree = resolveLaneWorktree({
+    repositoryPath,
+    worktreeRoot: teamConfig.dispatch.worktreeRoot,
+    worktreePath: lane.worktreePath,
+    create: createWorktreeFactory,
+  });
   const laneBranchName = lane.branchName;
   const pullRequestSummary =
     lane.pullRequest.summary?.trim() ||
@@ -1228,17 +829,17 @@ const runFinalArchiveCycle = async ({
 
     await ensureLaneWorktree({
       repositoryPath: assignment.repository.path,
-      worktreeRoot: resolveWorktreeRoot({
+      worktreeRoot: resolveManagedWorktreeRoot({
         repositoryPath: assignment.repository.path,
         worktreeRoot: teamConfig.dispatch.worktreeRoot,
       }),
-      worktreePath: lane.worktreePath,
+      worktreePath: laneWorktree.path,
       branchName: lane.branchName,
       startPoint: lane.latestImplementationCommit ?? lane.baseBranch,
     });
 
     const preArchiveState = await inspectOpenSpecChangeArchiveState({
-      worktreePath: lane.worktreePath,
+      worktreePath: laneWorktree.path,
       changeName: lane.proposalChangeName,
     });
 
@@ -1249,8 +850,9 @@ const runFinalArchiveCycle = async ({
     }
 
     if (preArchiveState.sourceExists) {
-      const coderState = buildLaneInitialState({
+      const coderState = buildLaneRunState({
         repository: assignment.repository,
+        worktree: laneWorktree,
         lane,
         assignment,
         workflow: getLaneWorkflow(),
@@ -1284,9 +886,9 @@ const runFinalArchiveCycle = async ({
         decision: coderResponse.decision,
       });
 
-      if (await hasWorktreeChanges(lane.worktreePath)) {
+      if (await hasWorktreeChanges(laneWorktree.path)) {
         await commitWorktreeChanges({
-          worktreePath: lane.worktreePath,
+          worktreePath: laneWorktree.path,
           message: buildCoderCommitMessage({
             lane,
           }),
@@ -1294,7 +896,7 @@ const runFinalArchiveCycle = async ({
       }
 
       const postArchiveState = await inspectOpenSpecChangeArchiveState({
-        worktreePath: lane.worktreePath,
+        worktreePath: laneWorktree.path,
         changeName: lane.proposalChangeName,
       });
 
@@ -1336,7 +938,7 @@ const runFinalArchiveCycle = async ({
     const finalizedPushedCommit = updatedPushedCommit;
 
     const synchronizedPullRequest = await synchronizePullRequest({
-      repositoryPath: lane.worktreePath,
+      repositoryPath: laneWorktree.path,
       branchName: lane.branchName,
       baseBranch: lane.baseBranch,
       title: pullRequestTitle,
@@ -1513,11 +1115,13 @@ const runLaneCycle = async ({
   threadId,
   assignmentNumber,
   laneId,
+  createWorktree: createWorktreeFactory,
   dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  createWorktree: CreateWorktree;
   dependencies: TeamRoleDependencies;
 }): Promise<void> => {
   while (true) {
@@ -1540,11 +1144,19 @@ const runLaneCycle = async ({
       throw new Error("Lane is missing repository, branch, or worktree metadata.");
     }
 
+    const laneWorktree = resolveLaneWorktree({
+      repositoryPath: assignment.repository.path,
+      worktreeRoot: teamConfig.dispatch.worktreeRoot,
+      worktreePath: lane.worktreePath,
+      create: createWorktreeFactory,
+    });
+
     if (isFinalArchivePhase(lane)) {
       await runFinalArchiveCycle({
         threadId,
         assignmentNumber,
         laneId,
+        createWorktree: createWorktreeFactory,
         dependencies,
       });
       return;
@@ -1580,11 +1192,11 @@ const runLaneCycle = async ({
 
     await ensureLaneWorktree({
       repositoryPath: assignment.repository.path,
-      worktreeRoot: resolveWorktreeRoot({
+      worktreeRoot: resolveManagedWorktreeRoot({
         repositoryPath: assignment.repository.path,
         worktreeRoot: teamConfig.dispatch.worktreeRoot,
       }),
-      worktreePath: lane.worktreePath,
+      worktreePath: laneWorktree.path,
       branchName: lane.branchName,
       startPoint: assignment.canonicalBranchName ?? lane.baseBranch,
     });
@@ -1594,8 +1206,9 @@ const runLaneCycle = async ({
       branchName: lane.branchName,
     });
 
-    const coderState = buildLaneInitialState({
+    const coderState = buildLaneRunState({
       repository: assignment.repository,
+      worktree: laneWorktree,
       lane,
       assignment,
       workflow: getLaneWorkflow(),
@@ -1628,9 +1241,9 @@ const runLaneCycle = async ({
       decision: coderResponse.decision,
     });
 
-    if (await hasWorktreeChanges(lane.worktreePath)) {
+    if (await hasWorktreeChanges(laneWorktree.path)) {
       await commitWorktreeChanges({
-        worktreePath: lane.worktreePath,
+        worktreePath: laneWorktree.path,
         message: buildCoderCommitMessage({
           lane,
         }),
@@ -1743,8 +1356,9 @@ const runLaneCycle = async ({
       latestDecision: coderHandoff.decision,
     };
 
-    const reviewerState = buildLaneInitialState({
+    const reviewerState = buildLaneRunState({
       repository: assignment.repository,
+      worktree: laneWorktree,
       lane: reviewerLane,
       assignment,
       workflow: getLaneWorkflow(),
@@ -1860,7 +1474,7 @@ const runLaneCycle = async ({
     let rebaseErrorSummary: string | null = null;
 
     const rebaseAttempt = await tryRebaseWorktreeBranch({
-      worktreePath: lane.worktreePath,
+      worktreePath: laneWorktree.path,
       baseBranch: lane.baseBranch,
     });
 
@@ -2028,7 +1642,7 @@ const runLaneCycle = async ({
     let synchronizedPullRequest: Awaited<ReturnType<typeof synchronizePullRequest>> | null = null;
     try {
       synchronizedPullRequest = await synchronizePullRequest({
-        repositoryPath: lane.worktreePath,
+        repositoryPath: laneWorktree.path,
         branchName: lane.branchName,
         baseBranch: lane.baseBranch,
         title: reviewPullRequestDraft.title,
@@ -2220,11 +1834,13 @@ const ensureLaneRun = ({
   threadId,
   assignmentNumber,
   laneId,
+  createWorktree: createWorktreeFactory,
   dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  createWorktree: CreateWorktree;
   dependencies: TeamRoleDependencies;
 }): void => {
   const key = laneRunKey(threadId, assignmentNumber, laneId);
@@ -2238,6 +1854,7 @@ const ensureLaneRun = ({
         threadId,
         assignmentNumber,
         laneId,
+        createWorktree: createWorktreeFactory,
         dependencies,
       });
     } catch (error) {
@@ -2290,7 +1907,11 @@ const ensureLaneRun = ({
       });
     } finally {
       activeLaneRuns.delete(key);
-      void ensurePendingDispatchWork({ threadId, dependencies });
+      void ensurePendingDispatchWork({
+        threadId,
+        createWorktree: createWorktreeFactory,
+        dependencies,
+      });
     }
   })();
 
@@ -2311,9 +1932,11 @@ const prioritizeThreadIds = (threadIds: string[], prioritizedThreadId?: string):
 
 export const ensurePendingDispatchWork = async ({
   threadId,
+  createWorktree: createWorktreeFactory = createWorktree,
   dependencies,
 }: {
   threadId?: string;
+  createWorktree?: CreateWorktree;
   dependencies?: Partial<TeamRoleDependencies>;
 } = {}): Promise<void> => {
   const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
@@ -2344,7 +1967,7 @@ export const ensurePendingDispatchWork = async ({
     pendingAssignments,
     workerCount: teamConfig.dispatch.workerCount,
     resolveAssignmentWorktreeRoot: (pending) =>
-      resolveWorktreeRoot({
+      resolveManagedWorktreeRoot({
         repositoryPath: pending.assignment.repository?.path ?? "",
         worktreeRoot: teamConfig.dispatch.worktreeRoot,
       }),
@@ -2353,7 +1976,7 @@ export const ensurePendingDispatchWork = async ({
   assignPendingDispatchWorkerSlots({
     pendingAssignments,
     resolveAssignmentWorktreeRoot: (pending) =>
-      resolveWorktreeRoot({
+      resolveManagedWorktreeRoot({
         repositoryPath: pending.assignment.repository?.path ?? "",
         worktreeRoot: teamConfig.dispatch.worktreeRoot,
       }),
@@ -2473,6 +2096,7 @@ export const ensurePendingDispatchWork = async ({
           threadId: pending.threadId,
           assignmentNumber: pending.assignment.assignmentNumber,
           laneId: lane.laneId,
+          createWorktree: createWorktreeFactory,
           dependencies: resolvedDependencies,
         });
       }
@@ -2528,11 +2152,13 @@ export const approveLaneProposal = async ({
   threadId,
   assignmentNumber,
   laneId,
+  createWorktree: createWorktreeFactory = createWorktree,
   dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  createWorktree?: CreateWorktree;
   dependencies?: Partial<TeamRoleDependencies>;
 }): Promise<void> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
@@ -2743,18 +2369,24 @@ export const approveLaneProposal = async ({
     throw error;
   }
 
-  void ensurePendingDispatchWork({ threadId, dependencies });
+  void ensurePendingDispatchWork({
+    threadId,
+    createWorktree: createWorktreeFactory,
+    dependencies,
+  });
 };
 
 export const approveLanePullRequest = async ({
   threadId,
   assignmentNumber,
   laneId,
+  createWorktree: createWorktreeFactory = createWorktree,
   dependencies,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  createWorktree?: CreateWorktree;
   dependencies?: Partial<TeamRoleDependencies>;
 }): Promise<void> => {
   const resolvedDependencies = resolveTeamRoleDependencies(dependencies);
@@ -2887,6 +2519,7 @@ export const approveLanePullRequest = async ({
 
   await ensurePendingDispatchWork({
     threadId,
+    createWorktree: createWorktreeFactory,
     dependencies: resolvedDependencies,
   });
 

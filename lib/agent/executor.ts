@@ -1,8 +1,9 @@
 import { z } from "zod";
+import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamCodexEvent } from "@/lib/team/types";
 
 export type TeamStructuredExecutorInput<TSchema extends z.ZodTypeAny> = {
-  worktreePath: string;
+  worktree: Worktree;
   prompt: string;
   responseSchema: TSchema;
   codexHomePrefix: string;
