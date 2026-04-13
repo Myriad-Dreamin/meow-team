@@ -3,7 +3,12 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { runOpenSpec } from "@/lib/cli-tools/openspec";
-import { commitWorktreeChanges, ensureBranchRef, hasWorktreeChanges } from "@/lib/git/ops";
+import {
+  commitWorktreeChanges,
+  ensureBranchRef,
+  hasWorktreeChanges,
+  listWorktreeChanges,
+} from "@/lib/git/ops";
 import { createWorktree } from "@/lib/team/coding/worktree";
 import { ensureLaneWorktree, sanitizeBranchSegment } from "@/lib/team/git";
 import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
@@ -17,6 +22,14 @@ type ProposalLane = Pick<
   TeamWorkerLaneRecord,
   "laneIndex" | "taskTitle" | "taskObjective" | "proposalChangeName" | "proposalPath" | "branchName"
 >;
+
+const toPosixPath = (value: string): string => {
+  return value.split(path.sep).join("/");
+};
+
+const normalizeChangedPath = (value: string): string => {
+  return toPosixPath(value).replace(/^\.\//, "").replace(/\/+$/, "");
+};
 
 const ensureOpenSpecChange = async ({
   worktreePath,
@@ -82,6 +95,39 @@ const assertMaterializedOpenSpecArtifacts = async ({
     `OpenSpec materializer did not produce the expected artifacts for ${proposalChangeName}: ${missingArtifacts.join(
       ", ",
     )}.${reportedArtifactNote}`,
+  );
+};
+
+const assertOnlyExpectedProposalChangesRemain = async ({
+  worktreePath,
+  proposalChangeName,
+  allowedProposalPaths,
+}: {
+  worktreePath: string;
+  proposalChangeName: string;
+  allowedProposalPaths: string[];
+}): Promise<void> => {
+  const allowedRoots = allowedProposalPaths.map(
+    (proposalPath) => `${normalizeChangedPath(proposalPath)}/`,
+  );
+  const unexpectedPaths = (await listWorktreeChanges(worktreePath))
+    .map(normalizeChangedPath)
+    .filter(
+      (changedPath) =>
+        !allowedRoots.some(
+          (allowedRoot) =>
+            changedPath === allowedRoot.slice(0, -1) || changedPath.startsWith(allowedRoot),
+        ),
+    );
+
+  if (unexpectedPaths.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer left unexpected planner worktree changes for ${proposalChangeName}: ${unexpectedPaths.join(
+      ", ",
+    )}.`,
   );
 };
 
@@ -171,6 +217,7 @@ export const materializeAssignmentProposals = async ({
     path: plannerWorktreePath,
     rootPath: worktreeRoot,
   });
+  const allowedProposalPaths: string[] = [];
 
   for (const lane of activeLanes) {
     await ensureOpenSpecChange({
@@ -202,12 +249,19 @@ export const materializeAssignmentProposals = async ({
       proposalPath: lane.proposalPath,
       reportedArtifacts: materializerResult.artifactsCreated,
     });
+    allowedProposalPaths.push(lane.proposalPath);
+    await assertOnlyExpectedProposalChangesRemain({
+      worktreePath: plannerWorktreePath,
+      proposalChangeName: lane.proposalChangeName,
+      allowedProposalPaths,
+    });
   }
 
   if (await hasWorktreeChanges(plannerWorktreePath)) {
     await commitWorktreeChanges({
       worktreePath: plannerWorktreePath,
       message: `planner: add openspec proposals for ${canonicalBranchName}`,
+      pathspecs: activeLanes.map((lane) => lane.proposalPath),
     });
   }
 
