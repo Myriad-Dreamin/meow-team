@@ -28,3 +28,4 @@ execution for the coding runtime.
 
 - [dispatch-network-a1-p1-merge-team-dispatch-orchestration-into-network](../../../openspec/changes/archive/2026-04-12-dispatch-network-a1-p1-merge-team-dispatch-orchestration-into-network/specs/dispatch-network-a1-p1-merge-team-dispatch-orchestration-into-network/spec.md)
 - [coding-stages-a1-p1-split-network-ts-into-stage-oriented-lib-team-coding](../../../openspec/changes/coding-stages-a1-p1-split-network-ts-into-stage-oriented-lib-team-coding/specs/coding-stages-a1-p1-split-network-ts-into-stage-oriented-lib-team-coding/spec.md)
+- [worktree-env-a1-p1-move-worktree-into-teamrunenv](../../../openspec/changes/archive/2026-04-13-worktree-env-a1-p1-move-worktree-into-teamrunenv/specs/worktree-env-a1-p1-move-worktree-into-teamrunenv/spec.md)
