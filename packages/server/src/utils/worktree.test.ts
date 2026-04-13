@@ -26,7 +26,7 @@ import { dirname, join } from "path";
 import { tmpdir } from "os";
 import net from "node:net";
 
-describe("createWorktree", () => {
+describe.skipIf(process.platform === "win32")("createWorktree", () => {
   let tempDir: string;
   let repoDir: string;
   let paseoHome: string;

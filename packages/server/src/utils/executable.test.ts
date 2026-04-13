@@ -142,9 +142,9 @@ describe("findExecutable", () => {
 
     await expect(findExecutable("codex")).resolves.toBe("/usr/local/bin/codex");
     expect(execFileMock).toHaveBeenCalledWith(
-      "which",
+      process.platform === "win32" ? "where.exe" : "which",
       ["codex"],
-      { encoding: "utf8" },
+      process.platform === "win32" ? { encoding: "utf8", windowsHide: true } : { encoding: "utf8" },
       expect.any(Function),
     );
   });
@@ -170,7 +170,7 @@ describe("findExecutable", () => {
       },
     });
 
-    await expect(findExecutable("codex")).resolves.toBeNull();
+    await expect(findExecutable(missingBinaryName)).resolves.toBeNull();
   });
 });
 
