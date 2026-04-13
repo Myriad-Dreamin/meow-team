@@ -20,10 +20,10 @@ describe("request-title conventional formatting", () => {
     });
   });
 
-  it("preserves the single proposal title when building a canonical request title", () => {
+  it("prefers the generated request title when a single proposal gets conventional metadata", () => {
     expect(
       buildCanonicalRequestTitle({
-        requestTitle: "Dispatch Coordination",
+        requestTitle: "standardize conventional request and PR titles",
         taskTitle: "Standardize Conventional Request and PR Titles",
         taskCount: 1,
         conventionalTitle: {
@@ -31,7 +31,7 @@ describe("request-title conventional formatting", () => {
           scope: "vsc/command",
         },
       }),
-    ).toBe("dev(vsc/command): Standardize Conventional Request and PR Titles");
+    ).toBe("dev(vsc/command): standardize conventional request and PR titles");
   });
 
   it("uses the lane task title when multiple proposals share one request group", () => {

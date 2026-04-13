@@ -11,7 +11,7 @@ Generate a concise engineering request title and optional Conventional Commit me
 
 - If tasks are supplied, infer the appropriate `type` from the list: [[param:conventionalTitleTypes]].
 - Set `scope` to a short slash-delimited roadmap/topic identifier **only** if it materially clarifies the work. Otherwise set `scope` to `null`.
-- When `scope` is not `null`:
+- When you set `conventionalTitle` to a non-null value:
   - The title must begin with a lowercased verb phrase (e.g., `migrate thread schema`).
   - The verb used in the title **must not** repeat the same leading verb implied by `type`.
 - If no tasks are provided, set `conventionalTitle` to `null`.

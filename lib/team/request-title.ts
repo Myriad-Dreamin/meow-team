@@ -255,7 +255,7 @@ export const buildCanonicalRequestTitle = ({
     requestTitle,
     taskTitle,
     taskCount,
-    preferTaskTitle: true,
+    preferTaskTitle: !(taskCount === 1 && metadata && resolveRequestTitleSubject(requestTitle)),
   });
 
   return metadata
