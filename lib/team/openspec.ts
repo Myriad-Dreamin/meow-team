@@ -164,21 +164,40 @@ const calculateChangedPathDelta = ({
   });
 };
 
-const assertProposalChangeDeltaIsIsolated = ({
-  beforePaths,
-  afterPaths,
+const assertProposalChangeDeltaIncludesMaterializedArtifacts = ({
+  changedPaths,
   proposalChangeName,
   proposalPath,
 }: {
-  beforePaths: string[];
-  afterPaths: string[];
+  changedPaths: string[];
   proposalChangeName: string;
   proposalPath: string;
 }): void => {
-  const unexpectedPaths = calculateChangedPathDelta({
-    beforePaths,
-    afterPaths,
-  }).filter((changedPath) => !isPathWithinProposalPath(changedPath, proposalPath));
+  const materializedPaths = changedPaths.filter((changedPath) =>
+    isPathWithinProposalPath(changedPath, proposalPath),
+  );
+
+  if (materializedPaths.length > 0) {
+    return;
+  }
+
+  throw new Error(
+    `OpenSpec materializer must leave planner-owned worktree changes for ${proposalChangeName}; the planner worktree was clean after materialization.`,
+  );
+};
+
+const assertProposalChangeDeltaIsIsolated = ({
+  changedPaths,
+  proposalChangeName,
+  proposalPath,
+}: {
+  changedPaths: string[];
+  proposalChangeName: string;
+  proposalPath: string;
+}): void => {
+  const unexpectedPaths = changedPaths.filter(
+    (changedPath) => !isPathWithinProposalPath(changedPath, proposalPath),
+  );
 
   if (unexpectedPaths.length === 0) {
     return;
@@ -437,9 +456,17 @@ export const materializeAssignmentProposals = async ({
     });
     const changedPathsAfterMaterialization =
       await listNormalizedWorktreeChanges(plannerWorktreePath);
-    await assertProposalChangeDeltaIsIsolated({
+    const proposalChangeDelta = calculateChangedPathDelta({
       beforePaths: changedPathsBeforeMaterialization,
       afterPaths: changedPathsAfterMaterialization,
+    });
+    assertProposalChangeDeltaIncludesMaterializedArtifacts({
+      changedPaths: proposalChangeDelta,
+      proposalChangeName: lane.proposalChangeName,
+      proposalPath: lane.proposalPath,
+    });
+    await assertProposalChangeDeltaIsIsolated({
+      changedPaths: proposalChangeDelta,
       proposalChangeName: lane.proposalChangeName,
       proposalPath: lane.proposalPath,
     });
