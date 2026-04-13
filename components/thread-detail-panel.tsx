@@ -220,7 +220,9 @@ export function ThreadDetailPanel({
           await refreshAll();
           setActionNotice("Thread archived. It now appears in Archived Threads.");
         } catch (error) {
-          setRefreshError(error instanceof Error ? error.message : "Unable to archive this thread.");
+          setRefreshError(
+            error instanceof Error ? error.message : "Unable to archive this thread.",
+          );
           setActionNotice(null);
         } finally {
           setArchivePending(false);
@@ -333,7 +335,7 @@ export function ThreadDetailPanel({
 
         {isThreadArchived ? (
           <span className="status-pill status-completed">Archived</span>
-        ) : archiveEnabled ? (
+        ) : (
           <button
             className="workspace-notification-action"
             disabled={archivePending}
@@ -342,8 +344,6 @@ export function ThreadDetailPanel({
           >
             {archivePending ? "Archiving..." : "Archive Thread"}
           </button>
-        ) : (
-          <p className="thread-detail-action-note">Archive becomes available after the thread is inactive.</p>
         )}
       </section>
 
