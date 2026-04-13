@@ -10,7 +10,7 @@ outline: deep
 
 ## Extension Package
 
-Track the VS Code extension package that lives in `packages/vscode-extension`,
+Track the VS Code extension package that lives in `editors/vscode`,
 including activation events, command contributions, configuration, packaging,
 and the local VSIX install flow.
 
@@ -24,14 +24,16 @@ the cues that make backend connection state visible to the owner.
 
 Track how the extension talks to the existing Next.js backend through explicit
 GET/POST requests, including base URL configuration, request shaping, and the
-rule that workflow orchestration stays on the server.
+rule that workflow orchestration stays on the server. This now includes
+backend-routed attention notifications via `GET /api/team/notifications`.
 
 ## Local Runtime
 
 Track the development and operator flow for running the extension beside the
 Next.js app, including `pnpm vscode:build`, `pnpm vscode:package`,
-`pnpm vscode:install`, backend discovery, and degraded UX when the backend is
-offline or misconfigured.
+`pnpm vscode:install`, the esbuild-generated `out/extension.js` bundle,
+backend discovery, and degraded UX when the backend is offline or
+misconfigured.
 
 ## Related Specs
 

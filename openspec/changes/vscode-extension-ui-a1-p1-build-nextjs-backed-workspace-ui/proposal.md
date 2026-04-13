@@ -11,7 +11,7 @@ contracts as the source of truth.
 - Introduce the
   `vscode-extension-ui-a1-p1-build-nextjs-backed-workspace-ui` OpenSpec change
   for proposal "Build Next.js-backed VS Code workspace UI".
-- Plan a VS Code extension package under `packages/vscode-extension` that
+- Plan a VS Code extension package under `editors/vscode` that
   contributes the meow-team workspace UI, commands, and configuration entry
   points.
 - Keep runtime orchestration and data APIs in the existing Next.js backend, and
@@ -27,7 +27,7 @@ contracts as the source of truth.
 ### New Capabilities
 
 - `vscode-extension-workspace-ui`: Provide a VS Code extension package at
-  `packages/vscode-extension` that hosts the meow-team workspace experience,
+  `editors/vscode` that hosts the meow-team workspace experience,
   commands, and editor-native navigation surfaces.
 - `vscode-extension-http-bridge`: Provide the extension-to-Next.js transport
   contract for GET/POST requests, backend base URL configuration, and degraded
@@ -40,7 +40,7 @@ contracts as the source of truth.
 ## Impact
 
 - Affected repository: `meow-team`
-- Affected code and docs: `packages/vscode-extension`, root workspace/package
+- Affected code and docs: `editors/vscode`, root workspace/package
   wiring, shared UI utilities if needed, `app/api/**` surfaces consumed by the
   extension, and `docs/roadmap/vscode-extension/*`
 - Affected systems: VS Code extension host, VS Code webviews, the Next.js

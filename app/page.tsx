@@ -3,6 +3,7 @@ import {
   getTeamRepositoryPickerModel,
   getTeamWorkspaceThreadSummaryLists,
 } from "@/lib/team/history";
+import { buildTeamNotificationsResponse } from "@/lib/team/notifications";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
 import { getTeamServerState } from "@/lib/team/server-state";
 import { teamConfig } from "@/team.config";
@@ -22,6 +23,10 @@ export default async function HomePage() {
   });
 
   const hasApiKey = teamRuntimeConfig.hasApiKey;
+  const initialNotifications = buildTeamNotificationsResponse({
+    threads: threadSummaryLists.threads,
+    target: teamConfig.notifications.target,
+  });
 
   return (
     <main className="page-shell">
@@ -32,6 +37,7 @@ export default async function HomePage() {
         }
         initialArchivedThreads={threadSummaryLists.archivedThreads}
         initialLogThreadId={threadSummaryLists.threads[0]?.threadId ?? null}
+        initialNotifications={initialNotifications}
         initialRepositoryPicker={repositoryPicker}
         initialThreads={threadSummaryLists.threads}
         workerCount={teamConfig.dispatch.workerCount}

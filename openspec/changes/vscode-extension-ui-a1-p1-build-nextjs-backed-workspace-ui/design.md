@@ -2,7 +2,7 @@
 
 Meow Team currently ships its operator experience through the Next.js app. This
 change adds a second delivery surface in the form of a VS Code extension under
-`packages/vscode-extension`, but the backend, persistence, and workflow
+`editors/vscode`, but the backend, persistence, and workflow
 orchestration stay in the existing app. The main design challenge is deciding
 how thin the extension should stay while still feeling like a first-class
 editor UI.
@@ -11,7 +11,7 @@ editor UI.
 
 **Goals:**
 
-- Add a plan for a VS Code extension package under `packages/vscode-extension`.
+- Add a plan for a VS Code extension package under `editors/vscode`.
 - Host the meow-team workspace inside VS Code through editor-native entry
   points and a webview-capable UI surface.
 - Keep the Next.js backend as the source of truth for reads and mutations.
@@ -29,16 +29,16 @@ editor UI.
 
 ## Decisions
 
-### Place the extension in `packages/vscode-extension`
+### Place the extension in `editors/vscode`
 
-The extension package will live in `packages/vscode-extension` so it stays
-inside the existing workspace package boundary while still being clearly
-treated as an editor delivery surface.
+The extension package will live in `editors/vscode` so it stays clearly scoped
+as an editor delivery surface while still participating in the existing
+workspace.
 
-Alternative considered: keep the earlier `editors/vscode` path from the
-proposal draft. This was rejected because the latest request explicitly asks
-for `packages/vscode-extension`, which also matches the current
-`pnpm-workspace.yaml` package glob.
+Alternative considered: keep the extension in the older workspace-package
+location. This was rejected because the current repository layout now treats
+editor deliverables as `editors/*` workspaces and the active relocation
+proposal makes `editors/vscode` the canonical path.
 
 ### Use a webview-centered UI with editor-native entry points
 
@@ -95,7 +95,7 @@ detect.
 
 ## Migration Plan
 
-1. Scaffold the extension package in `packages/vscode-extension` with manifest,
+1. Scaffold the extension package in `editors/vscode` with manifest,
    build, packaging, and local install wiring.
 2. Add commands, settings, and a minimal workspace webview shell.
 3. Implement the HTTP bridge for GET/POST calls to the Next.js backend.

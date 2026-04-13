@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildEndpointUrl, normalizeBackendBaseUrl, runTeam, TeamApiError } from "./team-client";
+import {
+  buildEndpointUrl,
+  getNotifications,
+  normalizeBackendBaseUrl,
+  runTeam,
+  TeamApiError,
+} from "./team-client";
 
 describe("normalizeBackendBaseUrl", () => {
   it("removes trailing slashes and keeps path prefixes", () => {
@@ -128,5 +134,40 @@ describe("runTeam", () => {
       message: "Branches already exist.",
       branches: ["requests/example/a1-proposal-1"],
     });
+  });
+});
+
+describe("getNotifications", () => {
+  it("reads the backend-routed notification snapshot", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          generatedAt: "2026-04-14T00:00:00.000Z",
+          target: "vscode",
+          notifications: [
+            {
+              body: "Proposal 1 is waiting for human approval in thread thread-1.",
+              fingerprint: "thread:thread-1:lane:lane-1:awaiting_human_approval:1:1:0",
+              laneId: "lane-1",
+              reason: "awaiting_human_approval",
+              tag: "thread-attention:lane-1:awaiting_human_approval",
+              threadId: "thread-1",
+              title: "Example request requires approval",
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+    const response = await getNotifications("http://127.0.0.1:3000");
+
+    expect(response.target).toBe("vscode");
+    expect(response.notifications).toHaveLength(1);
+    expect(response.notifications[0]?.reason).toBe("awaiting_human_approval");
   });
 });

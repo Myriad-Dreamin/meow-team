@@ -7,9 +7,15 @@ declare module "vscode" {
 
   export interface ExtensionContext {
     extensionUri: Uri;
+    globalState: Memento;
     subscriptions: {
       push(...items: Disposable[]): number;
     };
+  }
+
+  export interface Memento {
+    get<T>(key: string, defaultValue?: T): T;
+    update(key: string, value: unknown): Thenable<void>;
   }
 
   export interface ConfigurationChangeEvent {
@@ -62,6 +68,8 @@ declare module "vscode" {
 
   export namespace window {
     function registerWebviewViewProvider(viewId: string, provider: WebviewViewProvider): Disposable;
+    function showErrorMessage(message: string, ...items: string[]): Thenable<string | undefined>;
+    function showWarningMessage(message: string, ...items: string[]): Thenable<string | undefined>;
   }
 
   export class Uri {

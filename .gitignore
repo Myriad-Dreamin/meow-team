@@ -5,8 +5,9 @@ node_modules
 # next.js build output
 .next
 out
-packages/vscode-extension/dist
-packages/vscode-extension/*.vsix
+editors/vscode/dist
+editors/vscode/out
+editors/vscode/*.vsix
 
 # production
 /build

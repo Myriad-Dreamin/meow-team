@@ -9,6 +9,7 @@ const config = [
       "node_modules/**",
       ".next/**",
       "out/**",
+      "**/out/**",
       "build/**",
       "**/dist/**",
       ".pnpm-store/**",

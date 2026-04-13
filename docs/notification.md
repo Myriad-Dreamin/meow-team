@@ -5,28 +5,41 @@ outline: deep
 
 # Desktop notifications
 
-`TeamWorkspace` can raise browser desktop notifications for attention-needed
-threads. This guide documents the exact prerequisites, trigger rules, dedupe
-behavior, and the client bug that previously prevented alerts from firing.
+The repository routes attention-needed alerts through a backend-owned target.
+This guide documents the exact prerequisites, trigger rules, dedupe behavior,
+and how browser and VS Code delivery differ.
+
+## Notification target
+
+`team.config.ts` owns `notifications.target`:
+
+- `browser`: the web UI can raise browser desktop notifications.
+- `vscode`: the VS Code extension polls `GET /api/team/notifications` and the
+  browser stays silent.
+
+The backend classifies approval and failure attention states in
+`lib/team/notifications.ts` and publishes the active snapshot through both
+`GET /api/team/threads` and `GET /api/team/notifications`.
 
 ## Prerequisites
 
-Desktop alerts only fire when all of the following are true:
+Browser desktop alerts only fire when all of the following are true:
 
 - The current browser exposes the `Notification` API.
 - The user grants browser notification permission for this site.
 - The workspace "Desktop Alerts" setting is turned on.
+- `team.config.ts` keeps `notifications.target === "browser"`.
 - The workspace page is open so the client can keep polling
   `GET /api/team/threads`.
 
-There is no background push channel in this repository. If the page is closed,
-the client cannot emit desktop alerts.
+VS Code alerts require the extension to be installed and activated. The
+extension starts polling on editor startup and uses the same backend snapshot,
+so approval and failure alerts can continue without the browser page open.
 
 ## Exact trigger rules
 
-The client evaluates `components/thread-attention-utils.ts` on every thread
-refresh and creates a desktop alert candidate for each active attention-needed
-state:
+The backend evaluates `lib/team/notifications.ts` on every snapshot refresh and
+creates an alert candidate for each active attention-needed state:
 
 - Approval wait: a worker lane has `status === "awaiting_human_approval"`.
 - Final approval wait: a worker lane has `status === "approved"`,
@@ -50,9 +63,14 @@ current approval or failure instance:
   number.
 - Lane fingerprints also include `runCount` and `revisionCount`.
 
-The browser should show one desktop alert per fingerprint. A new alert is
-eligible when the underlying state changes enough to produce a new fingerprint,
-for example after a requeue, a new approval request, or a new failure.
+Each client dedupes by fingerprint inside its own local storage:
+
+- The browser stores delivered fingerprints in local storage.
+- The VS Code extension stores delivered fingerprints in extension state.
+
+A new alert is eligible when the underlying state changes enough to produce a
+new fingerprint, for example after a requeue, a new approval request, or a new
+failure.
 
 ## When alerts should not fire
 
@@ -61,30 +79,19 @@ Alerts should not fire in these cases:
 - The browser does not support notifications.
 - Permission is blocked or has not been granted yet.
 - The workspace toggle is off.
+- The backend target is `vscode`, which reserves delivery for the extension.
 - The thread is not in one of the approval or failure states listed above.
 - The same fingerprint was already delivered in this browser profile.
 - An attention state disappeared before notifications became available again.
 
 If notifications are unavailable when an attention state becomes active, the
-state stays pending. It will notify once the browser can deliver alerts again,
-as long as the state is still active.
+state stays pending for the active delivery target. It will notify once that
+client can deliver alerts again, as long as the state is still active.
 
-## Why notifications were not firing
+## Current behavior
 
-The previous `components/team-workspace.tsx` effect wrote every active
-attention fingerprint into local storage before calling `window.Notification`.
-That meant approval and failure states were marked as "seen" even when:
-
-- The user had not enabled desktop alerts yet.
-- The browser permission prompt had not been approved yet.
-- The page was hydrating its initial thread list.
-
-Once the fingerprint was stored, later refreshes treated the notification as
-already handled and suppressed the actual browser alert.
-
-## Current fix
-
-The client now stores only fingerprints that were actually delivered by
-`window.Notification`, under a fresh local-storage key dedicated to delivered
-alerts. This keeps approval and failure states pending until the browser can
-show them, while still deduping alerts that were already sent successfully.
+The browser now stores only fingerprints that were actually delivered by
+`window.Notification`, and only when the backend target is `browser`. The VS
+Code extension follows the same backend snapshot but stores its own delivered
+fingerprints in extension state and shows warning or error messages when the
+target is `vscode`.

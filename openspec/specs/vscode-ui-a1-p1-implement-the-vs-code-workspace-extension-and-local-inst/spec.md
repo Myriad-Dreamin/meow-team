@@ -3,7 +3,7 @@
 ## Purpose
 
 Define the approved VS Code workspace-extension delivery so the repository
-ships the editor surface from `packages/vscode-extension`, bridges it to the
+ships the editor surface from `editors/vscode`, bridges it to the
 existing Next.js `/api/team/*` backend, and supports local VSIX packaging and
 installation.
 
@@ -12,7 +12,7 @@ installation.
 ### Requirement: Implement the VS Code workspace extension and local install flow
 
 The system SHALL implement the approved proposal recorded in OpenSpec change `vscode-ui-a1-p1-implement-the-vs-code-workspace-extension-and-local-inst`
-and keep the work aligned with this proposal's objective: Continue `vscode-extension-ui-a1-p1-build-nextjs-backed-workspace-ui` by reconciling the package boundary in favor of the requested `packages/vscode-extension` location, scaffolding a VS Code webview extension using `/home/kamiyoru/work/rust/tinymist/editors/vscode` as the reference shape, wiring the first workspace read and mutation flows to the existing Next.js `/api/team/*` endpoints through a configurable HTTP bridge, and adding a root `vscode:install` script that packages and installs the built VSIX into local VS Code via `code`.
+and keep the work aligned with this proposal's objective: Continue `vscode-extension-ui-a1-p1-build-nextjs-backed-workspace-ui` by shipping the VS Code extension from `editors/vscode`, scaffolding a VS Code webview extension using `/home/kamiyoru/work/rust/tinymist/editors/vscode` as the reference shape, wiring the first workspace read and mutation flows to the existing Next.js `/api/team/*` endpoints through a configurable HTTP bridge, and adding a root `vscode:install` script that packages and installs the built VSIX into local VS Code via `code`.
 
 #### Scenario: Approved proposal enters execution
 

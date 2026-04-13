@@ -21,6 +21,11 @@ export type TeamWorkerLaneStatus =
 export type TeamHumanFeedbackScope = "assignment" | "proposal";
 
 export type TeamApprovalTarget = "proposal" | "pull_request";
+export type TeamNotificationTarget = "browser" | "vscode";
+export type TeamAttentionNotificationReason =
+  | "awaiting_human_approval"
+  | "lane_failed"
+  | "thread_failed";
 
 export type TeamRepositoryOption = {
   id: string;
@@ -190,6 +195,22 @@ export type TeamWorkspaceResponse = {
   repositoryPicker: TeamRepositoryPickerModel;
 };
 
+export type TeamAttentionNotification = {
+  body: string;
+  fingerprint: string;
+  laneId: string | null;
+  reason: TeamAttentionNotificationReason;
+  tag: string;
+  threadId: string;
+  title: string;
+};
+
+export type TeamNotificationsResponse = {
+  generatedAt: string;
+  notifications: TeamAttentionNotification[];
+  target: TeamNotificationTarget;
+};
+
 export type TeamThreadDetailResponse = {
   thread: TeamThreadDetail;
 };
@@ -290,6 +311,10 @@ const isStringArray = (value: unknown): value is string[] => {
   return Array.isArray(value) && value.every(isString);
 };
 
+const isNotificationTarget = (value: unknown): value is TeamNotificationTarget => {
+  return value === "browser" || value === "vscode";
+};
+
 const isRepositoryOption = (value: unknown): value is TeamRepositoryOption => {
   return (
     isRecord(value) &&
@@ -368,6 +393,29 @@ export const isWorkspaceResponse = (value: unknown): value is TeamWorkspaceRespo
     Array.isArray(value.archivedThreads) &&
     value.archivedThreads.every(isThreadSummary) &&
     isRepositoryPickerModel(value.repositoryPicker)
+  );
+};
+
+const isAttentionNotification = (value: unknown): value is TeamAttentionNotification => {
+  return (
+    isRecord(value) &&
+    isString(value.body) &&
+    isString(value.fingerprint) &&
+    (value.laneId === null || isString(value.laneId)) &&
+    isString(value.reason) &&
+    isString(value.tag) &&
+    isString(value.threadId) &&
+    isString(value.title)
+  );
+};
+
+export const isNotificationsResponse = (value: unknown): value is TeamNotificationsResponse => {
+  return (
+    isRecord(value) &&
+    isString(value.generatedAt) &&
+    isNotificationTarget(value.target) &&
+    Array.isArray(value.notifications) &&
+    value.notifications.every(isAttentionNotification)
   );
 };
 

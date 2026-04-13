@@ -27,8 +27,8 @@ const disposable = () => ({
 });
 
 export const commands = {
-  async executeCommand() {
-    return undefined;
+  async executeCommand<T = unknown>() {
+    return undefined as T;
   },
   registerCommand() {
     return disposable();
@@ -38,6 +38,12 @@ export const commands = {
 export const window = {
   registerWebviewViewProvider() {
     return disposable();
+  },
+  async showErrorMessage() {
+    return undefined;
+  },
+  async showWarningMessage() {
+    return undefined;
   },
 };
 
@@ -51,5 +57,14 @@ export const workspace = {
   },
   onDidChangeConfiguration() {
     return disposable();
+  },
+};
+
+export const globalState = {
+  get<T>(_key: string, defaultValue?: T) {
+    return defaultValue as T;
+  },
+  async update() {
+    return undefined;
   },
 };

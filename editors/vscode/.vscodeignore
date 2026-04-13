@@ -3,3 +3,4 @@ scripts/**
 tsconfig.build.json
 *.tsbuildinfo
 dist/**/*.vsix
+out/**/*.map
