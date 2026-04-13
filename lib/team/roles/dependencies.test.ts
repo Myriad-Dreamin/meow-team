@@ -153,7 +153,15 @@ describe("resolveTeamRoleDependencies", () => {
   });
 
   it("builds default agent instances from an injected executor", async () => {
-    const executor = vi.fn(async () => {
+    const executor = vi.fn(async ({ codexHomePrefix }: { codexHomePrefix: string }) => {
+      if (codexHomePrefix === "openspec-materializer") {
+        return {
+          summary: "Materialized artifacts.",
+          deliverable: "Wrote the OpenSpec proposal files.",
+          artifactsCreated: ["openspec/changes/change-1/proposal.md"],
+        };
+      }
+
       return {
         title: "Injected Title",
         conventionalTitle: null,
@@ -174,11 +182,44 @@ describe("resolveTeamRoleDependencies", () => {
       title: "Injected Title",
       conventionalTitle: null,
     });
+    await expect(
+      dependencies.openSpecMaterializerAgent.run({
+        worktree: createWorktree({ path: "/tmp/meow-team" }),
+        state: {
+          repositoryPath: "/tmp/meow-team",
+          canonicalBranchName: "requests/example/a1",
+          proposalBranchName: "requests/example/a1-proposal-1",
+          proposalChangeName: "change-1",
+          proposalPath: "openspec/changes/change-1",
+          requestTitle: "feat(dispatch): Materialize proposal artifacts",
+          conventionalTitle: {
+            type: "feat",
+            scope: "dispatch",
+          },
+          taskTitle: "Materialize proposal artifacts",
+          taskObjective: "Write proposal files from the dedicated agent.",
+          plannerSummary: "Planner summary",
+          plannerDeliverable: "Planner deliverable",
+          requestInput: "Materialize the planner proposal artifacts.",
+          worktreeRoot: "/tmp/team-worktrees",
+        },
+      }),
+    ).resolves.toEqual({
+      summary: "Materialized artifacts.",
+      deliverable: "Wrote the OpenSpec proposal files.",
+      artifactsCreated: ["openspec/changes/change-1/proposal.md"],
+    });
 
     expect(executor).toHaveBeenCalledWith(
       expect.objectContaining({
         worktree: createWorktree({ path: "/tmp/meow-team" }),
         codexHomePrefix: "request-title",
+      }),
+    );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktree: createWorktree({ path: "/tmp/meow-team" }),
+        codexHomePrefix: "openspec-materializer",
       }),
     );
     expect(runCodexStructuredOutputMock).not.toHaveBeenCalled();
@@ -188,11 +229,16 @@ describe("resolveTeamRoleDependencies", () => {
     const requestTitleAgent = {
       run: vi.fn(),
     };
+    const openSpecMaterializerAgent = {
+      run: vi.fn(),
+    };
 
     const dependencies = resolveTeamRoleDependencies({
       requestTitleAgent,
+      openSpecMaterializerAgent,
     });
 
     expect(dependencies.requestTitleAgent).toBe(requestTitleAgent);
+    expect(dependencies.openSpecMaterializerAgent).toBe(openSpecMaterializerAgent);
   });
 });
