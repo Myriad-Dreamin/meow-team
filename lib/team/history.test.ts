@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   archiveTeamThread,
+  claimTeamThreadWorktree,
   countActiveDispatchThreads,
   getTeamRepositoryPickerModel,
   getTeamThreadRecord,
@@ -514,6 +515,23 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     const archivedThread = await getTeamThreadRecord(storePath, "claimed-thread");
     expect(archivedThread?.archivedAt).not.toBeNull();
     expect(archivedThread?.data.threadWorktree).toBeNull();
+    expect(archivedThread?.dispatchAssignments[0]?.threadSlot).toBe(claimedWorktree.slot);
+    expect(archivedThread?.dispatchAssignments[0]?.plannerWorktreePath).toBe(claimedWorktree.path);
+    expect(archivedThread?.dispatchAssignments[0]?.lanes[0]?.worktreePath).toBe(
+      claimedWorktree.path,
+    );
+
+    const nextState = createRunState();
+    nextState.selectedRepository = repository;
+
+    const reclaimedWorktree = await claimTeamThreadWorktree({
+      threadFile: storePath,
+      threadId: "future-thread",
+      state: nextState,
+      input: "Reuse the archived slot.",
+    });
+
+    expect(reclaimedWorktree).toEqual(claimedWorktree);
   });
 
   it("imports a legacy JSON store once and persists later updates in SQLite", async () => {

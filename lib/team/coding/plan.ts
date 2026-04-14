@@ -17,16 +17,11 @@ import {
   appendTeamExecutionStep,
   claimTeamThreadWorktree,
   getTeamThreadRecord,
-  listLivingThreadWorktreeClaims,
   synchronizeDispatchAssignment,
   updateTeamThreadRecord,
   upsertTeamThreadRun,
 } from "@/lib/team/history";
-import {
-  applyThreadOwnedWorktreeToAssignment,
-  claimThreadOwnedWorktree,
-  resolveThreadOwnedWorktree,
-} from "@/lib/team/coding/thread-worktree";
+import { applyThreadOwnedWorktreeToAssignment } from "@/lib/team/coding/thread-worktree";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
 import {
   buildProposalChangeName,
@@ -588,51 +583,6 @@ const buildRunState = ({
   };
 };
 
-const resolvePlanningWorktree = async ({
-  threadId,
-  selectedRepository,
-  existingThread,
-  currentWorktree = null,
-}: {
-  threadId: string;
-  selectedRepository: TeamRepositoryOption | null;
-  existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
-  currentWorktree?: Worktree | null;
-}): Promise<Worktree> => {
-  if (!selectedRepository) {
-    return createRepositoryWorktree({
-      path: process.cwd(),
-    });
-  }
-
-  const currentThreadWorktree = resolveThreadOwnedWorktree({
-    repository: selectedRepository,
-    configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
-    candidate: {
-      threadWorktree: currentWorktree ?? existingThread?.data.threadWorktree,
-      dispatchAssignments: existingThread?.dispatchAssignments ?? [],
-    },
-  });
-  if (currentThreadWorktree?.slot) {
-    return currentThreadWorktree;
-  }
-  const claimedWorktree = claimThreadOwnedWorktree({
-    repository: selectedRepository,
-    configuredWorktreeRoot: teamConfig.dispatch.worktreeRoot,
-    currentWorktree: currentThreadWorktree,
-    livingClaims: await listLivingThreadWorktreeClaims(teamConfig.storage.threadFile, {
-      excludeThreadId: threadId,
-    }),
-    workerCount: teamConfig.dispatch.workerCount,
-  });
-
-  if (!claimedWorktree) {
-    throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
-  }
-
-  return claimedWorktree;
-};
-
 const preparePlanningWorktree = async ({
   repository,
   worktree,
@@ -661,6 +611,41 @@ const preparePlanningWorktree = async ({
     branchName: resolvedBaseBranch,
     startPoint: resolvedBaseBranch,
   });
+};
+
+const ensurePlanningStageWorktree = async ({
+  threadId,
+  input,
+  state,
+}: {
+  threadId: string;
+  input: string;
+  state: TeamRunState;
+}): Promise<Worktree> => {
+  const selectedRepository = state.selectedRepository;
+  if (!selectedRepository) {
+    return createRepositoryWorktree({
+      path: process.cwd(),
+    });
+  }
+
+  const worktree = await claimTeamThreadWorktree({
+    threadFile: teamConfig.storage.threadFile,
+    threadId,
+    state,
+    input,
+  });
+  if (!worktree?.slot) {
+    throw new DispatchThreadCapacityError(teamConfig.dispatch.workerCount);
+  }
+
+  await preparePlanningWorktree({
+    repository: selectedRepository,
+    worktree,
+  });
+  state.threadWorktree = worktree;
+
+  return worktree;
 };
 
 const resolveRequestMetadata = async ({
@@ -964,26 +949,10 @@ export const buildPlanningStageState = async (
     threadId: args.threadId,
     assignmentNumber: state.assignmentNumber,
   });
-  const worktree = selectedRepository
-    ? await claimTeamThreadWorktree({
-        threadFile: teamConfig.storage.threadFile,
-        threadId: args.threadId,
-        state,
-        input: args.input,
-      })
-    : await resolvePlanningWorktree({
-        threadId: args.threadId,
-        selectedRepository,
-        existingThread,
-      });
-  if (!worktree) {
-    throw new Error(
-      `Thread ${args.threadId} could not claim the required meow worktree before planning.`,
-    );
-  }
-  await preparePlanningWorktree({
-    repository: selectedRepository,
-    worktree,
+  const worktree = await ensurePlanningStageWorktree({
+    threadId: args.threadId,
+    input: args.input,
+    state,
   });
 
   const requestMetadata = await resolveRequestMetadata({
@@ -1022,21 +991,9 @@ export const runPlanningStage = async (
 ): Promise<TeamRunMetadataGenerationStageState> => {
   const {
     args,
-    context: { threadId, selectedRepository, state },
+    context: { threadId, selectedRepository, state, worktree },
   } = currentState;
-  const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
-  const worktree = await resolvePlanningWorktree({
-    threadId,
-    selectedRepository,
-    existingThread: existingThread ?? currentState.context.existingThread,
-    currentWorktree: currentState.context.worktree,
-  });
-  currentState.context.worktree = worktree;
   state.threadWorktree = selectedRepository ? worktree : null;
-  await preparePlanningWorktree({
-    repository: selectedRepository,
-    worktree,
-  });
   const forwardPlannerEvent = createPlannerEventForwarder({
     env,
     threadId,
@@ -1089,26 +1046,13 @@ export const runMetadataGenerationStage = async (
     teamConfig.storage.threadFile,
     currentState.context.threadId,
   );
-  const worktree = await resolvePlanningWorktree({
-    threadId: currentState.context.threadId,
-    selectedRepository: currentState.context.selectedRepository,
-    existingThread: persistedThread ?? currentState.context.existingThread,
-    currentWorktree: currentState.context.worktree,
-  });
-  currentState.context.worktree = worktree;
-  currentState.context.state.threadWorktree = currentState.context.selectedRepository
-    ? worktree
-    : null;
-  await preparePlanningWorktree({
-    repository: currentState.context.selectedRepository,
-    worktree,
-  });
   const {
     args,
-    context: { threadId, selectedRepository, requestMetadata, state },
+    context: { threadId, selectedRepository, requestMetadata, state, worktree },
     plannerResponse,
     plannerRoleName,
   } = currentState;
+  state.threadWorktree = selectedRepository ? worktree : null;
   const forwardPlannerEvent = createPlannerEventForwarder({
     env,
     threadId,

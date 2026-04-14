@@ -461,13 +461,11 @@ describe.sequential("runTeam", () => {
     expect(callOrder).toEqual([
       "prepare",
       "request-title:initial",
-      "prepare",
       "planner",
-      "prepare",
       "request-title:metadata",
     ]);
     expect(executorMock).not.toHaveBeenCalled();
-    expect(ensureLaneWorktreeMock).toHaveBeenCalledTimes(3);
+    expect(ensureLaneWorktreeMock).toHaveBeenCalledTimes(1);
     expect(ensureLaneWorktreeMock).toHaveBeenNthCalledWith(1, {
       repositoryPath: repository.path,
       worktreeRoot: path.join(repository.path, teamConfig.dispatch.worktreeRoot),
@@ -528,6 +526,7 @@ describe.sequential("runTeam", () => {
     });
     expect(thread?.data.requestText).toBe("Ship reliable dispatch coordination.");
     expect(thread?.data.handoffs.planner?.summary).toBe("Planner summary");
+    expect(thread?.data.threadWorktree).toEqual(createManagedPlanningWorktree(repository.path));
     expect(thread?.results).toHaveLength(1);
   });
 
@@ -972,14 +971,7 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
     await runTeam(env, structuredClone(persistedStage));
 
-    expect(ensureLaneWorktreeMock).toHaveBeenCalledTimes(2);
-    expect(ensureLaneWorktreeMock).toHaveBeenNthCalledWith(1, {
-      repositoryPath: repository.path,
-      worktreeRoot: path.join(repository.path, teamConfig.dispatch.worktreeRoot),
-      worktreePath: createManagedPlanningWorktree(repository.path).path,
-      branchName: "main",
-      startPoint: "main",
-    });
+    expect(ensureLaneWorktreeMock).not.toHaveBeenCalled();
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
     expect(materializeAssignmentProposalsMock).toHaveBeenCalledTimes(1);
 
@@ -987,6 +979,7 @@ describe.sequential("runTeam", () => {
     expect(thread?.dispatchAssignments).toHaveLength(1);
     expect(thread?.results).toHaveLength(1);
     expect(thread?.data.requestTitle).toBe("dev(dispatch/coordination): stabilize dispatch flow");
+    expect(thread?.data.threadWorktree).toEqual(createManagedPlanningWorktree(repository.path));
   });
 
   it("fails fast when all shared meow slots are already assigned to active threads", async () => {
