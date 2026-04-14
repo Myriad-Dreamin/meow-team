@@ -10,6 +10,7 @@ import {
   buildCanonicalBranchName,
   buildLaneBranchName,
   deleteManagedBranches,
+  ensureLaneWorktree,
   ExistingBranchesRequireDeleteError,
 } from "@/lib/team/git";
 import {
@@ -632,6 +633,36 @@ const resolvePlanningWorktree = async ({
   return claimedWorktree;
 };
 
+const preparePlanningWorktree = async ({
+  repository,
+  worktree,
+}: {
+  repository: TeamRepositoryOption | null;
+  worktree: Worktree;
+}): Promise<void> => {
+  if (!repository || !worktree.slot) {
+    return;
+  }
+
+  const resolvedBaseBranch = await resolveRepositoryBaseBranch(
+    repository.path,
+    teamConfig.dispatch.baseBranch,
+  );
+  const resolvedWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
+    ? teamConfig.dispatch.worktreeRoot
+    : path.join(repository.path, teamConfig.dispatch.worktreeRoot);
+
+  // Planner-side Codex runs need a real checkout on disk before they can `--cd`
+  // into the claimed meow slot for request-title and planning work.
+  await ensureLaneWorktree({
+    repositoryPath: repository.path,
+    worktreeRoot: resolvedWorktreeRoot,
+    worktreePath: worktree.path,
+    branchName: resolvedBaseBranch,
+    startPoint: resolvedBaseBranch,
+  });
+};
+
 const resolveRequestMetadata = async ({
   input,
   providedTitle,
@@ -950,6 +981,10 @@ export const buildPlanningStageState = async (
       `Thread ${args.threadId} could not claim the required meow worktree before planning.`,
     );
   }
+  await preparePlanningWorktree({
+    repository: selectedRepository,
+    worktree,
+  });
 
   const requestMetadata = await resolveRequestMetadata({
     input: args.input,
@@ -998,6 +1033,10 @@ export const runPlanningStage = async (
   });
   currentState.context.worktree = worktree;
   state.threadWorktree = selectedRepository ? worktree : null;
+  await preparePlanningWorktree({
+    repository: selectedRepository,
+    worktree,
+  });
   const forwardPlannerEvent = createPlannerEventForwarder({
     env,
     threadId,
@@ -1060,6 +1099,10 @@ export const runMetadataGenerationStage = async (
   currentState.context.state.threadWorktree = currentState.context.selectedRepository
     ? worktree
     : null;
+  await preparePlanningWorktree({
+    repository: currentState.context.selectedRepository,
+    worktree,
+  });
   const {
     args,
     context: { threadId, selectedRepository, requestMetadata, state },

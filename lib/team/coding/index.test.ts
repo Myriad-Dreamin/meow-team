@@ -358,6 +358,9 @@ describe.sequential("runTeam", () => {
   it("uses injected request-title and planner roles and forwards dependencies into dispatch scheduling", async () => {
     findConfiguredRepositoryMock.mockResolvedValue(repository);
     const callOrder: string[] = [];
+    ensureLaneWorktreeMock.mockImplementation(async () => {
+      callOrder.push("prepare");
+    });
 
     const executorMock = vi.fn(async () => {
       throw new Error("executor should not be called");
@@ -455,8 +458,23 @@ describe.sequential("runTeam", () => {
     await persistTeamRunState(env, initialState);
     const result = await runTeam(env, initialState);
 
-    expect(callOrder).toEqual(["request-title:initial", "planner", "request-title:metadata"]);
+    expect(callOrder).toEqual([
+      "prepare",
+      "request-title:initial",
+      "prepare",
+      "planner",
+      "prepare",
+      "request-title:metadata",
+    ]);
     expect(executorMock).not.toHaveBeenCalled();
+    expect(ensureLaneWorktreeMock).toHaveBeenCalledTimes(3);
+    expect(ensureLaneWorktreeMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath: repository.path,
+      worktreeRoot: path.join(repository.path, teamConfig.dispatch.worktreeRoot),
+      worktreePath: createManagedPlanningWorktree(repository.path).path,
+      branchName: "main",
+      startPoint: "main",
+    });
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(2);
     expect(plannerAgentMock.run).toHaveBeenCalledTimes(1);
     expect(coderAgentMock.run).not.toHaveBeenCalled();
@@ -849,6 +867,7 @@ describe.sequential("runTeam", () => {
   });
 
   it("does not replay metadata-generation side effects when resuming the same persisted stage", async () => {
+    ensureLaneWorktreeMock.mockImplementation(async () => undefined);
     const requestTitleAgentMock = {
       run: vi.fn(async () => {
         return {
@@ -953,6 +972,14 @@ describe.sequential("runTeam", () => {
     await runTeam(env, structuredClone(persistedStage));
     await runTeam(env, structuredClone(persistedStage));
 
+    expect(ensureLaneWorktreeMock).toHaveBeenCalledTimes(2);
+    expect(ensureLaneWorktreeMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath: repository.path,
+      worktreeRoot: path.join(repository.path, teamConfig.dispatch.worktreeRoot),
+      worktreePath: createManagedPlanningWorktree(repository.path).path,
+      branchName: "main",
+      startPoint: "main",
+    });
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
     expect(materializeAssignmentProposalsMock).toHaveBeenCalledTimes(1);
 
