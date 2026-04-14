@@ -10,7 +10,7 @@
 
 ## 2. Implementation
 
-- [ ] 2.1 Implement the approved objective: constrain the workspace shell,
+- [x] 2.1 Implement the approved objective: constrain the workspace shell,
   sidebar, and navigation list so the left sidebar no longer stretches to
   absorb overflow, make the thread-navigation region below the sidebar header
   scroll independently when content exceeds the available height, and preserve
