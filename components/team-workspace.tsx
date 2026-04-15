@@ -14,7 +14,6 @@ import {
   selectUndeliveredAttentionNotifications,
 } from "@/components/thread-attention-utils";
 import { ThreadDetailPanel } from "@/components/thread-detail-panel";
-import { formatThreadId, threadStatusLabels } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type {
@@ -766,16 +765,6 @@ export function TeamWorkspace({
             <>
               <div>
                 <h3>{activeThread.requestTitle}</h3>
-              </div>
-              <div className="workspace-editor-meta">
-                <span className={`status-pill status-${activeThread.status}`}>
-                  {threadStatusLabels[activeThread.status]}
-                </span>
-                {activeThread.archivedAt ? (
-                  <span className="status-pill status-completed">Archived</span>
-                ) : null}
-                <span>Thread {formatThreadId(activeThread.threadId)}</span>
-                <span>{activeThread.repository?.name ?? "No repository selected"}</span>
               </div>
             </>
           ) : (
