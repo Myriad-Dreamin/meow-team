@@ -1478,7 +1478,9 @@ export function ThreadDetailTimeline({
           <span className={`status-pill status-${thread.status}`}>
             {threadStatusLabels[thread.status]}
           </span>
-          {thread.archivedAt ? <span className="status-pill status-completed">Archived</span> : null}
+          {thread.archivedAt ? (
+            <span className="status-pill status-completed">Archived</span>
+          ) : null}
           <span className="thread-chat-meta-chip" title={`Thread ${thread.threadId}`}>
             Thread {formatThreadId(thread.threadId)}
           </span>
@@ -1491,7 +1493,9 @@ export function ThreadDetailTimeline({
             Pool slot: {formatPoolSlot(primaryLane?.workerSlot ?? null)}
           </span>
           <span className="thread-chat-meta-chip">Runs: {primaryLane?.runCount ?? 0}</span>
-          <span className="thread-chat-meta-chip">Revisions: {primaryLane?.revisionCount ?? 0}</span>
+          <span className="thread-chat-meta-chip">
+            Revisions: {primaryLane?.revisionCount ?? 0}
+          </span>
           {primaryLane?.pullRequest ? (
             primaryLane.pullRequest.url ? (
               <a
@@ -1674,7 +1678,9 @@ export function ThreadDetailTimeline({
                     </p>
 
                     <div className="thread-chat-assignment-meta">
-                      <span className="thread-chat-meta-chip">Workers: {assignment.workerCount}</span>
+                      <span className="thread-chat-meta-chip">
+                        Workers: {assignment.workerCount}
+                      </span>
                       {assignment.repository ? (
                         <span className="thread-chat-meta-chip">{assignment.repository.name}</span>
                       ) : null}
@@ -1682,7 +1688,10 @@ export function ThreadDetailTimeline({
                         Updated {formatTimestamp(assignment.updatedAt)}
                       </span>
                       {assignment.canonicalBranchName ? (
-                        <span className="thread-chat-meta-chip" title={assignment.canonicalBranchName}>
+                        <span
+                          className="thread-chat-meta-chip"
+                          title={assignment.canonicalBranchName}
+                        >
                           Branch: {assignment.canonicalBranchName}
                         </span>
                       ) : null}
@@ -1900,9 +1909,7 @@ export function ThreadDetailTimeline({
                           </button>
                         </div>
                       ) : (
-                        <p className="thread-chat-copy">
-                          {replanBlockedCopy}
-                        </p>
+                        <p className="thread-chat-copy">{replanBlockedCopy}</p>
                       )
                     ) : null}
                   </article>
