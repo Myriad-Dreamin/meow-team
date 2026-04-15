@@ -15,6 +15,7 @@ import {
   canRestartPlanning,
   describeLane,
   describeLogEntryContext,
+  formatThreadId,
   formatFeedbackLabel,
   formatPoolSlot,
   formatTimestamp,
@@ -26,6 +27,7 @@ import {
   groupThreadLogEntries,
   pullRequestStatusLabels,
   selectPrimaryLane,
+  threadStatusLabels,
 } from "@/components/thread-view-utils";
 import type { TeamThreadDetail, TeamThreadSummary } from "@/lib/team/history";
 import type {
@@ -1473,13 +1475,23 @@ export function ThreadDetailTimeline({
           </p>
         </div>
         <div className="thread-chat-link-strip">
-          <span title={`Thread ${thread.threadId}`}>Thread {thread.threadId?.slice(0, 8)}</span>
-          <span>Assignment #{thread.assignmentNumber}</span>
-          <span>{thread.repository?.name ?? "No repository selected"}</span>
-          <span>Updated {formatTimestamp(thread.updatedAt)}</span>
-          <span>Pool slot: {formatPoolSlot(primaryLane?.workerSlot ?? null)}</span>
-          <span>Runs: {primaryLane?.runCount ?? 0}</span>
-          <span>Revisions: {primaryLane?.revisionCount ?? 0}</span>
+          <span className={`status-pill status-${thread.status}`}>
+            {threadStatusLabels[thread.status]}
+          </span>
+          {thread.archivedAt ? <span className="status-pill status-completed">Archived</span> : null}
+          <span className="thread-chat-meta-chip" title={`Thread ${thread.threadId}`}>
+            Thread {formatThreadId(thread.threadId)}
+          </span>
+          <span className="thread-chat-meta-chip">Assignment #{thread.assignmentNumber}</span>
+          <span className="thread-chat-meta-chip">
+            {thread.repository?.name ?? "No repository selected"}
+          </span>
+          <span className="thread-chat-meta-chip">Updated {formatTimestamp(thread.updatedAt)}</span>
+          <span className="thread-chat-meta-chip">
+            Pool slot: {formatPoolSlot(primaryLane?.workerSlot ?? null)}
+          </span>
+          <span className="thread-chat-meta-chip">Runs: {primaryLane?.runCount ?? 0}</span>
+          <span className="thread-chat-meta-chip">Revisions: {primaryLane?.revisionCount ?? 0}</span>
           {primaryLane?.pullRequest ? (
             primaryLane.pullRequest.url ? (
               <a
@@ -1492,7 +1504,7 @@ export function ThreadDetailTimeline({
                 PR #{getPrNumber(primaryLane.pullRequest.url)}
               </a>
             ) : (
-              <span>{primaryLane.pullRequest.title}</span>
+              <span className="thread-chat-meta-chip">{primaryLane.pullRequest.title}</span>
             )
           ) : null}
         </div>
@@ -1662,11 +1674,15 @@ export function ThreadDetailTimeline({
                     </p>
 
                     <div className="thread-chat-assignment-meta">
-                      <span>Workers: {assignment.workerCount}</span>
-                      {assignment.repository ? <span>{assignment.repository.name}</span> : null}
-                      <span>Updated {formatTimestamp(assignment.updatedAt)}</span>
+                      <span className="thread-chat-meta-chip">Workers: {assignment.workerCount}</span>
+                      {assignment.repository ? (
+                        <span className="thread-chat-meta-chip">{assignment.repository.name}</span>
+                      ) : null}
+                      <span className="thread-chat-meta-chip">
+                        Updated {formatTimestamp(assignment.updatedAt)}
+                      </span>
                       {assignment.canonicalBranchName ? (
-                        <span title={assignment.canonicalBranchName}>
+                        <span className="thread-chat-meta-chip" title={assignment.canonicalBranchName}>
                           Branch: {assignment.canonicalBranchName}
                         </span>
                       ) : null}
@@ -1722,12 +1738,20 @@ export function ThreadDetailTimeline({
                               />
 
                               <div className="thread-chat-lane-meta">
-                                <span>Pool slot: {formatPoolSlot(lane.workerSlot)}</span>
-                                <span>Runs: {lane.runCount}</span>
-                                <span>Revisions: {lane.revisionCount}</span>
-                                <span>Worktree: {lane.worktreePath ?? "Not allocated"}</span>
-                                <span>Branch: {laneBranchDisplay.value}</span>
-                                <span>
+                                <span className="thread-chat-meta-chip">
+                                  Pool slot: {formatPoolSlot(lane.workerSlot)}
+                                </span>
+                                <span className="thread-chat-meta-chip">Runs: {lane.runCount}</span>
+                                <span className="thread-chat-meta-chip">
+                                  Revisions: {lane.revisionCount}
+                                </span>
+                                <span className="thread-chat-meta-chip">
+                                  Worktree: {lane.worktreePath ?? "Not allocated"}
+                                </span>
+                                <span className="thread-chat-meta-chip">
+                                  Branch: {laneBranchDisplay.value}
+                                </span>
+                                <span className="thread-chat-meta-chip">
                                   {commitDisplay?.label ?? "Review Commit"}:{" "}
                                   {commitDisplay?.value ?? "Not requested"}
                                 </span>
@@ -1735,7 +1759,9 @@ export function ThreadDetailTimeline({
 
                               {lane.pullRequest ? (
                                 <div className="thread-chat-pr-strip">
-                                  <span>{pullRequestStatusLabels[lane.pullRequest.status]}</span>
+                                  <span className="thread-chat-meta-chip">
+                                    {pullRequestStatusLabels[lane.pullRequest.status]}
+                                  </span>
                                   {lane.pullRequest.url ? (
                                     <a
                                       className="thread-chat-link"
@@ -1746,9 +1772,13 @@ export function ThreadDetailTimeline({
                                       {lane.pullRequest.title}
                                     </a>
                                   ) : (
-                                    <span>{lane.pullRequest.title}</span>
+                                    <span className="thread-chat-meta-chip">
+                                      {lane.pullRequest.title}
+                                    </span>
                                   )}
-                                  <span>{formatTimestamp(lane.pullRequest.updatedAt)}</span>
+                                  <span className="thread-chat-meta-chip">
+                                    {formatTimestamp(lane.pullRequest.updatedAt)}
+                                  </span>
                                 </div>
                               ) : null}
                               {approvalAction ? (

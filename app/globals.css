@@ -927,20 +927,11 @@ main {
   font-size: clamp(1.2rem, 3vw, 2rem);
 }
 
-.workspace-editor-copy,
-.workspace-editor-meta {
+.workspace-editor-copy {
   max-width: 54ch;
   margin: 0;
   color: var(--muted);
   line-height: 1.6;
-}
-
-.workspace-editor-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
 }
 
 .workspace-editor-body {
@@ -1138,32 +1129,25 @@ main {
   align-items: center;
 }
 
-.thread-chat-link-strip span,
-.thread-chat-assignment-meta span,
-.thread-chat-lane-meta span,
-.thread-chat-pr-strip span {
+.thread-chat-meta-chip,
+.thread-chat-link-strip .thread-chat-link {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
   padding: 8px 12px;
   background: rgba(6, 16, 30, 0.74);
-  color: var(--muted);
   font-size: 0.82rem;
   line-height: 1.4;
+}
+
+.thread-chat-meta-chip {
+  color: var(--muted);
 }
 
 .thread-chat-link,
 .thread-chat-pr-strip a {
   color: var(--accent);
   text-decoration: none;
-}
-
-.thread-chat-link-strip a {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 8px 12px;
-  background: rgba(6, 16, 30, 0.74);
 }
 
 .thread-chat-body {
@@ -2265,10 +2249,6 @@ main {
   .task-output-window-header,
   .task-output-window-panel-head {
     flex-direction: column;
-  }
-
-  .workspace-editor-meta {
-    justify-content: flex-start;
   }
 
   .thread-detail-actions {

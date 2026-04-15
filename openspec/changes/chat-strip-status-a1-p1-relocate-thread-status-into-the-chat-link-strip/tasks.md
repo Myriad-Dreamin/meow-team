@@ -5,10 +5,10 @@
 
 ## 2. Thread Header Consolidation
 
-- [ ] 2.1 Remove the active-thread `.workspace-editor-meta` row from `components/team-workspace.tsx` and render the selected thread status plus archived badge inside `.thread-chat-link-strip` in `components/thread-detail-timeline.tsx`
-- [ ] 2.2 Preserve existing status labels and archived-state visibility while keeping the change presentation-only and scoped to the selected thread detail surfaces
+- [x] 2.1 Remove the active-thread `.workspace-editor-meta` row from `components/team-workspace.tsx` and render the selected thread status plus archived badge inside `.thread-chat-link-strip` in `components/thread-detail-timeline.tsx`
+- [x] 2.2 Preserve existing status labels and archived-state visibility while keeping the change presentation-only and scoped to the selected thread detail surfaces
 
 ## 3. Shared Styling And Validation
 
-- [ ] 3.1 Delete the obsolete `.workspace-editor-meta` rules and mobile override from `app/globals.css`, then narrow the chat-strip chip selectors so plain metadata chips, links, and `.status-pill` elements coexist without regressions
-- [ ] 3.2 Run the relevant validation and capture reviewer findings for "Relocate thread status into the chat link strip"
+- [x] 3.1 Delete the obsolete `.workspace-editor-meta` rules and mobile override from `app/globals.css`, then narrow the chat-strip chip selectors so plain metadata chips, links, and `.status-pill` elements coexist without regressions
+- [x] 3.2 Run the relevant validation and capture reviewer findings for "Relocate thread status into the chat link strip"
