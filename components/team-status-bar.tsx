@@ -18,16 +18,22 @@ import {
   type TeamStatusLanePopoverTrigger,
   type TeamStatusLanePopoverState,
 } from "@/components/team-status-bar-lane-utils";
+import {
+  getTeamWorkspaceSidebarToggleState,
+  TEAM_WORKSPACE_SIDEBAR_ID,
+} from "@/components/team-workspace-sidebar-visibility";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamStatusSnapshotResponse } from "@/lib/team/status";
 
 type RefreshState = "loading" | "live" | "stale" | "error";
 
 type TeamStatusBarProps = {
+  isSidebarVisible: boolean;
   livingThreads: TeamThreadSummary[];
   isArchivedThreadsRevealed: boolean;
   isSettingsSelected: boolean;
   onSelectThreadTab: (threadId: string) => void;
+  onToggleSidebar: () => void;
   onToggleArchivedThreads: () => void;
   onSelectSettings: () => void;
 };
@@ -166,11 +172,46 @@ const ArchiveIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const SidebarIcon = ({
+  className,
+  isSidebarVisible,
+}: {
+  className?: string;
+  isSidebarVisible: boolean;
+}) => (
+  <svg
+    aria-hidden="true"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth="1.75"
+    viewBox="0 0 20 20"
+  >
+    <path d="M2.75 3.5h14.5v13H2.75z" />
+    <path d="M7.25 3.5v13" />
+    {isSidebarVisible ? (
+      <>
+        <path d="m12.75 10-2-2" />
+        <path d="m12.75 10-2 2" />
+      </>
+    ) : (
+      <>
+        <path d="m10.75 10 2-2" />
+        <path d="m10.75 10 2 2" />
+      </>
+    )}
+  </svg>
+);
+
 export function TeamStatusBar({
+  isSidebarVisible,
   livingThreads,
   isArchivedThreadsRevealed,
   isSettingsSelected,
   onSelectThreadTab,
+  onToggleSidebar,
   onToggleArchivedThreads,
   onSelectSettings,
 }: TeamStatusBarProps) {
@@ -291,6 +332,7 @@ export function TeamStatusBar({
       : archivedThreadCount === 1
         ? "1 Archived Thread"
         : `${archivedThreadCount} Archived Threads`;
+  const sidebarToggleState = getTeamWorkspaceSidebarToggleState(isSidebarVisible);
 
   const handleOpenLane = (
     laneKey: TeamStatusLaneCountKey,
@@ -354,6 +396,19 @@ export function TeamStatusBar({
     <section aria-label="Workspace status" className="workspace-status-bar">
       <div className="workspace-status-group">
         <div className="workspace-status-actions">
+          <button
+            aria-controls={TEAM_WORKSPACE_SIDEBAR_ID}
+            aria-expanded={isSidebarVisible}
+            aria-label={sidebarToggleState.actionLabel}
+            aria-pressed={sidebarToggleState.isPressed}
+            className={`workspace-status-toggle ${sidebarToggleState.isPressed ? "workspace-status-toggle-active" : ""}`}
+            title={sidebarToggleState.actionLabel}
+            type="button"
+            onClick={onToggleSidebar}
+          >
+            <SidebarIcon className="workspace-icon" isSidebarVisible={isSidebarVisible} />
+            <span aria-hidden="true">Sidebar</span>
+          </button>
           <button
             aria-pressed={isSettingsSelected}
             className={`workspace-icon-button workspace-status-icon-button ${isSettingsSelected ? "workspace-icon-button-active" : ""}`}
