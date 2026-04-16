@@ -4,6 +4,12 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
 import { TeamStatusBar } from "@/components/team-status-bar";
 import {
+  DEFAULT_TEAM_WORKSPACE_SIDEBAR_VISIBILITY,
+  getNextTeamWorkspaceSidebarVisibility,
+  getTeamWorkspaceShellClassName,
+  TEAM_WORKSPACE_SIDEBAR_ID,
+} from "@/components/team-workspace-sidebar-visibility";
+import {
   buildThreadRepositoryGroups,
   formatThreadSidebarMetadata,
   getThreadRepositoryGroupKey,
@@ -282,6 +288,9 @@ export function TeamWorkspace({
   const [showArchivedThreads, setShowArchivedThreads] = useState(false);
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(() =>
     readStoredNotificationPreference(),
+  );
+  const [isSidebarVisible, setIsSidebarVisible] = useState(
+    DEFAULT_TEAM_WORKSPACE_SIDEBAR_VISIBILITY,
   );
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>(
     () => getNotificationPermissionState(),
@@ -589,6 +598,12 @@ export function TeamWorkspace({
     });
   };
 
+  const handleToggleSidebar = () => {
+    startTransition(() => {
+      setIsSidebarVisible((current) => getNextTeamWorkspaceSidebarVisibility(current));
+    });
+  };
+
   const handleToggleThreadGroup = (groupKey: string) => {
     setCollapsedThreadGroupKeys((current) => {
       const next = new Set(current);
@@ -694,8 +709,12 @@ export function TeamWorkspace({
   };
 
   return (
-    <section className="workspace-shell">
-      <aside className="workspace-sidebar">
+    <section className={getTeamWorkspaceShellClassName(isSidebarVisible)}>
+      <aside
+        className="workspace-sidebar"
+        hidden={!isSidebarVisible}
+        id={TEAM_WORKSPACE_SIDEBAR_ID}
+      >
         <div className="workspace-sidebar-header">
           <h2>Meow Team</h2>
         </div>
@@ -773,8 +792,8 @@ export function TeamWorkspace({
                 <h3>Thread Not Available</h3>
               </div>
               <p className="workspace-editor-copy">
-                This thread is no longer present in local storage. Choose another tab from the left
-                or use the + action to start a new request.
+                This thread is no longer present in local storage. Open the sidebar or use the +
+                action to start a new request.
               </p>
             </>
           )}
@@ -849,10 +868,12 @@ export function TeamWorkspace({
       </div>
 
       <TeamStatusBar
+        isSidebarVisible={isSidebarVisible}
         livingThreads={threads}
         isArchivedThreadsRevealed={isArchivedThreadsRevealed}
         isSettingsSelected={resolvedSelectedTab.type === "settings"}
         onSelectThreadTab={handleSelectThreadTab}
+        onToggleSidebar={handleToggleSidebar}
         onToggleArchivedThreads={handleToggleArchivedThreads}
         onSelectSettings={handleSelectSettingsTab}
       />
