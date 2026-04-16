@@ -187,6 +187,41 @@ describe("buildTeamStatusLaneThreadBuckets", () => {
       },
     ]);
   });
+
+  it("skips terminal living threads so only active threads contribute to lane pills", () => {
+    const buckets = buildTeamStatusLaneThreadBuckets([
+      createThread({
+        threadId: "approved1111terminal",
+        status: "approved",
+        requestTitle: "Approved terminal thread",
+        workerLanes: [
+          createLane({
+            laneId: "lane-approved-terminal",
+            status: "approved",
+          }),
+        ],
+      }),
+      createThread({
+        threadId: "approved2222active00",
+        requestTitle: "Approved lane still active",
+        workerLanes: [
+          createLane({
+            laneId: "lane-approved-active",
+            status: "approved",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(buckets.approved).toEqual([
+      {
+        threadId: "approved2222active00",
+        title: "Approved lane still active",
+        shortThreadId: "approved",
+        matchingLaneCount: 1,
+      },
+    ]);
+  });
 });
 
 describe("describeTeamStatusLanePopover", () => {

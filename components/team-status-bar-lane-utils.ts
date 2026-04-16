@@ -1,6 +1,6 @@
 import { formatThreadId } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
-import type { TeamWorkerLaneStatus } from "@/lib/team/types";
+import type { TeamThreadStatus, TeamWorkerLaneStatus } from "@/lib/team/types";
 
 export const teamStatusLaneItems = [
   {
@@ -103,15 +103,24 @@ const getTeamStatusLaneThreadTitle = (
   return trimmedTitle || `Thread ${formatThreadId(thread.threadId)}`;
 };
 
+const isTerminalTeamThreadStatus = (status: TeamThreadStatus): boolean => {
+  return (
+    status === "completed" ||
+    status === "approved" ||
+    status === "needs_revision" ||
+    status === "failed"
+  );
+};
+
 export const buildTeamStatusLaneThreadBuckets = (
   threads: Array<
-    Pick<TeamThreadSummary, "archivedAt" | "requestTitle" | "threadId" | "workerLanes">
+    Pick<TeamThreadSummary, "archivedAt" | "requestTitle" | "status" | "threadId" | "workerLanes">
   >,
 ): TeamStatusLaneThreadBuckets => {
   const buckets = createEmptyTeamStatusLaneThreadBuckets();
 
   for (const thread of threads) {
-    if (thread.archivedAt) {
+    if (thread.archivedAt || isTerminalTeamThreadStatus(thread.status)) {
       continue;
     }
 
