@@ -473,6 +473,52 @@ describe("buildProviderRegistry", () => {
     expect(mockState.isCommandAvailable).toHaveBeenCalledWith("claude");
   });
 
+  test("disallowedTools flows through to runtime settings", () => {
+    buildProviderRegistry(logger, {
+      providerOverrides: {
+        claude: {
+          disallowedTools: ["WebSearch", "WebFetch"],
+        },
+      },
+    });
+
+    expect(mockState.constructorArgs.claude[0]).toEqual({
+      runtimeSettings: {
+        command: undefined,
+        env: undefined,
+        disallowedTools: ["WebSearch", "WebFetch"],
+      },
+    });
+  });
+
+  test("derived provider inherits and merges disallowedTools from base", () => {
+    buildProviderRegistry(logger, {
+      providerOverrides: {
+        claude: {
+          disallowedTools: ["WebSearch"],
+        },
+        zai: {
+          extends: "claude",
+          label: "ZAI",
+          disallowedTools: ["ComputerUse"],
+        },
+      },
+    });
+
+    const zaiArgs = mockState.constructorArgs.claude.find(
+      (entry) =>
+        Array.isArray((entry.runtimeSettings as { disallowedTools?: string[] })?.disallowedTools) &&
+        (entry.runtimeSettings as { disallowedTools: string[] }).disallowedTools.includes(
+          "ComputerUse",
+        ),
+    );
+    expect(zaiArgs).toBeDefined();
+    expect((zaiArgs!.runtimeSettings as { disallowedTools: string[] }).disallowedTools).toEqual([
+      "WebSearch",
+      "ComputerUse",
+    ]);
+  });
+
   test("extension inherits base override — override claude command, zai extends claude gets overridden command", () => {
     buildProviderRegistry(logger, {
       providerOverrides: {

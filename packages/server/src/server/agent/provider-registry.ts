@@ -90,7 +90,7 @@ function getProviderClientFactory(provider: string): ProviderClientFactory {
 }
 
 function toRuntimeSettings(override?: ProviderOverride): ProviderRuntimeSettings | undefined {
-  if (!override?.command && !override?.env) {
+  if (!override?.command && !override?.env && !override?.disallowedTools) {
     return undefined;
   }
 
@@ -102,6 +102,7 @@ function toRuntimeSettings(override?: ProviderOverride): ProviderRuntimeSettings
         }
       : undefined,
     env: override.env,
+    disallowedTools: override.disallowedTools,
   };
 }
 
@@ -121,6 +122,10 @@ function mergeRuntimeSettings(
             ...(base?.env ?? {}),
             ...(override?.env ?? {}),
           }
+        : undefined,
+    disallowedTools:
+      base?.disallowedTools || override?.disallowedTools
+        ? [...(base?.disallowedTools ?? []), ...(override?.disallowedTools ?? [])]
         : undefined,
   };
 }
