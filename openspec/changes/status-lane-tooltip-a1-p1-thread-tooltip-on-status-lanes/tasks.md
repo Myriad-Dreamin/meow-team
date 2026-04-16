@@ -5,10 +5,10 @@
 
 ## 2. Thread Data Wiring
 
-- [ ] 2.1 Pass living `TeamThreadSummary` records and the existing thread-tab selection handler from `components/team-workspace.tsx` into `TeamStatusBar`, keeping archived-thread behavior and existing status polling unchanged
-- [ ] 2.2 Add a pure helper plus targeted Vitest coverage to bucket living threads by lane status, preserving thread title, short thread ID, and same-status multiplicity for tooltip rendering
+- [x] 2.1 Pass living `TeamThreadSummary` records and the existing thread-tab selection handler from `components/team-workspace.tsx` into `TeamStatusBar`, keeping archived-thread behavior and existing status polling unchanged
+- [x] 2.2 Add a pure helper plus targeted Vitest coverage to bucket living threads by lane status, preserving thread title, short thread ID, and same-status multiplicity for tooltip rendering
 
 ## 3. Status Bar Interaction And Validation
 
-- [ ] 3.1 Replace passive non-zero lane pills in `components/team-status-bar.tsx` with accessible hover/focus/click tooltip-style popovers that list matching living threads and switch to the clicked thread tab while dismissing the panel
-- [ ] 3.2 Update the status-bar-only styling in `app/globals.css`, then run `pnpm fmt`, `pnpm lint`, `pnpm test`, and `pnpm build`
+- [x] 3.1 Replace passive non-zero lane pills in `components/team-status-bar.tsx` with accessible hover/focus/click tooltip-style popovers that list matching living threads and switch to the clicked thread tab while dismissing the panel
+- [x] 3.2 Update the status-bar-only styling in `app/globals.css`, then run `pnpm fmt`, `pnpm lint`, `pnpm test`, and `pnpm build`

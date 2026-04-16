@@ -549,6 +549,160 @@ main {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+.workspace-status-lane-popover {
+  position: relative;
+  display: inline-flex;
+}
+
+.workspace-status-lane-popover-open {
+  z-index: 4;
+}
+
+.workspace-status-lane-trigger {
+  appearance: none;
+  gap: 6px;
+  border: 1px solid transparent;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.workspace-status-lane-trigger:hover,
+.workspace-status-lane-popover-open .workspace-status-lane-trigger {
+  transform: translateY(-1px);
+}
+
+.workspace-status-lane-trigger:focus-visible {
+  outline: none;
+  border-color: rgba(146, 190, 232, 0.3);
+  box-shadow: 0 0 0 2px rgba(125, 242, 198, 0.14);
+}
+
+.workspace-status-lane-trigger-count {
+  font-weight: 700;
+}
+
+.workspace-status-lane-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  display: grid;
+  gap: 10px;
+  width: min(320px, calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
+  padding: 14px;
+  border: 1px solid rgba(146, 190, 232, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(125, 242, 198, 0.1), transparent 28%),
+    rgba(7, 18, 33, 0.96);
+  box-shadow: 0 18px 48px rgba(4, 10, 21, 0.46);
+}
+
+.workspace-status-lane-panel::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  border-right: 1px solid rgba(146, 190, 232, 0.18);
+  border-bottom: 1px solid rgba(146, 190, 232, 0.18);
+  background: rgba(7, 18, 33, 0.96);
+  transform: rotate(45deg);
+}
+
+.workspace-status-lane-panel-head,
+.workspace-status-lane-thread-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-status-lane-panel-title,
+.workspace-status-lane-panel-summary,
+.workspace-status-lane-panel-detail,
+.workspace-status-lane-empty {
+  margin: 0;
+}
+
+.workspace-status-lane-panel-title {
+  font-size: 0.76rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.workspace-status-lane-panel-summary {
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.workspace-status-lane-panel-detail,
+.workspace-status-lane-empty {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.workspace-status-lane-thread-button {
+  appearance: none;
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(146, 190, 232, 0.12);
+  border-radius: 14px;
+  color: var(--text);
+  background: rgba(11, 27, 47, 0.88);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.workspace-status-lane-thread-button:hover {
+  border-color: rgba(146, 190, 232, 0.28);
+  transform: translateY(-1px);
+}
+
+.workspace-status-lane-thread-button:focus-visible {
+  outline: none;
+  border-color: rgba(125, 242, 198, 0.36);
+  box-shadow: 0 0 0 2px rgba(125, 242, 198, 0.14);
+}
+
+.workspace-status-lane-thread-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.workspace-status-lane-thread-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.workspace-status-lane-thread-multiplicity {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 201, 110, 0.16);
+  color: var(--warning);
+  font-weight: 700;
 }
 
 .workspace-sidebar {
@@ -2234,6 +2388,18 @@ main {
     padding-left: 0;
     border-left: 0;
     justify-content: flex-start;
+  }
+
+  .workspace-status-lane-panel {
+    left: auto;
+    right: 0;
+    width: min(320px, calc(100vw - 48px));
+    max-width: calc(100vw - 48px);
+  }
+
+  .workspace-status-lane-panel::after {
+    left: auto;
+    right: 18px;
   }
 
   .workspace-thread-tab-head,
