@@ -7,6 +7,7 @@ const {
   commitWorktreeChangesMock,
   detectBranchConflictMock,
   deleteManagedBranchesMock,
+  ensureBranchRefMock,
   ensureLaneWorktreeMock,
   findConfiguredRepositoryMock,
   getBranchHeadMock,
@@ -23,6 +24,7 @@ const {
     commitWorktreeChangesMock: vi.fn(),
     detectBranchConflictMock: vi.fn(),
     deleteManagedBranchesMock: vi.fn(),
+    ensureBranchRefMock: vi.fn(),
     ensureLaneWorktreeMock: vi.fn(),
     findConfiguredRepositoryMock: vi.fn(),
     getBranchHeadMock: vi.fn(),
@@ -43,6 +45,7 @@ vi.mock("@/lib/git/ops", async (importOriginal) => {
     ...actual,
     commitWorktreeChanges: commitWorktreeChangesMock,
     detectBranchConflict: detectBranchConflictMock,
+    ensureBranchRef: ensureBranchRefMock,
     getBranchHead: getBranchHeadMock,
     hasWorktreeChanges: hasWorktreeChangesMock,
     inspectOpenSpecChangeArchiveState: inspectOpenSpecChangeArchiveStateMock,
@@ -322,6 +325,8 @@ describe.sequential("runTeam", () => {
     synchronizePullRequestMock.mockResolvedValue({
       url: "https://github.com/example/meow-team/pull/42",
     });
+    ensureBranchRefMock.mockReset();
+    ensureBranchRefMock.mockResolvedValue(undefined);
     getBranchHeadMock.mockReset();
     getBranchHeadMock.mockResolvedValue("proposal-commit");
     ensureLaneWorktreeMock.mockReset();
@@ -3026,6 +3031,11 @@ describe.sequential("approveLaneProposal", () => {
     const draftLane = draftThread?.dispatchAssignments[0]?.lanes[0];
     const trackingPullRequestId = draftLane?.pullRequest?.id;
 
+    expect(ensureBranchRefMock).toHaveBeenCalledWith({
+      repositoryPath: dispatchRepository.path,
+      branchName: "requests/example/a1-proposal-1",
+      startPoint: "requests/example/a1",
+    });
     expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(1, {
       repositoryPath: dispatchRepository.path,
       branchName: "requests/example/a1-proposal-1",

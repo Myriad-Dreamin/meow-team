@@ -1,7 +1,7 @@
 import "server-only";
 
 import { teamConfig } from "@/team.config";
-import { getBranchHead } from "@/lib/git/ops";
+import { ensureBranchRef, getBranchHead } from "@/lib/git/ops";
 import { synchronizePullRequest } from "@/lib/platform";
 import { pushLaneBranch } from "@/lib/team/git";
 import {
@@ -69,6 +69,13 @@ export const approveLaneProposal = async ({
     assignment,
     lane,
   });
+  if (assignment.canonicalBranchName) {
+    await ensureBranchRef({
+      repositoryPath: assignment.repository.path,
+      branchName: lane.branchName,
+      startPoint: assignment.canonicalBranchName,
+    });
+  }
   const proposalCommit = await getBranchHead({
     repositoryPath: assignment.repository.path,
     branchName: lane.branchName,
