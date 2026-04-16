@@ -1,7 +1,12 @@
 import "server-only";
 
 import { teamConfig } from "@/team.config";
-import { ensureBranchRef, getBranchHead } from "@/lib/git/ops";
+import {
+  commitContainsPath,
+  ensureBranchRef,
+  findCommitContainingPathInReflog,
+  getBranchHead,
+} from "@/lib/git/ops";
 import { synchronizePullRequest } from "@/lib/platform";
 import { pushLaneBranch } from "@/lib/team/git";
 import {
@@ -32,60 +37,126 @@ const resolveProposalCommitForApproval = async ({
   repositoryPath,
   laneBranchName,
   canonicalBranchName,
+  plannerWorktreePath,
+  proposalCommitHash,
+  proposalArtifactPath,
   threadWorktree,
 }: {
   repositoryPath: string;
   laneBranchName: string;
   canonicalBranchName: string | null;
+  plannerWorktreePath: string | null | undefined;
+  proposalCommitHash: string | null | undefined;
+  proposalArtifactPath: string;
   threadWorktree: Worktree | null;
 }): Promise<string> => {
-  if (canonicalBranchName) {
+  const resolveCommitIfProposalArtifactExists = async ({
+    gitPath,
+    revision,
+  }: {
+    gitPath: string;
+    revision: string;
+  }): Promise<string | null> => {
     try {
+      const commitHash = await getBranchHead({
+        repositoryPath: gitPath,
+        branchName: revision,
+      });
+      return (await commitContainsPath({
+        repositoryPath: gitPath,
+        revision: commitHash,
+        relativePath: proposalArtifactPath,
+      }))
+        ? commitHash
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  if (proposalCommitHash) {
+    const storedCommit = await resolveCommitIfProposalArtifactExists({
+      gitPath: repositoryPath,
+      revision: proposalCommitHash,
+    });
+    if (storedCommit) {
+      await ensureBranchRef({
+        repositoryPath,
+        branchName: laneBranchName,
+        startPoint: storedCommit,
+        forceUpdate: true,
+      });
+      return storedCommit;
+    }
+  }
+
+  if (canonicalBranchName) {
+    const canonicalCommit = await resolveCommitIfProposalArtifactExists({
+      gitPath: repositoryPath,
+      revision: canonicalBranchName,
+    });
+    if (canonicalCommit) {
       await ensureBranchRef({
         repositoryPath,
         branchName: laneBranchName,
         startPoint: canonicalBranchName,
+        forceUpdate: true,
       });
-    } catch {
-      // Keep approval resilient when a legacy or cleaned-up branch ref must be
-      // recovered from the claimed thread worktree instead.
+      return canonicalCommit;
     }
   }
 
-  try {
-    return await getBranchHead({
-      repositoryPath,
-      branchName: laneBranchName,
-    });
-  } catch (branchError) {
-    if (!threadWorktree?.path) {
-      throw branchError;
-    }
+  const laneCommit = await resolveCommitIfProposalArtifactExists({
+    gitPath: repositoryPath,
+    revision: laneBranchName,
+  });
+  if (laneCommit) {
+    return laneCommit;
+  }
 
-    try {
-      const proposalCommit = await getBranchHead({
-        repositoryPath: threadWorktree.path,
-        branchName: "HEAD",
-      });
+  const worktreePaths = Array.from(
+    new Set(
+      [threadWorktree?.path ?? null, plannerWorktreePath ?? null].filter((value): value is string =>
+        Boolean(value),
+      ),
+    ),
+  );
+  for (const worktreePath of worktreePaths) {
+    const currentHeadCommit = await resolveCommitIfProposalArtifactExists({
+      gitPath: worktreePath,
+      revision: "HEAD",
+    });
+    if (currentHeadCommit) {
       await ensureBranchRef({
         repositoryPath,
         branchName: laneBranchName,
-        startPoint: proposalCommit,
+        startPoint: currentHeadCommit,
         forceUpdate: true,
       });
-      return proposalCommit;
-    } catch (worktreeError) {
-      const branchMessage =
-        branchError instanceof Error ? branchError.message : "Unknown branch lookup failure.";
-      const worktreeMessage =
-        worktreeError instanceof Error
-          ? worktreeError.message
-          : "Unknown thread worktree recovery failure.";
-      throw new Error(
-        `Unable to resolve proposal branch ${laneBranchName} for approval. Branch lookup failed (${branchMessage}). Recovery from claimed thread worktree HEAD at ${threadWorktree.path} also failed (${worktreeMessage}).`,
-      );
+      return currentHeadCommit;
+    }
+
+    const reflogCommit = await findCommitContainingPathInReflog({
+      worktreePath,
+      relativePath: proposalArtifactPath,
+    });
+    if (reflogCommit) {
+      await ensureBranchRef({
+        repositoryPath,
+        branchName: laneBranchName,
+        startPoint: reflogCommit,
+        forceUpdate: true,
+      });
+      return reflogCommit;
     }
   }
+
+  throw new Error(
+    [
+      `Unable to resolve proposal branch ${laneBranchName} for approval.`,
+      `No valid proposal commit containing ${proposalArtifactPath} was found on ${laneBranchName}${canonicalBranchName ? `, ${canonicalBranchName}` : ""}, or in the claimed planner worktree reflog.`,
+    ].join(" "),
+  );
 };
 
 export const approveLaneProposal = async ({
@@ -117,8 +188,10 @@ export const approveLaneProposal = async ({
     throw new Error("Approving a proposal requires a repository.");
   }
 
-  if (!lane.branchName || !lane.baseBranch) {
-    throw new Error("This proposal is missing the branch metadata required for approval.");
+  if (!lane.branchName || !lane.baseBranch || !lane.proposalPath) {
+    throw new Error(
+      "This proposal is missing the branch or OpenSpec metadata required for approval.",
+    );
   }
 
   const threadWorktree = worktree ?? thread.data.threadWorktree;
@@ -138,6 +211,9 @@ export const approveLaneProposal = async ({
     repositoryPath: assignment.repository.path,
     laneBranchName: lane.branchName,
     canonicalBranchName: resolvedCanonicalBranchName,
+    plannerWorktreePath: assignment.plannerWorktreePath,
+    proposalCommitHash: lane.proposalCommitHash,
+    proposalArtifactPath: `${lane.proposalPath}/.openspec.yaml`,
     threadWorktree,
   });
 
@@ -198,6 +274,7 @@ export const approveLaneProposal = async ({
         mutableLane.approvalGrantedAt = now;
         mutableLane.workerSlot = null;
         mutableLane.worktreePath = threadWorktree.path;
+        mutableLane.proposalCommitHash = proposalCommit;
         mutableLane.queuedAt = now;
         mutableLane.pushedCommit = pushedCommit;
         mutableLane.lastError = null;
@@ -287,6 +364,7 @@ export const approveLaneProposal = async ({
         mutableLane.approvalGrantedAt = null;
         mutableLane.workerSlot = null;
         mutableLane.worktreePath = threadWorktree.path;
+        mutableLane.proposalCommitHash = proposalCommit;
         mutableLane.queuedAt = null;
         mutableLane.pushedCommit = pushedCommit;
         mutableLane.lastError = errorSummary;

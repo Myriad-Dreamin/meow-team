@@ -295,6 +295,7 @@ const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord =
     executionPhase: lane.executionPhase ?? defaultExecutionPhase,
     proposalChangeName: lane.proposalChangeName ?? null,
     proposalPath: lane.proposalPath ?? null,
+    proposalCommitHash: lane.proposalCommitHash ?? null,
     workerSlot: lane.workerSlot ?? null,
     latestImplementationCommit: lane.latestImplementationCommit ?? null,
     pushedCommit: normalizePushedCommit(lane.pushedCommit),

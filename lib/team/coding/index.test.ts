@@ -4,11 +4,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  commitContainsPathMock,
   commitWorktreeChangesMock,
   detectBranchConflictMock,
   deleteManagedBranchesMock,
   ensureBranchRefMock,
   ensureLaneWorktreeMock,
+  findCommitContainingPathInReflogMock,
   findConfiguredRepositoryMock,
   getBranchHeadMock,
   hasWorktreeChangesMock,
@@ -21,11 +23,13 @@ const {
   tryRebaseWorktreeBranchMock,
 } = vi.hoisted(() => {
   return {
+    commitContainsPathMock: vi.fn(),
     commitWorktreeChangesMock: vi.fn(),
     detectBranchConflictMock: vi.fn(),
     deleteManagedBranchesMock: vi.fn(),
     ensureBranchRefMock: vi.fn(),
     ensureLaneWorktreeMock: vi.fn(),
+    findCommitContainingPathInReflogMock: vi.fn(),
     findConfiguredRepositoryMock: vi.fn(),
     getBranchHeadMock: vi.fn(),
     hasWorktreeChangesMock: vi.fn(),
@@ -43,9 +47,11 @@ vi.mock("@/lib/git/ops", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/git/ops")>();
   return {
     ...actual,
+    commitContainsPath: commitContainsPathMock,
     commitWorktreeChanges: commitWorktreeChangesMock,
     detectBranchConflict: detectBranchConflictMock,
     ensureBranchRef: ensureBranchRefMock,
+    findCommitContainingPathInReflog: findCommitContainingPathInReflogMock,
     getBranchHead: getBranchHeadMock,
     hasWorktreeChanges: hasWorktreeChangesMock,
     inspectOpenSpecChangeArchiveState: inspectOpenSpecChangeArchiveStateMock,
@@ -167,6 +173,7 @@ const createReplayLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWo
   taskObjective: "Replay the persisted stage safely.",
   proposalChangeName: "replay-change",
   proposalPath: "openspec/changes/replay-change",
+  proposalCommitHash: null,
   workerSlot: null,
   branchName: "requests/replay/a1-proposal-1",
   baseBranch: "main",
@@ -326,12 +333,16 @@ describe.sequential("runTeam", () => {
     synchronizePullRequestMock.mockResolvedValue({
       url: "https://github.com/example/meow-team/pull/42",
     });
+    commitContainsPathMock.mockReset();
+    commitContainsPathMock.mockResolvedValue(true);
     ensureBranchRefMock.mockReset();
     ensureBranchRefMock.mockResolvedValue(undefined);
     getBranchHeadMock.mockReset();
     getBranchHeadMock.mockResolvedValue("proposal-commit");
     ensureLaneWorktreeMock.mockReset();
     ensureLaneWorktreeMock.mockResolvedValue(undefined);
+    findCommitContainingPathInReflogMock.mockReset();
+    findCommitContainingPathInReflogMock.mockResolvedValue(null);
     tryRebaseWorktreeBranchMock.mockReset();
     tryRebaseWorktreeBranchMock.mockResolvedValue({
       applied: true,
@@ -1332,11 +1343,12 @@ describe.sequential("runTeam", () => {
     );
     expect(requestTitleAgentMock.run).toHaveBeenCalledTimes(1);
 
-    if (!releaseFirstRequestTitle) {
-      throw new Error("The first request-title run never blocked as expected.");
-    }
-
-    releaseFirstRequestTitle();
+    const releaseBlockedRequestTitle =
+      releaseFirstRequestTitle ??
+      (() => {
+        throw new Error("The first request-title run never blocked as expected.");
+      });
+    releaseBlockedRequestTitle();
 
     const result = await firstRun;
     expect(result?.threadId).toBe("thread-one");
@@ -1882,6 +1894,7 @@ const createDispatchLane = ({
   taskObjective = `Objective ${laneIndex}`,
   proposalChangeName = `change-${laneId}`,
   proposalPath = `openspec/changes/change-${laneId}`,
+  proposalCommitHash = null,
   latestImplementationCommit = null,
   pushedCommit = null,
   latestDecision = null,
@@ -1911,6 +1924,7 @@ const createDispatchLane = ({
   taskObjective?: string;
   proposalChangeName?: string;
   proposalPath?: string;
+  proposalCommitHash?: string | null;
   latestImplementationCommit?: TeamWorkerLaneRecord["latestImplementationCommit"];
   pushedCommit?: TeamWorkerLaneRecord["pushedCommit"];
   latestDecision?: TeamWorkerLaneRecord["latestDecision"];
@@ -1937,6 +1951,7 @@ const createDispatchLane = ({
     taskObjective,
     proposalChangeName,
     proposalPath,
+    proposalCommitHash,
     workerSlot,
     branchName,
     baseBranch,
@@ -2529,9 +2544,14 @@ describe.sequential("ensurePendingDispatchWork", () => {
     ];
     let nestedPassStarted = false;
 
-    getTeamThreadRecordSpy.mockImplementation(async (_threadFile, currentThreadId) => {
-      return structuredClone(threadStore[currentThreadId] ?? null);
-    });
+    getTeamThreadRecordSpy.mockImplementation(
+      async (
+        _threadFile: Parameters<typeof historyModule.getTeamThreadRecord>[0],
+        currentThreadId: Parameters<typeof historyModule.getTeamThreadRecord>[1],
+      ) => {
+        return structuredClone(threadStore[currentThreadId] ?? null);
+      },
+    );
 
     listPendingDispatchAssignmentsSpy = vi
       .spyOn(historyModule, "listPendingDispatchAssignments")
@@ -2924,11 +2944,15 @@ describe.sequential("approveLaneProposal", () => {
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), "dispatch-proposal-"));
     teamConfig.storage.threadFile = path.join(tempDirectory, "threads.sqlite");
     commitWorktreeChangesMock.mockResolvedValue(undefined);
+    commitContainsPathMock.mockReset();
+    commitContainsPathMock.mockResolvedValue(true);
     synchronizePullRequestMock.mockReset();
     detectBranchConflictMock.mockReset();
     detectBranchConflictMock.mockResolvedValue(false);
     ensureLaneWorktreeMock.mockReset();
     ensureLaneWorktreeMock.mockResolvedValue(undefined);
+    findCommitContainingPathInReflogMock.mockReset();
+    findCommitContainingPathInReflogMock.mockResolvedValue(null);
     getBranchHeadMock.mockReset();
     hasWorktreeChangesMock.mockReset();
     hasWorktreeChangesMock.mockResolvedValue(false);
@@ -3036,6 +3060,7 @@ describe.sequential("approveLaneProposal", () => {
       repositoryPath: dispatchRepository.path,
       branchName: "requests/example/a1-proposal-1",
       startPoint: "requests/example/a1",
+      forceUpdate: true,
     });
     expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(1, {
       repositoryPath: dispatchRepository.path,
@@ -3155,6 +3180,7 @@ describe.sequential("approveLaneProposal", () => {
       repositoryPath: dispatchRepository.path,
       branchName: laneBranchName,
       startPoint: canonicalBranchName,
+      forceUpdate: true,
     });
     await vi.waitFor(() => {
       expect(pendingCoderRun).toHaveBeenCalledTimes(1);
@@ -3162,9 +3188,10 @@ describe.sequential("approveLaneProposal", () => {
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
     expect(thread?.dispatchAssignments[0]?.canonicalBranchName).toBe(canonicalBranchName);
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.proposalCommitHash).toBe("proposal-commit");
   });
 
-  it("recovers a missing proposal branch from the claimed thread worktree HEAD", async () => {
+  it("recovers a missing proposal branch from the claimed thread worktree reflog", async () => {
     const threadId = "01fba175-e48a-4999-a458-d970d82198f7";
     const branchPrefix = "status-lane-tooltip";
     const canonicalBranchName = buildCanonicalBranchName({
@@ -3183,21 +3210,21 @@ describe.sequential("approveLaneProposal", () => {
       () => new Promise<Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>>(() => {}),
     ) as TeamRoleDependencies["coderAgent"]["run"];
 
-    ensureBranchRefMock
+    getBranchHeadMock
       .mockRejectedValueOnce(
         new Error(
           `fatal: ambiguous argument '${canonicalBranchName}': unknown revision or path not in the working tree.`,
         ),
       )
-      .mockResolvedValueOnce(undefined);
-    getBranchHeadMock
       .mockRejectedValueOnce(
         new Error(
           `fatal: ambiguous argument '${laneBranchName}': unknown revision or path not in the working tree.`,
         ),
       )
-      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("main-commit")
       .mockResolvedValueOnce("proposal-commit");
+    commitContainsPathMock.mockResolvedValue(false);
+    findCommitContainingPathInReflogMock.mockResolvedValue("proposal-commit");
     pushLaneBranchMock.mockResolvedValueOnce({
       ...basePushedCommit,
       commitHash: "proposal-commit",
@@ -3244,16 +3271,15 @@ describe.sequential("approveLaneProposal", () => {
       laneId: "lane-1",
     });
 
-    expect(ensureBranchRefMock).toHaveBeenNthCalledWith(1, {
-      repositoryPath: dispatchRepository.path,
-      branchName: laneBranchName,
-      startPoint: canonicalBranchName,
-    });
-    expect(getBranchHeadMock).toHaveBeenNthCalledWith(2, {
+    expect(getBranchHeadMock).toHaveBeenNthCalledWith(3, {
       repositoryPath: threadWorktreePath,
       branchName: "HEAD",
     });
-    expect(ensureBranchRefMock).toHaveBeenNthCalledWith(2, {
+    expect(findCommitContainingPathInReflogMock).toHaveBeenCalledWith({
+      worktreePath: threadWorktreePath,
+      relativePath: `${createProposalApprovalLane().proposalPath}/.openspec.yaml`,
+    });
+    expect(ensureBranchRefMock).toHaveBeenNthCalledWith(1, {
       repositoryPath: dispatchRepository.path,
       branchName: laneBranchName,
       startPoint: "proposal-commit",
@@ -3267,6 +3293,9 @@ describe.sequential("approveLaneProposal", () => {
     await vi.waitFor(() => {
       expect(pendingCoderRun).toHaveBeenCalledTimes(1);
     });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.proposalCommitHash).toBe("proposal-commit");
   });
 
   it("keeps the tracking PR in conflict state when auto-rebase fails and starts a conflict-resolution retry", async () => {

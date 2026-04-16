@@ -149,6 +149,7 @@ const createProposalLane = ({
     taskObjective: task.objective,
     proposalChangeName,
     proposalPath: buildProposalPath(proposalChangeName),
+    proposalCommitHash: null,
     workerSlot: null,
     branchName,
     baseBranch,

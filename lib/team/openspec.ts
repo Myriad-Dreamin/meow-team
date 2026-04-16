@@ -23,7 +23,13 @@ import type { TeamCodexEvent, TeamWorkerLaneRecord } from "@/lib/team/types";
 
 type ProposalLane = Pick<
   TeamWorkerLaneRecord,
-  "laneIndex" | "taskTitle" | "taskObjective" | "proposalChangeName" | "proposalPath" | "branchName"
+  | "laneIndex"
+  | "taskTitle"
+  | "taskObjective"
+  | "proposalChangeName"
+  | "proposalPath"
+  | "proposalCommitHash"
+  | "branchName"
 >;
 
 type MaterializedProposalSnapshot = {
@@ -617,11 +623,17 @@ export const materializeAssignmentProposals = async ({
     });
   }
 
+  const proposalCommitHash = await getBranchHead({
+    repositoryPath: plannerWorktreePath,
+    branchName: "HEAD",
+  });
+
   for (const lane of activeLanes) {
+    lane.proposalCommitHash = proposalCommitHash;
     await ensureBranchRef({
       repositoryPath,
       branchName: lane.branchName,
-      startPoint: canonicalBranchName,
+      startPoint: proposalCommitHash,
       forceUpdate: true,
     });
   }

@@ -270,6 +270,59 @@ export const getBranchHead = async ({
   return stdout;
 };
 
+export const commitContainsPath = async ({
+  repositoryPath,
+  revision,
+  relativePath,
+}: {
+  repositoryPath: string;
+  revision: string;
+  relativePath: string;
+}): Promise<boolean> => {
+  try {
+    await runGit(repositoryPath, [
+      "cat-file",
+      "-e",
+      `${revision}:${relativePath.split(path.sep).join("/")}`,
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const findCommitContainingPathInReflog = async ({
+  worktreePath,
+  relativePath,
+}: {
+  worktreePath: string;
+  relativePath: string;
+}): Promise<string | null> => {
+  const { stdout } = await runGit(worktreePath, ["log", "-g", "--format=%H", "HEAD"]);
+  const commits = Array.from(
+    new Set(
+      stdout
+        .split("\n")
+        .map((value) => value.trim())
+        .filter((value): value is string => value.length > 0),
+    ),
+  );
+
+  for (const commit of commits) {
+    if (
+      await commitContainsPath({
+        repositoryPath: worktreePath,
+        revision: commit,
+        relativePath,
+      })
+    ) {
+      return commit;
+    }
+  }
+
+  return null;
+};
+
 const pathExists = async (candidatePath: string): Promise<boolean> => {
   try {
     await fs.stat(candidatePath);

@@ -244,6 +244,18 @@ describe("materializeAssignmentProposals", () => {
       }),
     };
 
+    const lanes: Parameters<typeof materializeAssignmentProposals>[0]["lanes"] = [
+      {
+        laneIndex: 1,
+        taskTitle: "Agent-backed OpenSpec proposal materialization",
+        taskObjective:
+          "Replace hardcoded proposal markdown generation with an agent-backed materializer.",
+        proposalChangeName,
+        proposalPath,
+        branchName: "requests/openspec-agent/thread-1/a1-proposal-1",
+      },
+    ];
+
     await materializeAssignmentProposals({
       repositoryPath,
       baseBranch: "main",
@@ -259,17 +271,7 @@ describe("materializeAssignmentProposals", () => {
         "Replace hardcoded markdown generation in lib/team/openspec.ts with a dedicated agent.",
       worktreeRoot,
       plannerWorktreePath,
-      lanes: [
-        {
-          laneIndex: 1,
-          taskTitle: "Agent-backed OpenSpec proposal materialization",
-          taskObjective:
-            "Replace hardcoded proposal markdown generation with an agent-backed materializer.",
-          proposalChangeName,
-          proposalPath,
-          branchName: "requests/openspec-agent/thread-1/a1-proposal-1",
-        },
-      ],
+      lanes,
       openSpecMaterializerAgent,
     });
 
@@ -294,9 +296,10 @@ describe("materializeAssignmentProposals", () => {
     expect(ensureBranchRefMock).toHaveBeenCalledWith({
       repositoryPath,
       branchName: "requests/openspec-agent/thread-1/a1-proposal-1",
-      startPoint: "requests/openspec-agent/thread-1/a1",
+      startPoint: "planner-head-commit",
       forceUpdate: true,
     });
+    expect(lanes[0]?.proposalCommitHash).toBe("planner-head-commit");
   });
 
   it("fails when the materializer does not leave the required proposal artifacts on disk", async () => {

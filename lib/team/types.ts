@@ -134,6 +134,7 @@ export type TeamWorkerLaneRecord = {
   taskObjective: string | null;
   proposalChangeName: string | null;
   proposalPath: string | null;
+  proposalCommitHash?: string | null;
   workerSlot: number | null;
   branchName: string | null;
   baseBranch: string | null;

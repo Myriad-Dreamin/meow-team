@@ -680,10 +680,13 @@ const runLaneCycle = async ({
       worktreePath: laneWorktree.path,
       branchName: lane.branchName,
       startPoint:
+        lane.latestImplementationCommit ??
+        lane.proposalCommitHash ??
         resolveAssignmentCanonicalBranchName({
           threadId,
           assignment,
-        }) ?? lane.baseBranch,
+        }) ??
+        lane.baseBranch,
     });
 
     const branchHeadBeforeCoding = await getBranchHead({

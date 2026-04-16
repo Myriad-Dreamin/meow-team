@@ -323,7 +323,12 @@ describe("compact timeline labels", () => {
           message: "Reviewer completed machine review: approved.",
         },
       ]),
-    ).toEqual(["Coder run 1", "Reviewer revision 1", "Coder run 2", "Reviewer approved"]);
+    ).toEqual([
+      "Coder implementing 1",
+      "Reviewer revision 1",
+      "Coder updated 1",
+      "Reviewer approved",
+    ]);
   });
 
   it("keeps handoff anchors concise", () => {
