@@ -60,6 +60,13 @@ export type TeamStatusLanePopoverCopy = {
   detail: string | null;
 };
 
+export type TeamStatusLanePopoverTrigger = "hover" | "focus" | "click";
+
+export type TeamStatusLanePopoverState = {
+  key: TeamStatusLaneCountKey;
+  trigger: TeamStatusLanePopoverTrigger;
+};
+
 const createEmptyTeamStatusLaneThreadBuckets = (): TeamStatusLaneThreadBuckets => {
   return {
     queued: [],
@@ -151,6 +158,32 @@ export const buildTeamStatusLaneThreadBuckets = (
   }
 
   return buckets;
+};
+
+export const getNextTeamStatusLanePopoverState = (
+  currentState: TeamStatusLanePopoverState | null,
+  laneKey: TeamStatusLaneCountKey,
+  trigger: TeamStatusLanePopoverTrigger,
+): TeamStatusLanePopoverState | null => {
+  if (trigger === "click") {
+    if (currentState?.key === laneKey && currentState.trigger === "click") {
+      return null;
+    }
+
+    return {
+      key: laneKey,
+      trigger,
+    };
+  }
+
+  if (currentState?.key === laneKey && currentState.trigger === "click") {
+    return currentState;
+  }
+
+  return {
+    key: laneKey,
+    trigger,
+  };
 };
 
 export const describeTeamStatusLanePopover = (

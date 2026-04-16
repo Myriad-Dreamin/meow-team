@@ -12,8 +12,11 @@ import {
 import {
   buildTeamStatusLaneThreadBuckets,
   describeTeamStatusLanePopover,
+  getNextTeamStatusLanePopoverState,
   teamStatusLaneItems,
   type TeamStatusLaneCountKey,
+  type TeamStatusLanePopoverTrigger,
+  type TeamStatusLanePopoverState,
 } from "@/components/team-status-bar-lane-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamStatusSnapshotResponse } from "@/lib/team/status";
@@ -173,11 +176,12 @@ export function TeamStatusBar({
 }: TeamStatusBarProps) {
   const [snapshot, setSnapshot] = useState<TeamStatusSnapshotResponse | null>(null);
   const [refreshState, setRefreshState] = useState<RefreshState>("loading");
-  const [openLaneKey, setOpenLaneKey] = useState<TeamStatusLaneCountKey | null>(null);
+  const [openLaneState, setOpenLaneState] = useState<TeamStatusLanePopoverState | null>(null);
   const lanePopoverRefs = useRef<Partial<Record<TeamStatusLaneCountKey, HTMLDivElement | null>>>(
     {},
   );
   const laneThreadsByStatus = buildTeamStatusLaneThreadBuckets(livingThreads);
+  const openLaneKey = openLaneState?.key ?? null;
 
   useEffect(() => {
     let isCancelled = false;
@@ -225,7 +229,7 @@ export function TeamStatusBar({
     const openPopover = lanePopoverRefs.current[openLaneKey];
     const eventTarget = event.target;
     if (!(eventTarget instanceof Node) || !openPopover?.contains(eventTarget)) {
-      setOpenLaneKey(null);
+      setOpenLaneState(null);
     }
   });
 
@@ -259,7 +263,7 @@ export function TeamStatusBar({
     }
 
     if (snapshot.workspace.laneCounts[openLaneKey] <= 0) {
-      setOpenLaneKey(null);
+      setOpenLaneState(null);
     }
   }, [openLaneKey, snapshot]);
 
@@ -288,18 +292,20 @@ export function TeamStatusBar({
         ? "1 Archived Thread"
         : `${archivedThreadCount} Archived Threads`;
 
-  const handleOpenLane = (laneKey: TeamStatusLaneCountKey) => {
-    setOpenLaneKey(laneKey);
+  const handleOpenLane = (
+    laneKey: TeamStatusLaneCountKey,
+    trigger: TeamStatusLanePopoverTrigger,
+  ) => {
+    setOpenLaneState((currentState) => {
+      return getNextTeamStatusLanePopoverState(currentState, laneKey, trigger);
+    });
   };
 
   const handleCloseLane = (laneKey: TeamStatusLaneCountKey) => {
-    setOpenLaneKey((currentLaneKey) => (currentLaneKey === laneKey ? null : currentLaneKey));
+    setOpenLaneState((currentState) => (currentState?.key === laneKey ? null : currentState));
   };
 
-  const handleLaneBlur = (
-    laneKey: TeamStatusLaneCountKey,
-    event: FocusEvent<HTMLDivElement>,
-  ) => {
+  const handleLaneBlur = (laneKey: TeamStatusLaneCountKey, event: FocusEvent<HTMLDivElement>) => {
     const nextFocusedElement = event.relatedTarget;
     if (nextFocusedElement instanceof Node && event.currentTarget.contains(nextFocusedElement)) {
       return;
@@ -312,6 +318,10 @@ export function TeamStatusBar({
     laneKey: TeamStatusLaneCountKey,
     event: MouseEvent<HTMLDivElement>,
   ) => {
+    if (openLaneState?.key === laneKey && openLaneState.trigger === "click") {
+      return;
+    }
+
     const activeElement = document.activeElement;
     if (activeElement instanceof Node && event.currentTarget.contains(activeElement)) {
       return;
@@ -325,18 +335,18 @@ export function TeamStatusBar({
       return;
     }
 
-    setOpenLaneKey(null);
+    setOpenLaneState(null);
     if (event.target instanceof HTMLElement) {
       event.target.blur();
     }
   };
 
   const handleToggleLane = (laneKey: TeamStatusLaneCountKey) => {
-    setOpenLaneKey((currentLaneKey) => (currentLaneKey === laneKey ? null : laneKey));
+    handleOpenLane(laneKey, "click");
   };
 
   const handleSelectLaneThread = (threadId: string) => {
-    setOpenLaneKey(null);
+    setOpenLaneState(null);
     onSelectThreadTab(threadId);
   };
 
@@ -406,9 +416,9 @@ export function TeamStatusBar({
                     lanePopoverRefs.current[item.key] = element;
                   }}
                   onBlur={(event) => handleLaneBlur(item.key, event)}
-                  onFocusCapture={() => handleOpenLane(item.key)}
+                  onFocusCapture={() => handleOpenLane(item.key, "focus")}
                   onKeyDown={handleLaneKeyDown}
-                  onMouseEnter={() => handleOpenLane(item.key)}
+                  onMouseEnter={() => handleOpenLane(item.key, "hover")}
                   onMouseLeave={(event) => handleLaneMouseLeave(item.key, event)}
                 >
                   <button

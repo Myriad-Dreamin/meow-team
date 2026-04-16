@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTeamStatusLaneThreadBuckets,
   describeTeamStatusLanePopover,
+  getNextTeamStatusLanePopoverState,
 } from "@/components/team-status-bar-lane-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
@@ -260,6 +261,57 @@ describe("describeTeamStatusLanePopover", () => {
     ).toEqual({
       summary: "2 lanes across 1 living thread",
       detail: "Thread summaries are still refreshing for this status.",
+    });
+  });
+});
+
+describe("getNextTeamStatusLanePopoverState", () => {
+  it("keeps click as an open action when hover or focus already revealed the same lane", () => {
+    expect(
+      getNextTeamStatusLanePopoverState(
+        {
+          key: "queued",
+          trigger: "hover",
+        },
+        "queued",
+        "click",
+      ),
+    ).toEqual({
+      key: "queued",
+      trigger: "click",
+    });
+
+    expect(
+      getNextTeamStatusLanePopoverState(
+        {
+          key: "reviewing",
+          trigger: "focus",
+        },
+        "reviewing",
+        "click",
+      ),
+    ).toEqual({
+      key: "reviewing",
+      trigger: "click",
+    });
+  });
+
+  it("only closes on click when that lane was already opened by click", () => {
+    const clickOpenState = {
+      key: "queued",
+      trigger: "click",
+    } as const;
+
+    expect(getNextTeamStatusLanePopoverState(clickOpenState, "queued", "hover")).toEqual(
+      clickOpenState,
+    );
+    expect(getNextTeamStatusLanePopoverState(clickOpenState, "queued", "focus")).toEqual(
+      clickOpenState,
+    );
+    expect(getNextTeamStatusLanePopoverState(clickOpenState, "queued", "click")).toBeNull();
+    expect(getNextTeamStatusLanePopoverState(clickOpenState, "coding", "click")).toEqual({
+      key: "coding",
+      trigger: "click",
     });
   });
 });
