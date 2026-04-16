@@ -849,8 +849,10 @@ export function TeamWorkspace({
       </div>
 
       <TeamStatusBar
+        livingThreads={threads}
         isArchivedThreadsRevealed={isArchivedThreadsRevealed}
         isSettingsSelected={resolvedSelectedTab.type === "settings"}
+        onSelectThreadTab={handleSelectThreadTab}
         onToggleArchivedThreads={handleToggleArchivedThreads}
         onSelectSettings={handleSelectSettingsTab}
       />
