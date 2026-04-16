@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { execFileMock } = vi.hoisted(() => ({
@@ -112,6 +114,13 @@ describe("execCliCommand", () => {
 describe("runGit", () => {
   it("runs git with -C against the target repository", async () => {
     const { runGit } = await loadModules();
+    vi.stubEnv(
+      "PATH",
+      ["/usr/bin", "./node_modules/.bin", "/repo/node_modules/.bin", "/custom/tools"].join(
+        path.delimiter,
+      ),
+    );
+    vi.stubEnv("MEOW_TEST_ENV", "set");
     completeCommand({
       stdout: "clean",
     });
@@ -121,14 +130,23 @@ describe("runGit", () => {
       stderr: "",
     });
 
+    const options = execFileMock.mock.calls[0]?.[2] as {
+      env?: NodeJS.ProcessEnv;
+      maxBuffer?: number;
+    };
+
     expect(execFileMock).toHaveBeenCalledWith(
       "git",
       ["-C", "/repo", "status", "--short"],
-      {
+      expect.objectContaining({
+        env: expect.objectContaining({
+          MEOW_TEST_ENV: "set",
+        }),
         maxBuffer: 1024 * 1024 * 4,
-      },
+      }),
       expect.any(Function),
     );
+    expect(options.env?.PATH?.split(path.delimiter)).toEqual(["/usr/bin", "/custom/tools"]);
   });
 
   it("preserves the git fallback failure message", async () => {
