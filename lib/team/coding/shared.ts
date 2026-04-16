@@ -2,6 +2,7 @@ import "server-only";
 
 import { teamConfig } from "@/team.config";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import { buildCanonicalBranchName } from "@/lib/team/git";
 import type { TeamThreadRecord } from "@/lib/team/history";
 import {
   buildLanePullRequestTitle,
@@ -217,6 +218,31 @@ const createLaneEvent = (actor: TeamWorkerEventActor, message: string, createdAt
     message,
     createdAt,
   };
+};
+
+export const resolveAssignmentCanonicalBranchName = ({
+  threadId,
+  assignment,
+}: {
+  threadId: string;
+  assignment: Pick<
+    TeamDispatchAssignment,
+    "assignmentNumber" | "branchPrefix" | "canonicalBranchName"
+  >;
+}): string | null => {
+  if (assignment.canonicalBranchName) {
+    return assignment.canonicalBranchName;
+  }
+
+  if (!assignment.branchPrefix) {
+    return null;
+  }
+
+  return buildCanonicalBranchName({
+    threadId,
+    branchPrefix: assignment.branchPrefix,
+    assignmentNumber: assignment.assignmentNumber,
+  });
 };
 
 const createPlannerNote = (message: string, createdAt: string): TeamPlannerNote => {

@@ -90,6 +90,7 @@ vi.mock("@/lib/team/repositories", async (importOriginal) => {
 });
 
 import { teamConfig } from "@/team.config";
+import { buildCanonicalBranchName, buildLaneBranchName } from "@/lib/team/git";
 import * as historyModule from "@/lib/team/history";
 import {
   getTeamThreadRecord,
@@ -3080,6 +3081,191 @@ describe.sequential("approveLaneProposal", () => {
       title: "Ship the feature",
       body: "Machine review approved the branch.",
       draft: false,
+    });
+  });
+
+  it("derives and persists a canonical branch name when legacy records omit it", async () => {
+    const threadId = "thread-legacy-canonical";
+    const branchPrefix = "status-lane-tooltip";
+    const canonicalBranchName = buildCanonicalBranchName({
+      threadId,
+      branchPrefix,
+      assignmentNumber: 1,
+    });
+    const laneBranchName = buildLaneBranchName({
+      threadId,
+      branchPrefix,
+      assignmentNumber: 1,
+      laneIndex: 1,
+    });
+    const pendingCoderRun = vi.fn(
+      () => new Promise<Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>>(() => {}),
+    ) as TeamRoleDependencies["coderAgent"]["run"];
+
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("proposal-commit");
+    pushLaneBranchMock.mockResolvedValueOnce({
+      ...basePushedCommit,
+      commitHash: "proposal-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValueOnce({
+      url: "https://github.com/example/meow-team/pull/42",
+    });
+
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+    await writeStoredThreadRecord(
+      createDispatchThreadRecord({
+        threadId,
+        assignment: createDispatchAssignment({
+          assignmentNumber: 1,
+          repository: dispatchRepository,
+          status: "awaiting_human_approval",
+          requestTitle: "Ship the feature",
+          conventionalTitle: null,
+          requestText: "Implement the approved proposal.",
+          plannerSummary: "Planner summary",
+          plannerDeliverable: "Planner deliverable",
+          branchPrefix,
+          canonicalBranchName: null,
+          workerCount: 1,
+          threadSlot: 1,
+          plannerWorktreePath: `${worktreeRoot}/meow-1`,
+          lanes: [
+            createProposalApprovalLane({
+              branchName: laneBranchName,
+            }),
+          ],
+        }),
+        runStatus: "awaiting_human_approval",
+      }),
+    );
+
+    await approveLaneProposal({
+      env: createExecutionEnv({
+        coderRun: pendingCoderRun,
+      }),
+      threadId,
+      assignmentNumber: 1,
+      laneId: "lane-1",
+    });
+
+    expect(ensureBranchRefMock).toHaveBeenCalledWith({
+      repositoryPath: dispatchRepository.path,
+      branchName: laneBranchName,
+      startPoint: canonicalBranchName,
+    });
+    await vi.waitFor(() => {
+      expect(pendingCoderRun).toHaveBeenCalledTimes(1);
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+    expect(thread?.dispatchAssignments[0]?.canonicalBranchName).toBe(canonicalBranchName);
+  });
+
+  it("recovers a missing proposal branch from the claimed thread worktree HEAD", async () => {
+    const threadId = "01fba175-e48a-4999-a458-d970d82198f7";
+    const branchPrefix = "status-lane-tooltip";
+    const canonicalBranchName = buildCanonicalBranchName({
+      threadId,
+      branchPrefix,
+      assignmentNumber: 1,
+    });
+    const laneBranchName = buildLaneBranchName({
+      threadId,
+      branchPrefix,
+      assignmentNumber: 1,
+      laneIndex: 1,
+    });
+    const threadWorktreePath = `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`;
+    const pendingCoderRun = vi.fn(
+      () => new Promise<Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>>(() => {}),
+    ) as TeamRoleDependencies["coderAgent"]["run"];
+
+    ensureBranchRefMock
+      .mockRejectedValueOnce(
+        new Error(
+          `fatal: ambiguous argument '${canonicalBranchName}': unknown revision or path not in the working tree.`,
+        ),
+      )
+      .mockResolvedValueOnce(undefined);
+    getBranchHeadMock
+      .mockRejectedValueOnce(
+        new Error(
+          `fatal: ambiguous argument '${laneBranchName}': unknown revision or path not in the working tree.`,
+        ),
+      )
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("proposal-commit");
+    pushLaneBranchMock.mockResolvedValueOnce({
+      ...basePushedCommit,
+      commitHash: "proposal-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValueOnce({
+      url: "https://github.com/example/meow-team/pull/42",
+    });
+
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+    await writeStoredThreadRecord(
+      createDispatchThreadRecord({
+        threadId,
+        assignment: createDispatchAssignment({
+          assignmentNumber: 1,
+          repository: dispatchRepository,
+          status: "awaiting_human_approval",
+          requestTitle: "Ship the feature",
+          conventionalTitle: null,
+          requestText: "Implement the approved proposal.",
+          plannerSummary: "Planner summary",
+          plannerDeliverable: "Planner deliverable",
+          branchPrefix,
+          canonicalBranchName: null,
+          workerCount: 1,
+          threadSlot: 1,
+          plannerWorktreePath: `${worktreeRoot}/meow-1`,
+          lanes: [
+            createProposalApprovalLane({
+              branchName: laneBranchName,
+            }),
+          ],
+        }),
+        runStatus: "awaiting_human_approval",
+      }),
+    );
+
+    await approveLaneProposal({
+      env: createExecutionEnv({
+        coderRun: pendingCoderRun,
+      }),
+      threadId,
+      assignmentNumber: 1,
+      laneId: "lane-1",
+    });
+
+    expect(ensureBranchRefMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath: dispatchRepository.path,
+      branchName: laneBranchName,
+      startPoint: canonicalBranchName,
+    });
+    expect(getBranchHeadMock).toHaveBeenNthCalledWith(2, {
+      repositoryPath: threadWorktreePath,
+      branchName: "HEAD",
+    });
+    expect(ensureBranchRefMock).toHaveBeenNthCalledWith(2, {
+      repositoryPath: dispatchRepository.path,
+      branchName: laneBranchName,
+      startPoint: "proposal-commit",
+      forceUpdate: true,
+    });
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: dispatchRepository.path,
+      branchName: laneBranchName,
+      commitHash: "proposal-commit",
+    });
+    await vi.waitFor(() => {
+      expect(pendingCoderRun).toHaveBeenCalledTimes(1);
     });
   });
 

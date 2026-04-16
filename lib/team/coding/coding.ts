@@ -16,6 +16,7 @@ import {
   createPullRequestRecord,
   findAssignment,
   findLane,
+  resolveAssignmentCanonicalBranchName,
   summarizeGitFailure,
   type TeamRunCodingStageState,
   type TeamRunEnv,
@@ -26,6 +27,66 @@ import { ensurePendingDispatchWork } from "@/lib/team/coding/reviewing";
 import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
 import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
+
+const resolveProposalCommitForApproval = async ({
+  repositoryPath,
+  laneBranchName,
+  canonicalBranchName,
+  threadWorktree,
+}: {
+  repositoryPath: string;
+  laneBranchName: string;
+  canonicalBranchName: string | null;
+  threadWorktree: Worktree | null;
+}): Promise<string> => {
+  if (canonicalBranchName) {
+    try {
+      await ensureBranchRef({
+        repositoryPath,
+        branchName: laneBranchName,
+        startPoint: canonicalBranchName,
+      });
+    } catch {
+      // Keep approval resilient when a legacy or cleaned-up branch ref must be
+      // recovered from the claimed thread worktree instead.
+    }
+  }
+
+  try {
+    return await getBranchHead({
+      repositoryPath,
+      branchName: laneBranchName,
+    });
+  } catch (branchError) {
+    if (!threadWorktree?.path) {
+      throw branchError;
+    }
+
+    try {
+      const proposalCommit = await getBranchHead({
+        repositoryPath: threadWorktree.path,
+        branchName: "HEAD",
+      });
+      await ensureBranchRef({
+        repositoryPath,
+        branchName: laneBranchName,
+        startPoint: proposalCommit,
+        forceUpdate: true,
+      });
+      return proposalCommit;
+    } catch (worktreeError) {
+      const branchMessage =
+        branchError instanceof Error ? branchError.message : "Unknown branch lookup failure.";
+      const worktreeMessage =
+        worktreeError instanceof Error
+          ? worktreeError.message
+          : "Unknown thread worktree recovery failure.";
+      throw new Error(
+        `Unable to resolve proposal branch ${laneBranchName} for approval. Branch lookup failed (${branchMessage}). Recovery from claimed thread worktree HEAD at ${threadWorktree.path} also failed (${worktreeMessage}).`,
+      );
+    }
+  }
+};
 
 export const approveLaneProposal = async ({
   env,
@@ -69,16 +130,15 @@ export const approveLaneProposal = async ({
     assignment,
     lane,
   });
-  if (assignment.canonicalBranchName) {
-    await ensureBranchRef({
-      repositoryPath: assignment.repository.path,
-      branchName: lane.branchName,
-      startPoint: assignment.canonicalBranchName,
-    });
-  }
-  const proposalCommit = await getBranchHead({
+  const resolvedCanonicalBranchName = resolveAssignmentCanonicalBranchName({
+    threadId,
+    assignment,
+  });
+  const proposalCommit = await resolveProposalCommitForApproval({
     repositoryPath: assignment.repository.path,
-    branchName: lane.branchName,
+    laneBranchName: lane.branchName,
+    canonicalBranchName: resolvedCanonicalBranchName,
+    threadWorktree,
   });
 
   let pushedCommit: Awaited<ReturnType<typeof pushLaneBranch>> | null = null;
@@ -107,6 +167,9 @@ export const approveLaneProposal = async ({
           mutableThread.dispatchAssignments,
           assignmentNumber,
         );
+        if (!mutableAssignment.canonicalBranchName && resolvedCanonicalBranchName) {
+          mutableAssignment.canonicalBranchName = resolvedCanonicalBranchName;
+        }
         const mutableLane = findLane(mutableAssignment, laneId);
         if (mutableLane.status !== "awaiting_human_approval") {
           throw new Error("This proposal is not waiting for human approval.");
@@ -196,6 +259,9 @@ export const approveLaneProposal = async ({
           mutableThread.dispatchAssignments,
           assignmentNumber,
         );
+        if (!mutableAssignment.canonicalBranchName && resolvedCanonicalBranchName) {
+          mutableAssignment.canonicalBranchName = resolvedCanonicalBranchName;
+        }
         const mutableLane = findLane(mutableAssignment, laneId);
         if (mutableLane.status !== "awaiting_human_approval") {
           throw new Error("This proposal is not waiting for human approval.");

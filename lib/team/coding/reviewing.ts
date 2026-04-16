@@ -32,6 +32,7 @@ import {
   findAssignment,
   findLane,
   isFinalArchivePhase,
+  resolveAssignmentCanonicalBranchName,
   summarizeGitFailure,
   type TeamRunCompletedState,
   type TeamRunEnv,
@@ -678,7 +679,11 @@ const runLaneCycle = async ({
       worktreeRoot: laneWorktreeRoot,
       worktreePath: laneWorktree.path,
       branchName: lane.branchName,
-      startPoint: assignment.canonicalBranchName ?? lane.baseBranch,
+      startPoint:
+        resolveAssignmentCanonicalBranchName({
+          threadId,
+          assignment,
+        }) ?? lane.baseBranch,
     });
 
     const branchHeadBeforeCoding = await getBranchHead({
