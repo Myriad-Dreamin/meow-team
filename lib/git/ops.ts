@@ -266,8 +266,25 @@ export const getBranchHead = async ({
   repositoryPath: string;
   branchName: string;
 }): Promise<string> => {
-  const { stdout } = await runGit(repositoryPath, ["rev-parse", branchName]);
-  return stdout;
+  const normalizedBranchName = branchName.trim();
+  const revisionCandidates =
+    normalizedBranchName === "HEAD" || normalizedBranchName.startsWith("refs/")
+      ? [normalizedBranchName]
+      : [`refs/heads/${normalizedBranchName}`, normalizedBranchName];
+  let lastError: unknown = null;
+
+  for (const revision of revisionCandidates) {
+    try {
+      const { stdout } = await runGit(repositoryPath, ["rev-parse", "--verify", revision]);
+      return stdout;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Git command failed in ${repositoryPath}: git rev-parse --verify ${branchName}`);
 };
 
 const pathExists = async (candidatePath: string): Promise<boolean> => {

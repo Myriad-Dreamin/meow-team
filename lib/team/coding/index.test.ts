@@ -125,6 +125,10 @@ type RequestTitleAgentArgs = Parameters<TeamRoleDependencies["requestTitleAgent"
 type PlannerAgentArgs = Parameters<TeamRoleDependencies["plannerAgent"]["run"]>;
 type PlannerAgentResult = Awaited<ReturnType<TeamRoleDependencies["plannerAgent"]["run"]>>;
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
+const NESTED_REQUEST_BRANCH_NAME =
+  "requests/workflow-pages/0784c123-bcb3-4eaf-acc3--62086a172c62c97d/a1-proposal-1";
+const NESTED_CANONICAL_BRANCH_NAME =
+  "requests/workflow-pages/0784c123-bcb3-4eaf-acc3--62086a172c62c97d/a1";
 
 const repository: TeamRepositoryOption = {
   id: "repo-1",
@@ -3083,6 +3087,99 @@ describe.sequential("approveLaneProposal", () => {
     });
   });
 
+  it("routes slash-delimited proposal branches through the shared branch-head helper", async () => {
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("review-commit")
+      .mockResolvedValueOnce("rebased-review-commit");
+    pushLaneBranchMock
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        branchUrl: `https://github.com/example/meow-team/tree/${NESTED_REQUEST_BRANCH_NAME}`,
+        commitHash: "proposal-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+      })
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        branchUrl: `https://github.com/example/meow-team/tree/${NESTED_REQUEST_BRANCH_NAME}`,
+        commitHash: "rebased-review-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/rebased-review-commit",
+      });
+    synchronizePullRequestMock
+      .mockResolvedValueOnce({
+        url: "https://github.com/example/meow-team/pull/84",
+      })
+      .mockResolvedValueOnce({
+        url: "https://github.com/example/meow-team/pull/84",
+      });
+
+    await writeExecutionThreadStore({
+      threadId: "thread-nested-proposal",
+      lane: createProposalApprovalLane({
+        branchName: NESTED_REQUEST_BRANCH_NAME,
+      }),
+      assignmentOverrides: {
+        requestTitle: "fix(workflow-pages/approval): harden approval branch resolution",
+        branchPrefix: "workflow-pages",
+        canonicalBranchName: NESTED_CANONICAL_BRANCH_NAME,
+      },
+    });
+
+    await approveLaneProposal({
+      env: createExecutionEnv(),
+      threadId: "thread-nested-proposal",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+    });
+
+    await vi.waitFor(async () => {
+      const thread = await getTeamThreadRecord(
+        teamConfig.storage.threadFile,
+        "thread-nested-proposal",
+      );
+      expect(thread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("approved");
+    });
+
+    expect(getBranchHeadMock).toHaveBeenCalled();
+    expect(
+      getBranchHeadMock.mock.calls.every(
+        ([input]) => input.branchName === NESTED_REQUEST_BRANCH_NAME,
+      ),
+    ).toBe(true);
+    expect(ensureLaneWorktreeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchName: NESTED_REQUEST_BRANCH_NAME,
+      }),
+    );
+    expect(pushLaneBranchMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath: dispatchRepository.path,
+      branchName: NESTED_REQUEST_BRANCH_NAME,
+      commitHash: "proposal-commit",
+    });
+    expect(pushLaneBranchMock).toHaveBeenNthCalledWith(2, {
+      repositoryPath: dispatchRepository.path,
+      branchName: NESTED_REQUEST_BRANCH_NAME,
+      commitHash: "rebased-review-commit",
+    });
+    expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath: dispatchRepository.path,
+      branchName: NESTED_REQUEST_BRANCH_NAME,
+      baseBranch: "main",
+      title: "fix(workflow-pages/approval): harden approval branch resolution",
+      body: "Implement the approved proposal.",
+      draft: true,
+    });
+    expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(2, {
+      repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+      branchName: NESTED_REQUEST_BRANCH_NAME,
+      baseBranch: "main",
+      title: "fix(workflow-pages/approval): harden approval branch resolution",
+      body: "Machine review approved the branch.",
+      draft: false,
+    });
+  });
+
   it("keeps the tracking PR in conflict state when auto-rebase fails and starts a conflict-resolution retry", async () => {
     let secondCoderStarted = false;
     const secondCoderPromise = new Promise<
@@ -3410,6 +3507,70 @@ describe.sequential("approveLanePullRequest", () => {
     );
     expect(thread?.dispatchAssignments[0]?.status).toBe("completed");
     expect(thread?.run?.status).toBe("completed");
+  });
+
+  it("refreshes nested request branches during final approval", async () => {
+    commitWorktreeChangesMock.mockResolvedValue(undefined);
+    getBranchHeadMock.mockResolvedValue("archive-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      branchUrl: `https://github.com/example/meow-team/tree/${NESTED_REQUEST_BRANCH_NAME}`,
+      commitUrl: "https://github.com/example/meow-team/commit/archive-commit",
+      commitHash: "archive-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/99",
+    });
+
+    await writeApprovalThreadStore(
+      createApprovalLane({
+        branchName: NESTED_REQUEST_BRANCH_NAME,
+        pullRequest: {
+          ...createApprovalLane().pullRequest!,
+          branchName: NESTED_REQUEST_BRANCH_NAME,
+        },
+      }),
+      {
+        requestTitle: "fix(workflow-pages/approval): harden approval branch resolution",
+        branchPrefix: "workflow-pages",
+        canonicalBranchName: NESTED_CANONICAL_BRANCH_NAME,
+      },
+    );
+
+    await approveLanePullRequest({
+      env: createArchiveEnv(),
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(getBranchHeadMock).toHaveBeenCalledWith({
+      repositoryPath: dispatchRepository.path,
+      branchName: NESTED_REQUEST_BRANCH_NAME,
+    });
+    expect(ensureLaneWorktreeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchName: NESTED_REQUEST_BRANCH_NAME,
+      }),
+    );
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: dispatchRepository.path,
+      branchName: NESTED_REQUEST_BRANCH_NAME,
+      commitHash: "archive-commit",
+    });
+    expect(synchronizePullRequestMock).toHaveBeenCalledWith({
+      repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+      branchName: NESTED_REQUEST_BRANCH_NAME,
+      baseBranch: "main",
+      title: "fix(workflow-pages/approval): harden approval branch resolution",
+      body: "Machine review approved the branch.",
+      draft: false,
+    });
+    expect(lane?.pullRequest?.status).toBe("approved");
+    expect(lane?.branchName).toBe(NESTED_REQUEST_BRANCH_NAME);
   });
 
   it("normalizes the final GitHub PR title from stored conventional metadata", async () => {
