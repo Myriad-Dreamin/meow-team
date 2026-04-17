@@ -1,7 +1,10 @@
 import "server-only";
 
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { teamConfig } from "@/team.config";
 import {
+  commitWorktreeChanges,
   commitContainsPath,
   ensureBranchRef,
   findCommitContainingPathInReflog,
@@ -33,12 +36,27 @@ import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
 import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamWorkerLaneRecord } from "@/lib/team/types";
 
+const hasFileAtPath = async (candidatePath: string): Promise<boolean> => {
+  try {
+    return (await fs.stat(candidatePath)).isFile();
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException).code;
+
+    if (errorCode === "ENOENT" || errorCode === "ENOTDIR") {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
 const resolveProposalCommitForApproval = async ({
   repositoryPath,
   laneBranchName,
   canonicalBranchName,
   plannerWorktreePath,
   proposalCommitHash,
+  proposalPath,
   proposalArtifactPath,
   threadWorktree,
 }: {
@@ -47,6 +65,7 @@ const resolveProposalCommitForApproval = async ({
   canonicalBranchName: string | null;
   plannerWorktreePath: string | null | undefined;
   proposalCommitHash: string | null | undefined;
+  proposalPath: string;
   proposalArtifactPath: string;
   threadWorktree: Worktree | null;
 }): Promise<string> => {
@@ -72,6 +91,42 @@ const resolveProposalCommitForApproval = async ({
     } catch {
       return null;
     }
+  };
+
+  const snapshotProposalArtifactFromWorktree = async (
+    worktreePath: string,
+  ): Promise<string | null> => {
+    if (!(await hasFileAtPath(path.join(worktreePath, proposalArtifactPath)))) {
+      return null;
+    }
+
+    await commitWorktreeChanges({
+      worktreePath,
+      message: `planner: recover proposal snapshot for ${laneBranchName}`,
+      pathspecs: [proposalPath],
+    });
+
+    const recoveredCommit = await getBranchHead({
+      repositoryPath: worktreePath,
+      branchName: "HEAD",
+    });
+    if (
+      !(await commitContainsPath({
+        repositoryPath: worktreePath,
+        revision: recoveredCommit,
+        relativePath: proposalArtifactPath,
+      }))
+    ) {
+      return null;
+    }
+
+    await ensureBranchRef({
+      repositoryPath,
+      branchName: laneBranchName,
+      startPoint: recoveredCommit,
+      forceUpdate: true,
+    });
+    return recoveredCommit;
   };
 
   if (proposalCommitHash) {
@@ -149,12 +204,17 @@ const resolveProposalCommitForApproval = async ({
       });
       return reflogCommit;
     }
+
+    const recoveredCommit = await snapshotProposalArtifactFromWorktree(worktreePath);
+    if (recoveredCommit) {
+      return recoveredCommit;
+    }
   }
 
   throw new Error(
     [
       `Unable to resolve proposal branch ${laneBranchName} for approval.`,
-      `No valid proposal commit containing ${proposalArtifactPath} was found on ${laneBranchName}${canonicalBranchName ? `, ${canonicalBranchName}` : ""}, or in the claimed planner worktree reflog.`,
+      `No valid proposal commit containing ${proposalArtifactPath} was found on ${laneBranchName}${canonicalBranchName ? `, ${canonicalBranchName}` : ""}, in the claimed planner worktree reflog, or in the current planner worktree changes.`,
     ].join(" "),
   );
 };
@@ -213,6 +273,7 @@ export const approveLaneProposal = async ({
     canonicalBranchName: resolvedCanonicalBranchName,
     plannerWorktreePath: assignment.plannerWorktreePath,
     proposalCommitHash: lane.proposalCommitHash,
+    proposalPath: lane.proposalPath,
     proposalArtifactPath: `${lane.proposalPath}/.openspec.yaml`,
     threadWorktree,
   });

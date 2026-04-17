@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -3289,6 +3289,123 @@ describe.sequential("approveLaneProposal", () => {
       repositoryPath: dispatchRepository.path,
       branchName: laneBranchName,
       commitHash: "proposal-commit",
+    });
+    await vi.waitFor(() => {
+      expect(pendingCoderRun).toHaveBeenCalledTimes(1);
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+    expect(thread?.dispatchAssignments[0]?.lanes[0]?.proposalCommitHash).toBe("proposal-commit");
+  });
+
+  it("recovers a missing proposal branch from planner worktree proposal files that still exist on disk", async () => {
+    const threadId = "8e193d06-2586-498d-864c-e8f47231dcee";
+    const branchPrefix = "trace-paths";
+    const canonicalBranchName = buildCanonicalBranchName({
+      threadId,
+      branchPrefix,
+      assignmentNumber: 1,
+    });
+    const laneBranchName = buildLaneBranchName({
+      threadId,
+      branchPrefix,
+      assignmentNumber: 1,
+      laneIndex: 1,
+    });
+    const repositoryPath = path.join(tempDirectory, "repository");
+    const worktreeRoot = path.join(repositoryPath, teamConfig.dispatch.worktreeRoot);
+    const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
+    const proposalPath =
+      "openspec/changes/trace-paths-a1-p1-narrow-server-file-tracing-path-resolution";
+    const proposalArtifactPath = `${proposalPath}/.openspec.yaml`;
+    const pendingCoderRun = vi.fn(
+      () => new Promise<Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>>(() => {}),
+    ) as TeamRoleDependencies["coderAgent"]["run"];
+
+    await mkdir(path.join(plannerWorktreePath, proposalPath), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(plannerWorktreePath, proposalArtifactPath),
+      "name: trace-paths-a1-p1-narrow-server-file-tracing-path-resolution\n",
+      "utf8",
+    );
+
+    getBranchHeadMock
+      .mockRejectedValueOnce(
+        new Error(
+          `fatal: ambiguous argument '${canonicalBranchName}': unknown revision or path not in the working tree.`,
+        ),
+      )
+      .mockRejectedValueOnce(
+        new Error(
+          `fatal: ambiguous argument '${laneBranchName}': unknown revision or path not in the working tree.`,
+        ),
+      )
+      .mockResolvedValueOnce("main-commit")
+      .mockResolvedValueOnce("proposal-commit");
+    commitContainsPathMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    findCommitContainingPathInReflogMock.mockResolvedValue(null);
+    pushLaneBranchMock.mockResolvedValueOnce({
+      ...basePushedCommit,
+      commitHash: "proposal-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValueOnce({
+      url: "https://github.com/example/meow-team/pull/42",
+    });
+
+    const threadRecord = createDispatchThreadRecord({
+      threadId,
+      assignment: createDispatchAssignment({
+        assignmentNumber: 1,
+        repository: {
+          ...dispatchRepository,
+          path: repositoryPath,
+        },
+        status: "awaiting_human_approval",
+        requestTitle: "Ship the feature",
+        conventionalTitle: null,
+        requestText: "Implement the approved proposal.",
+        plannerSummary: "Planner summary",
+        plannerDeliverable: "Planner deliverable",
+        branchPrefix,
+        canonicalBranchName: null,
+        workerCount: 1,
+        threadSlot: 1,
+        plannerWorktreePath,
+        lanes: [
+          createProposalApprovalLane({
+            branchName: laneBranchName,
+            proposalChangeName: "trace-paths-a1-p1-narrow-server-file-tracing-path-resolution",
+            proposalPath,
+          }),
+        ],
+      }),
+      runStatus: "awaiting_human_approval",
+    });
+    threadRecord.data.threadWorktree = createManagedPlanningWorktree(repositoryPath, 1);
+    await writeStoredThreadRecord(threadRecord);
+
+    await approveLaneProposal({
+      env: createExecutionEnv({
+        coderRun: pendingCoderRun,
+      }),
+      threadId,
+      assignmentNumber: 1,
+      laneId: "lane-1",
+    });
+
+    expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
+      worktreePath: plannerWorktreePath,
+      message: `planner: recover proposal snapshot for ${laneBranchName}`,
+      pathspecs: [proposalPath],
+    });
+    expect(ensureBranchRefMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath,
+      branchName: laneBranchName,
+      startPoint: "proposal-commit",
+      forceUpdate: true,
     });
     await vi.waitFor(() => {
       expect(pendingCoderRun).toHaveBeenCalledTimes(1);
