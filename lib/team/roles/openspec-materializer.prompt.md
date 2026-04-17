@@ -40,8 +40,11 @@ change scaffold already exists.
 - Use `openspec status --change "[[param:proposalChangeName]]" --json` and
   `openspec instructions <artifact-id> --change "[[param:proposalChangeName]]"
   --json` as needed to follow the schema and output paths.
-- Write or update only the OpenSpec artifacts for this change. Do not modify
-  branch refs, git state, thread history, or unrelated repository files.
+- Write or update only the OpenSpec artifacts for this change. Planner-side
+  commits on the currently checked out planner branch are allowed when they
+  capture only this change's OpenSpec artifacts, but do not create or update
+  proposal branch refs, rewrite git history, touch thread history, or modify
+  unrelated repository files.
 - Keep all content in English.
 - Preserve the canonical request title and conventional-title metadata in the
   artifacts without changing the change name or path.

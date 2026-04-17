@@ -239,6 +239,36 @@ export const listWorktreeChanges = async (worktreePath: string): Promise<string[
   });
 };
 
+export const listCommittedPathsBetweenRevisions = async ({
+  repositoryPath,
+  fromRevision,
+  toRevision,
+}: {
+  repositoryPath: string;
+  fromRevision: string;
+  toRevision: string;
+}): Promise<string[]> => {
+  if (fromRevision === toRevision) {
+    return [];
+  }
+
+  const { stdout } = await runGit(repositoryPath, [
+    "diff",
+    "--name-only",
+    "--relative",
+    "--no-renames",
+    `${fromRevision}..${toRevision}`,
+  ]);
+
+  return Array.from(new Set(listNamedPaths(stdout))).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+};
+
 export const commitWorktreeChanges = async ({
   worktreePath,
   message,

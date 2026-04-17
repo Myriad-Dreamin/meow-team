@@ -8,7 +8,11 @@ vi.mock("@/lib/cli-tools/git", () => ({
   runGit: runGitMock,
 }));
 
-import { commitWorktreeChanges, listWorktreeChanges } from "@/lib/git/ops";
+import {
+  commitWorktreeChanges,
+  listCommittedPathsBetweenRevisions,
+  listWorktreeChanges,
+} from "@/lib/git/ops";
 
 describe("listWorktreeChanges", () => {
   beforeEach(() => {
@@ -86,5 +90,44 @@ describe("commitWorktreeChanges", () => {
       "-m",
       "docs: add openspec proposals",
     ]);
+  });
+});
+
+describe("listCommittedPathsBetweenRevisions", () => {
+  beforeEach(() => {
+    runGitMock.mockReset();
+  });
+
+  it("returns a unique sorted list for the committed revision delta", async () => {
+    runGitMock.mockResolvedValue({
+      stdout: "openspec/changes/example/proposal.md\nREADME.md\nREADME.md\n",
+      stderr: "",
+    });
+
+    await expect(
+      listCommittedPathsBetweenRevisions({
+        repositoryPath: "/repo",
+        fromRevision: "abc123",
+        toRevision: "def456",
+      }),
+    ).resolves.toEqual(["README.md", "openspec/changes/example/proposal.md"]);
+    expect(runGitMock).toHaveBeenCalledWith("/repo", [
+      "diff",
+      "--name-only",
+      "--relative",
+      "--no-renames",
+      "abc123..def456",
+    ]);
+  });
+
+  it("skips git when the revisions match", async () => {
+    await expect(
+      listCommittedPathsBetweenRevisions({
+        repositoryPath: "/repo",
+        fromRevision: "abc123",
+        toRevision: "abc123",
+      }),
+    ).resolves.toEqual([]);
+    expect(runGitMock).not.toHaveBeenCalled();
   });
 });

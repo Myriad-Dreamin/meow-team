@@ -84,5 +84,12 @@ describe("OpenSpecMaterializerAgent", () => {
         prompt: expect.stringContaining("Planner summary:"),
       }),
     );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          "commits on the currently checked out planner branch are allowed",
+        ),
+      }),
+    );
   });
 });
