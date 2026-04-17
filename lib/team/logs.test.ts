@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -54,6 +54,26 @@ afterEach(async () => {
     ),
   );
   TEMPORARY_DIRECTORIES.clear();
+});
+
+describe("appendTeamCodexLogEntry", () => {
+  it("stores logs in a codex-logs sibling beside the resolved thread store", async () => {
+    const threadFile = await createStorePath();
+    const entry = createLogEntry({
+      index: 1,
+      message: "coder boot",
+      source: "stdout",
+    });
+
+    await appendTeamCodexLogEntry({
+      entry,
+      threadFile,
+    });
+
+    await expect(
+      readFile(path.join(path.dirname(threadFile), "codex-logs", "thread-1.jsonl"), "utf8"),
+    ).resolves.toBe(`${JSON.stringify(entry)}\n`);
+  });
 });
 
 describe("listTeamCodexLogWindow", () => {

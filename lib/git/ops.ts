@@ -332,6 +332,29 @@ const pathExists = async (candidatePath: string): Promise<boolean> => {
   }
 };
 
+const toPortablePath = (...segments: string[]): string => {
+  return path
+    .join(...segments)
+    .split(path.sep)
+    .join("/");
+};
+
+const buildOpenSpecChangeRelativePath = (changeName: string): string => {
+  return toPortablePath("openspec", "changes", changeName);
+};
+
+const buildOpenSpecChangePath = (worktreePath: string, changeName: string): string => {
+  return path.join(worktreePath, "openspec", "changes", changeName);
+};
+
+const buildOpenSpecArchiveRelativePath = (archiveName: string): string => {
+  return toPortablePath("openspec", "changes", "archive", archiveName);
+};
+
+const buildOpenSpecArchivePath = (worktreePath: string, archiveName: string): string => {
+  return path.join(worktreePath, "openspec", "changes", "archive", archiveName);
+};
+
 const findExistingArchivedOpenSpecChange = async ({
   worktreePath,
   changeName,
@@ -363,7 +386,7 @@ const findExistingArchivedOpenSpecChange = async ({
       return match?.[2] === changeName;
     })
     .sort((left, right) => left.localeCompare(right))
-    .map((entryName) => path.join("openspec", "changes", "archive", entryName));
+    .map((entryName) => buildOpenSpecArchiveRelativePath(entryName));
 
   if (matchingArchivePaths.length > 1) {
     throw new Error(
@@ -385,11 +408,11 @@ export const inspectOpenSpecChangeArchiveState = async ({
   sourceExists: boolean;
   archivedPath: string | null;
 }> => {
-  const sourcePath = path.join("openspec", "changes", changeName).split(path.sep).join("/");
+  const sourcePath = buildOpenSpecChangeRelativePath(changeName);
 
   return {
     sourcePath,
-    sourceExists: await pathExists(path.join(worktreePath, sourcePath)),
+    sourceExists: await pathExists(buildOpenSpecChangePath(worktreePath, changeName)),
     archivedPath:
       (await findExistingArchivedOpenSpecChange({
         worktreePath,
@@ -411,14 +434,15 @@ export const archiveOpenSpecChangeInWorktree = async ({
   createdArchive: boolean;
 }> => {
   const datedArchiveName = `${archiveDate.toISOString().slice(0, 10)}-${changeName}`;
-  const sourceRelativePath = path.join("openspec", "changes", changeName);
-  const archiveRelativePath =
-    (await findExistingArchivedOpenSpecChange({
-      worktreePath,
-      changeName,
-    })) ?? path.join("openspec", "changes", "archive", datedArchiveName);
-  const sourcePath = path.join(worktreePath, sourceRelativePath);
-  const archivePath = path.join(worktreePath, archiveRelativePath);
+  const sourceRelativePath = buildOpenSpecChangeRelativePath(changeName);
+  const existingArchivedPath = await findExistingArchivedOpenSpecChange({
+    worktreePath,
+    changeName,
+  });
+  const archiveName = existingArchivedPath ? path.basename(existingArchivedPath) : datedArchiveName;
+  const archiveRelativePath = buildOpenSpecArchiveRelativePath(archiveName);
+  const sourcePath = buildOpenSpecChangePath(worktreePath, changeName);
+  const archivePath = buildOpenSpecArchivePath(worktreePath, archiveName);
 
   const [sourceExists, archiveExists] = await Promise.all([
     pathExists(sourcePath),
@@ -433,7 +457,7 @@ export const archiveOpenSpecChangeInWorktree = async ({
 
   if (!sourceExists && archiveExists) {
     return {
-      archivedPath: archiveRelativePath.split(path.sep).join("/"),
+      archivedPath: archiveRelativePath,
       createdArchive: false,
     };
   }
@@ -446,7 +470,7 @@ export const archiveOpenSpecChangeInWorktree = async ({
   await fs.rename(sourcePath, archivePath);
 
   return {
-    archivedPath: archiveRelativePath.split(path.sep).join("/"),
+    archivedPath: archiveRelativePath,
     createdArchive: true,
   };
 };

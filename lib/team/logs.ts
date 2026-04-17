@@ -15,12 +15,8 @@ const LOG_READ_CHUNK_BYTES = 64 * 1024;
 const LOG_WINDOW_DEFAULT_LIMIT = 200;
 const logMutationQueues = new Map<string, Promise<unknown>>();
 
-const resolveStorePath = (threadFile: string): string => {
-  return path.isAbsolute(threadFile) ? threadFile : path.join(process.cwd(), threadFile);
-};
-
 const resolveLogDirectory = (threadFile: string): string => {
-  return path.join(path.dirname(resolveStorePath(threadFile)), "codex-logs");
+  return path.join(path.dirname(threadFile), "codex-logs");
 };
 
 const resolveLogFilePath = ({

@@ -380,6 +380,41 @@ describe("archiveOpenSpecChangeInWorktree", () => {
     ).resolves.toBe("proposal\n");
   });
 
+  it("preserves conflict detection when both the active and archived paths exist", async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-archive-test-"));
+    temporaryDirectories.add(worktreePath);
+
+    const sourceChangePath = path.join(
+      worktreePath,
+      "openspec",
+      "changes",
+      "change-name",
+      "proposal.md",
+    );
+    const archiveProposalPath = path.join(
+      worktreePath,
+      "openspec",
+      "changes",
+      "archive",
+      "2026-04-11-change-name",
+      "proposal.md",
+    );
+    await fs.mkdir(path.dirname(sourceChangePath), { recursive: true });
+    await fs.writeFile(sourceChangePath, "proposal\n", "utf8");
+    await fs.mkdir(path.dirname(archiveProposalPath), { recursive: true });
+    await fs.writeFile(archiveProposalPath, "archived\n", "utf8");
+
+    await expect(
+      archiveOpenSpecChangeInWorktree({
+        worktreePath,
+        changeName: "change-name",
+        archiveDate: new Date("2026-04-11T10:00:00.000Z"),
+      }),
+    ).rejects.toThrow(
+      "OpenSpec change change-name cannot be archived because both openspec/changes/change-name and openspec/changes/archive/2026-04-11-change-name already exist.",
+    );
+  });
+
   it("treats an already archived change as idempotent", async () => {
     const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), "team-git-archive-test-"));
     temporaryDirectories.add(worktreePath);

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { z } from "zod";
 
 const roleIdSchema = z
@@ -76,6 +77,42 @@ export type TeamConfigInput = z.input<typeof teamConfigSchema>;
 export type TeamConfig = z.output<typeof teamConfigSchema>;
 export type TeamNotificationTarget = z.infer<typeof notificationTargetSchema>;
 
+const resolveConfigOwnedPath = ({
+  preserveInMemoryTarget = false,
+  value,
+}: {
+  preserveInMemoryTarget?: boolean;
+  value: string;
+}): string => {
+  if (preserveInMemoryTarget && value === ":memory:") {
+    return value;
+  }
+
+  return path.resolve(value);
+};
+
 export const defineTeamConfig = (input: TeamConfigInput): TeamConfig => {
-  return teamConfigSchema.parse(input);
+  const config = teamConfigSchema.parse(input);
+
+  return {
+    ...config,
+    storage: {
+      ...config.storage,
+      threadFile: resolveConfigOwnedPath({
+        preserveInMemoryTarget: true,
+        value: config.storage.threadFile,
+      }),
+    },
+    repositories: config.repositories
+      ? {
+          ...config.repositories,
+          roots: config.repositories.roots.map((root) => ({
+            ...root,
+            directory: resolveConfigOwnedPath({
+              value: root.directory,
+            }),
+          })),
+        }
+      : undefined,
+  };
 };
