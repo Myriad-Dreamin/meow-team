@@ -15,10 +15,6 @@ const isWithinDirectory = (targetPath: string, rootDirectory: string): boolean =
   return targetPath === rootDirectory || targetPath.startsWith(`${rootDirectory}${path.sep}`);
 };
 
-const resolveRootDirectory = (directory: string): string => {
-  return path.resolve(process.cwd(), directory);
-};
-
 const createRepositoryId = (rootId: string, relativePath: string): string => {
   return `${rootId}:${relativePath || "."}`;
 };
@@ -78,7 +74,7 @@ const listRepositoriesForRoot = async (
         return;
       }
 
-      const candidatePath = path.resolve(root.directory, entry.name);
+      const candidatePath = path.join(root.directory, entry.name);
       if (!isWithinDirectory(candidatePath, root.directory)) {
         return;
       }
@@ -101,7 +97,7 @@ export const resolveConfiguredRepositoryRoots = (
     return {
       id: root.id,
       label: root.label,
-      directory: resolveRootDirectory(root.directory),
+      directory: root.directory,
     };
   });
 };

@@ -59,44 +59,35 @@ const bootstrapSchemaSql = `
   );
 `;
 
-const resolveInputPath = (storageFile: string): string => {
-  if (storageFile === ":memory:") {
-    return storageFile;
-  }
-
-  return path.isAbsolute(storageFile) ? storageFile : path.join(process.cwd(), storageFile);
-};
-
 export const resolveSqliteStorageLocation = (storageFile: string): SqliteStorageLocation => {
-  const inputPath = resolveInputPath(storageFile);
-  if (inputPath === ":memory:") {
+  if (storageFile === ":memory:") {
     return {
-      inputPath,
-      sqlitePath: inputPath,
+      inputPath: storageFile,
+      sqlitePath: storageFile,
       legacyJsonPath: null,
     };
   }
 
-  if (inputPath.endsWith(".sqlite")) {
+  if (storageFile.endsWith(".sqlite")) {
     return {
-      inputPath,
-      sqlitePath: inputPath,
-      legacyJsonPath: `${inputPath.slice(0, -".sqlite".length)}.json`,
+      inputPath: storageFile,
+      sqlitePath: storageFile,
+      legacyJsonPath: `${storageFile.slice(0, -".sqlite".length)}.json`,
     };
   }
 
-  if (inputPath.endsWith(".json")) {
+  if (storageFile.endsWith(".json")) {
     return {
-      inputPath,
-      sqlitePath: `${inputPath.slice(0, -".json".length)}.sqlite`,
-      legacyJsonPath: inputPath,
+      inputPath: storageFile,
+      sqlitePath: `${storageFile.slice(0, -".json".length)}.sqlite`,
+      legacyJsonPath: storageFile,
     };
   }
 
   return {
-    inputPath,
-    sqlitePath: `${inputPath}.sqlite`,
-    legacyJsonPath: `${inputPath}.json`,
+    inputPath: storageFile,
+    sqlitePath: `${storageFile}.sqlite`,
+    legacyJsonPath: `${storageFile}.json`,
   };
 };
 

@@ -8,6 +8,7 @@ import {
   getTeamThreadStorageState,
   readTeamThreadStorageMetadata,
   resetTeamThreadStorageStateCacheForTests,
+  resolveTeamThreadStorageLocation,
   TEAM_THREAD_STORAGE_LATEST_SCHEMA_VERSION,
 } from "@/lib/storage/thread";
 
@@ -173,6 +174,32 @@ describe("applyTeamThreadStorageMigrations", () => {
 });
 
 describe("getTeamThreadStorageState", () => {
+  it("derives bounded SQLite and legacy JSON sibling paths from the thread store", async () => {
+    const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "team-storage-state-"));
+    temporaryDirectories.add(temporaryDirectory);
+    const jsonPath = path.join(temporaryDirectory, "threads.json");
+    const basePath = path.join(temporaryDirectory, "threads");
+
+    expect(resolveTeamThreadStorageLocation(jsonPath)).toEqual({
+      inputPath: jsonPath,
+      sqlitePath: path.join(temporaryDirectory, "threads.sqlite"),
+      legacyJsonPath: jsonPath,
+    });
+    expect(resolveTeamThreadStorageLocation(basePath)).toEqual({
+      inputPath: basePath,
+      sqlitePath: path.join(temporaryDirectory, "threads.sqlite"),
+      legacyJsonPath: path.join(temporaryDirectory, "threads.json"),
+    });
+  });
+
+  it("preserves the in-memory storage target", () => {
+    expect(resolveTeamThreadStorageLocation(":memory:")).toEqual({
+      inputPath: ":memory:",
+      sqlitePath: ":memory:",
+      legacyJsonPath: null,
+    });
+  });
+
   it("reuses the same SQLite connection for equivalent storage paths", async () => {
     const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "team-storage-state-"));
     temporaryDirectories.add(temporaryDirectory);
