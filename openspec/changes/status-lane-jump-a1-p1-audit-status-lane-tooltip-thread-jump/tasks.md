@@ -5,10 +5,10 @@
 
 ## 2. Regression Audit And Repair
 
-- [ ] 2.1 Reproduce the current `workspace-status-lane-list` gap with focused rendered interaction coverage that exercises hover, focus, and click triggers, matching living-thread filtering, same-thread multiplicity, and thread-row activation from the popover
-- [ ] 2.2 Apply only the targeted fix needed in `components/team-status-bar.tsx`, `components/team-workspace.tsx`, or related status-lane helpers so clicking a thread row dismisses the popover and reuses the existing thread-tab selection path without changing broader status-bar behavior
+- [x] 2.1 Reproduce the current `workspace-status-lane-list` gap with focused rendered interaction coverage that exercises hover, focus, and click triggers, matching living-thread filtering, same-thread multiplicity, and thread-row activation from the popover
+- [x] 2.2 Apply only the targeted fix needed in `components/team-status-bar.tsx`, `components/team-workspace.tsx`, or related status-lane helpers so clicking a thread row dismisses the popover and reuses the existing thread-tab selection path without changing broader status-bar behavior
 
 ## 3. Validation
 
-- [ ] 3.1 Run `pnpm fmt`, `pnpm lint`, targeted tests for the status-lane popover flow, and `pnpm build` if the repaired surface changes component integration
-- [ ] 3.2 Capture reviewer findings or confirm none for "Audit status-lane tooltip thread jump"
+- [x] 3.1 Run `pnpm fmt`, `pnpm lint`, targeted tests for the status-lane popover flow, and `pnpm build` if the repaired surface changes component integration
+- [x] 3.2 Capture reviewer findings or confirm none for "Audit status-lane tooltip thread jump"
