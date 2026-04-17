@@ -76,6 +76,7 @@ const buildCoderPrompt = ({ state, input }: CoderPromptInput): string => {
     ? [
         state.archiveCommand ? `Archive command: ${state.archiveCommand}.` : null,
         state.archivePathContext ? `Archive path context: ${state.archivePathContext}.` : null,
+        "If you author a direct archive commit, use a lowercase `docs:` subject.",
         "Archive continuation: this is the final coder-only archive pass. Do not route back to reviewer.",
       ]
         .filter(Boolean)

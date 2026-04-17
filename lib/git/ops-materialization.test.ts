@@ -70,7 +70,7 @@ describe("commitWorktreeChanges", () => {
   it("stages only the requested pathspecs before committing", async () => {
     await commitWorktreeChanges({
       worktreePath: "/repo",
-      message: "planner: add openspec proposals",
+      message: "docs: add openspec proposals",
       pathspecs: ["openspec/changes/example", " openspec/changes/example-two "],
     });
 
@@ -84,7 +84,7 @@ describe("commitWorktreeChanges", () => {
     expect(runGitMock).toHaveBeenNthCalledWith(2, "/repo", [
       "commit",
       "-m",
-      "planner: add openspec proposals",
+      "docs: add openspec proposals",
     ]);
   });
 });
