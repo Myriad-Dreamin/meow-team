@@ -143,7 +143,7 @@ const createProposalLane = ({
   return {
     laneId,
     laneIndex,
-    status: "awaiting_human_approval",
+    status: "idle",
     executionPhase: null,
     taskTitle: task.title,
     taskObjective: task.objective,
@@ -161,8 +161,8 @@ const createProposalLane = ({
     latestDecision: null,
     latestCoderSummary: null,
     latestReviewerSummary: null,
-    latestActivity: "Proposal is waiting for human approval before coding and review begin.",
-    approvalRequestedAt: now,
+    latestActivity: "Planner is materializing the proposal artifacts before human approval opens.",
+    approvalRequestedAt: null,
     approvalGrantedAt: null,
     queuedAt: null,
     runCount: 0,
@@ -175,6 +175,38 @@ const createProposalLane = ({
     finishedAt: null,
     updatedAt: now,
   };
+};
+
+const markAssignmentReadyForHumanApproval = (
+  assignment: TeamDispatchAssignment,
+  now: string,
+): void => {
+  assignment.lanes = assignment.lanes.map((lane) => {
+    if (!lane.taskTitle && !lane.taskObjective) {
+      return lane;
+    }
+
+    return {
+      ...lane,
+      status: "awaiting_human_approval",
+      latestActivity: "Proposal is waiting for human approval before coding and review begin.",
+      approvalRequestedAt: lane.approvalRequestedAt ?? now,
+      updatedAt: now,
+    };
+  });
+  assignment.plannerNotes = [
+    ...assignment.plannerNotes,
+    createPlannerNote(
+      "Planner materialized the proposal artifacts and is waiting for human approval before the coding-review queue starts.",
+      now,
+    ),
+  ];
+};
+
+const shouldReusePersistedAssignment = (
+  assignment: PersistedTeamThread["dispatchAssignments"][number] | null,
+): boolean => {
+  return Boolean(assignment && assignment.status !== "planning");
 };
 
 export const createPlannerDispatchAssignment = async ({
@@ -263,7 +295,7 @@ export const createPlannerDispatchAssignment = async ({
         ),
         plannerNotes: [
           createPlannerNote(
-            `Planner created ${tasks.length} proposal${tasks.length === 1 ? "" : "s"} and is waiting for human approval before the coding-review queue starts.`,
+            `Planner created ${tasks.length} proposal${tasks.length === 1 ? "" : "s"} and is materializing the proposal artifacts before human approval opens.`,
             now,
           ),
         ],
@@ -336,6 +368,7 @@ export const createPlannerDispatchAssignment = async ({
         openSpecMaterializerAgent: resolveOpenSpecMaterializerAgent(dependencies),
         onEvent: onMaterializerEvent,
       });
+      markAssignmentReadyForHumanApproval(assignment, new Date().toISOString());
 
       await updateTeamThreadRecord({
         threadFile: teamConfig.storage.threadFile,
@@ -1065,7 +1098,7 @@ export const runMetadataGenerationStage = async (
     assignmentNumber: state.assignmentNumber,
   });
   const finalizedRequestMetadata =
-    persistedAssignment || persistedPlannerStep
+    shouldReusePersistedAssignment(persistedAssignment) || persistedPlannerStep
       ? resolvePersistedRequestMetadata({
           thread: persistedThread,
           assignment: persistedAssignment,
@@ -1104,7 +1137,7 @@ export const runMetadataGenerationStage = async (
       });
     }
 
-    if (!persistedAssignment) {
+    if (!shouldReusePersistedAssignment(persistedAssignment)) {
       await createPlannerDispatchAssignment({
         threadId,
         assignmentNumber: state.assignmentNumber,

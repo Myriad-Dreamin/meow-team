@@ -561,6 +561,10 @@ const deriveDispatchAssignmentStatus = (
     return "completed";
   }
 
+  if (assignedLanes.every((lane) => lane.status === "idle")) {
+    return "planning";
+  }
+
   if (
     assignedLanes.every(
       (lane) => lane.status === "approved" && lane.pullRequest?.status === "approved",

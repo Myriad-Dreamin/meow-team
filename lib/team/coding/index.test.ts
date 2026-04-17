@@ -2794,6 +2794,56 @@ describe.sequential("createPlannerDispatchAssignment", () => {
     );
     expect(assignment.plannerWorktreePath).toBe(`${teamConfig.dispatch.worktreeRoot}/meow-1`);
   });
+
+  it("keeps proposals non-approvable until materialization finishes", async () => {
+    await writePlannerThread("thread-pending-materialization");
+
+    let resolveMaterialization: (() => void) | null = null;
+    materializeAssignmentProposalsMock.mockImplementationOnce(
+      async () =>
+        await new Promise<void>((resolve) => {
+          resolveMaterialization = resolve;
+        }),
+    );
+
+    const assignmentPromise = createPlannerDispatchAssignment({
+      threadId: "thread-pending-materialization",
+      worktree: createManagedPlanningWorktree(dispatchRepository.path, 1),
+      ...plannerInput,
+    });
+
+    await vi.waitFor(() => {
+      expect(materializeAssignmentProposalsMock).toHaveBeenCalledTimes(1);
+    });
+
+    const pendingThread = await getTeamThreadRecord(
+      teamConfig.storage.threadFile,
+      "thread-pending-materialization",
+    );
+    const pendingAssignment = pendingThread?.dispatchAssignments[0];
+    const pendingLane = pendingAssignment?.lanes[0];
+
+    expect(pendingAssignment?.status).toBe("planning");
+    expect(pendingLane?.status).toBe("idle");
+    expect(pendingLane?.approvalRequestedAt).toBeNull();
+    expect(pendingLane?.latestActivity).toContain("materializing");
+
+    resolveMaterialization?.();
+    const assignment = await assignmentPromise;
+
+    expect(assignment.status).toBe("awaiting_human_approval");
+    expect(assignment.lanes[0]?.status).toBe("awaiting_human_approval");
+    expect(assignment.lanes[0]?.approvalRequestedAt).toBeTruthy();
+
+    const completedThread = await getTeamThreadRecord(
+      teamConfig.storage.threadFile,
+      "thread-pending-materialization",
+    );
+    expect(completedThread?.dispatchAssignments[0]?.status).toBe("awaiting_human_approval");
+    expect(completedThread?.dispatchAssignments[0]?.lanes[0]?.status).toBe(
+      "awaiting_human_approval",
+    );
+  });
 });
 
 describe.sequential("approveLaneProposal", () => {
