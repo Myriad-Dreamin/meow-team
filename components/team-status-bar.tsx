@@ -8,6 +8,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   buildTeamStatusLaneThreadBuckets,
@@ -15,6 +16,7 @@ import {
   getNextTeamStatusLanePopoverState,
   teamStatusLaneItems,
   type TeamStatusLaneCountKey,
+  type TeamStatusLaneThreadBuckets,
   type TeamStatusLanePopoverTrigger,
   type TeamStatusLanePopoverState,
 } from "@/components/team-status-bar-lane-utils";
@@ -36,6 +38,30 @@ type TeamStatusBarProps = {
   onToggleSidebar: () => void;
   onToggleArchivedThreads: () => void;
   onSelectSettings: () => void;
+};
+
+type TeamStatusBarLaneTotal = (typeof teamStatusLaneItems)[number] & {
+  value: number;
+};
+
+type TeamStatusBarLaneListProps = {
+  laneTotals: TeamStatusBarLaneTotal[];
+  laneThreadsByStatus: TeamStatusLaneThreadBuckets;
+  openLaneKey: TeamStatusLaneCountKey | null;
+  setLanePopoverRef: (
+    laneKey: TeamStatusLaneCountKey,
+    element: HTMLDivElement | null,
+  ) => void;
+  onLaneBlur: (laneKey: TeamStatusLaneCountKey, event: FocusEvent<HTMLDivElement>) => void;
+  onLaneFocusCapture: (laneKey: TeamStatusLaneCountKey) => void;
+  onLaneKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  onLaneMouseEnter: (laneKey: TeamStatusLaneCountKey) => void;
+  onLaneMouseLeave: (
+    laneKey: TeamStatusLaneCountKey,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
+  onLaneClick: (laneKey: TeamStatusLaneCountKey) => void;
+  onSelectLaneThread: (threadId: string) => void;
 };
 
 const POLL_INTERVAL_MS = 1000;
@@ -205,6 +231,118 @@ const SidebarIcon = ({
   </svg>
 );
 
+const handleTeamStatusLaneThreadPointerDown = (
+  event: ReactPointerEvent<HTMLButtonElement>,
+) => {
+  // Keep focus anchored so blur-driven dismissal does not unmount the row before click runs.
+  event.preventDefault();
+};
+
+export function TeamStatusBarLaneList({
+  laneTotals,
+  laneThreadsByStatus,
+  openLaneKey,
+  setLanePopoverRef,
+  onLaneBlur,
+  onLaneFocusCapture,
+  onLaneKeyDown,
+  onLaneMouseEnter,
+  onLaneMouseLeave,
+  onLaneClick,
+  onSelectLaneThread,
+}: TeamStatusBarLaneListProps) {
+  if (laneTotals.length === 0) {
+    return <span className="workspace-status-note">No active lanes.</span>;
+  }
+
+  return (
+    <>
+      {laneTotals.map((item) => {
+        const isOpen = openLaneKey === item.key;
+        const lanePopoverId = `workspace-status-lane-panel-${item.key}`;
+        const matchingThreads = laneThreadsByStatus[item.key];
+        const popoverCopy = describeTeamStatusLanePopover(matchingThreads, item.value);
+
+        return (
+          <div
+            className={`workspace-status-lane-popover ${isOpen ? "workspace-status-lane-popover-open" : ""}`}
+            data-status-lane-key={item.key}
+            key={item.key}
+            ref={(element) => {
+              setLanePopoverRef(item.key, element);
+            }}
+            onBlur={(event) => onLaneBlur(item.key, event)}
+            onFocusCapture={() => onLaneFocusCapture(item.key)}
+            onKeyDown={onLaneKeyDown}
+            onMouseEnter={() => onLaneMouseEnter(item.key)}
+            onMouseLeave={(event) => onLaneMouseLeave(item.key, event)}
+          >
+            <button
+              aria-controls={lanePopoverId}
+              aria-expanded={isOpen}
+              aria-haspopup="dialog"
+              className={`status-pill workspace-status-lane-trigger ${item.className}`}
+              data-status-lane-trigger={item.key}
+              type="button"
+              onClick={() => onLaneClick(item.key)}
+            >
+              <span>{item.label}</span>
+              <span className="workspace-status-lane-trigger-count">{item.value}</span>
+            </button>
+
+            {isOpen ? (
+              <div
+                aria-label={`${item.label} living threads`}
+                className="workspace-status-lane-panel"
+                id={lanePopoverId}
+                role="dialog"
+              >
+                <div className="workspace-status-lane-panel-head">
+                  <p className="workspace-status-lane-panel-title">{item.label}</p>
+                  <p className="workspace-status-lane-panel-summary">{popoverCopy.summary}</p>
+                  {popoverCopy.detail ? (
+                    <p className="workspace-status-lane-panel-detail">{popoverCopy.detail}</p>
+                  ) : null}
+                </div>
+
+                {matchingThreads.length > 0 ? (
+                  <div className="workspace-status-lane-thread-list">
+                    {matchingThreads.map((thread) => (
+                      <button
+                        aria-label={`Open thread ${thread.shortThreadId}: ${thread.title}`}
+                        className="workspace-status-lane-thread-button"
+                        data-thread-id={thread.threadId}
+                        key={thread.threadId}
+                        type="button"
+                        onClick={() => onSelectLaneThread(thread.threadId)}
+                        onPointerDown={handleTeamStatusLaneThreadPointerDown}
+                      >
+                        <span className="workspace-status-lane-thread-title">{thread.title}</span>
+                        <span className="workspace-status-lane-thread-meta">
+                          <span>Thread {thread.shortThreadId}</span>
+                          {thread.matchingLaneCount > 1 ? (
+                            <span className="workspace-status-lane-thread-multiplicity">
+                              {thread.matchingLaneCount} matching lanes
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="workspace-status-lane-empty">
+                    Waiting for the latest living-thread refresh.
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export function TeamStatusBar({
   isSidebarVisible,
   livingThreads,
@@ -277,7 +415,7 @@ export function TeamStatusBar({
   const activeThreadCount = snapshot?.workspace.activeThreadCount ?? null;
   const archivedThreadCount = snapshot?.workspace.archivedThreadCount ?? null;
   const livingThreadCount = snapshot?.workspace.livingThreadCount ?? null;
-  const laneTotals =
+  const laneTotals: TeamStatusBarLaneTotal[] =
     snapshot === null
       ? []
       : teamStatusLaneItems
@@ -392,6 +530,13 @@ export function TeamStatusBar({
     onSelectThreadTab(threadId);
   };
 
+  const setLanePopoverRef = (
+    laneKey: TeamStatusLaneCountKey,
+    element: HTMLDivElement | null,
+  ) => {
+    lanePopoverRefs.current[laneKey] = element;
+  };
+
   return (
     <section aria-label="Workspace status" className="workspace-status-bar">
       <div className="workspace-status-group">
@@ -457,86 +602,19 @@ export function TeamStatusBar({
         </div>
         <div className="workspace-status-lane-list">
           {laneTotals.length > 0 ? (
-            laneTotals.map((item) => {
-              const isOpen = openLaneKey === item.key;
-              const lanePopoverId = `workspace-status-lane-panel-${item.key}`;
-              const matchingThreads = laneThreadsByStatus[item.key];
-              const popoverCopy = describeTeamStatusLanePopover(matchingThreads, item.value);
-
-              return (
-                <div
-                  className={`workspace-status-lane-popover ${isOpen ? "workspace-status-lane-popover-open" : ""}`}
-                  key={item.key}
-                  ref={(element) => {
-                    lanePopoverRefs.current[item.key] = element;
-                  }}
-                  onBlur={(event) => handleLaneBlur(item.key, event)}
-                  onFocusCapture={() => handleOpenLane(item.key, "focus")}
-                  onKeyDown={handleLaneKeyDown}
-                  onMouseEnter={() => handleOpenLane(item.key, "hover")}
-                  onMouseLeave={(event) => handleLaneMouseLeave(item.key, event)}
-                >
-                  <button
-                    aria-controls={lanePopoverId}
-                    aria-expanded={isOpen}
-                    aria-haspopup="dialog"
-                    className={`status-pill workspace-status-lane-trigger ${item.className}`}
-                    type="button"
-                    onClick={() => handleToggleLane(item.key)}
-                  >
-                    <span>{item.label}</span>
-                    <span className="workspace-status-lane-trigger-count">{item.value}</span>
-                  </button>
-
-                  {isOpen ? (
-                    <div
-                      aria-label={`${item.label} living threads`}
-                      className="workspace-status-lane-panel"
-                      id={lanePopoverId}
-                      role="dialog"
-                    >
-                      <div className="workspace-status-lane-panel-head">
-                        <p className="workspace-status-lane-panel-title">{item.label}</p>
-                        <p className="workspace-status-lane-panel-summary">{popoverCopy.summary}</p>
-                        {popoverCopy.detail ? (
-                          <p className="workspace-status-lane-panel-detail">{popoverCopy.detail}</p>
-                        ) : null}
-                      </div>
-
-                      {matchingThreads.length > 0 ? (
-                        <div className="workspace-status-lane-thread-list">
-                          {matchingThreads.map((thread) => (
-                            <button
-                              aria-label={`Open thread ${thread.shortThreadId}: ${thread.title}`}
-                              className="workspace-status-lane-thread-button"
-                              key={thread.threadId}
-                              type="button"
-                              onClick={() => handleSelectLaneThread(thread.threadId)}
-                            >
-                              <span className="workspace-status-lane-thread-title">
-                                {thread.title}
-                              </span>
-                              <span className="workspace-status-lane-thread-meta">
-                                <span>Thread {thread.shortThreadId}</span>
-                                {thread.matchingLaneCount > 1 ? (
-                                  <span className="workspace-status-lane-thread-multiplicity">
-                                    {thread.matchingLaneCount} matching lanes
-                                  </span>
-                                ) : null}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="workspace-status-lane-empty">
-                          Waiting for the latest living-thread refresh.
-                        </p>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })
+            <TeamStatusBarLaneList
+              laneThreadsByStatus={laneThreadsByStatus}
+              laneTotals={laneTotals}
+              openLaneKey={openLaneKey}
+              setLanePopoverRef={setLanePopoverRef}
+              onLaneBlur={handleLaneBlur}
+              onLaneClick={handleToggleLane}
+              onLaneFocusCapture={(laneKey) => handleOpenLane(laneKey, "focus")}
+              onLaneKeyDown={handleLaneKeyDown}
+              onLaneMouseEnter={(laneKey) => handleOpenLane(laneKey, "hover")}
+              onLaneMouseLeave={handleLaneMouseLeave}
+              onSelectLaneThread={handleSelectLaneThread}
+            />
           ) : (
             <span className="workspace-status-note">
               {activeThreadCount && activeThreadCount > 0 ? "Planning only." : "No active lanes."}
