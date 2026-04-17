@@ -14,13 +14,6 @@ import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 
 const HOST_ROOT_REDIRECT_DELAY_MS = 300;
 
-function getCurrentPathname(fallbackPathname: string): string {
-  if (typeof window === "undefined") {
-    return fallbackPathname;
-  }
-  return window.location.pathname || fallbackPathname;
-}
-
 export default function HostIndexRoute() {
   return (
     <HostRouteBootstrapBoundary>
@@ -50,13 +43,11 @@ function HostIndexRouteContent() {
       return;
     }
     const rootRoute = buildHostRootRoute(serverId);
-    const currentPathname = getCurrentPathname(pathname);
-    if (currentPathname !== rootRoute && currentPathname !== `${rootRoute}/`) {
+    if (pathname !== rootRoute && pathname !== `${rootRoute}/`) {
       return;
     }
     const timer = setTimeout(() => {
-      const latestPathname = getCurrentPathname(pathname);
-      if (latestPathname !== rootRoute && latestPathname !== `${rootRoute}/`) {
+      if (pathname !== rootRoute && pathname !== `${rootRoute}/`) {
         return;
       }
 
