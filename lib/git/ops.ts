@@ -300,6 +300,15 @@ export const getBranchHead = async ({
   return stdout;
 };
 
+export const getSymbolicHeadReference = async (repositoryPath: string): Promise<string | null> => {
+  try {
+    const { stdout } = await runGit(repositoryPath, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    return stdout || null;
+  } catch {
+    return null;
+  }
+};
+
 export const commitContainsPath = async ({
   repositoryPath,
   revision,

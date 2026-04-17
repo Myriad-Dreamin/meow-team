@@ -15,6 +15,7 @@ const {
   ensureBranchRefMock,
   ensureLaneWorktreeMock,
   getBranchHeadMock,
+  getSymbolicHeadReferenceMock,
   hasWorktreeChangesMock,
   listCommittedPathsBetweenRevisionsMock,
   listExistingBranchesMock,
@@ -26,6 +27,7 @@ const {
   ensureBranchRefMock: vi.fn(),
   ensureLaneWorktreeMock: vi.fn(),
   getBranchHeadMock: vi.fn(),
+  getSymbolicHeadReferenceMock: vi.fn(),
   hasWorktreeChangesMock: vi.fn(),
   listCommittedPathsBetweenRevisionsMock: vi.fn(),
   listExistingBranchesMock: vi.fn(),
@@ -42,6 +44,7 @@ vi.mock("@/lib/git/ops", () => ({
   commitWorktreeChanges: commitWorktreeChangesMock,
   ensureBranchRef: ensureBranchRefMock,
   getBranchHead: getBranchHeadMock,
+  getSymbolicHeadReference: getSymbolicHeadReferenceMock,
   hasWorktreeChanges: hasWorktreeChangesMock,
   listCommittedPathsBetweenRevisions: listCommittedPathsBetweenRevisionsMock,
   listExistingBranches: listExistingBranchesMock,
@@ -152,6 +155,8 @@ describe("materializeAssignmentProposals", () => {
     ensureLaneWorktreeMock.mockResolvedValue(undefined);
     getBranchHeadMock.mockReset();
     getBranchHeadMock.mockResolvedValue("planner-head-commit");
+    getSymbolicHeadReferenceMock.mockReset();
+    getSymbolicHeadReferenceMock.mockResolvedValue("requests/example/thread-1/a1");
     hasWorktreeChangesMock.mockReset();
     hasWorktreeChangesMock.mockResolvedValue(false);
     listCommittedPathsBetweenRevisionsMock.mockReset();
@@ -985,7 +990,7 @@ describe("materializeAssignmentProposals", () => {
     expect(lanes[0]?.proposalCommitHash).toBe("planner-head-final");
   });
 
-  it("fails when the materializer updates a planner-managed proposal ref before the planner ref flow runs", async () => {
+  it("accepts a newly created proposal branch ref when it points at the current planner HEAD", async () => {
     const repositoryPath = await createTemporaryDirectory();
     const worktreeRoot = path.join(repositoryPath, "worktrees");
     const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
@@ -1003,10 +1008,7 @@ describe("materializeAssignmentProposals", () => {
         `${proposalPath}/tasks.md`,
       ]);
     listExistingBranchesMock.mockResolvedValueOnce([]).mockResolvedValueOnce([proposalBranchName]);
-    getBranchHeadMock
-      .mockResolvedValueOnce("planner-head-commit")
-      .mockResolvedValueOnce("planner-head-commit")
-      .mockResolvedValueOnce("proposal-branch-head");
+    getBranchHeadMock.mockResolvedValue("planner-head-commit");
 
     const openSpecMaterializerAgent: {
       run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
@@ -1020,7 +1022,86 @@ describe("materializeAssignmentProposals", () => {
 
         return {
           summary: "Materialized the change artifacts.",
-          deliverable: "Wrote the expected proposal files and moved a proposal branch ref.",
+          deliverable: "Wrote the expected proposal files and pre-created the proposal branch ref.",
+          artifactsCreated,
+        };
+      }),
+    };
+
+    const lanes: Parameters<typeof materializeAssignmentProposals>[0]["lanes"] = [
+      {
+        laneIndex: 1,
+        taskTitle: "Materialize proposal artifacts",
+        taskObjective: "Write the proposal files from the agent.",
+        proposalChangeName,
+        proposalPath,
+        branchName: proposalBranchName,
+      },
+    ];
+
+    await materializeAssignmentProposals({
+      repositoryPath,
+      baseBranch: "main",
+      canonicalBranchName: "requests/example/thread-1/a1",
+      requestTitle: "feat(dispatch): Materialize proposal artifacts",
+      conventionalTitle: {
+        type: "feat",
+        scope: "dispatch",
+      },
+      plannerSummary: "Planner summary",
+      plannerDeliverable: "Planner deliverable",
+      requestInput: "Materialize proposal artifacts through the agent.",
+      worktreeRoot,
+      plannerWorktreePath,
+      lanes,
+      openSpecMaterializerAgent,
+    });
+
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(ensureBranchRefMock).toHaveBeenCalledWith({
+      repositoryPath,
+      branchName: proposalBranchName,
+      startPoint: "planner-head-commit",
+      forceUpdate: true,
+    });
+    expect(lanes[0]?.proposalCommitHash).toBe("planner-head-commit");
+  });
+
+  it("fails when the materializer switches the checked out planner branch", async () => {
+    const repositoryPath = await createTemporaryDirectory();
+    const worktreeRoot = path.join(repositoryPath, "worktrees");
+    const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
+    const proposalChangeName = "change-1";
+    const proposalPath = "openspec/changes/change-1";
+    const proposalBranchName = "requests/example/thread-1/a1-proposal-1";
+
+    listWorktreeChangesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        `${proposalPath}/.openspec.yaml`,
+        `${proposalPath}/design.md`,
+        `${proposalPath}/proposal.md`,
+        `${proposalPath}/specs/${proposalChangeName}/spec.md`,
+        `${proposalPath}/tasks.md`,
+      ]);
+    listExistingBranchesMock.mockResolvedValueOnce([]).mockResolvedValueOnce([proposalBranchName]);
+    getSymbolicHeadReferenceMock
+      .mockResolvedValueOnce("requests/example/thread-1/a1")
+      .mockResolvedValueOnce(proposalBranchName);
+
+    const openSpecMaterializerAgent: {
+      run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
+    } = {
+      run: vi.fn(async () => {
+        const artifactsCreated = await writeExpectedProposalArtifacts({
+          worktreePath: plannerWorktreePath,
+          proposalChangeName,
+          proposalPath,
+        });
+
+        return {
+          summary: "Materialized the change artifacts.",
+          deliverable: "Wrote the expected proposal files after switching branches.",
           artifactsCreated,
         };
       }),
@@ -1054,7 +1135,7 @@ describe("materializeAssignmentProposals", () => {
         openSpecMaterializerAgent,
       }),
     ).rejects.toThrow(
-      "OpenSpec materializer must not update planner-managed branch refs while materializing change-1",
+      "OpenSpec materializer must not change the checked out planner branch while materializing change-1",
     );
 
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
