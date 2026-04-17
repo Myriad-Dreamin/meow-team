@@ -12,6 +12,7 @@ import {
   listExistingBranches,
   listWorktreeChanges,
 } from "@/lib/git/ops";
+import { formatHarnessCommitMessage } from "@/lib/team/commit-message";
 import { createWorktree } from "@/lib/team/coding/worktree";
 import { ensureLaneWorktree, sanitizeBranchSegment } from "@/lib/team/git";
 import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
@@ -618,7 +619,10 @@ export const materializeAssignmentProposals = async ({
   if (await hasWorktreeChanges(plannerWorktreePath)) {
     await commitWorktreeChanges({
       worktreePath: plannerWorktreePath,
-      message: `planner: add openspec proposals for ${canonicalBranchName}`,
+      message: formatHarnessCommitMessage({
+        intent: "proposal",
+        summary: `add openspec proposals for ${canonicalBranchName}`,
+      }),
       pathspecs: activeLanes.map((lane) => lane.proposalPath),
     });
   }

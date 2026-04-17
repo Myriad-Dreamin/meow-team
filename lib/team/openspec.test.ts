@@ -290,7 +290,7 @@ describe("materializeAssignmentProposals", () => {
     expect(openSpecMaterializerAgent.run).toHaveBeenCalledTimes(1);
     expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
       worktreePath: plannerWorktreePath,
-      message: "planner: add openspec proposals for requests/openspec-agent/thread-1/a1",
+      message: "docs: add openspec proposals for requests/openspec-agent/thread-1/a1",
       pathspecs: [proposalPath],
     });
     expect(ensureBranchRefMock).toHaveBeenCalledWith({

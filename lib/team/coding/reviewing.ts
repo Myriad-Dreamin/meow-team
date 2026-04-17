@@ -14,6 +14,7 @@ import {
   tryRebaseWorktreeBranch,
 } from "@/lib/git/ops";
 import { synchronizePullRequest } from "@/lib/platform";
+import { formatHarnessCommitMessage } from "@/lib/team/commit-message";
 import { ensureLaneWorktree, pushLaneBranch } from "@/lib/team/git";
 import {
   assignPendingDispatchWorkerSlots,
@@ -47,6 +48,7 @@ import {
   updateTeamThreadRecord,
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
+import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
 import { coderRole } from "@/lib/team/roles/coder";
 import { reviewerRole } from "@/lib/team/roles/reviewer";
 import type { Worktree } from "@/lib/team/coding/worktree";
@@ -175,27 +177,41 @@ const buildLanePersistedHandoffs = ({
 
 const buildCoderCommitMessage = ({
   lane,
+  conventionalTitle,
 }: {
   lane: Pick<
     TeamWorkerLaneRecord,
     "executionPhase" | "laneIndex" | "proposalChangeName" | "taskTitle" | "requeueReason"
   >;
+  conventionalTitle: ConventionalTitleMetadata | null;
 }): string => {
   if (lane.executionPhase === "final_archive" && lane.proposalChangeName) {
-    return `coder: archive ${lane.proposalChangeName}`;
+    return formatHarnessCommitMessage({
+      intent: "archive",
+      summary: `archive ${lane.proposalChangeName}`,
+    });
   }
 
   const taskLabel = lane.taskTitle?.trim() || `proposal ${lane.laneIndex}`;
 
   if (lane.requeueReason === "reviewer_requested_changes") {
-    return `coder: address review feedback for ${taskLabel}`;
+    return formatHarnessCommitMessage({
+      intent: "repair",
+      summary: `address review feedback for ${taskLabel}`,
+    });
   }
 
   if (lane.requeueReason === "planner_detected_conflict") {
-    return `coder: resolve conflict for ${taskLabel}`;
+    return formatHarnessCommitMessage({
+      intent: "repair",
+      summary: `resolve conflict for ${taskLabel}`,
+    });
   }
 
-  return `coder: implement ${taskLabel}`;
+  return formatHarnessCommitMessage({
+    conventionalTitle,
+    summary: `implement ${taskLabel}`,
+  });
 };
 
 const noBranchOutputMessage =
@@ -377,6 +393,7 @@ const runFinalArchiveCycle = async ({
           worktreePath: laneWorktree.path,
           message: buildCoderCommitMessage({
             lane,
+            conventionalTitle: assignment.conventionalTitle,
           }),
         });
       }
@@ -734,6 +751,7 @@ const runLaneCycle = async ({
         worktreePath: laneWorktree.path,
         message: buildCoderCommitMessage({
           lane,
+          conventionalTitle: assignment.conventionalTitle,
         }),
       });
     }

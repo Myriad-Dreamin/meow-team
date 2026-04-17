@@ -80,6 +80,20 @@ describe("CoderAgent", () => {
     );
     expect(executor).toHaveBeenCalledWith(
       expect.objectContaining({
+        prompt: expect.stringContaining(
+          "If you author a direct `git commit`, use a lowercase conventional subject",
+        ),
+      }),
+    );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          "If you author a direct archive commit, use a lowercase `docs:` subject.",
+        ),
+      }),
+    );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
         prompt: expect.stringContaining("No previous role handoffs exist for this assignment yet."),
       }),
     );

@@ -72,5 +72,12 @@ describe("ReviewerAgent", () => {
         prompt: expect.stringContaining("Create or update a failing Proof of Concept test"),
       }),
     );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          "If you author a direct `git commit`, use a lowercase conventional subject",
+        ),
+      }),
+    );
   });
 });

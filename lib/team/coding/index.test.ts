@@ -2938,6 +2938,49 @@ describe.sequential("approveLaneProposal", () => {
     );
   };
 
+  const runQueuedLaneExecution = async ({
+    threadId,
+    laneOverrides = {},
+    assignmentOverrides = {},
+    coderRun,
+    reviewerRun,
+  }: {
+    threadId: string;
+    laneOverrides?: Partial<TeamWorkerLaneRecord>;
+    assignmentOverrides?: Partial<TeamDispatchAssignment>;
+    coderRun?: TeamRoleDependencies["coderAgent"]["run"];
+    reviewerRun?: TeamRoleDependencies["reviewerAgent"]["run"];
+  }) => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+
+    await writeExecutionThreadStore({
+      threadId,
+      lane: createProposalApprovalLane({
+        status: "queued",
+        workerSlot: 1,
+        worktreePath: `${worktreeRoot}/meow-1`,
+        approvalGrantedAt: FIXED_TIMESTAMP,
+        queuedAt: FIXED_TIMESTAMP,
+        pullRequest: createDraftTrackingPullRequest(),
+        ...laneOverrides,
+      }),
+      assignmentOverrides: {
+        status: "running",
+        ...assignmentOverrides,
+      },
+      runStatus: "running",
+    });
+
+    await ensurePendingDispatchWork(
+      createExecutionEnv({
+        coderRun,
+        reviewerRun,
+      }),
+      threadId,
+    );
+    await waitForLaneRunCompletion(threadId, 1, "lane-1");
+  };
+
   beforeEach(async () => {
     vi.clearAllMocks();
     originalThreadFile = teamConfig.storage.threadFile;
@@ -3107,6 +3150,104 @@ describe.sequential("approveLaneProposal", () => {
       body: "Machine review approved the branch.",
       draft: false,
     });
+  });
+
+  it("uses a dev commit prefix for default implementation work", async () => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+
+    hasWorktreeChangesMock.mockResolvedValue(true);
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("implementation-commit")
+      .mockResolvedValueOnce("implementation-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitHash: "implementation-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/implementation-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/42",
+    });
+
+    await runQueuedLaneExecution({
+      threadId: "thread-dev-prefix",
+    });
+
+    expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
+      worktreePath: `${worktreeRoot}/meow-1`,
+      message: "dev: implement Ship the feature",
+    });
+    expect(commitWorktreeChangesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a test commit prefix for explicit test-only work", async () => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+
+    hasWorktreeChangesMock.mockResolvedValue(true);
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("test-commit")
+      .mockResolvedValueOnce("test-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitHash: "test-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/test-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/43",
+    });
+
+    await runQueuedLaneExecution({
+      threadId: "thread-test-prefix",
+      laneOverrides: {
+        taskTitle: "Add regression coverage",
+        taskObjective: "Add explicit test-only coverage for the queue runner.",
+      },
+      assignmentOverrides: {
+        requestTitle: "test(team/dispatch): add regression coverage",
+        conventionalTitle: {
+          type: "test",
+          scope: "team/dispatch",
+        },
+      },
+    });
+
+    expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
+      worktreePath: `${worktreeRoot}/meow-1`,
+      message: "test: implement Add regression coverage",
+    });
+    expect(commitWorktreeChangesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a fix commit prefix for repair-oriented reruns", async () => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+
+    hasWorktreeChangesMock.mockResolvedValue(true);
+    getBranchHeadMock
+      .mockResolvedValueOnce("review-commit")
+      .mockResolvedValueOnce("fix-commit")
+      .mockResolvedValueOnce("fix-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitHash: "fix-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/fix-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/44",
+    });
+
+    await runQueuedLaneExecution({
+      threadId: "thread-fix-prefix",
+      laneOverrides: {
+        requeueReason: "reviewer_requested_changes",
+      },
+    });
+
+    expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
+      worktreePath: `${worktreeRoot}/meow-1`,
+      message: "fix: address review feedback for Ship the feature",
+    });
+    expect(commitWorktreeChangesMock).toHaveBeenCalledTimes(1);
   });
 
   it("derives and persists a canonical branch name when legacy records omit it", async () => {
@@ -3711,7 +3852,7 @@ describe.sequential("approveLanePullRequest", () => {
     );
     expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
       worktreePath: `${worktreeRoot}/meow-1`,
-      message: "coder: archive change-1",
+      message: "docs: archive change-1",
     });
     expect(commitWorktreeChangesMock).toHaveBeenCalledTimes(1);
     expect(synchronizePullRequestMock).toHaveBeenCalledWith({
