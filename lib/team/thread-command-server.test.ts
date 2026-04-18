@@ -327,6 +327,47 @@ describe("executeThreadCommandForThread", () => {
     expect(result.message).toContain("Stopped on proposal 2: archive continuation failed");
   });
 
+  it("keeps /ready retryable after archive failures that already recorded human approval", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "approved",
+        lanes: [
+          createLane({
+            laneId: "lane-1",
+            laneIndex: 1,
+            status: "approved",
+            pullRequest: createPullRequest({
+              status: "failed",
+              humanApprovedAt: FIXED_TIMESTAMP,
+            }),
+          }),
+        ],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/ready 1"),
+      executors,
+      thread,
+    });
+
+    expect(executors.runApproval).toHaveBeenCalledWith({
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      target: "pull_request",
+      threadId: "thread-1",
+    });
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "ready",
+      outcome: "success",
+    });
+    expect(result.message).toContain(
+      "Proposal 1 final approval recorded. The archive continuation was queued.",
+    );
+  });
+
   it("cancels the latest request group while proposal approval is pending", async () => {
     const executors = createExecutors();
     const thread = createThread([

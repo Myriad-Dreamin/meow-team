@@ -86,10 +86,16 @@ const hasFinalApprovalWaitStatus = (
   return pullRequest?.status === "awaiting_human_approval";
 };
 
-const hasRetryableFinalApprovalStatus = (
+const isFreshFinalApprovalWait = (
+  pullRequest: Pick<TeamPullRequestRecord, "humanApprovedAt" | "status"> | null,
+): boolean => {
+  return hasFinalApprovalWaitStatus(pullRequest) && !pullRequest?.humanApprovedAt;
+};
+
+const hasRetryableFinalApprovalFailure = (
   pullRequest: Pick<TeamPullRequestRecord, "status"> | null,
 ): boolean => {
-  return hasFinalApprovalWaitStatus(pullRequest) || pullRequest?.status === "failed";
+  return pullRequest?.status === "failed";
 };
 
 export const isLaneAwaitingHumanApprovalForCancel = (
@@ -99,11 +105,7 @@ export const isLaneAwaitingHumanApprovalForCancel = (
     return true;
   }
 
-  return (
-    lane.status === "approved" &&
-    hasFinalApprovalWaitStatus(lane.pullRequest) &&
-    !lane.pullRequest?.humanApprovedAt
-  );
+  return lane.status === "approved" && isFreshFinalApprovalWait(lane.pullRequest);
 };
 
 export const getCancelCommandSkipReason = (
@@ -141,7 +143,10 @@ export const getReadyCommandSkipReason = (
     return "it does not have final approval metadata yet.";
   }
 
-  if (hasRetryableFinalApprovalStatus(lane.pullRequest) && !lane.pullRequest.humanApprovedAt) {
+  if (
+    isFreshFinalApprovalWait(lane.pullRequest) ||
+    hasRetryableFinalApprovalFailure(lane.pullRequest)
+  ) {
     return null;
   }
 
