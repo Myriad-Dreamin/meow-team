@@ -49,6 +49,7 @@ vi.mock("lucide-react-native", () => {
   const createIcon = (name: string) => (props: Record<string, unknown>) =>
     React.createElement("span", { ...props, "data-icon": name });
   return {
+    ArrowUp: createIcon("ArrowUp"),
     Mic: createIcon("Mic"),
     MicOff: createIcon("MicOff"),
     CornerDownLeft: createIcon("CornerDownLeft"),
@@ -226,18 +227,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderMessageInput(menuItems: AttachmentMenuItem[]) {
+interface RenderMessageInputOptions {
+  value?: string;
+  submitIcon?: "arrow" | "return";
+}
+
+function renderMessageInput(
+  menuItems: AttachmentMenuItem[],
+  { value = "", submitIcon }: RenderMessageInputOptions = {},
+) {
   act(() => {
     root?.render(
       <MessageInput
-        value=""
+        value={value}
         onChangeText={vi.fn()}
         onSubmit={vi.fn()}
         attachments={[]}
         cwd="/repo"
         attachmentMenuItems={menuItems}
         client={{ isConnected: true } as never}
-        isAgentRunning
+        isAgentRunning={false}
+        submitIcon={submitIcon}
         onQueue={vi.fn()}
       />,
     );
@@ -301,5 +311,17 @@ describe("MessageInput attachments", () => {
     ]);
 
     expect(queryAllByAriaLabel("Queue message")).toHaveLength(0);
+  });
+
+  it("uses ArrowUp by default and CornerDownLeft when return submit icon is requested", () => {
+    renderMessageInput([], { value: "Send this" });
+
+    expect(document.querySelectorAll('[data-icon="ArrowUp"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-icon="CornerDownLeft"]')).toHaveLength(0);
+
+    renderMessageInput([], { value: "Create this", submitIcon: "return" });
+
+    expect(document.querySelectorAll('[data-icon="ArrowUp"]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-icon="CornerDownLeft"]')).toHaveLength(1);
   });
 });

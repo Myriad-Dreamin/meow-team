@@ -222,6 +222,7 @@ vi.mock("@/components/composer", () => ({
   Composer: ({
     onSubmitMessage,
     submitBehavior,
+    submitIcon,
     isSubmitLoading,
     value,
     onChangeText,
@@ -234,13 +235,18 @@ vi.mock("@/components/composer", () => ({
       cwd: string;
     }) => void;
     submitBehavior?: "clear" | "preserve-and-lock";
+    submitIcon?: "arrow" | "return";
     isSubmitLoading?: boolean;
     value: string;
     onChangeText: (text: string) => void;
     attachments: ComposerAttachment[];
     onChangeAttachments: (attachments: ComposerAttachment[]) => void;
   }) => (
-    <div data-testid="test-composer" data-submit-behavior={submitBehavior}>
+    <div
+      data-testid="test-composer"
+      data-submit-behavior={submitBehavior}
+      data-submit-icon={submitIcon}
+    >
       <textarea
         aria-label="Message agent..."
         disabled={submitBehavior === "preserve-and-lock" && isSubmitLoading}
@@ -759,6 +765,7 @@ describe("NewWorkspaceScreen picker payload", () => {
     const textInput = document.querySelector('[aria-label="Message agent..."]');
     const removeButton = document.querySelector(`[aria-label="Remove PR #${prItem.number}"]`);
     expect(queryByTestId("test-composer")?.dataset.submitBehavior).toBe("preserve-and-lock");
+    expect(queryByTestId("test-composer")?.dataset.submitIcon).toBe("return");
     expect(textInput).toHaveProperty("value", "please review this change");
     expect(textInput).toHaveProperty("disabled", true);
     expect(queryByTestId("composer-github-attachment-pill")).not.toBeNull();

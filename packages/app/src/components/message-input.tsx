@@ -20,7 +20,7 @@ import {
   forwardRef,
 } from "react";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { Mic, MicOff, CornerDownLeft, Plus, Square } from "lucide-react-native";
+import { ArrowUp, Mic, MicOff, CornerDownLeft, Plus, Square } from "lucide-react-native";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { useDictation } from "@/hooks/use-dictation";
 import { DictationOverlay } from "./dictation-controls";
@@ -85,6 +85,7 @@ export interface MessageInputProps {
   allowEmptySubmit?: boolean;
   /** Optional accessibility label for the primary submit button. */
   submitButtonAccessibilityLabel?: string;
+  submitIcon?: "arrow" | "return";
   isSubmitDisabled?: boolean;
   isSubmitLoading?: boolean;
   attachments: ComposerAttachment[];
@@ -217,6 +218,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
     hasExternalContent = false,
     allowEmptySubmit = false,
     submitButtonAccessibilityLabel,
+    submitIcon = "arrow",
     isSubmitDisabled = false,
     isSubmitLoading = false,
     attachments,
@@ -1180,8 +1182,10 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
                 >
                   {isSubmitLoading ? (
                     <ActivityIndicator size="small" color="white" />
-                  ) : (
+                  ) : submitIcon === "return" ? (
                     <CornerDownLeft size={buttonIconSize} color="white" />
+                  ) : (
+                    <ArrowUp size={buttonIconSize} color="white" />
                   )}
                 </TooltipTrigger>
                 <TooltipContent side="top" align="center" offset={8}>

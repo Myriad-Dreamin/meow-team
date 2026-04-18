@@ -462,6 +462,7 @@ export function NewWorkspaceScreen({
             onSubmitMessage={handleCreateChatAgent}
             allowEmptySubmit={true}
             submitButtonAccessibilityLabel="Create"
+            submitIcon="return"
             isSubmitLoading={pendingAction === "chat"}
             submitBehavior="preserve-and-lock"
             blurOnSubmit={true}

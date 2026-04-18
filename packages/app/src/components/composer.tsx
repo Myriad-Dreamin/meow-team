@@ -100,6 +100,7 @@ interface ComposerProps {
   allowEmptySubmit?: boolean;
   /** Optional accessibility label for the primary submit button. */
   submitButtonAccessibilityLabel?: string;
+  submitIcon?: "arrow" | "return";
   /** Externally controlled loading state. When true, disables the submit button. */
   isSubmitLoading?: boolean;
   submitBehavior?: "clear" | "preserve-and-lock";
@@ -142,6 +143,7 @@ export function Composer({
   hasExternalContent = false,
   allowEmptySubmit = false,
   submitButtonAccessibilityLabel,
+  submitIcon = "arrow",
   isSubmitLoading = false,
   submitBehavior = "clear",
   blurOnSubmit = false,
@@ -930,6 +932,7 @@ export function Composer({
               hasExternalContent={hasExternalContent}
               allowEmptySubmit={allowEmptySubmit}
               submitButtonAccessibilityLabel={submitButtonAccessibilityLabel}
+              submitIcon={submitIcon}
               isSubmitDisabled={isProcessing || isSubmitLoading}
               isSubmitLoading={isProcessing || isSubmitLoading}
               attachments={selectedAttachments}
