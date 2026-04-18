@@ -1206,7 +1206,8 @@ main {
   box-shadow: none;
 }
 
-.thread-command-editor[data-status="loading"][data-has-content="false"]::after {
+.thread-command-editor[data-status="loading"][data-has-content="false"]::after,
+.thread-command-editor[data-status="error"][data-has-content="false"]::after {
   content: attr(data-placeholder);
   position: absolute;
   inset: 0;
@@ -1223,19 +1224,9 @@ main {
   min-height: 96px;
 }
 
-.thread-command-editor-fallback {
-  min-height: 96px;
-  border: 0;
-  border-radius: inherit;
-  padding: 14px 16px;
-  background: transparent;
-  color: var(--text);
-  font-family: var(--font-mono);
-  outline: none;
-  resize: vertical;
-}
-
 .thread-command-editor .CodeMirror {
+  position: relative;
+  display: block;
   height: auto;
   min-height: 96px;
   font-family: var(--font-mono);
@@ -1245,20 +1236,45 @@ main {
 }
 
 .thread-command-editor .CodeMirror-scroll {
+  position: relative;
   min-height: 96px;
 }
 
-.thread-command-editor .CodeMirror-gutters {
-  display: none;
+.thread-command-editor .CodeMirror-lines {
+  position: relative;
+  min-height: 96px;
 }
 
-.thread-command-editor .CodeMirror-lines {
+.thread-command-editor .CodeMirror-input {
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  border: 0;
   padding: 14px 16px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.55;
+  outline: none;
+  resize: none;
+}
+
+.thread-command-editor .CodeMirror-input::placeholder {
+  color: transparent;
 }
 
 .thread-command-editor .CodeMirror-placeholder {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  right: 16px;
   color: rgba(227, 239, 246, 0.42);
+  pointer-events: none;
   white-space: pre-wrap;
+}
+
+.thread-command-editor[data-disabled="true"] .CodeMirror-input {
+  cursor: default;
 }
 
 .thread-command-editor[data-disabled="true"] .CodeMirror-cursors {
