@@ -46,6 +46,13 @@ Archived threads continue to load through this route so archived detail polling
 stays stable after the thread disappears from the living sidebar. When a thread
 is archived, `thread.summary.archivedAt` contains the archive timestamp.
 
+## Related routes
+
+- [`POST /api/team/threads/:threadId/command`](/api/team/threads/threadId/command) runs
+  slash commands against the latest idle assignment on the same thread.
+- [`POST /api/team/threads/:threadId/archive`](/api/team/threads/threadId/archive) archives
+  one inactive thread after work is complete.
+
 ## Failure modes
 
 | Status | When                                           |
