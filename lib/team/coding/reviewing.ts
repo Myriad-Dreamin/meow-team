@@ -578,6 +578,23 @@ const runFinalArchiveCycle = async ({
       );
     }
 
+    if (
+      finalizationMode === "delete" &&
+      proposalDisposition === "deleted" &&
+      !hasFinalizationArtifactsApplied(finalizationCheckpoint)
+    ) {
+      latestImplementationCommit = null;
+      finalizationCheckpoint = "artifacts_applied";
+      await persistFinalizationProgress(
+        buildFinalizationWorkActivity({
+          checkpoint: finalizationCheckpoint,
+          lane,
+          mode: finalizationMode,
+          proposalDisposition,
+        }),
+      );
+    }
+
     if (!hasFinalizationArtifactsApplied(finalizationCheckpoint)) {
       const preArchiveState = await inspectOpenSpecChangeArchiveState({
         worktreePath: laneWorktree.path,
@@ -623,6 +640,16 @@ const runFinalArchiveCycle = async ({
         proposalPath = lane.proposalPath ?? preArchiveState.sourcePath;
         proposalDisposition = "deleted";
         proposalArtifactsChangedThisRun = true;
+        latestImplementationCommit = null;
+        finalizationCheckpoint = "artifacts_applied";
+        await persistFinalizationProgress(
+          buildFinalizationWorkActivity({
+            checkpoint: finalizationCheckpoint,
+            lane,
+            mode: finalizationMode,
+            proposalDisposition,
+          }),
+        );
       } else if (preArchiveState.sourceExists) {
         const coderState = buildLaneRunState({
           repository: assignment.repository,
@@ -693,16 +720,18 @@ const runFinalArchiveCycle = async ({
         );
       }
 
-      await refreshLatestImplementationCommit();
-      finalizationCheckpoint = "artifacts_applied";
-      await persistFinalizationProgress(
-        buildFinalizationWorkActivity({
-          checkpoint: finalizationCheckpoint,
-          lane,
-          mode: finalizationMode,
-          proposalDisposition,
-        }),
-      );
+      if (!hasFinalizationArtifactsApplied(finalizationCheckpoint)) {
+        await refreshLatestImplementationCommit();
+        finalizationCheckpoint = "artifacts_applied";
+        await persistFinalizationProgress(
+          buildFinalizationWorkActivity({
+            checkpoint: finalizationCheckpoint,
+            lane,
+            mode: finalizationMode,
+            proposalDisposition,
+          }),
+        );
+      }
     }
 
     if (!hasFinalizationBranchPush(finalizationCheckpoint)) {

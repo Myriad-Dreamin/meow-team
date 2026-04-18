@@ -4169,6 +4169,73 @@ describe.sequential("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/56");
   });
 
+  it("resumes delete finalization after the deletion commit succeeds but before the checkpoint is persisted", async () => {
+    getBranchHeadMock.mockRejectedValueOnce(new Error("branch head lookup failed"));
+
+    await writeApprovalThreadStore(createApprovalLane());
+
+    await expect(
+      approveLanePullRequest({
+        env: createArchiveEnv(),
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+        finalizationMode: "delete",
+      }),
+    ).rejects.toThrow("branch head lookup failed");
+
+    let thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    let lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(pushLaneBranchMock).not.toHaveBeenCalled();
+    expect(synchronizePullRequestMock).not.toHaveBeenCalled();
+    expect(lane?.proposalDisposition).toBe("deleted");
+    expect(lane?.finalizationCheckpoint).toBe("artifacts_applied");
+    expect(lane?.latestImplementationCommit).toBeNull();
+    expect(lane?.latestActivity).toBe(
+      "Final human approval deleted the OpenSpec change locally, but the branch push and GitHub PR refresh did not complete.",
+    );
+    expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toContain(
+      "failed after deleting openspec/changes/change-1",
+    );
+
+    commitWorktreeChangesMock.mockClear();
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    getBranchHeadMock.mockReset();
+    getBranchHeadMock.mockResolvedValue("delete-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/delete-commit",
+      commitHash: "delete-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/57",
+    });
+
+    await approveLanePullRequest({
+      env: createArchiveEnv(),
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      finalizationMode: "delete",
+    });
+
+    thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(inspectOpenSpecChangeArchiveStateMock).not.toHaveBeenCalled();
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(pushLaneBranchMock).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: dispatchRepository.path,
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "delete-commit",
+    });
+    expect(lane?.finalizationCheckpoint).toBe("completed");
+    expect(lane?.pullRequest?.status).toBe("approved");
+    expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/57");
+  });
+
   it("records an archive failure when the coder pass leaves the change unarchived", async () => {
     inspectOpenSpecChangeArchiveStateMock.mockReset();
     inspectOpenSpecChangeArchiveStateMock.mockResolvedValue({
