@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { ClientExceptionSurface } from "@/components/client-exception-surface";
 import { formatBoundaryException } from "@/lib/client-exception";
+import "codemirror/lib/codemirror.css";
+import "codemirror/addon/hint/show-hint.css";
 import "./globals.css";
 
 type GlobalErrorProps = Readonly<{

@@ -49,4 +49,24 @@ describe("ThreadCommandEditor review guard", () => {
     expect(vitestConfig).not.toContain("vendor/codemirror");
     expect(existsSync(path.join(rootDirectory, "vendor", "codemirror"))).toBe(false);
   });
+
+  it("loads the upstream CodeMirror styles before local overrides", () => {
+    const layoutSource = readFileSync(path.join(rootDirectory, "app", "layout.tsx"), "utf8");
+    const globalErrorSource = readFileSync(
+      path.join(rootDirectory, "app", "global-error.tsx"),
+      "utf8",
+    );
+
+    for (const source of [layoutSource, globalErrorSource]) {
+      const baseCssImport = 'import "codemirror/lib/codemirror.css";';
+      const hintCssImport = 'import "codemirror/addon/hint/show-hint.css";';
+      const globalsImport = 'import "./globals.css";';
+
+      expect(source).toContain(baseCssImport);
+      expect(source).toContain(hintCssImport);
+      expect(source).toContain(globalsImport);
+      expect(source.indexOf(baseCssImport)).toBeLessThan(source.indexOf(globalsImport));
+      expect(source.indexOf(hintCssImport)).toBeLessThan(source.indexOf(globalsImport));
+    }
+  });
 });
