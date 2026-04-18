@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getThreadCommandDisabledReason,
   parseThreadCommand,
+  THREAD_COMMAND_NO_ASSIGNMENT_REASON,
   THREAD_COMMAND_REPLANNING_REASON,
   ThreadCommandParseError,
 } from "@/lib/team/thread-command";
@@ -91,6 +92,29 @@ describe("parseThreadCommand", () => {
 describe("getThreadCommandDisabledReason", () => {
   it("allows idle living threads", () => {
     expect(getThreadCommandDisabledReason(createThreadSummary())).toBeNull();
+  });
+
+  it("blocks threads before the first assignment exists", () => {
+    expect(
+      getThreadCommandDisabledReason(
+        createThreadSummary({
+          latestAssignmentStatus: null,
+          dispatchWorkerCount: 0,
+          latestPlanSummary: null,
+          latestBranchPrefix: null,
+          latestCanonicalBranchName: null,
+          workerCounts: {
+            idle: 0,
+            queued: 0,
+            coding: 0,
+            reviewing: 0,
+            awaitingHumanApproval: 0,
+            approved: 0,
+            failed: 0,
+          },
+        }),
+      ),
+    ).toBe(THREAD_COMMAND_NO_ASSIGNMENT_REASON);
   });
 
   it("blocks archived and busy latest assignments", () => {

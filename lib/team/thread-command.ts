@@ -20,6 +20,9 @@ export const THREAD_COMMAND_PLACEHOLDER = [
 export const THREAD_COMMAND_ARCHIVED_REASON =
   "Archived threads are read-only. Thread commands only run while the latest assignment is idle.";
 
+export const THREAD_COMMAND_NO_ASSIGNMENT_REASON =
+  "Thread commands are unavailable until the planner creates the first assignment for this thread.";
+
 export const THREAD_COMMAND_BUSY_REASON =
   "Thread commands only run while the latest assignment is idle. Wait for queued, coding, or reviewing work to finish first.";
 
@@ -156,6 +159,10 @@ export const getThreadCommandDisabledReason = (
 ): string | null => {
   if (thread.archivedAt) {
     return THREAD_COMMAND_ARCHIVED_REASON;
+  }
+
+  if (thread.latestAssignmentStatus === null) {
+    return THREAD_COMMAND_NO_ASSIGNMENT_REASON;
   }
 
   if (hasReplanningThreadCommandStatus(thread.latestAssignmentStatus)) {

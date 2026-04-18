@@ -7,6 +7,7 @@ import {
   getApproveCommandSkipReason,
   getAssignmentThreadCommandDisabledReason,
   getCommandProposalLanes,
+  THREAD_COMMAND_NO_ASSIGNMENT_REASON,
   getReadyCommandSkipReason,
   getReplanCommandSkipReason,
   parseThreadCommand,
@@ -111,7 +112,7 @@ const createResult = ({
 const getRequiredAssignment = (thread: TeamThreadRecord): TeamDispatchAssignment => {
   const latestAssignment = getLatestAssignment(thread);
   if (!latestAssignment) {
-    throw new TeamThreadCommandError("This thread has no assignment to control yet.", 409);
+    throw new TeamThreadCommandError(THREAD_COMMAND_NO_ASSIGNMENT_REASON, 409);
   }
 
   const disabledReason = getAssignmentThreadCommandDisabledReason({

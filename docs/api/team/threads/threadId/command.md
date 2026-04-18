@@ -63,7 +63,8 @@ background.
 ## UI notes
 
 The selected-thread detail view shows a bottom command composer that posts to
-this endpoint. The composer is disabled when the thread is archived, the latest
-assignment is being replanned or already superseded, or the latest assignment
-still has queued, coding, or reviewing work. It shows the latest command result
-inline after each submission.
+this endpoint. The composer is disabled when the thread is archived, the thread
+has no latest assignment yet, the latest assignment is being replanned or
+already superseded, or the latest assignment still has queued, coding, or
+reviewing work. It shows the latest command result inline after each
+submission.

@@ -3,7 +3,11 @@ import {
   executeThreadCommandForThread,
   type ThreadCommandExecutors,
 } from "@/lib/team/thread-command-server";
-import { parseThreadCommand, THREAD_COMMAND_REPLANNING_REASON } from "@/lib/team/thread-command";
+import {
+  parseThreadCommand,
+  THREAD_COMMAND_NO_ASSIGNMENT_REASON,
+  THREAD_COMMAND_REPLANNING_REASON,
+} from "@/lib/team/thread-command";
 import type { TeamThreadRecord } from "@/lib/team/history";
 import type {
   TeamDispatchAssignment,
@@ -143,6 +147,18 @@ const createExecutors = (
 };
 
 describe("executeThreadCommandForThread", () => {
+  it("rejects threads before the first assignment exists", async () => {
+    await expect(
+      executeThreadCommandForThread({
+        command: parseThreadCommand("/approve 1"),
+        thread: createThread([]),
+      }),
+    ).rejects.toMatchObject({
+      message: THREAD_COMMAND_NO_ASSIGNMENT_REASON,
+      statusCode: 409,
+    });
+  });
+
   it("rejects busy latest assignments before executing a command", async () => {
     const thread = createThread([
       createAssignment(1, {
