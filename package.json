@@ -8,6 +8,7 @@
     "dev": "next dev --turbopack",
     "build": "env -u TURBOPACK next build --webpack",
     "start": "next start",
+    "meow-team": "pnpm exec meow-team",
     "vscode:build": "pnpm --dir editors/vscode build",
     "vscode:package": "pnpm --dir editors/vscode package",
     "vscode:install": "pnpm --dir editors/vscode install-local",
@@ -30,14 +31,17 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
+    "clipanion": "4.0.0-rc.4",
     "codemirror": "5.65.20",
     "markdown-it": "14.1.0",
     "next": "^16.2.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "typanion": "3.14.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@meow-team/cli": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/markdown-it": "14.1.2",
     "@types/node": "^22.19.17",

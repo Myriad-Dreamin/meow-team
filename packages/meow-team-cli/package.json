@@ -1,0 +1,9 @@
+{
+  "name": "@meow-team/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "meow-team": "./bin/meow-team.mjs"
+  }
+}
