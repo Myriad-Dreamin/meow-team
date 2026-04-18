@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
+    "codemirror": "workspace:*",
     "markdown-it": "14.1.0",
     "next": "^16.0.0",
     "react": "^19.0.0",

@@ -10,12 +10,7 @@ import type {
 export const THREAD_COMMAND_HELP_TEXT =
   "Supported commands: /approve [proposal-number], /ready [proposal-number], /replan [proposal-number] requirement, /replan-all requirement.";
 
-export const THREAD_COMMAND_PLACEHOLDER = [
-  "/approve 1",
-  "/ready",
-  "/replan 2 tighten the scope",
-  "/replan-all reduce this to one proposal",
-].join("\n");
+export const THREAD_COMMAND_PLACEHOLDER = ["/approve, /ready, /replan, /replan-all"].join("\n");
 
 export const THREAD_COMMAND_ARCHIVED_REASON =
   "Archived threads are read-only. Thread commands only run while the latest assignment is idle.";
