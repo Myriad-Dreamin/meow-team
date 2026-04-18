@@ -2798,7 +2798,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
   it("keeps proposals non-approvable until materialization finishes", async () => {
     await writePlannerThread("thread-pending-materialization");
 
-    let resolveMaterialization: (() => void) | null = null;
+    let resolveMaterialization!: () => void;
     materializeAssignmentProposalsMock.mockImplementationOnce(
       async () =>
         await new Promise<void>((resolve) => {
@@ -2828,7 +2828,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
     expect(pendingLane?.approvalRequestedAt).toBeNull();
     expect(pendingLane?.latestActivity).toContain("materializing");
 
-    resolveMaterialization?.();
+    resolveMaterialization();
     const assignment = await assignmentPromise;
 
     expect(assignment.status).toBe("awaiting_human_approval");
