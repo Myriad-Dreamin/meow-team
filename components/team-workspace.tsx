@@ -5,9 +5,10 @@ import { TeamConsole } from "@/components/team-console";
 import { TeamStatusBar } from "@/components/team-status-bar";
 import { resolveTeamWorkspaceShortcutTarget } from "@/components/team-workspace-shortcuts";
 import {
-  DEFAULT_TEAM_WORKSPACE_SIDEBAR_VISIBILITY,
   getNextTeamWorkspaceSidebarVisibility,
   getTeamWorkspaceShellClassName,
+  persistTeamWorkspaceSidebarVisibility,
+  readStoredTeamWorkspaceSidebarVisibility,
   TEAM_WORKSPACE_SIDEBAR_ID,
 } from "@/components/team-workspace-sidebar-visibility";
 import {
@@ -290,8 +291,8 @@ export function TeamWorkspace({
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(() =>
     readStoredNotificationPreference(),
   );
-  const [isSidebarVisible, setIsSidebarVisible] = useState(
-    DEFAULT_TEAM_WORKSPACE_SIDEBAR_VISIBILITY,
+  const [isSidebarVisible, setIsSidebarVisible] = useState(() =>
+    readStoredTeamWorkspaceSidebarVisibility(),
   );
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>(
     () => getNotificationPermissionState(),
@@ -359,6 +360,10 @@ export function TeamWorkspace({
       desktopNotificationsEnabled ? "true" : "false",
     );
   }, [desktopNotificationsEnabled]);
+
+  useEffect(() => {
+    persistTeamWorkspaceSidebarVisibility(isSidebarVisible);
+  }, [isSidebarVisible]);
 
   useEffect(() => {
     window.localStorage.removeItem(LEGACY_SEEN_ATTENTION_FINGERPRINTS_STORAGE_KEY);

@@ -1,17 +1,8 @@
 // API docs: docs/api/team/feedback.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { markTeamThreadFailed } from "@/lib/team/history";
-import {
-  createInitialTeamRunState,
-  createTeamRunEnv,
-  prepareAssignmentReplan,
-  persistTeamRunState,
-  runTeam,
-  TeamThreadReplanError,
-} from "@/lib/team/coding";
-import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
-import { getTeamServerState } from "@/lib/team/server-state";
+import { TeamThreadReplanError } from "@/lib/team/coding";
+import { startAssignmentReplan } from "@/lib/team/thread-actions";
 
 export const runtime = "nodejs";
 
@@ -36,47 +27,14 @@ const feedbackSchema = z
 export async function POST(request: Request) {
   try {
     const body = feedbackSchema.parse(await request.json());
-    const serverState = await getTeamServerState();
-
-    if (!teamRuntimeConfig.apiKey) {
-      return NextResponse.json(
-        {
-          error: missingOpenAiConfigMessage,
-        },
-        { status: 500 },
-      );
-    }
-
-    const nextRun = await prepareAssignmentReplan(body);
-    const startedAt = new Date().toISOString();
-    const initialState = createInitialTeamRunState({
-      kind: "planning",
-      input: nextRun.input,
-      threadId: body.threadId,
-      title: nextRun.title,
-      requestText: nextRun.requestText,
-      repositoryId: nextRun.repositoryId,
-      reset: true,
-    });
-    const env = createTeamRunEnv();
-    await persistTeamRunState(env, initialState);
-
-    void runTeam(env, initialState).catch(async (error) => {
-      const message = error instanceof Error ? error.message : "Unknown error.";
-      console.error(`[team-feedback:${body.threadId}] ${message}`);
-      await markTeamThreadFailed({
-        threadFile: serverState.threadStorage,
-        threadId: body.threadId,
-        error: message,
-      });
-    });
+    const nextRun = await startAssignmentReplan(body);
 
     return NextResponse.json(
       {
-        accepted: true,
-        status: "planning",
-        threadId: body.threadId,
-        startedAt,
+        accepted: nextRun.accepted,
+        status: nextRun.status,
+        threadId: nextRun.threadId,
+        startedAt: nextRun.startedAt,
       },
       { status: 202 },
     );
