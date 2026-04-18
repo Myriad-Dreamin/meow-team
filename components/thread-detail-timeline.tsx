@@ -19,7 +19,7 @@ import {
   formatFeedbackLabel,
   formatPoolSlot,
   formatTimestamp,
-  getLaneApprovalAction,
+  getLaneApprovalActions,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
   getLaneStatusClassName,
@@ -400,6 +400,10 @@ export const buildCompactLaneEventLabels = (events: TeamWorkerEvent[]): string[]
 
         if (normalizedMessage.includes("archived openspec")) {
           return "System archived";
+        }
+
+        if (normalizedMessage.includes("deleted openspec")) {
+          return "System deleted";
         }
 
         return "System update";
@@ -1707,11 +1711,11 @@ export function ThreadDetailTimeline({
                             "proposal",
                             lane.laneId,
                           );
-                          const isApproving = approvalKey === currentApprovalKey;
+                          const isApproving = approvalKey?.startsWith(`${currentApprovalKey}:`) ?? false;
                           const isSendingFeedback = feedbackKey === laneFeedbackKey;
-                          const approvalAction = isCurrentAssignment
-                            ? getLaneApprovalAction(lane)
-                            : null;
+                          const approvalActions = isCurrentAssignment
+                            ? getLaneApprovalActions(lane)
+                            : [];
                           const canSendLaneFeedback =
                             isCurrentAssignment &&
                             canRestart &&
@@ -1790,19 +1794,34 @@ export function ThreadDetailTimeline({
                                   </span>
                                 </div>
                               ) : null}
-                              {approvalAction ? (
-                                <button
-                                  className="secondary-button"
-                                  disabled={isApproving}
-                                  type="button"
-                                  onClick={() =>
-                                    onApprove(thread.assignmentNumber, lane.laneId, approvalAction)
-                                  }
-                                >
-                                  {isApproving
-                                    ? approvalAction.pendingLabel
-                                    : approvalAction.buttonLabel}
-                                </button>
+                              {approvalActions.length > 0 ? (
+                                <div className="approval-action-stack">
+                                  {approvalActions.map((approvalAction) => {
+                                    const isPendingAction =
+                                      approvalKey ===
+                                      `${thread.threadId}:${thread.assignmentNumber}:${lane.laneId}:${approvalAction.key}`;
+
+                                    return (
+                                      <button
+                                        className="secondary-button"
+                                        disabled={isApproving}
+                                        key={approvalAction.key}
+                                        type="button"
+                                        onClick={() =>
+                                          onApprove(
+                                            thread.assignmentNumber,
+                                            lane.laneId,
+                                            approvalAction,
+                                          )
+                                        }
+                                      >
+                                        {isPendingAction
+                                          ? approvalAction.pendingLabel
+                                          : approvalAction.buttonLabel}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                               ) : null}
 
                               {canSendLaneFeedback ? (

@@ -68,6 +68,16 @@ export type TeamWorkerLaneStatus =
 
 export type TeamWorkerLaneExecutionPhase = "implementation" | "final_archive";
 
+export type TeamLaneFinalizationMode = "archive" | "delete";
+
+export type TeamLaneProposalDisposition = "active" | "archived" | "deleted";
+
+export type TeamLaneFinalizationCheckpoint =
+  | "requested"
+  | "artifacts_applied"
+  | "branch_pushed"
+  | "completed";
+
 export type TeamPullRequestStatus =
   | "draft"
   | "awaiting_human_approval"
@@ -135,6 +145,9 @@ export type TeamWorkerLaneRecord = {
   proposalChangeName: string | null;
   proposalPath: string | null;
   proposalCommitHash?: string | null;
+  finalizationMode?: TeamLaneFinalizationMode | null;
+  proposalDisposition?: TeamLaneProposalDisposition | null;
+  finalizationCheckpoint?: TeamLaneFinalizationCheckpoint | null;
   workerSlot: number | null;
   branchName: string | null;
   baseBranch: string | null;

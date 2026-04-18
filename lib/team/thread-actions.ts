@@ -1,6 +1,7 @@
 import "server-only";
 
 import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
+import { teamConfig } from "@/team.config";
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
@@ -8,9 +9,12 @@ import {
   prepareAssignmentReplan,
   runTeam,
 } from "@/lib/team/coding";
+import { findAssignment, findLane } from "@/lib/team/coding/shared";
+import { getLaneFinalizationMode } from "@/lib/team/finalization";
 import { markTeamThreadFailed } from "@/lib/team/history";
+import { getTeamThreadRecord } from "@/lib/team/history";
 import { getTeamServerState } from "@/lib/team/server-state";
-import type { TeamHumanFeedbackScope } from "@/lib/team/types";
+import type { TeamHumanFeedbackScope, TeamLaneFinalizationMode } from "@/lib/team/types";
 
 export type LaneApprovalTarget = "proposal" | "pull_request";
 
@@ -19,27 +23,44 @@ export const runLaneApproval = async ({
   assignmentNumber,
   laneId,
   target = "proposal",
+  finalizationMode,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
   target?: LaneApprovalTarget;
+  finalizationMode?: TeamLaneFinalizationMode;
 }) => {
-  const initialState = createInitialTeamRunState(
+  const initialState =
     target === "pull_request"
-      ? {
+      ? createInitialTeamRunState({
           kind: "pull-request-approval",
           threadId,
           assignmentNumber,
           laneId,
-        }
-      : {
+          finalizationMode: await (async (): Promise<TeamLaneFinalizationMode> => {
+            if (finalizationMode) {
+              return finalizationMode;
+            }
+
+            const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+            if (!thread) {
+              throw new Error(
+                `Thread ${threadId} was not found in ${teamConfig.storage.threadFile}.`,
+              );
+            }
+
+            const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
+            const lane = findLane(assignment, laneId);
+            return getLaneFinalizationMode(lane) ?? "archive";
+          })(),
+        })
+      : createInitialTeamRunState({
           kind: "proposal-approval",
           threadId,
           assignmentNumber,
           laneId,
-        },
-  );
+        });
   const env = createTeamRunEnv();
   await persistTeamRunState(env, initialState);
   await runTeam(env, initialState);

@@ -8,6 +8,13 @@ import {
   buildLanePullRequestTitle,
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
+import {
+  getLaneFinalizationCheckpoint,
+  getLaneFinalizationMode,
+  getLaneProposalDisposition,
+  hasReachedLaneFinalizationCheckpoint,
+  isLaneProposalArchived,
+} from "@/lib/team/finalization";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import type { LanePullRequestDraft } from "@/lib/team/coding/lane-state";
 import type { Worktree } from "@/lib/team/coding/worktree";
@@ -15,6 +22,7 @@ import type {
   TeamCodexLogEntry,
   TeamDispatchAssignment,
   TeamExecutionStep,
+  TeamLaneFinalizationMode,
   TeamPlannerNote,
   TeamPullRequestRecord,
   TeamRoleHandoff,
@@ -80,6 +88,7 @@ export type TeamPullRequestApprovalRunArgs = {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
+  finalizationMode: TeamLaneFinalizationMode;
 };
 
 export type TeamRunArgs =
@@ -303,28 +312,77 @@ export const isFinalArchivePhase = (
   return lane.executionPhase === "final_archive";
 };
 
-export const buildFinalArchiveApprovalActivity = ({
+export const buildFinalizationApprovalActivity = ({
   lane,
+  mode,
   isRetry,
   isResume,
 }: {
-  lane: Pick<TeamWorkerLaneRecord, "proposalPath">;
+  lane: Pick<
+    TeamWorkerLaneRecord,
+    | "finalizationCheckpoint"
+    | "finalizationMode"
+    | "proposalDisposition"
+    | "proposalPath"
+    | "pullRequest"
+    | "status"
+  >;
+  mode: TeamLaneFinalizationMode;
   isRetry: boolean;
   isResume: boolean;
 }): string => {
+  const proposalDisposition = getLaneProposalDisposition(lane);
+  const hasBranchPush = hasReachedLaneFinalizationCheckpoint(lane, "branch_pushed");
+  const finalizationMode = mode ?? getLaneFinalizationMode(lane) ?? "archive";
+
+  if (finalizationMode === "delete") {
+    if (isRetry) {
+      if (hasBranchPush) {
+        return "Retrying delete finalization by refreshing the GitHub PR for the deleted OpenSpec change.";
+      }
+
+      if (proposalDisposition === "deleted") {
+        return "Retrying delete finalization after deleting the OpenSpec change. The branch push and GitHub PR refresh will resume.";
+      }
+
+      return "Retrying final approval through OpenSpec change deletion and GitHub PR refresh.";
+    }
+
+    if (isResume) {
+      if (hasBranchPush) {
+        return "Resuming delete finalization by refreshing the GitHub PR for the deleted OpenSpec change.";
+      }
+
+      if (proposalDisposition === "deleted") {
+        return "Resuming delete finalization after deleting the OpenSpec change. The branch push and GitHub PR refresh will continue.";
+      }
+
+      return "Resuming final approval through OpenSpec change deletion and GitHub PR refresh.";
+    }
+
+    if (
+      proposalDisposition === "deleted" ||
+      getLaneFinalizationCheckpoint(lane) === "artifacts_applied"
+    ) {
+      return "Human approved the deleted machine-reviewed branch. Pushing the branch update before refreshing the GitHub PR.";
+    }
+
+    return "Human approved the machine-reviewed branch. Queueing OpenSpec change deletion before refreshing the GitHub PR.";
+  }
+
   if (isRetry) {
-    return lane.proposalPath?.startsWith("openspec/changes/archive/")
+    return isLaneProposalArchived(lane)
       ? "Retrying final approval for the archived OpenSpec change and GitHub PR refresh."
       : "Retrying final approval through the coder archive pass and GitHub PR refresh.";
   }
 
   if (isResume) {
-    return lane.proposalPath?.startsWith("openspec/changes/archive/")
+    return isLaneProposalArchived(lane)
       ? "Resuming final approval for the archived OpenSpec change and GitHub PR refresh."
       : "Resuming final approval through the coder archive pass and GitHub PR refresh.";
   }
 
-  return lane.proposalPath?.startsWith("openspec/changes/archive/")
+  return isLaneProposalArchived(lane)
     ? "Human approved the archived machine-reviewed branch. Refreshing the GitHub PR."
     : "Human approved the machine-reviewed branch. Queueing the coder archive pass before refreshing the GitHub PR.";
 };

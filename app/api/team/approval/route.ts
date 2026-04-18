@@ -5,12 +5,23 @@ import { runLaneApproval } from "@/lib/team/thread-actions";
 
 export const runtime = "nodejs";
 
-const approveLaneSchema = z.object({
-  threadId: z.string().trim().min(1),
-  assignmentNumber: z.number().int().positive(),
-  laneId: z.string().trim().min(1),
-  target: z.enum(["proposal", "pull_request"]).optional(),
-});
+const approveLaneSchema = z
+  .object({
+    threadId: z.string().trim().min(1),
+    assignmentNumber: z.number().int().positive(),
+    laneId: z.string().trim().min(1),
+    target: z.enum(["proposal", "pull_request"]).optional(),
+    finalizationMode: z.enum(["archive", "delete"]).optional(),
+  })
+  .superRefine((body, ctx) => {
+    if (body.finalizationMode && body.target !== "pull_request") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "`finalizationMode` is only valid when `target` is `pull_request`.",
+        path: ["finalizationMode"],
+      });
+    }
+  });
 
 export async function POST(request: Request) {
   try {
@@ -20,6 +31,7 @@ export async function POST(request: Request) {
       assignmentNumber: body.assignmentNumber,
       laneId: body.laneId,
       target: body.target,
+      finalizationMode: body.finalizationMode,
     });
 
     return NextResponse.json({
@@ -38,7 +50,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to approve the proposal.",
+        error: error instanceof Error ? error.message : "Unable to approve the lane.",
       },
       { status: 500 },
     );

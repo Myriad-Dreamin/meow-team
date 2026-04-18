@@ -2047,6 +2047,12 @@ main {
   opacity: 0.65;
 }
 
+.approval-action-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .error-callout {
   margin: 16px 0 0;
   padding: 12px 14px;

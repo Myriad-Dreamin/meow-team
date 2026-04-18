@@ -11,7 +11,7 @@ import {
   formatPoolSlot,
   formatThreadId,
   formatTimestamp,
-  getLaneApprovalAction,
+  getLaneApprovalActions,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
   getLaneStatusClassName,
@@ -109,7 +109,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
     laneId: string,
     approvalAction: LaneApprovalAction,
   ) => {
-    const nextApprovalKey = `${threadId}:${assignmentNumber}:${laneId}`;
+    const nextApprovalKey = `${threadId}:${assignmentNumber}:${laneId}:${approvalAction.key}`;
     startTransition(() => {
       setApprovalKey(nextApprovalKey);
       void (async () => {
@@ -124,6 +124,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
               assignmentNumber,
               laneId,
               target: approvalAction.target,
+              finalizationMode: approvalAction.finalizationMode,
             }),
           });
 
@@ -329,9 +330,9 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                         "proposal",
                         lane.laneId,
                       );
-                      const isApproving = approvalKey === currentApprovalKey;
+                      const isApproving = approvalKey?.startsWith(`${currentApprovalKey}:`) ?? false;
                       const isSendingFeedback = feedbackKey === laneFeedbackKey;
-                      const approvalAction = getLaneApprovalAction(lane);
+                      const approvalActions = getLaneApprovalActions(lane);
                       const canSendLaneFeedback =
                         canRestart && lane.status !== "idle" && lane.status !== "failed";
                       const branchDisplay = getLaneBranchDisplay(lane);
@@ -438,24 +439,35 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                             </div>
                           ) : null}
 
-                          {approvalAction ? (
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              disabled={isApproving}
-                              onClick={() =>
-                                handleApprove(
-                                  thread.threadId,
-                                  thread.assignmentNumber,
-                                  lane.laneId,
-                                  approvalAction,
-                                )
-                              }
-                            >
-                              {isApproving
-                                ? approvalAction.pendingLabel
-                                : approvalAction.buttonLabel}
-                            </button>
+                          {approvalActions.length > 0 ? (
+                            <div className="approval-action-stack">
+                              {approvalActions.map((approvalAction) => {
+                                const isPendingAction =
+                                  approvalKey ===
+                                  `${thread.threadId}:${thread.assignmentNumber}:${lane.laneId}:${approvalAction.key}`;
+
+                                return (
+                                  <button
+                                    className="secondary-button"
+                                    key={approvalAction.key}
+                                    type="button"
+                                    disabled={isApproving}
+                                    onClick={() =>
+                                      handleApprove(
+                                        thread.threadId,
+                                        thread.assignmentNumber,
+                                        lane.laneId,
+                                        approvalAction,
+                                      )
+                                    }
+                                  >
+                                    {isPendingAction
+                                      ? approvalAction.pendingLabel
+                                      : approvalAction.buttonLabel}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           ) : null}
 
                           {canSendLaneFeedback ? (

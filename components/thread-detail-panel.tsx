@@ -197,7 +197,7 @@ export function ThreadDetailPanel({
     laneId: string,
     approvalAction: LaneApprovalAction,
   ) => {
-    const nextApprovalKey = `${threadId}:${assignmentNumber}:${laneId}`;
+    const nextApprovalKey = `${threadId}:${assignmentNumber}:${laneId}:${approvalAction.key}`;
 
     startTransition(() => {
       setApprovalKey(nextApprovalKey);
@@ -213,6 +213,7 @@ export function ThreadDetailPanel({
               assignmentNumber,
               laneId,
               target: approvalAction.target,
+              finalizationMode: approvalAction.finalizationMode,
             }),
           });
 
