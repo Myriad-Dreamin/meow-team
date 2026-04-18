@@ -1,8 +1,9 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
 import { TeamStatusBar } from "@/components/team-status-bar";
+import { resolveTeamWorkspaceShortcutTarget } from "@/components/team-workspace-shortcuts";
 import {
   getNextTeamWorkspaceSidebarVisibility,
   getTeamWorkspaceShellClassName,
@@ -596,6 +597,39 @@ export function TeamWorkspace({
       });
     });
   };
+
+  const handleWorkspaceShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const shortcutTarget = resolveTeamWorkspaceShortcutTarget({
+      event,
+      livingThreadGroups: threadGroups,
+      selectedTabType: resolvedSelectedTab.type,
+    });
+
+    if (!shortcutTarget) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (shortcutTarget.type === "run") {
+      handleSelectRunTab();
+      return;
+    }
+
+    handleSelectThreadTab(shortcutTarget.threadId);
+  });
+
+  useEffect(() => {
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      handleWorkspaceShortcut(event);
+    };
+
+    window.addEventListener("keydown", handleWindowKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown);
+    };
+  }, []);
 
   const handleToggleArchivedThreads = () => {
     startTransition(() => {
