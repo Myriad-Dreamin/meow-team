@@ -23,10 +23,10 @@ import {
   getLaneApprovalActions,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
+  getLanePullRequestStatusLabel,
   getLaneStatusClassName,
   getLaneStatusLabel,
   groupThreadLogEntries,
-  pullRequestStatusLabels,
   selectPrimaryLane,
   threadStatusLabels,
 } from "@/components/thread-view-utils";
@@ -1820,7 +1820,7 @@ export function ThreadDetailTimeline({
                               {lane.pullRequest ? (
                                 <div className="thread-chat-pr-strip">
                                   <span className="thread-chat-meta-chip">
-                                    {pullRequestStatusLabels[lane.pullRequest.status]}
+                                    {getLanePullRequestStatusLabel(lane)}
                                   </span>
                                   {lane.pullRequest.url ? (
                                     <a

@@ -160,6 +160,18 @@ export const getLaneCommitDisplay = (
   };
 };
 
+export const getLanePullRequestStatusLabel = (lane: TeamWorkerLaneRecord): string | null => {
+  if (!lane.pullRequest) {
+    return null;
+  }
+
+  if (lane.status === "cancelled") {
+    return "Cancelled";
+  }
+
+  return pullRequestStatusLabels[lane.pullRequest.status];
+};
+
 export const buildFeedbackKey = (
   threadId: string,
   assignmentNumber: number,

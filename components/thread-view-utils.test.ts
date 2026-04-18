@@ -10,6 +10,7 @@ import {
   groupThreadLogEntries,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
+  getLanePullRequestStatusLabel,
   getLaneStatusClassName,
   getLaneStatusLabel,
   mergeThreadLogGroups,
@@ -308,6 +309,30 @@ describe("thread view approval helpers", () => {
     expect(getLaneStatusClassName(lane)).toBe("status-cancelled");
     expect(describeLane(lane)).toContain("cancelled this request group");
     expect(formatAssignmentStatusLabel("cancelled")).toBe("Cancelled");
+  });
+
+  it("renders cancelled PR strips with the cancelled lifecycle label", () => {
+    const lane = createLane({
+      status: "cancelled",
+      latestActivity: "Human cancelled this request group while it was waiting for final approval.",
+      pullRequest: {
+        id: "pr-1",
+        provider: "local-ci",
+        title: "Ship the feature",
+        summary: "Machine review approved the branch.",
+        branchName: "requests/example/a1-proposal-1",
+        baseBranch: "main",
+        status: "awaiting_human_approval",
+        requestedAt: FIXED_TIMESTAMP,
+        humanApprovalRequestedAt: FIXED_TIMESTAMP,
+        humanApprovedAt: null,
+        machineReviewedAt: FIXED_TIMESTAMP,
+        updatedAt: FIXED_TIMESTAMP,
+        url: null,
+      },
+    });
+
+    expect(getLanePullRequestStatusLabel(lane)).toBe("Cancelled");
   });
 
   it("shows archive-specific labels and messaging while the final archive pass is running", () => {

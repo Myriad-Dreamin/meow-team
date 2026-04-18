@@ -5,10 +5,10 @@ import {
   describeLogEntryContext,
   formatAssignmentStatusLabel,
   formatTimestamp,
+  getLanePullRequestStatusLabel,
   getLaneStatusClassName,
   getLaneStatusLabel,
   groupThreadLogEntries,
-  pullRequestStatusLabels,
   threadStatusLabels,
 } from "@/components/thread-view-utils";
 import type { TeamThreadDetail } from "@/lib/team/history";
@@ -494,7 +494,7 @@ export function AgentTaskOutputWindow({
 
             {lane?.pullRequest ? (
               <div className="task-output-window-meta">
-                <span>{pullRequestStatusLabels[lane.pullRequest.status]}</span>
+                <span>{getLanePullRequestStatusLabel(lane)}</span>
                 {lane.pullRequest.url ? (
                   <a
                     className="thread-chat-link"
