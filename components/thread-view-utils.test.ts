@@ -6,6 +6,7 @@ import {
   formatAssignmentStatusLabel,
   formatPoolSlot,
   formatCommitHash,
+  getLaneApprovalAction,
   getLaneApprovalActions,
   groupThreadLogEntries,
   getLaneBranchDisplay,
