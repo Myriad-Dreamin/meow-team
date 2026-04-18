@@ -3,6 +3,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   applyThreadCommandAutocomplete,
+  consumeThreadCommandAutocompleteKeyUpSuppression,
   getThreadCommandAutocompleteMatches,
   type ThreadCommandAutocompleteMatchResult,
 } from "@/lib/team/thread-command-autocomplete";
@@ -78,6 +79,7 @@ export function ThreadCommandEditor({
   const ariaDescribedByRef = useRef(ariaDescribedBy);
   const autocompleteRef = useRef<ThreadCommandAutocompleteMatchResult | null>(null);
   const selectedCommandRef = useRef<string | null>(null);
+  const suppressedKeyUpRef = useRef<string | null>(null);
 
   const updateAutocomplete = (nextValue: ThreadCommandAutocompleteMatchResult | null) => {
     autocompleteRef.current = nextValue;
@@ -98,34 +100,32 @@ export function ThreadCommandEditor({
     dismissAutocomplete();
   });
 
-  const syncAutocomplete = useEffectEvent((
-    nextValue: string,
-    selectionStart: number | null,
-    selectionEnd: number | null,
-  ) => {
-    if (disabledRef.current || selectionStart === null || selectionEnd === null) {
-      dismissAutocomplete();
-      return;
-    }
+  const syncAutocomplete = useEffectEvent(
+    (nextValue: string, selectionStart: number | null, selectionEnd: number | null) => {
+      if (disabledRef.current || selectionStart === null || selectionEnd === null) {
+        dismissAutocomplete();
+        return;
+      }
 
-    const nextAutocomplete = getThreadCommandAutocompleteMatches({
-      selectionEnd,
-      selectionStart,
-      value: nextValue,
-    });
-    if (!nextAutocomplete) {
-      dismissAutocomplete();
-      return;
-    }
+      const nextAutocomplete = getThreadCommandAutocompleteMatches({
+        selectionEnd,
+        selectionStart,
+        value: nextValue,
+      });
+      if (!nextAutocomplete) {
+        dismissAutocomplete();
+        return;
+      }
 
-    updateAutocomplete(nextAutocomplete);
-    const nextSelectedCommand =
-      selectedCommandRef.current &&
-      nextAutocomplete.items.some((command) => command.command === selectedCommandRef.current)
-        ? selectedCommandRef.current
-        : nextAutocomplete.items[0]?.command ?? null;
-    updateSelectedCommand(nextSelectedCommand);
-  });
+      updateAutocomplete(nextAutocomplete);
+      const nextSelectedCommand =
+        selectedCommandRef.current &&
+        nextAutocomplete.items.some((command) => command.command === selectedCommandRef.current)
+          ? selectedCommandRef.current
+          : (nextAutocomplete.items[0]?.command ?? null);
+      updateSelectedCommand(nextSelectedCommand);
+    },
+  );
 
   const getSelectedCommandDefinition = useEffectEvent((): ThreadCommandDefinition | null => {
     const selectedCommandName = selectedCommandRef.current;
@@ -146,8 +146,11 @@ export function ThreadCommandEditor({
       return;
     }
 
-    const currentIndex = items.findIndex((command) => command.command === selectedCommandRef.current);
-    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + items.length) % items.length;
+    const currentIndex = items.findIndex(
+      (command) => command.command === selectedCommandRef.current,
+    );
+    const nextIndex =
+      currentIndex < 0 ? 0 : (currentIndex + direction + items.length) % items.length;
     updateSelectedCommand(items[nextIndex]?.command ?? null);
   });
 
@@ -312,11 +315,25 @@ export function ThreadCommandEditor({
           }
           case "Escape":
             event.preventDefault();
+            suppressedKeyUpRef.current = event.key;
             dismissAutocompleteFromEffect();
             return;
           default:
             return;
         }
+      };
+
+      const handleKeyUp = (event: KeyboardEvent) => {
+        const nextKeyUp = consumeThreadCommandAutocompleteKeyUpSuppression({
+          key: event.key,
+          suppressedKey: suppressedKeyUpRef.current,
+        });
+        suppressedKeyUpRef.current = nextKeyUp.nextSuppressedKey;
+        if (!nextKeyUp.shouldSync) {
+          return;
+        }
+
+        syncFromInput();
       };
 
       const handleBlur = () => {
@@ -327,7 +344,7 @@ export function ThreadCommandEditor({
       input.addEventListener("click", syncFromInput);
       input.addEventListener("focus", syncFromInput);
       input.addEventListener("keydown", handleKeyDown);
-      input.addEventListener("keyup", syncFromInput);
+      input.addEventListener("keyup", handleKeyUp);
       input.addEventListener("select", syncFromInput);
       editor.on("change", handleChange);
       editor.setSize("100%", "auto");
@@ -349,7 +366,7 @@ export function ThreadCommandEditor({
         input.removeEventListener("click", syncFromInput);
         input.removeEventListener("focus", syncFromInput);
         input.removeEventListener("keydown", handleKeyDown);
-        input.removeEventListener("keyup", syncFromInput);
+        input.removeEventListener("keyup", handleKeyUp);
         input.removeEventListener("select", syncFromInput);
       };
     } catch {
@@ -397,7 +414,11 @@ export function ThreadCommandEditor({
     >
       <div ref={hostRef} className="thread-command-editor-shell" />
       {suggestions.length > 0 ? (
-        <div className="thread-command-autocomplete" role="listbox" aria-label="Command suggestions">
+        <div
+          className="thread-command-autocomplete"
+          role="listbox"
+          aria-label="Command suggestions"
+        >
           {suggestions.map((command) => {
             const isActive = command.command === selectedCommand;
 

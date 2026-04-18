@@ -11,6 +11,11 @@ export type ThreadCommandAutocompleteMatchResult = {
   token: ThreadCommandAutocompleteToken;
 };
 
+export type ThreadCommandAutocompleteKeyUpResolution = {
+  nextSuppressedKey: string | null;
+  shouldSync: boolean;
+};
+
 type ThreadCommandSelection = {
   selectionEnd?: number;
   selectionStart: number;
@@ -87,6 +92,19 @@ export const getThreadCommandAutocompleteMatches = (
   return {
     items: [...items],
     token,
+  };
+};
+
+export const consumeThreadCommandAutocompleteKeyUpSuppression = ({
+  key,
+  suppressedKey,
+}: {
+  key: string;
+  suppressedKey: string | null;
+}): ThreadCommandAutocompleteKeyUpResolution => {
+  return {
+    nextSuppressedKey: null,
+    shouldSync: suppressedKey !== key,
   };
 };
 

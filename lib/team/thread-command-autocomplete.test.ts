@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyThreadCommandAutocomplete,
+  consumeThreadCommandAutocompleteKeyUpSuppression,
   getActiveThreadCommandToken,
   getThreadCommandAutocompleteMatches,
 } from "@/lib/team/thread-command-autocomplete";
@@ -75,6 +76,27 @@ describe("thread command autocomplete helpers", () => {
       "/replan [proposal-number] requirement",
       "/replan-all requirement",
     ]);
+  });
+
+  it("consumes the next keyup after an escape dismissal so suggestions stay closed", () => {
+    expect(
+      consumeThreadCommandAutocompleteKeyUpSuppression({
+        key: "Escape",
+        suppressedKey: "Escape",
+      }),
+    ).toEqual({
+      nextSuppressedKey: null,
+      shouldSync: false,
+    });
+    expect(
+      consumeThreadCommandAutocompleteKeyUpSuppression({
+        key: "r",
+        suppressedKey: "Escape",
+      }),
+    ).toEqual({
+      nextSuppressedKey: null,
+      shouldSync: true,
+    });
   });
 
   it("replaces only the command token and leaves the caret ready for the next argument", () => {
