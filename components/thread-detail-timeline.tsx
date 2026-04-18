@@ -236,8 +236,16 @@ const buildUnexpectedLogsResponseMessage = (response: Response): string => {
   return `Unable to refresh thread activity (HTTP ${response.status}).`;
 };
 
+const titleizeIdentifier = (value: string): string => {
+  return value
+    .split(/[-_]/gu)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+};
+
 const formatEventActorLabel = (actor: TeamWorkerEvent["actor"]): string => {
-  return actor.charAt(0).toUpperCase() + actor.slice(1);
+  return titleizeIdentifier(actor);
 };
 
 const normalizeAnchorMessage = (value: string): string => {
@@ -274,7 +282,7 @@ export const formatCompactTimelineHandoffLabel = (
   handoff: Pick<TeamThreadDetail["handoffs"][number], "decision" | "roleId" | "roleName">,
 ): string => {
   const roleLabelN = (handoff.roleId || handoff.roleName || "agent").trim();
-  const roleLabel = roleLabelN.charAt(0).toUpperCase() + roleLabelN.slice(1);
+  const roleLabel = titleizeIdentifier(roleLabelN);
 
   if (handoff.decision === "approved") {
     return `${roleLabel} approved`;
@@ -362,6 +370,22 @@ export const buildCompactLaneEventLabels = (events: TeamWorkerEvent[]): string[]
 
         return `Coder ${verb}`;
 
+      case "executor":
+        const executorVerb = normalizedMessage.includes("implementing")
+          ? "implementing"
+          : normalizedMessage.includes("requested review")
+            ? "requested review"
+            : "updated";
+        if (executorVerb === "implementing") {
+          coderRunCount += 1;
+        }
+
+        if (coderRunCount > 0) {
+          return `Executor ${executorVerb} ${coderRunCount}`;
+        }
+
+        return `Executor ${executorVerb}`;
+
       case "reviewer":
         if (normalizedMessage.startsWith("reviewer is ")) {
           reviewerRunCount += 1;
@@ -382,6 +406,27 @@ export const buildCompactLaneEventLabels = (events: TeamWorkerEvent[]): string[]
         }
 
         return "Reviewer update";
+
+      case "execution-reviewer":
+        if (normalizedMessage.startsWith("execution reviewer is ")) {
+          reviewerRunCount += 1;
+          return `Execution review ${reviewerRunCount}`;
+        }
+
+        if (normalizedMessage.includes("requested changes")) {
+          reviewerRevisionCount += 1;
+          return `Execution revision ${reviewerRevisionCount}`;
+        }
+
+        if (
+          normalizedMessage.includes("approved the proposal") ||
+          normalizedMessage.includes("completed machine review")
+        ) {
+          reviewerRunCount = Math.max(reviewerRunCount, 1);
+          return "Execution review approved";
+        }
+
+        return "Execution review update";
 
       case "system":
         if (normalizedMessage.includes("published")) {

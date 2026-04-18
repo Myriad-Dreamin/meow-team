@@ -2909,6 +2909,12 @@ describe.sequential("approveLaneProposal", () => {
             pullRequestSummary: "Machine review approved the branch.",
           })) as TeamRoleDependencies["reviewerAgent"]["run"]),
       },
+      executorAgent: {
+        run: vi.fn(),
+      },
+      executionReviewerAgent: {
+        run: vi.fn(),
+      },
     };
   };
 
@@ -3814,6 +3820,12 @@ describe.sequential("approveLanePullRequest", () => {
           })) as TeamRoleDependencies["coderAgent"]["run"]),
       },
       reviewerAgent: {
+        run: vi.fn(),
+      },
+      executorAgent: {
+        run: vi.fn(),
+      },
+      executionReviewerAgent: {
         run: vi.fn(),
       },
     };

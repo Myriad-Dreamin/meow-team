@@ -162,6 +162,16 @@ describe("resolveTeamRoleDependencies", () => {
         };
       }
 
+      if (codexHomePrefix === "lane") {
+        return {
+          summary: "Execution lane ready.",
+          deliverable: "Committed the execution artifacts.",
+          decision: "continue",
+          pullRequestTitle: null,
+          pullRequestSummary: null,
+        };
+      }
+
       return {
         title: "Injected Title",
         conventionalTitle: null,
@@ -222,6 +232,58 @@ describe("resolveTeamRoleDependencies", () => {
         codexHomePrefix: "openspec-materializer",
       }),
     );
+    await expect(
+      dependencies.executorAgent.run({
+        input: "Run the execution lane.",
+        state: {
+          repository: {
+            id: "repo",
+            name: "meow-team",
+            rootId: "root",
+            rootLabel: "Root",
+            path: "/tmp/meow-team",
+            relativePath: ".",
+          },
+          branchName: "requests/example/a1-proposal-1",
+          baseBranch: "main",
+          worktree: createWorktree({ path: "/tmp/meow-team" }),
+          implementationCommit: null,
+          teamName: "Test Team",
+          ownerName: "Owner",
+          objective: "Ship reliable GitHub delivery.",
+          laneId: "lane-1",
+          laneIndex: 1,
+          executionPhase: "implementation",
+          executionMode: "execution",
+          executionModeLabel: "execution",
+          taskTitle: "Run fixture refresh script",
+          taskObjective: "Refresh fixtures with a validator and summary.",
+          requestTitle: "feat(team/executing): introduce execute mode workflow",
+          conventionalTitle: {
+            type: "feat",
+            scope: "team/executing",
+          },
+          planSummary: "Route execute-mode work through executor lanes.",
+          planDeliverable: "Proposal: Add execute-mode workflow and roles",
+          conflictNote: null,
+          archiveCommand: null,
+          archivePathContext: "openspec/changes/change-1",
+          guideInstructions: "Inspect AGENTS.md for execution guidance before making changes.",
+          artifactContract:
+            "Execution artifact contract for execution lanes:\n- Commit the scripts or automation changes that perform the run.",
+          workflow: ["executor", "execution-reviewer"],
+          handoffs: {},
+          handoffCounter: 0,
+          assignmentNumber: 1,
+        },
+      }),
+    ).resolves.toEqual({
+      summary: "Execution lane ready.",
+      deliverable: "Committed the execution artifacts.",
+      decision: "continue",
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    });
     expect(runCodexStructuredOutputMock).not.toHaveBeenCalled();
   });
 
@@ -232,13 +294,23 @@ describe("resolveTeamRoleDependencies", () => {
     const openSpecMaterializerAgent = {
       run: vi.fn(),
     };
+    const executorAgent = {
+      run: vi.fn(),
+    };
+    const executionReviewerAgent = {
+      run: vi.fn(),
+    };
 
     const dependencies = resolveTeamRoleDependencies({
       requestTitleAgent,
       openSpecMaterializerAgent,
+      executorAgent,
+      executionReviewerAgent,
     });
 
     expect(dependencies.requestTitleAgent).toBe(requestTitleAgent);
     expect(dependencies.openSpecMaterializerAgent).toBe(openSpecMaterializerAgent);
+    expect(dependencies.executorAgent).toBe(executorAgent);
+    expect(dependencies.executionReviewerAgent).toBe(executionReviewerAgent);
   });
 });

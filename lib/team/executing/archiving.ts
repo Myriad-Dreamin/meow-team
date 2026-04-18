@@ -6,11 +6,10 @@ import {
   synchronizeDispatchAssignment,
   updateTeamThreadRecord,
 } from "@/lib/team/history";
-import { runExecutingArchivingStage } from "@/lib/team/executing/archiving";
 import {
   appendLaneEvent,
   buildCanonicalLanePullRequestDraft,
-  buildFinalizationApprovalActivity,
+  buildFinalArchiveApprovalActivity,
   findAssignment,
   findLane,
   isFinalArchivePhase,
@@ -18,25 +17,21 @@ import {
   type TeamRunCompletedState,
   type TeamRunEnv,
 } from "@/lib/team/coding/shared";
-import { getLaneFinalizationCheckpoint, getLaneFinalizationMode } from "@/lib/team/finalization";
 import { findPersistedLane, isLanePullRequestFinalized } from "@/lib/team/coding/plan";
 import { ensurePendingDispatchWork, waitForLaneRunCompletion } from "@/lib/team/coding/reviewing";
 import type { Worktree } from "@/lib/team/coding/worktree";
-import type { TeamLaneFinalizationMode } from "@/lib/team/types";
 
-export const approveLanePullRequest = async ({
+export const approveExecuteLanePullRequest = async ({
   env,
   threadId,
   assignmentNumber,
   laneId,
-  finalizationMode,
   worktree,
 }: {
   env: TeamRunEnv;
   threadId: string;
   assignmentNumber: number;
   laneId: string;
-  finalizationMode: TeamLaneFinalizationMode;
   worktree?: Worktree;
 }): Promise<void> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
@@ -119,20 +114,13 @@ export const approveLanePullRequest = async ({
       }
 
       const nextHumanApprovedAt = mutablePullRequest.humanApprovedAt ?? now;
-      const mutableFinalizationAttempted =
-        mutablePullRequest.humanApprovedAt !== null ||
-        getLaneFinalizationMode(mutableLane) !== null;
-      const isRetry = mutablePullRequest.status === "failed" && mutableFinalizationAttempted;
+      const isRetry = mutablePullRequest.status === "failed";
       const isResume =
         mutablePullRequest.status === "awaiting_human_approval" &&
-        mutablePullRequest.humanApprovedAt !== null &&
-        mutableFinalizationAttempted;
-      const retainedCheckpoint = getLaneFinalizationCheckpoint(mutableLane);
+        mutablePullRequest.humanApprovedAt !== null;
 
       if (mutableArchiveInProgress) {
         mutableLane.lastError = null;
-        mutableLane.finalizationMode = finalizationMode;
-        mutableLane.finalizationCheckpoint = retainedCheckpoint ?? "requested";
         mutableLane.pullRequest = {
           ...mutablePullRequest,
           title: pullRequestTitle,
@@ -148,13 +136,11 @@ export const approveLanePullRequest = async ({
 
       mutableLane.status = "queued";
       mutableLane.executionPhase = "final_archive";
-      mutableLane.finalizationMode = finalizationMode;
-      mutableLane.finalizationCheckpoint = retainedCheckpoint ?? "requested";
-      mutableLane.latestActivity = buildFinalizationApprovalActivity({
+      mutableLane.latestActivity = buildFinalArchiveApprovalActivity({
         lane: mutableLane,
-        mode: finalizationMode,
         isRetry,
         isResume,
+        implementationLabel: "executor",
       });
       mutableLane.lastError = null;
       mutableLane.workerSlot = null;
@@ -175,8 +161,8 @@ export const approveLanePullRequest = async ({
           mutableLane,
           "human",
           isRetry
-            ? `Human retried ${finalizationMode} finalization for the machine-reviewed branch.`
-            : `Human approved the machine-reviewed branch for OpenSpec ${finalizationMode} and GitHub PR refresh.`,
+            ? "Human retried final approval for the machine-reviewed branch."
+            : "Human approved the machine-reviewed branch for OpenSpec archive and GitHub PR refresh.",
           now,
         );
       }
@@ -203,7 +189,7 @@ export const approveLanePullRequest = async ({
   }
 };
 
-export const runArchivingStage = async (
+export const runExecutingArchivingStage = async (
   env: TeamRunEnv,
   currentState: TeamRunArchivingStageState,
 ): Promise<TeamRunCompletedState> => {
@@ -216,33 +202,13 @@ export const runArchivingStage = async (
     currentState.args.assignmentNumber,
     currentState.args.laneId,
   );
-  const persistedAssignment = persistedThread
-    ? findAssignment(persistedThread.dispatchAssignments, currentState.args.assignmentNumber)
-    : null;
-
-  if (persistedAssignment?.executionMode) {
-    return runExecutingArchivingStage(env, currentState);
-  }
 
   if (!persistedLane || !isLanePullRequestFinalized(persistedLane)) {
-    await approveLanePullRequest({
+    await approveExecuteLanePullRequest({
       env,
       threadId: currentState.args.threadId,
       assignmentNumber: currentState.args.assignmentNumber,
       laneId: currentState.args.laneId,
-      finalizationMode:
-        currentState.args.finalizationMode ??
-        getLaneFinalizationMode(
-          persistedLane ?? {
-            finalizationMode: null,
-            finalizationCheckpoint: null,
-            proposalDisposition: null,
-            proposalPath: null,
-            pullRequest: null,
-            status: "approved",
-          },
-        ) ??
-        "archive",
       worktree: currentState.worktree,
     });
   }

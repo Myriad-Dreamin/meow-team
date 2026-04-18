@@ -6,6 +6,11 @@ import { summarizeHandoffs } from "@/lib/team/agent-helpers";
 import type { Worktree } from "@/lib/team/coding/worktree";
 import { buildOpenSpecSkillReference, describeLocalOpenSpecSkills } from "@/lib/team/openspec";
 import {
+  formatTeamExecutionModeLabel,
+  parseExecutionModeInput,
+  type TeamExecutionMode,
+} from "@/lib/team/execution-mode";
+import {
   describeConventionalTitleMetadata,
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
@@ -52,6 +57,7 @@ export type PlannerRoleState = {
   assignmentNumber: number;
   requestTitle: string | null;
   conventionalTitle: ConventionalTitleMetadata | null;
+  executionMode?: TeamExecutionMode | null;
   requestText: string | null;
   latestInput: string | null;
 };
@@ -86,6 +92,13 @@ const buildPlannerRequestContext = (input: PlannerRoleState): string => {
   const requestTitle = input.requestTitle?.trim();
   const requestText = input.requestText?.trim();
   const conventionalTitle = describeConventionalTitleMetadata(input.conventionalTitle);
+  const parsedLatestInput = parseExecutionModeInput(latestInput);
+  const latestInputOnlyDiffersByPrefix = Boolean(
+    input.executionMode &&
+    requestText &&
+    parsedLatestInput.executionMode === input.executionMode &&
+    parsedLatestInput.requestText === requestText,
+  );
 
   if (requestTitle) {
     sections.push(`Current request title: ${requestTitle}`);
@@ -95,8 +108,14 @@ const buildPlannerRequestContext = (input: PlannerRoleState): string => {
     sections.push(`Current conventional title metadata: ${conventionalTitle}`);
   }
 
+  if (input.executionMode) {
+    sections.push(
+      `Execute mode: ${formatTeamExecutionModeLabel(input.executionMode)} (strip the prefix from canonical titles, proposal titles, and branch-planning metadata).`,
+    );
+  }
+
   if (requestText) {
-    sections.push(`Raw request text:\n${requestText}`);
+    sections.push(`Normalized request text:\n${requestText}`);
   }
 
   if (!latestInput) {
@@ -106,11 +125,13 @@ const buildPlannerRequestContext = (input: PlannerRoleState): string => {
     return sections.join("\n\n");
   }
 
-  sections.push(
-    requestText && latestInput !== requestText
-      ? `Current planning input:\n${latestInput}`
-      : `Current assignment input:\n${latestInput}`,
-  );
+  if (!latestInputOnlyDiffersByPrefix) {
+    sections.push(
+      requestText && latestInput !== requestText
+        ? `Current planning input:\n${latestInput}`
+        : `Current assignment input:\n${latestInput}`,
+    );
+  }
 
   return sections.join("\n\n");
 };

@@ -4,6 +4,7 @@ import { teamConfig } from "@/team.config";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { buildCanonicalBranchName } from "@/lib/team/git";
 import type { TeamThreadRecord } from "@/lib/team/history";
+import type { TeamExecutionMode } from "@/lib/team/execution-mode";
 import {
   buildLanePullRequestTitle,
   type ConventionalTitleMetadata,
@@ -42,6 +43,7 @@ export type TeamRunState = {
   assignmentNumber: number;
   requestTitle: string | null;
   conventionalTitle: ConventionalTitleMetadata | null;
+  executionMode?: TeamExecutionMode | null;
   requestText: string | null;
   threadWorktree: Worktree | null;
   latestInput: string | null;
@@ -66,6 +68,7 @@ export type TeamPlanningRunArgs = {
   threadId: string;
   title?: string;
   requestText?: string;
+  executionMode?: TeamExecutionMode | null;
   repositoryId?: string;
   reset?: boolean;
   deleteExistingBranches?: boolean;
@@ -117,12 +120,14 @@ export type TeamRunEnv = {
 export type ResolvedRequestMetadata = {
   requestTitle: string;
   conventionalTitle: ConventionalTitleMetadata | null;
+  executionMode?: TeamExecutionMode | null;
   requestText: string;
 };
 
 export type InitialRequestMetadata = {
   requestTitle: string | null;
   conventionalTitle: ConventionalTitleMetadata | null;
+  executionMode?: TeamExecutionMode | null;
   requestText: string;
 };
 
@@ -312,25 +317,31 @@ export const isFinalArchivePhase = (
   return lane.executionPhase === "final_archive";
 };
 
+type FinalizationApprovalActivityLane = Pick<
+  TeamWorkerLaneRecord,
+  | "finalizationCheckpoint"
+  | "finalizationMode"
+  | "proposalDisposition"
+  | "proposalPath"
+  | "pullRequest"
+  | "status"
+>;
+
+type FinalizationApprovalActivityArgs = {
+  lane: FinalizationApprovalActivityLane;
+  mode: TeamLaneFinalizationMode;
+  isRetry: boolean;
+  isResume: boolean;
+  implementationLabel?: "coder" | "executor";
+};
+
 export const buildFinalizationApprovalActivity = ({
   lane,
   mode,
   isRetry,
   isResume,
-}: {
-  lane: Pick<
-    TeamWorkerLaneRecord,
-    | "finalizationCheckpoint"
-    | "finalizationMode"
-    | "proposalDisposition"
-    | "proposalPath"
-    | "pullRequest"
-    | "status"
-  >;
-  mode: TeamLaneFinalizationMode;
-  isRetry: boolean;
-  isResume: boolean;
-}): string => {
+  implementationLabel = "coder",
+}: FinalizationApprovalActivityArgs): string => {
   const proposalDisposition = getLaneProposalDisposition(lane);
   const hasBranchPush = hasReachedLaneFinalizationCheckpoint(lane, "branch_pushed");
   const finalizationMode = mode ?? getLaneFinalizationMode(lane) ?? "archive";
@@ -370,21 +381,39 @@ export const buildFinalizationApprovalActivity = ({
     return "Human approved the machine-reviewed branch. Queueing OpenSpec change deletion before refreshing the GitHub PR.";
   }
 
+  const archivePassLabel =
+    implementationLabel === "executor" ? "executor archive pass" : "coder archive pass";
+
   if (isRetry) {
     return isLaneProposalArchived(lane)
       ? "Retrying final approval for the archived OpenSpec change and GitHub PR refresh."
-      : "Retrying final approval through the coder archive pass and GitHub PR refresh.";
+      : `Retrying final approval through the ${archivePassLabel} and GitHub PR refresh.`;
   }
 
   if (isResume) {
     return isLaneProposalArchived(lane)
       ? "Resuming final approval for the archived OpenSpec change and GitHub PR refresh."
-      : "Resuming final approval through the coder archive pass and GitHub PR refresh.";
+      : `Resuming final approval through the ${archivePassLabel} and GitHub PR refresh.`;
   }
 
   return isLaneProposalArchived(lane)
     ? "Human approved the archived machine-reviewed branch. Refreshing the GitHub PR."
-    : "Human approved the machine-reviewed branch. Queueing the coder archive pass before refreshing the GitHub PR.";
+    : `Human approved the machine-reviewed branch. Queueing the ${archivePassLabel} before refreshing the GitHub PR.`;
+};
+
+export const buildFinalArchiveApprovalActivity = ({
+  lane,
+  isRetry,
+  isResume,
+  implementationLabel = "coder",
+}: Omit<FinalizationApprovalActivityArgs, "mode">): string => {
+  return buildFinalizationApprovalActivity({
+    lane,
+    mode: "archive",
+    isRetry,
+    isResume,
+    implementationLabel,
+  });
 };
 
 export const summarizeGitFailure = (message: string): string => {

@@ -33,7 +33,7 @@ export const normalizeDecision = (
   roleId: string,
   proposedDecision: TeamRoleDecision,
 ): TeamRoleDecision => {
-  if (roleId === "reviewer") {
+  if (roleId === "reviewer" || roleId === "execution-reviewer") {
     return proposedDecision === "continue" ? "approved" : proposedDecision;
   }
 

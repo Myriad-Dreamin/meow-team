@@ -173,12 +173,20 @@ const isNearBottom = (element: HTMLDivElement): boolean => {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= SCROLL_THRESHOLD_PX;
 };
 
+const titleizeIdentifier = (value: string): string => {
+  return value
+    .split(/[-_]/gu)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+};
+
 const formatRoleName = (roleId: string | null): string => {
   if (!roleId) {
     return "Agent";
   }
 
-  return roleId.charAt(0).toUpperCase() + roleId.slice(1);
+  return titleizeIdentifier(roleId);
 };
 
 const formatAssignmentStatusLabel = (status: string): string => {

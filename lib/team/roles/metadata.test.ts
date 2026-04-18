@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { coderRole } from "@/lib/team/roles/coder";
+import { executionReviewerRole } from "@/lib/team/roles/execution-reviewer";
+import { executorRole } from "@/lib/team/roles/executor";
 import { plannerRole } from "@/lib/team/roles/planner";
 import { reviewerRole } from "@/lib/team/roles/reviewer";
 
 describe("team role metadata", () => {
-  it("derives planner, coder, and reviewer metadata from the colocated role templates", () => {
+  it("derives planner, implementation, and review role metadata from the colocated templates", () => {
     expect(plannerRole).toMatchObject({
       id: "planner",
       name: "Planner",
@@ -23,6 +25,19 @@ describe("team role metadata", () => {
       name: "Reviewer",
       summary: "Review the proposed work with a code review mindset.",
       filePath: "lib/team/roles/reviewer.prompt.md",
+    });
+    expect(executorRole).toMatchObject({
+      id: "executor",
+      name: "Executor",
+      summary:
+        "Execute the approved script-and-data plan as the implementation owner for this lane.",
+      filePath: "lib/team/roles/executor.prompt.md",
+    });
+    expect(executionReviewerRole).toMatchObject({
+      id: "execution-reviewer",
+      name: "Execution Reviewer",
+      summary: "Review execute-mode work with a reproducibility and validation mindset.",
+      filePath: "lib/team/roles/execution-reviewer.prompt.md",
     });
   });
 });

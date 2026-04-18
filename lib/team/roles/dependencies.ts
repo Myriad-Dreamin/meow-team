@@ -5,6 +5,8 @@ import {
   type TeamStructuredExecutor,
 } from "@/lib/agent/executor";
 import { CoderAgent } from "@/lib/team/roles/coder";
+import { ExecutionReviewerAgent } from "@/lib/team/roles/execution-reviewer";
+import { ExecutorAgent } from "@/lib/team/roles/executor";
 import { OpenSpecMaterializerAgent } from "@/lib/team/roles/openspec-materializer";
 import { PlannerAgent } from "@/lib/team/roles/planner";
 import { RequestTitleAgent } from "@/lib/team/roles/request-title";
@@ -17,6 +19,8 @@ export type TeamRoleDependencies = {
   openSpecMaterializerAgent: Pick<OpenSpecMaterializerAgent, "run">;
   coderAgent: Pick<CoderAgent, "run">;
   reviewerAgent: Pick<ReviewerAgent, "run">;
+  executorAgent: Pick<ExecutorAgent, "run">;
+  executionReviewerAgent: Pick<ExecutionReviewerAgent, "run">;
 };
 
 const defaultQueuedExecutor = createQueuedTeamStructuredExecutor({
@@ -33,6 +37,8 @@ const createDefaultRoleAgents = (
     openSpecMaterializerAgent: new OpenSpecMaterializerAgent(executor),
     coderAgent: new CoderAgent(executor),
     reviewerAgent: new ReviewerAgent(executor),
+    executorAgent: new ExecutorAgent(executor),
+    executionReviewerAgent: new ExecutionReviewerAgent(executor),
   };
 };
 

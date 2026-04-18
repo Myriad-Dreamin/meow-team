@@ -22,6 +22,7 @@ import {
   parseConventionalTitle,
   resolveDisplayRequestTitle,
 } from "@/lib/team/request-title";
+import { normalizeTeamExecutionMode } from "@/lib/team/execution-mode";
 import {
   getTeamThreadStorageRecord,
   listTeamThreadStorageRecords,
@@ -329,6 +330,7 @@ const normalizeDispatchAssignment = (
 ): TeamDispatchAssignment => {
   return {
     ...assignment,
+    executionMode: normalizeTeamExecutionMode(assignment.executionMode),
     requestTitle: assignment.requestTitle ?? null,
     conventionalTitle:
       normalizeConventionalTitleMetadata(assignment.conventionalTitle) ??
@@ -349,6 +351,7 @@ const normalizeDispatchAssignment = (
 const normalizeRunState = (state: TeamRunState): TeamRunState => {
   return {
     ...state,
+    executionMode: normalizeTeamExecutionMode(state.executionMode),
     requestTitle: state.requestTitle ?? null,
     conventionalTitle:
       normalizeConventionalTitleMetadata(state.conventionalTitle) ??

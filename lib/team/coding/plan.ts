@@ -37,6 +37,7 @@ import {
   parseConventionalTitle,
   type ConventionalTitleMetadata,
 } from "@/lib/team/request-title";
+import { parseExecutionModeInput, type TeamExecutionMode } from "@/lib/team/execution-mode";
 import { findConfiguredRepository } from "@/lib/team/repositories";
 import {
   resolveTeamRoleDependencies,
@@ -184,6 +185,11 @@ const markAssignmentReadyForHumanApproval = (
   assignment: TeamDispatchAssignment,
   now: string,
 ): void => {
+  const queueLabel = assignment.executionMode ? "execution-review" : "coding-review";
+  const laneActivity = assignment.executionMode
+    ? "Proposal is waiting for human approval before execution and review begin."
+    : "Proposal is waiting for human approval before coding and review begin.";
+
   assignment.lanes = assignment.lanes.map((lane) => {
     if (!lane.taskTitle && !lane.taskObjective) {
       return lane;
@@ -192,7 +198,7 @@ const markAssignmentReadyForHumanApproval = (
     return {
       ...lane,
       status: "awaiting_human_approval",
-      latestActivity: "Proposal is waiting for human approval before coding and review begin.",
+      latestActivity: laneActivity,
       approvalRequestedAt: lane.approvalRequestedAt ?? now,
       updatedAt: now,
     };
@@ -200,7 +206,7 @@ const markAssignmentReadyForHumanApproval = (
   assignment.plannerNotes = [
     ...assignment.plannerNotes,
     createPlannerNote(
-      "Planner materialized the proposal artifacts and is waiting for human approval before the coding-review queue starts.",
+      `Planner materialized the proposal artifacts and is waiting for human approval before the ${queueLabel} queue starts.`,
       now,
     ),
   ];
@@ -215,6 +221,7 @@ const shouldReusePersistedAssignment = (
 export const createPlannerDispatchAssignment = async ({
   threadId,
   assignmentNumber,
+  executionMode,
   repository,
   worktree,
   requestTitle,
@@ -230,6 +237,7 @@ export const createPlannerDispatchAssignment = async ({
 }: {
   threadId: string;
   assignmentNumber: number;
+  executionMode?: TeamExecutionMode | null;
   repository: TeamRepositoryOption | null;
   worktree: Worktree | null;
   requestTitle: string;
@@ -244,7 +252,7 @@ export const createPlannerDispatchAssignment = async ({
   onMaterializerEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<TeamDispatchAssignment> => {
   if (!repository) {
-    throw new Error("Dispatching coder and reviewer lanes requires a selected repository.");
+    throw new Error("Dispatching worker lanes requires a selected repository.");
   }
 
   if (!worktree?.slot) {
@@ -270,6 +278,7 @@ export const createPlannerDispatchAssignment = async ({
       {
         assignmentNumber,
         status: "planning",
+        executionMode: executionMode ?? null,
         repository,
         requestTitle,
         conventionalTitle,
@@ -408,6 +417,39 @@ const normalizeRequestText = (value: string | null | undefined): string | null =
   return normalized ? normalized : null;
 };
 
+const resolveNormalizedExecutionInput = ({
+  input,
+  providedRequestText,
+  preservedExecutionMode,
+  providedExecutionMode,
+}: {
+  input: string;
+  providedRequestText?: string;
+  preservedExecutionMode?: TeamExecutionMode | null;
+  providedExecutionMode?: TeamExecutionMode | null;
+}) => {
+  const parsedInput = parseExecutionModeInput(input);
+  const parsedRequestText = parseExecutionModeInput(providedRequestText);
+  const executionMode =
+    providedExecutionMode ??
+    preservedExecutionMode ??
+    parsedRequestText.executionMode ??
+    parsedInput.executionMode;
+
+  return {
+    executionMode,
+    normalizedInput:
+      executionMode && parsedInput.executionMode === executionMode
+        ? parsedInput.requestText
+        : input.trim(),
+    requestText:
+      normalizeRequestText(providedRequestText) ??
+      (executionMode
+        ? parsedRequestText.requestText || parsedInput.requestText
+        : parsedInput.requestText),
+  };
+};
+
 const describeUnknownError = (error: unknown): string => {
   return error instanceof Error ? error.message : "Unknown error.";
 };
@@ -428,6 +470,7 @@ const buildInitialState = (
     assignmentNumber: 1,
     requestTitle: null,
     conventionalTitle: null,
+    executionMode: null,
     requestText: null,
     threadWorktree: null,
     latestInput: null,
@@ -522,6 +565,7 @@ const resolvePersistedRequestMetadata = ({
   return {
     requestTitle,
     conventionalTitle,
+    executionMode: assignment?.executionMode ?? thread?.data.executionMode ?? null,
     requestText,
   };
 };
@@ -613,6 +657,7 @@ const buildRunState = ({
       latestInput: input,
       handoffCounter: shouldResetAssignment ? 0 : storedData.handoffCounter,
       handoffs: shouldResetAssignment ? {} : filterWorkflowHandoffs(storedData),
+      executionMode: shouldResetAssignment ? null : (storedData.executionMode ?? null),
       threadWorktree: storedData.threadWorktree ?? null,
       forceReset: false,
     },
@@ -689,6 +734,7 @@ const resolveRequestMetadata = async ({
   input,
   providedTitle,
   providedRequestText,
+  providedExecutionMode,
   existingThread,
   shouldResetAssignment,
   worktree,
@@ -698,17 +744,24 @@ const resolveRequestMetadata = async ({
   input: string;
   providedTitle?: string;
   providedRequestText?: string;
+  providedExecutionMode?: TeamExecutionMode | null;
   existingThread: Awaited<ReturnType<typeof getTeamThreadRecord>>;
   shouldResetAssignment: boolean;
   worktree: Worktree;
   dependencies: TeamRoleDependencies;
   logEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<InitialRequestMetadata> => {
+  const normalizedExecutionInput = resolveNormalizedExecutionInput({
+    input,
+    providedRequestText,
+    preservedExecutionMode: shouldResetAssignment ? null : existingThread?.data.executionMode,
+    providedExecutionMode,
+  });
   const requestText =
-    normalizeRequestText(providedRequestText) ??
+    normalizeRequestText(normalizedExecutionInput.requestText) ??
     (shouldResetAssignment ? null : normalizeRequestText(existingThread?.data.requestText)) ??
     input.trim();
-  const humanTitle = normalizeRequestTitle(providedTitle);
+  const humanTitle = normalizeRequestTitle(parseExecutionModeInput(providedTitle).requestText);
   const humanConventionalTitle = parseConventionalTitle(humanTitle)?.metadata ?? null;
 
   if (humanTitle) {
@@ -721,6 +774,7 @@ const resolveRequestMetadata = async ({
     return {
       requestTitle: humanTitle,
       conventionalTitle: humanConventionalTitle,
+      executionMode: normalizedExecutionInput.executionMode,
       requestText,
     };
   }
@@ -743,13 +797,14 @@ const resolveRequestMetadata = async ({
     return {
       requestTitle: preservedTitle,
       conventionalTitle: preservedConventionalTitle,
+      executionMode: normalizedExecutionInput.executionMode,
       requestText,
     };
   }
 
   try {
     const generatedMetadata = await generateRequestMetadata({
-      input,
+      input: normalizedExecutionInput.normalizedInput,
       requestText,
       tasks: null,
       worktree,
@@ -766,6 +821,7 @@ const resolveRequestMetadata = async ({
       return {
         requestTitle: generatedMetadata.requestTitle,
         conventionalTitle: generatedMetadata.conventionalTitle,
+        executionMode: normalizedExecutionInput.executionMode,
         requestText,
       };
     }
@@ -789,6 +845,7 @@ const resolveRequestMetadata = async ({
   return {
     requestTitle: fallbackTitle,
     conventionalTitle: null,
+    executionMode: normalizedExecutionInput.executionMode,
     requestText,
   };
 };
@@ -857,7 +914,11 @@ const finalizeRequestMetadata = async ({
   if (shouldGenerateTitle || shouldGenerateConventionalTitle) {
     try {
       generatedMetadata = await generateRequestMetadata({
-        input,
+        input:
+          initialMetadata.executionMode &&
+          parseExecutionModeInput(input).executionMode === initialMetadata.executionMode
+            ? parseExecutionModeInput(input).requestText
+            : input,
         requestText: initialMetadata.requestText,
         tasks,
         worktree,
@@ -927,6 +988,7 @@ const finalizeRequestMetadata = async ({
   return {
     requestTitle,
     conventionalTitle,
+    executionMode: initialMetadata.executionMode,
     requestText: initialMetadata.requestText,
   };
 };
@@ -996,6 +1058,7 @@ export const buildPlanningStageState = async (
     input: args.input,
     providedTitle: args.title,
     providedRequestText: args.requestText,
+    providedExecutionMode: args.executionMode,
     existingThread,
     shouldResetAssignment,
     worktree,
@@ -1004,6 +1067,7 @@ export const buildPlanningStageState = async (
   });
   state.requestTitle = requestMetadata.requestTitle;
   state.conventionalTitle = requestMetadata.conventionalTitle;
+  state.executionMode = requestMetadata.executionMode;
   state.requestText = requestMetadata.requestText;
   state.threadWorktree = selectedRepository ? worktree : null;
 
@@ -1116,6 +1180,7 @@ export const runMetadataGenerationStage = async (
           logEvent: forwardPlannerEvent,
         });
   state.requestText = finalizedRequestMetadata.requestText;
+  state.executionMode = finalizedRequestMetadata.executionMode;
 
   if (selectedRepository && plannerResponse.dispatch) {
     const canonicalRequestTitle =
@@ -1144,6 +1209,7 @@ export const runMetadataGenerationStage = async (
       await createPlannerDispatchAssignment({
         threadId,
         assignmentNumber: state.assignmentNumber,
+        executionMode: finalizedRequestMetadata.executionMode,
         repository: selectedRepository,
         worktree,
         requestTitle: canonicalRequestTitle,
