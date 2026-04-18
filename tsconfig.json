@@ -20,9 +20,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"],
-      "codemirror": ["./vendor/codemirror/lib/codemirror"],
-      "codemirror/*": ["./vendor/codemirror/*"]
+      "@/*": ["./*"]
     }
   },
   "include": [

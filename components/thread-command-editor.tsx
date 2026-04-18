@@ -81,7 +81,7 @@ const renderAutocompleteSuggestion = (
 };
 
 const resolveCodeMirrorRuntime = (module: CodeMirrorModule) => {
-  return module.default;
+  return module.default ?? (module as unknown as CodeMirrorModule["default"]);
 };
 
 const loadCodeMirror = async () => {

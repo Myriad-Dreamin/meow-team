@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const rootDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,5 +32,21 @@ describe("ThreadCommandEditor review guard", () => {
     expect(lockfile).toContain("specifier: 5.65.20");
     expect(lockfile).toContain("codemirror@5.65.20:");
     expect(lockfile).not.toContain("version: link:packages/codemirror");
+  });
+
+  it("does not redirect codemirror imports to a vendored runtime", () => {
+    const tsconfig = JSON.parse(
+      readFileSync(path.join(rootDirectory, "tsconfig.json"), "utf8"),
+    ) as {
+      compilerOptions?: {
+        paths?: Record<string, string[] | undefined>;
+      };
+    };
+    const vitestConfig = readFileSync(path.join(rootDirectory, "vitest.config.ts"), "utf8");
+
+    expect(tsconfig.compilerOptions?.paths?.codemirror).toBeUndefined();
+    expect(tsconfig.compilerOptions?.paths?.["codemirror/*"]).toBeUndefined();
+    expect(vitestConfig).not.toContain("vendor/codemirror");
+    expect(existsSync(path.join(rootDirectory, "vendor", "codemirror"))).toBe(false);
   });
 });
