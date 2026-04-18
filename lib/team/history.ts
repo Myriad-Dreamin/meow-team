@@ -18,6 +18,12 @@ import {
   type TeamRepositoryUsageRecord,
 } from "@/lib/team/repository-picker";
 import {
+  getAssignmentThreadCommandDisabledReason,
+  getCancelCommandSkipReason,
+  THREAD_COMMAND_NO_ASSIGNMENT_REASON,
+} from "@/lib/team/thread-command-eligibility";
+import { TeamThreadCommandError } from "@/lib/team/thread-command-error";
+import {
   normalizeConventionalTitleMetadata,
   parseConventionalTitle,
   resolveDisplayRequestTitle,
@@ -1238,12 +1244,29 @@ export const cancelLatestThreadAssignmentApprovalWait = async ({
     updater: (thread, now) => {
       const latestAssignment = getLatestDispatchAssignment(thread);
       if (!latestAssignment) {
-        throw new Error(`Thread ${threadId} does not have a latest assignment to cancel.`);
+        throw new TeamThreadCommandError(THREAD_COMMAND_NO_ASSIGNMENT_REASON, 409);
       }
 
       if (latestAssignment.assignmentNumber !== assignmentNumber) {
-        throw new Error(
+        throw new TeamThreadCommandError(
           `Assignment ${assignmentNumber} is no longer the latest request group for thread ${threadId}.`,
+          409,
+        );
+      }
+
+      const disabledReason = getAssignmentThreadCommandDisabledReason({
+        archivedAt: thread.archivedAt,
+        assignment: latestAssignment,
+      });
+      if (disabledReason) {
+        throw new TeamThreadCommandError(disabledReason, 409);
+      }
+
+      const skipReason = getCancelCommandSkipReason(latestAssignment);
+      if (skipReason) {
+        throw new TeamThreadCommandError(
+          `Skipped request-group cancellation because ${skipReason}`,
+          409,
         );
       }
 

@@ -5,9 +5,11 @@ import {
 } from "@/lib/team/thread-command-server";
 import {
   parseThreadCommand,
+  THREAD_COMMAND_BUSY_REASON,
   THREAD_COMMAND_NO_ASSIGNMENT_REASON,
   THREAD_COMMAND_REPLANNING_REASON,
 } from "@/lib/team/thread-command";
+import { TeamThreadCommandError } from "@/lib/team/thread-command-error";
 import type { TeamThreadRecord } from "@/lib/team/history";
 import type {
   TeamDispatchAssignment,
@@ -402,6 +404,30 @@ describe("executeThreadCommandForThread", () => {
       outcome: "skipped",
     });
     expect(result.message).toContain("already cancelled");
+  });
+
+  it("surfaces server-side /cancel eligibility races from the executor", async () => {
+    const executors = createExecutors({
+      cancelApprovalWait: vi.fn(async () => {
+        throw new TeamThreadCommandError(THREAD_COMMAND_BUSY_REASON, 409);
+      }),
+    });
+    const thread = createThread([
+      createAssignment(1, {
+        lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "awaiting_human_approval" })],
+      }),
+    ]);
+
+    await expect(
+      executeThreadCommandForThread({
+        command: parseThreadCommand("/cancel"),
+        executors,
+        thread,
+      }),
+    ).rejects.toMatchObject({
+      message: THREAD_COMMAND_BUSY_REASON,
+      statusCode: 409,
+    });
   });
 
   it("routes proposal and request-group replans through the existing helper inputs", async () => {

@@ -13,6 +13,7 @@ import {
   getTeamWorkspaceStatusSnapshot,
   updateTeamThreadRecord,
 } from "@/lib/team/history";
+import { THREAD_COMMAND_BUSY_REASON } from "@/lib/team/thread-command";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/coding/shared";
 import {
@@ -519,6 +520,68 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     expect(archivedThread.summary.status).toBe("cancelled");
     expect(archivedThread.summary.latestAssignmentStatus).toBe("cancelled");
     expect(archivedThread.summary.archivedAt).not.toBeNull();
+  });
+
+  it("rejects cancellation once the latest assignment is no longer idle", async () => {
+    const storePath = createSqliteStorePath("team-history-cancel-race");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      busy: createStoredThread({
+        threadId: "busy",
+        status: "awaiting_human_approval",
+        dispatchAssignments: [
+          createAssignment({
+            status: "awaiting_human_approval",
+            lanes: [
+              {
+                ...createLane({
+                  laneId: "busy-lane-1",
+                  laneIndex: 1,
+                  status: "awaiting_human_approval",
+                }),
+                approvalRequestedAt: FIXED_TIMESTAMP,
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await updateTeamThreadRecord({
+      threadFile: storePath,
+      threadId: "busy",
+      updater: (thread, now) => {
+        const latestAssignment = thread.dispatchAssignments[0];
+        const latestLane = latestAssignment?.lanes[0];
+        if (!latestAssignment || !latestLane) {
+          throw new Error("Expected a latest assignment lane in the busy-thread fixture.");
+        }
+
+        latestLane.status = "queued";
+        latestLane.executionPhase = "implementation";
+        latestLane.latestActivity = "Queued after approval was granted.";
+        latestLane.queuedAt = now;
+        latestLane.updatedAt = now;
+      },
+    });
+
+    await expect(
+      cancelLatestThreadAssignmentApprovalWait({
+        threadFile: storePath,
+        threadId: "busy",
+        assignmentNumber: 1,
+      }),
+    ).rejects.toMatchObject({
+      message: THREAD_COMMAND_BUSY_REASON,
+      statusCode: 409,
+    });
+
+    const busyThread = await getTeamThreadRecord(storePath, "busy");
+
+    expect(busyThread?.dispatchAssignments[0]?.cancelledAt).toBeNull();
+    expect(busyThread?.dispatchAssignments[0]?.status).toBe("running");
+    expect(busyThread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("queued");
   });
 
   it("releases a claimed meow worktree when archiving an inactive thread", async () => {

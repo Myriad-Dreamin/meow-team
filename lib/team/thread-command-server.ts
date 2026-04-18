@@ -18,8 +18,10 @@ import {
   parseThreadCommand,
   type ThreadCommand,
 } from "@/lib/team/thread-command";
+import { TeamThreadCommandError } from "@/lib/team/thread-command-error";
 import { getTeamThreadRecord, type TeamThreadRecord } from "@/lib/team/history";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
+export { TeamThreadCommandError } from "@/lib/team/thread-command-error";
 
 type ThreadCommandResultOutcome = "success" | "partial" | "skipped" | "accepted";
 
@@ -31,16 +33,6 @@ export type ThreadCommandResult = {
   message: string;
   outcome: ThreadCommandResultOutcome;
 };
-
-export class TeamThreadCommandError extends Error {
-  readonly statusCode: 400 | 404 | 409;
-
-  constructor(message: string, statusCode: 400 | 404 | 409) {
-    super(message);
-    this.name = "TeamThreadCommandError";
-    this.statusCode = statusCode;
-  }
-}
 
 export type ThreadCommandExecutors = {
   cancelApprovalWait: (args: { assignmentNumber: number; threadId: string }) => Promise<void>;
