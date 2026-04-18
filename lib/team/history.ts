@@ -20,6 +20,7 @@ import {
 import {
   getAssignmentThreadCommandDisabledReason,
   getCancelCommandSkipReason,
+  isLaneAwaitingHumanApprovalForCancel,
   THREAD_COMMAND_NO_ASSIGNMENT_REASON,
 } from "@/lib/team/thread-command-eligibility";
 import { TeamThreadCommandError } from "@/lib/team/thread-command-error";
@@ -1277,7 +1278,7 @@ export const cancelLatestThreadAssignmentApprovalWait = async ({
       latestAssignment.updatedAt = now;
 
       for (const lane of latestAssignment.lanes) {
-        if (!isAssignedWorkerLane(lane)) {
+        if (!isAssignedWorkerLane(lane) || !isLaneAwaitingHumanApprovalForCancel(lane)) {
           continue;
         }
 

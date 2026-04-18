@@ -92,16 +92,17 @@ const hasRetryableFinalApprovalStatus = (
   return hasFinalApprovalWaitStatus(pullRequest) || pullRequest?.status === "failed";
 };
 
-const hasProposalApprovalWait = (assignment: Pick<TeamDispatchAssignment, "lanes">): boolean => {
-  return assignment.lanes.some((lane) => lane.status === "awaiting_human_approval");
-};
+export const isLaneAwaitingHumanApprovalForCancel = (
+  lane: Pick<TeamWorkerLaneRecord, "pullRequest" | "status">,
+): boolean => {
+  if (lane.status === "awaiting_human_approval") {
+    return true;
+  }
 
-const hasFinalApprovalWait = (assignment: Pick<TeamDispatchAssignment, "lanes">): boolean => {
-  return assignment.lanes.some(
-    (lane) =>
-      lane.status === "approved" &&
-      hasFinalApprovalWaitStatus(lane.pullRequest) &&
-      !lane.pullRequest?.humanApprovedAt,
+  return (
+    lane.status === "approved" &&
+    hasFinalApprovalWaitStatus(lane.pullRequest) &&
+    !lane.pullRequest?.humanApprovedAt
   );
 };
 
@@ -112,7 +113,7 @@ export const getCancelCommandSkipReason = (
     return "it is already cancelled.";
   }
 
-  if (hasProposalApprovalWait(assignment) || hasFinalApprovalWait(assignment)) {
+  if (assignment.lanes.some(isLaneAwaitingHumanApprovalForCancel)) {
     return null;
   }
 

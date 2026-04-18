@@ -23,6 +23,7 @@ import {
 } from "@/lib/storage/thread";
 import type {
   TeamDispatchAssignment,
+  TeamPullRequestRecord,
   TeamThreadStatus,
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
@@ -118,6 +119,27 @@ const createLane = ({
     startedAt: FIXED_TIMESTAMP,
     finishedAt: null,
     updatedAt: FIXED_TIMESTAMP,
+  };
+};
+
+const createPullRequest = (
+  overrides: Partial<TeamPullRequestRecord> = {},
+): TeamPullRequestRecord => {
+  return {
+    id: "pr-1",
+    provider: "github",
+    title: "Proposal 1",
+    summary: "Machine review approved the branch.",
+    branchName: "requests/example/a1-proposal-1",
+    baseBranch: "main",
+    status: "awaiting_human_approval",
+    requestedAt: FIXED_TIMESTAMP,
+    humanApprovalRequestedAt: FIXED_TIMESTAMP,
+    humanApprovedAt: null,
+    machineReviewedAt: FIXED_TIMESTAMP,
+    updatedAt: FIXED_TIMESTAMP,
+    url: "https://github.com/example/meow-team/pull/1",
+    ...overrides,
   };
 };
 
@@ -520,6 +542,99 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     expect(archivedThread.summary.status).toBe("cancelled");
     expect(archivedThread.summary.latestAssignmentStatus).toBe("cancelled");
     expect(archivedThread.summary.archivedAt).not.toBeNull();
+  });
+
+  it("keeps already-finalized lane history intact when cancelling a mixed final-approval assignment", async () => {
+    const storePath = createSqliteStorePath("team-history-cancelled-mixed-final");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      mixed: createStoredThread({
+        threadId: "mixed",
+        status: "approved",
+        dispatchAssignments: [
+          createAssignment({
+            status: "approved",
+            lanes: [
+              {
+                ...createLane({
+                  laneId: "mixed-lane-1",
+                  laneIndex: 1,
+                  status: "approved",
+                }),
+                latestActivity: "GitHub PR is finalized and ready to merge.",
+                events: [
+                  {
+                    id: "mixed-lane-1-event-1",
+                    actor: "human",
+                    message: "Final approval archived the change and refreshed the GitHub PR.",
+                    createdAt: FIXED_TIMESTAMP,
+                  },
+                ],
+                finishedAt: FIXED_TIMESTAMP,
+                pullRequest: createPullRequest({
+                  id: "pr-finalized",
+                  status: "approved",
+                  humanApprovedAt: FIXED_TIMESTAMP,
+                  updatedAt: FIXED_TIMESTAMP,
+                  url: "https://github.com/example/meow-team/pull/41",
+                }),
+              },
+              {
+                ...createLane({
+                  laneId: "mixed-lane-2",
+                  laneIndex: 2,
+                  status: "approved",
+                }),
+                latestActivity:
+                  "Coding, machine review, and GitHub PR prep are complete. Human approval can now archive this OpenSpec change and refresh the existing GitHub PR.",
+                pullRequest: createPullRequest({
+                  id: "pr-awaiting-final",
+                  updatedAt: FIXED_TIMESTAMP,
+                  url: "https://github.com/example/meow-team/pull/42",
+                }),
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await cancelLatestThreadAssignmentApprovalWait({
+      threadFile: storePath,
+      threadId: "mixed",
+      assignmentNumber: 1,
+    });
+
+    const mixedThread = await getTeamThreadRecord(storePath, "mixed");
+    const assignment = mixedThread?.dispatchAssignments[0];
+    const finalizedLane = assignment?.lanes[0];
+    const awaitingLane = assignment?.lanes[1];
+
+    expect(assignment?.status).toBe("cancelled");
+    expect(mixedThread?.run?.status).toBe("cancelled");
+    expect(finalizedLane).toMatchObject({
+      status: "approved",
+      latestActivity: "GitHub PR is finalized and ready to merge.",
+      finishedAt: FIXED_TIMESTAMP,
+      updatedAt: FIXED_TIMESTAMP,
+      pullRequest: {
+        status: "approved",
+        humanApprovedAt: FIXED_TIMESTAMP,
+      },
+    });
+    expect(finalizedLane?.events).toEqual([
+      {
+        id: "mixed-lane-1-event-1",
+        actor: "human",
+        message: "Final approval archived the change and refreshed the GitHub PR.",
+        createdAt: FIXED_TIMESTAMP,
+      },
+    ]);
+    expect(awaitingLane?.status).toBe("cancelled");
+    expect(awaitingLane?.latestActivity).toContain("final approval");
+    expect(awaitingLane?.pullRequest?.status).toBe("awaiting_human_approval");
+    expect(awaitingLane?.events.at(-1)?.message).toContain("final approval");
   });
 
   it("rejects cancellation once the latest assignment is no longer idle", async () => {
