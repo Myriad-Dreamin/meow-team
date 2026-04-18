@@ -15,6 +15,7 @@ import {
   canRestartPlanning,
   describeLane,
   describeLogEntryContext,
+  formatAssignmentStatusLabel,
   formatThreadId,
   formatFeedbackLabel,
   formatPoolSlot,
@@ -1717,7 +1718,7 @@ export function ThreadDetailTimeline({
                         <h3>{assignment.requestTitle ?? thread.requestTitle}</h3>
                       </div>
                       <span className={`status-pill status-${assignment.status}`}>
-                        {assignment.status.replaceAll("_", " ")}
+                        {formatAssignmentStatusLabel(assignment.status)}
                       </span>
                     </div>
 
@@ -1765,7 +1766,8 @@ export function ThreadDetailTimeline({
                             isCurrentAssignment &&
                             canRestart &&
                             lane.status !== "idle" &&
-                            lane.status !== "failed";
+                            lane.status !== "failed" &&
+                            lane.status !== "cancelled";
                           const laneBranchDisplay = getLaneBranchDisplay(lane);
                           const commitDisplay = getLaneCommitDisplay(lane);
 

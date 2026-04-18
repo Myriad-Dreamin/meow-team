@@ -11,7 +11,7 @@ import {
 } from "@/lib/team/coding";
 import { findAssignment, findLane } from "@/lib/team/coding/shared";
 import { getLaneFinalizationMode } from "@/lib/team/finalization";
-import { markTeamThreadFailed } from "@/lib/team/history";
+import { cancelLatestThreadAssignmentApprovalWait, markTeamThreadFailed } from "@/lib/team/history";
 import { getTeamThreadRecord } from "@/lib/team/history";
 import { getTeamServerState } from "@/lib/team/server-state";
 import type { TeamHumanFeedbackScope, TeamLaneFinalizationMode } from "@/lib/team/types";
@@ -122,4 +122,20 @@ export const startAssignmentReplan = async ({
     status: "planning" as const,
     threadId,
   };
+};
+
+export const cancelThreadApprovalWait = async ({
+  threadId,
+  assignmentNumber,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+}) => {
+  const serverState = await getTeamServerState();
+
+  await cancelLatestThreadAssignmentApprovalWait({
+    threadFile: serverState.threadStorage,
+    threadId,
+    assignmentNumber,
+  });
 };

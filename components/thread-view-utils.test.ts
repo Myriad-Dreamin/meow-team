@@ -3,6 +3,7 @@ import {
   canArchiveThread,
   canRestartPlanning,
   describeLane,
+  formatAssignmentStatusLabel,
   formatPoolSlot,
   formatCommitHash,
   getLaneApprovalActions,
@@ -294,6 +295,21 @@ describe("thread view approval helpers", () => {
     ]);
   });
 
+  it("renders cancelled request groups with terminal copy and no approval controls", () => {
+    const lane = createLane({
+      status: "cancelled",
+      latestActivity:
+        "Human cancelled this request group while it was waiting for proposal approval.",
+      finishedAt: "2026-04-11T09:00:00.000Z",
+    });
+
+    expect(getLaneApprovalAction(lane)).toBeNull();
+    expect(getLaneStatusLabel(lane)).toBe("Cancelled");
+    expect(getLaneStatusClassName(lane)).toBe("status-cancelled");
+    expect(describeLane(lane)).toContain("cancelled this request group");
+    expect(formatAssignmentStatusLabel("cancelled")).toBe("Cancelled");
+  });
+
   it("shows archive-specific labels and messaging while the final archive pass is running", () => {
     const lane = createLane({
       status: "coding",
@@ -453,6 +469,9 @@ describe("thread visibility helpers", () => {
 
   it("only allows archiving inactive, unarchived thread summaries", () => {
     expect(canArchiveThread(createThread())).toBe(true);
+    expect(
+      canArchiveThread(createThread({ status: "cancelled", latestAssignmentStatus: "cancelled" })),
+    ).toBe(true);
     expect(canArchiveThread(createThread({ status: "running" }))).toBe(false);
     expect(canArchiveThread(createThread({ status: "planning" }))).toBe(false);
     expect(canArchiveThread(createThread({ latestAssignmentStatus: "approved" }))).toBe(false);

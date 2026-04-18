@@ -160,4 +160,21 @@ describe("formatThreadSidebarMetadata", () => {
       updatedLine: `Archived ${formatTimestamp(FIXED_TIMESTAMP)}`,
     });
   });
+
+  it("renders cancelled thread summaries with the shared terminal label", () => {
+    expect(
+      formatThreadSidebarMetadata(
+        createThread({
+          status: "cancelled",
+          latestAssignmentStatus: "cancelled",
+          updatedAt: FIXED_TIMESTAMP,
+        }),
+      ),
+    ).toEqual({
+      statusClassName: "status-cancelled",
+      statusLabel: "Cancelled",
+      threadLine: "Thread 12345678",
+      updatedLine: `Updated ${formatTimestamp(FIXED_TIMESTAMP)}`,
+    });
+  });
 });

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   archiveTeamThread,
+  cancelLatestThreadAssignmentApprovalWait,
   claimTeamThreadWorktree,
   countActiveDispatchThreads,
   getTeamRepositoryPickerModel,
@@ -450,6 +451,74 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
         threadId: "awaiting-final-approval",
       }),
     ).rejects.toThrow("Only inactive threads can be archived.");
+  });
+
+  it("persists cancelled latest assignments as terminal and archivable", async () => {
+    const storePath = createSqliteStorePath("team-history-cancelled");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      cancelled: createStoredThread({
+        threadId: "cancelled",
+        status: "awaiting_human_approval",
+        dispatchAssignments: [
+          createAssignment({
+            status: "awaiting_human_approval",
+            lanes: [
+              {
+                ...createLane({
+                  laneId: "cancelled-lane-1",
+                  laneIndex: 1,
+                  status: "awaiting_human_approval",
+                }),
+                approvalRequestedAt: FIXED_TIMESTAMP,
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await cancelLatestThreadAssignmentApprovalWait({
+      threadFile: storePath,
+      threadId: "cancelled",
+      assignmentNumber: 1,
+    });
+
+    const cancelledThread = await getTeamThreadRecord(storePath, "cancelled");
+    const snapshot = await getTeamWorkspaceStatusSnapshot(storePath);
+
+    expect(cancelledThread?.dispatchAssignments[0]?.cancelledAt).toBeTruthy();
+    expect(cancelledThread?.dispatchAssignments[0]?.plannerSummary).toContain("cancelled");
+    expect(cancelledThread?.dispatchAssignments[0]?.status).toBe("cancelled");
+    expect(cancelledThread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("cancelled");
+    expect(cancelledThread?.dispatchAssignments[0]?.lanes[0]?.latestActivity).toContain(
+      "cancelled",
+    );
+    expect(cancelledThread?.run?.status).toBe("cancelled");
+    expect(snapshot).toEqual({
+      activeThreadCount: 0,
+      livingThreadCount: 1,
+      archivedThreadCount: 0,
+      laneCounts: {
+        idle: 0,
+        queued: 0,
+        coding: 0,
+        reviewing: 0,
+        awaitingHumanApproval: 0,
+        approved: 0,
+        failed: 0,
+      },
+    });
+
+    const archivedThread = await archiveTeamThread({
+      threadFile: storePath,
+      threadId: "cancelled",
+    });
+
+    expect(archivedThread.summary.status).toBe("cancelled");
+    expect(archivedThread.summary.latestAssignmentStatus).toBe("cancelled");
+    expect(archivedThread.summary.archivedAt).not.toBeNull();
   });
 
   it("releases a claimed meow worktree when archiving an inactive thread", async () => {

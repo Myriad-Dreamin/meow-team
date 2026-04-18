@@ -334,7 +334,10 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                       const isSendingFeedback = feedbackKey === laneFeedbackKey;
                       const approvalActions = getLaneApprovalActions(lane);
                       const canSendLaneFeedback =
-                        canRestart && lane.status !== "idle" && lane.status !== "failed";
+                        canRestart &&
+                        lane.status !== "idle" &&
+                        lane.status !== "failed" &&
+                        lane.status !== "cancelled";
                       const branchDisplay = getLaneBranchDisplay(lane);
                       const commitDisplay = getLaneCommitDisplay(lane);
 

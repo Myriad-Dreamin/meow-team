@@ -53,6 +53,7 @@ export type TeamThreadStatus =
   | "planning"
   | "running"
   | "awaiting_human_approval"
+  | "cancelled"
   | "completed"
   | "approved"
   | "needs_revision"
@@ -64,6 +65,7 @@ export type TeamWorkerLaneStatus =
   | "coding"
   | "reviewing"
   | "awaiting_human_approval"
+  | "cancelled"
   | "approved"
   | "failed";
 
@@ -186,6 +188,7 @@ export type TeamDispatchAssignmentStatus =
   | "planning"
   | "running"
   | "awaiting_human_approval"
+  | "cancelled"
   | "approved"
   | "completed"
   | "superseded"
@@ -214,6 +217,7 @@ export type TeamDispatchAssignment = {
   lanes: TeamWorkerLaneRecord[];
   plannerNotes: TeamPlannerNote[];
   humanFeedback: TeamHumanFeedbackRecord[];
+  cancelledAt?: string | null;
   supersededAt: string | null;
   supersededReason: string | null;
 };

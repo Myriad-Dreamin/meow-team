@@ -7,7 +7,7 @@ import type {
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
 
-type ThreadCommandKind = "approve" | "ready" | "replan" | "replan-all";
+type ThreadCommandKind = "approve" | "ready" | "cancel" | "replan" | "replan-all";
 type ProposalNumberMode = "none" | "optional" | "required";
 
 type ThreadCommandDefinition = {
@@ -42,6 +42,13 @@ export const THREAD_COMMAND_DEFINITIONS: ThreadCommandDefinition[] = [
     command: "/ready",
     syntax: "/ready [proposal-number]",
     proposalNumberMode: "optional",
+    requiresRequirement: false,
+  },
+  {
+    kind: "cancel",
+    command: "/cancel",
+    syntax: "/cancel",
+    proposalNumberMode: "none",
     requiresRequirement: false,
   },
   {
@@ -111,6 +118,10 @@ export type ThreadCommand =
       kind: ProposalCommandName;
       original: string;
       proposalNumber: number | null;
+    }
+  | {
+      kind: "cancel";
+      original: string;
     }
   | {
       kind: "replan";
@@ -206,6 +217,15 @@ export const parseThreadCommand = (input: string): ThreadCommand => {
       return parseProposalCommand("approve", original, remainder);
     case "/ready":
       return parseProposalCommand("ready", original, remainder);
+    case "/cancel":
+      if (remainder) {
+        throw new ThreadCommandParseError(buildInvalidSyntaxMessage("/cancel"));
+      }
+
+      return {
+        kind: "cancel",
+        original,
+      };
     case "/replan": {
       const [proposalToken = "", ...requirementTokens] = restTokens;
       const proposalNumber = parsePositiveInteger(proposalToken);
@@ -510,6 +530,33 @@ export const getReadyCommandSkipReason = (
   return "it is not ready for final approval.";
 };
 
+const hasProposalApprovalWait = (assignment: Pick<TeamDispatchAssignment, "lanes">): boolean => {
+  return assignment.lanes.some((lane) => lane.status === "awaiting_human_approval");
+};
+
+const hasFinalApprovalWait = (assignment: Pick<TeamDispatchAssignment, "lanes">): boolean => {
+  return assignment.lanes.some(
+    (lane) =>
+      lane.status === "approved" &&
+      lane.pullRequest?.status === "awaiting_human_approval" &&
+      !lane.pullRequest.humanApprovedAt,
+  );
+};
+
+export const getCancelCommandSkipReason = (
+  assignment: Pick<TeamDispatchAssignment, "cancelledAt" | "lanes" | "status">,
+): string | null => {
+  if (assignment.cancelledAt || assignment.status === "cancelled") {
+    return "it is already cancelled.";
+  }
+
+  if (hasProposalApprovalWait(assignment) || hasFinalApprovalWait(assignment)) {
+    return null;
+  }
+
+  return "the latest assignment is not waiting for human approval.";
+};
+
 export const getReplanCommandSkipReason = (
   lane: Pick<TeamWorkerLaneRecord, "status">,
 ): string | null => {
@@ -519,6 +566,10 @@ export const getReplanCommandSkipReason = (
 
   if (lane.status === "failed") {
     return "it is already failed and cannot accept proposal-scoped replanning.";
+  }
+
+  if (lane.status === "cancelled") {
+    return "it has already been cancelled. Restart planning for the full request group instead.";
   }
 
   return null;

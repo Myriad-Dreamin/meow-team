@@ -2,10 +2,15 @@ import "server-only";
 
 import { teamConfig } from "@/team.config";
 import type { LaneApprovalTarget } from "@/lib/team/thread-actions";
-import { runLaneApproval, startAssignmentReplan } from "@/lib/team/thread-actions";
+import {
+  cancelThreadApprovalWait,
+  runLaneApproval,
+  startAssignmentReplan,
+} from "@/lib/team/thread-actions";
 import {
   getApproveCommandSkipReason,
   getAssignmentThreadCommandDisabledReason,
+  getCancelCommandSkipReason,
   getCommandProposalLanes,
   THREAD_COMMAND_NO_ASSIGNMENT_REASON,
   getReadyCommandSkipReason,
@@ -38,6 +43,7 @@ export class TeamThreadCommandError extends Error {
 }
 
 export type ThreadCommandExecutors = {
+  cancelApprovalWait: (args: { assignmentNumber: number; threadId: string }) => Promise<void>;
   runApproval: (args: {
     assignmentNumber: number;
     laneId: string;
@@ -53,6 +59,7 @@ type BatchSkip = {
 };
 
 const defaultExecutors: ThreadCommandExecutors = {
+  cancelApprovalWait: cancelThreadApprovalWait,
   runApproval: runLaneApproval,
   startReplan: startAssignmentReplan,
 };
@@ -291,6 +298,40 @@ const executeApprovalCommand = async ({
   });
 };
 
+const executeCancelCommand = async ({
+  assignment,
+  executors,
+  threadId,
+}: {
+  assignment: TeamDispatchAssignment;
+  executors: ThreadCommandExecutors;
+  threadId: string;
+}): Promise<ThreadCommandResult> => {
+  const skipReason = getCancelCommandSkipReason(assignment);
+  if (skipReason) {
+    return createResult({
+      assignmentNumber: assignment.assignmentNumber,
+      commandName: "cancel",
+      details: [`Skipped request-group cancellation because ${skipReason}`],
+      outcome: "skipped",
+    });
+  }
+
+  await executors.cancelApprovalWait({
+    threadId,
+    assignmentNumber: assignment.assignmentNumber,
+  });
+
+  return createResult({
+    assignmentNumber: assignment.assignmentNumber,
+    commandName: "cancel",
+    details: [
+      `Cancelled request group for assignment ${assignment.assignmentNumber}. Archive it later if you want to move it out of the active list.`,
+    ],
+    outcome: "success",
+  });
+};
+
 export const executeThreadCommandForThread = async ({
   command,
   executors = defaultExecutors,
@@ -303,6 +344,12 @@ export const executeThreadCommandForThread = async ({
   const assignment = getRequiredAssignment(thread);
 
   switch (command.kind) {
+    case "cancel":
+      return executeCancelCommand({
+        assignment,
+        executors,
+        threadId: thread.threadId,
+      });
     case "approve":
       return executeApprovalCommand({
         assignment,

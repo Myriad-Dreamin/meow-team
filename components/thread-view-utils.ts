@@ -6,6 +6,7 @@ import {
 } from "@/lib/team/finalization";
 import type {
   TeamCodexLogCursorEntry,
+  TeamDispatchAssignmentStatus,
   TeamCodexLogSource,
   TeamHumanFeedbackScope,
   TeamLaneFinalizationMode,
@@ -18,6 +19,7 @@ export const threadStatusLabels: Record<TeamThreadStatus, string> = {
   planning: "Planning",
   running: "Coding / Reviewing",
   awaiting_human_approval: "Awaiting Proposal Approval",
+  cancelled: "Cancelled",
   completed: "Completed",
   approved: "Machine Reviewed",
   needs_revision: "Needs Revision",
@@ -180,7 +182,8 @@ export const canArchiveThread = (thread: TeamThreadSummary): boolean => {
   return (
     !thread.archivedAt &&
     thread.latestAssignmentStatus !== "approved" &&
-    (thread.status === "completed" ||
+    (thread.status === "cancelled" ||
+      thread.status === "completed" ||
       thread.status === "approved" ||
       thread.status === "needs_revision" ||
       thread.status === "failed")
@@ -212,6 +215,12 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
 
   if (lane.status === "idle") {
     return "Idle and waiting for planner work.";
+  }
+
+  if (lane.status === "cancelled") {
+    return (
+      lane.latestActivity ?? "Human cancelled this request group before any more work continued."
+    );
   }
 
   if (lane.executionPhase === "final_archive" && lane.status === "queued") {
@@ -520,6 +529,14 @@ export const getLaneApprovalAction = (lane: TeamWorkerLaneRecord): LaneApprovalA
   return getLaneApprovalActions(lane)[0] ?? null;
 };
 
+export const formatAssignmentStatusLabel = (status: TeamDispatchAssignmentStatus): string => {
+  if (status === "cancelled") {
+    return "Cancelled";
+  }
+
+  return status.replaceAll("_", " ");
+};
+
 export const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
   if (lane.executionPhase === "final_archive" && lane.status === "queued") {
     return getLaneFinalizationMode(lane) === "delete" ? "Queued for Delete" : "Queued for Archive";
@@ -544,6 +561,8 @@ export const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
       return "Reviewing";
     case "awaiting_human_approval":
       return "Awaiting Approval";
+    case "cancelled":
+      return "Cancelled";
     case "approved":
       return lane.pullRequest?.status === "approved" ? "Completed" : "Machine Reviewed";
     case "failed":
@@ -571,6 +590,8 @@ export const getLaneStatusClassName = (lane: TeamWorkerLaneRecord): string => {
       return "status-reviewing";
     case "awaiting_human_approval":
       return "status-awaiting_human_approval";
+    case "cancelled":
+      return "status-cancelled";
     case "approved":
       return "status-approved";
     case "failed":

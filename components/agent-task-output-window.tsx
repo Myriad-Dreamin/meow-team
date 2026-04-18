@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   describeLogEntryContext,
+  formatAssignmentStatusLabel,
   formatTimestamp,
   getLaneStatusClassName,
   getLaneStatusLabel,
@@ -11,10 +12,7 @@ import {
   threadStatusLabels,
 } from "@/components/thread-view-utils";
 import type { TeamThreadDetail } from "@/lib/team/history";
-import type {
-  TeamCodexLogCursorEntry,
-  TeamCodexLogPageInfo,
-} from "@/lib/team/types";
+import type { TeamCodexLogCursorEntry, TeamCodexLogPageInfo } from "@/lib/team/types";
 
 type AgentTaskOutputWindowProps = {
   threadId: string;
@@ -189,10 +187,6 @@ const formatRoleName = (roleId: string | null): string => {
   return titleizeIdentifier(roleId);
 };
 
-const formatAssignmentStatusLabel = (status: string): string => {
-  return status.replaceAll("_", " ");
-};
-
 export function AgentTaskOutputWindow({
   threadId,
   assignmentNumber,
@@ -349,7 +343,9 @@ export function AgentTaskOutputWindow({
           (candidate) => candidate.assignmentNumber === assignmentNumber,
         ) ?? null)
       : null;
-  const lane = laneId ? (assignment?.lanes.find((candidate) => candidate.laneId === laneId) ?? null) : null;
+  const lane = laneId
+    ? (assignment?.lanes.find((candidate) => candidate.laneId === laneId) ?? null)
+    : null;
 
   const streamGroups = groupThreadLogEntries(entries);
   const sourceTitle = `stdout / stderr from ${formatRoleName(roleId)}`;
@@ -368,12 +364,14 @@ export function AgentTaskOutputWindow({
 
   const laneIsTerminal = lane
     ? lane.status === "awaiting_human_approval" ||
+      lane.status === "cancelled" ||
       lane.status === "approved" ||
       lane.status === "failed" ||
       Boolean(lane.finishedAt)
     : false;
   const assignmentIsTerminal = assignment
     ? assignment.status === "awaiting_human_approval" ||
+      assignment.status === "cancelled" ||
       assignment.status === "approved" ||
       assignment.status === "completed" ||
       assignment.status === "superseded" ||
@@ -403,7 +401,8 @@ export function AgentTaskOutputWindow({
     assignment?.plannerSummary ??
     detail?.summary.latestPlanSummary ??
     "No result has been recorded for this task yet.";
-  const resultUpdatedAt = lane?.finishedAt ?? lane?.updatedAt ?? assignment?.finishedAt ?? assignment?.updatedAt;
+  const resultUpdatedAt =
+    lane?.finishedAt ?? lane?.updatedAt ?? assignment?.finishedAt ?? assignment?.updatedAt;
   const streamStateLabel = lane
     ? laneIsTerminal
       ? "Finished"
@@ -483,7 +482,9 @@ export function AgentTaskOutputWindow({
           <section className="task-output-window-panel task-output-window-result">
             <div className="task-output-window-panel-head">
               <div className="task-output-window-panel-copy">
-                <p className="eyebrow">{laneIsTerminal || assignmentIsTerminal ? "Result" : "Task Status"}</p>
+                <p className="eyebrow">
+                  {laneIsTerminal || assignmentIsTerminal ? "Result" : "Task Status"}
+                </p>
                 <span className={`status-pill ${resultStatusClassName}`}>{resultStatusLabel}</span>
               </div>
               {resultUpdatedAt ? <span>{formatTimestamp(resultUpdatedAt)}</span> : null}

@@ -135,6 +135,7 @@ const createExecutors = (
   overrides: Partial<ThreadCommandExecutors> = {},
 ): ThreadCommandExecutors => {
   return {
+    cancelApprovalWait: vi.fn(async () => undefined),
     runApproval: vi.fn(async () => undefined),
     startReplan: vi.fn(async () => ({
       accepted: true as const,
@@ -322,6 +323,85 @@ describe("executeThreadCommandForThread", () => {
     expect(result.outcome).toBe("partial");
     expect(result.message).toContain("Queued final approval for proposal 1.");
     expect(result.message).toContain("Stopped on proposal 2: archive continuation failed");
+  });
+
+  it("cancels the latest request group while proposal approval is pending", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "awaiting_human_approval" })],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      assignmentNumber: 1,
+    });
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "cancel",
+      outcome: "success",
+    });
+    expect(result.message).toContain("Cancelled request group for assignment 1.");
+  });
+
+  it("cancels the latest request group while final approval is pending", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "approved",
+        lanes: [
+          createLane({
+            laneId: "lane-1",
+            laneIndex: 1,
+            status: "approved",
+            pullRequest: createPullRequest({
+              status: "awaiting_human_approval",
+              humanApprovedAt: null,
+            }),
+          }),
+        ],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe("success");
+  });
+
+  it("skips /cancel when the latest request group is already terminal", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "cancelled",
+        cancelledAt: FIXED_TIMESTAMP,
+        lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "cancelled" })],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      commandName: "cancel",
+      outcome: "skipped",
+    });
+    expect(result.message).toContain("already cancelled");
   });
 
   it("routes proposal and request-group replans through the existing helper inputs", async () => {
