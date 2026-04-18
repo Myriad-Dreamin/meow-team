@@ -1,6 +1,7 @@
 // API docs: docs/api/team/threads/threadId/command.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { TeamThreadReplanError } from "@/lib/team/coding";
 import { executeThreadCommand, TeamThreadCommandError } from "@/lib/team/thread-command-server";
 import { ThreadCommandParseError } from "@/lib/team/thread-command";
 
@@ -45,6 +46,15 @@ export async function POST(request: Request, context: RouteContext) {
           error: error.message,
         },
         { status: error instanceof TeamThreadCommandError ? error.statusCode : 400 },
+      );
+    }
+
+    if (error instanceof TeamThreadReplanError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+        },
+        { status: error.statusCode },
       );
     }
 
