@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { Builtins, Cli, type BaseContext } from "clipanion/lib/advanced/index.js";
+import { Builtins, Cli, type BaseContext } from "clipanion";
 import { ConfigCommand } from "./commands/config.ts";
 import { ConfigPlatformCommand } from "./commands/config-platform.ts";
 

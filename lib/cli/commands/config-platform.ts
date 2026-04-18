@@ -1,4 +1,4 @@
-import { Command, Option, UsageError } from "clipanion/lib/advanced/index.js";
+import { Command, Option, UsageError } from "clipanion";
 import { writeRepositoryPlatformConfig } from "../../config/repository.ts";
 import { gitPlatformIds, isGitPlatformId } from "../../platform/types.ts";
 import type { MeowTeamCliContext } from "../app.ts";

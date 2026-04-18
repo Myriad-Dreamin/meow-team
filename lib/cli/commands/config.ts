@@ -1,4 +1,4 @@
-import { Command } from "clipanion/lib/advanced/index.js";
+import { Command } from "clipanion";
 import type { MeowTeamCliContext } from "../app.ts";
 
 export class ConfigCommand extends Command<MeowTeamCliContext> {

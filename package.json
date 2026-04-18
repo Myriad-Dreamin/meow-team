@@ -4,14 +4,11 @@
   "private": true,
   "packageManager": "pnpm@10.16.1",
   "description": "Continuous Codex CLI engineering harness.",
-  "bin": {
-    "meow-team": "./bin/meow-team.mjs"
-  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "env -u TURBOPACK next build --webpack",
     "start": "next start",
-    "meow-team": "./bin/meow-team.mjs",
+    "meow-team": "pnpm exec meow-team",
     "vscode:build": "pnpm --dir editors/vscode build",
     "vscode:package": "pnpm --dir editors/vscode package",
     "vscode:install": "pnpm --dir editors/vscode install-local",
@@ -34,7 +31,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
-    "clipanion": "3.2.1",
+    "clipanion": "4.0.0-rc.4",
     "codemirror": "5.65.20",
     "markdown-it": "14.1.0",
     "next": "^16.2.4",
@@ -44,6 +41,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@meow-team/cli": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/markdown-it": "14.1.2",
     "@types/node": "^22.19.17",
