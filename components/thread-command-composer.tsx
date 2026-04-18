@@ -15,6 +15,7 @@ type ThreadCommandComposerProps = {
   notice: ThreadCommandComposerNotice | null;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  proposalNumbers: number[];
   value: string;
 };
 
@@ -24,6 +25,7 @@ export function ThreadCommandComposer({
   notice,
   onChange,
   onSubmit,
+  proposalNumbers,
   value,
 }: ThreadCommandComposerProps) {
   const helperTextId = useId();
@@ -36,6 +38,17 @@ export function ThreadCommandComposer({
 
   return (
     <section className="thread-command-composer">
+      <div className="thread-command-copy">
+        <p id={helperTextId} className="thread-detail-action-note">
+          {THREAD_COMMAND_HELP_TEXT}
+        </p>
+        {disabledReason ? (
+          <p id={disabledReasonId} className="thread-detail-action-note">
+            {disabledReason}
+          </p>
+        ) : null}
+      </div>
+
       <label className="field feedback-field thread-command-field">
         <span>Command</span>
         <ThreadCommandEditor
@@ -43,6 +56,7 @@ export function ThreadCommandComposer({
           ariaLabel="Command"
           disabled={isDisabled}
           placeholder={THREAD_COMMAND_PLACEHOLDER}
+          proposalNumbers={proposalNumbers}
           value={value}
           onChange={onChange}
         />

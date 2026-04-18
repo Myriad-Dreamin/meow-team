@@ -7,7 +7,10 @@ import {
 } from "@/components/thread-command-composer";
 import { ThreadDetailTimeline } from "@/components/thread-detail-timeline";
 import { type LaneApprovalAction } from "@/components/thread-view-utils";
-import { getThreadCommandDisabledReason } from "@/lib/team/thread-command";
+import {
+  getThreadCommandDisabledReason,
+  getThreadCommandProposalNumbers,
+} from "@/lib/team/thread-command";
 import type { TeamThreadDetail, TeamThreadSummary } from "@/lib/team/history";
 import type { TeamHumanFeedbackScope } from "@/lib/team/types";
 
@@ -95,6 +98,21 @@ const buildFeedbackKey = (
   return `${threadId}:${assignmentNumber}:${scope}:${laneId ?? "request-group"}`;
 };
 
+const getLatestAssignment = (
+  assignments: TeamThreadDetail["dispatchAssignments"],
+): TeamThreadDetail["dispatchAssignments"][number] | null => {
+  return assignments.reduce<TeamThreadDetail["dispatchAssignments"][number] | null>(
+    (latestAssignment, assignment) => {
+      if (!latestAssignment || assignment.assignmentNumber > latestAssignment.assignmentNumber) {
+        return assignment;
+      }
+
+      return latestAssignment;
+    },
+    null,
+  );
+};
+
 export function ThreadDetailPanel({
   threadId,
   initialSummary,
@@ -159,6 +177,11 @@ export function ThreadDetailPanel({
 
   const thread = detail?.summary ?? initialSummary;
   const commandDisabledReason = thread ? getThreadCommandDisabledReason(thread) : null;
+  const commandProposalNumbers = detail
+    ? getThreadCommandProposalNumbers(getLatestAssignment(detail.dispatchAssignments)?.lanes ?? [])
+    : thread
+      ? getThreadCommandProposalNumbers(thread.workerLanes)
+      : [];
 
   const refreshAll = async () => {
     const [nextDetail] = await Promise.all([
@@ -386,6 +409,7 @@ export function ThreadDetailPanel({
         disabledReason={commandDisabledReason}
         isPending={commandPending}
         notice={commandNotice}
+        proposalNumbers={commandProposalNumbers}
         value={commandDraft}
         onChange={setCommandDraft}
         onSubmit={handleCommand}

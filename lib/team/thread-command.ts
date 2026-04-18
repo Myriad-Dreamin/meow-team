@@ -7,10 +7,90 @@ import type {
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
 
-export const THREAD_COMMAND_HELP_TEXT =
-  "Supported commands: /approve [proposal-number], /ready [proposal-number], /replan [proposal-number] requirement, /replan-all requirement.";
+type ThreadCommandKind = "approve" | "ready" | "replan" | "replan-all";
+type ProposalNumberMode = "none" | "optional" | "required";
 
-export const THREAD_COMMAND_PLACEHOLDER = ["/approve, /ready, /replan, /replan-all"].join("\n");
+type ThreadCommandDefinition = {
+  kind: ThreadCommandKind;
+  command: `/${ThreadCommandKind}`;
+  syntax: string;
+  proposalNumberMode: ProposalNumberMode;
+  requiresRequirement: boolean;
+};
+
+type ProposalLaneLike = Pick<
+  TeamWorkerLaneRecord,
+  "laneId" | "laneIndex" | "proposalChangeName" | "status" | "taskObjective" | "taskTitle"
+>;
+
+type AutocompleteToken = {
+  end: number;
+  start: number;
+  text: string;
+};
+
+export const THREAD_COMMAND_DEFINITIONS: ThreadCommandDefinition[] = [
+  {
+    kind: "approve",
+    command: "/approve",
+    syntax: "/approve [proposal-number]",
+    proposalNumberMode: "optional",
+    requiresRequirement: false,
+  },
+  {
+    kind: "ready",
+    command: "/ready",
+    syntax: "/ready [proposal-number]",
+    proposalNumberMode: "optional",
+    requiresRequirement: false,
+  },
+  {
+    kind: "replan",
+    command: "/replan",
+    syntax: "/replan [proposal-number] requirement",
+    proposalNumberMode: "required",
+    requiresRequirement: true,
+  },
+  {
+    kind: "replan-all",
+    command: "/replan-all",
+    syntax: "/replan-all requirement",
+    proposalNumberMode: "none",
+    requiresRequirement: true,
+  },
+];
+
+const THREAD_COMMAND_DEFINITION_BY_COMMAND = new Map(
+  THREAD_COMMAND_DEFINITIONS.map((definition) => [definition.command, definition]),
+);
+
+const joinThreadCommandList = (items: string[]): string => {
+  if (items.length === 0) {
+    return "";
+  }
+
+  if (items.length === 1) {
+    return items[0] ?? "";
+  }
+
+  if (items.length === 2) {
+    return `${items[0]} or ${items[1]}`;
+  }
+
+  return `${items.slice(0, -1).join(", ")}, or ${items.at(-1)}`;
+};
+
+const SUPPORTED_THREAD_COMMANDS_TEXT = joinThreadCommandList(
+  THREAD_COMMAND_DEFINITIONS.map((definition) => definition.command),
+);
+
+export const THREAD_COMMAND_HELP_TEXT = `Supported commands: ${THREAD_COMMAND_DEFINITIONS.map(
+  (definition) => definition.syntax,
+).join(", ")}.`;
+
+export const THREAD_COMMAND_PLACEHOLDER = THREAD_COMMAND_DEFINITIONS.map(
+  (definition) => definition.command,
+).join("\n");
 
 export const THREAD_COMMAND_ARCHIVED_REASON =
   "Archived threads are read-only. Thread commands only run while the latest assignment is idle.";
@@ -24,7 +104,7 @@ export const THREAD_COMMAND_BUSY_REASON =
 export const THREAD_COMMAND_REPLANNING_REASON =
   "Thread commands are unavailable while the latest assignment is being replanned. Wait for the refreshed proposal set before sending more commands.";
 
-type ProposalCommandName = "approve" | "ready";
+type ProposalCommandName = Extract<ThreadCommandKind, "approve" | "ready">;
 
 export type ThreadCommand =
   | {
@@ -44,6 +124,19 @@ export type ThreadCommand =
       requirement: string;
     };
 
+export type ThreadCommandAutocompleteSuggestion = {
+  detail: string;
+  insertText: string;
+  kind: "command" | "proposal";
+  label: string;
+};
+
+export type ThreadCommandAutocompleteResult = {
+  from: number;
+  suggestions: ThreadCommandAutocompleteSuggestion[];
+  to: number;
+};
+
 export class ThreadCommandParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -57,6 +150,21 @@ const parsePositiveInteger = (value: string): number | null => {
   }
 
   return Number.parseInt(value, 10);
+};
+
+const getThreadCommandDefinition = (command: string): ThreadCommandDefinition | null => {
+  return (
+    THREAD_COMMAND_DEFINITION_BY_COMMAND.get(command as ThreadCommandDefinition["command"]) ?? null
+  );
+};
+
+const buildInvalidSyntaxMessage = (command: ThreadCommandDefinition["command"]) => {
+  const definition = getThreadCommandDefinition(command);
+  if (!definition) {
+    return `Unsupported command. Use ${SUPPORTED_THREAD_COMMANDS_TEXT}.`;
+  }
+
+  return `Invalid syntax for ${definition.command}. Use ${definition.syntax}.`;
 };
 
 const parseProposalCommand = (
@@ -74,9 +182,7 @@ const parseProposalCommand = (
 
   const proposalNumber = parsePositiveInteger(remainder);
   if (!proposalNumber) {
-    throw new ThreadCommandParseError(
-      `Invalid syntax for /${kind}. Use /${kind} [proposal-number].`,
-    );
+    throw new ThreadCommandParseError(buildInvalidSyntaxMessage(`/${kind}`));
   }
 
   return {
@@ -105,9 +211,7 @@ export const parseThreadCommand = (input: string): ThreadCommand => {
       const proposalNumber = parsePositiveInteger(proposalToken);
       const requirement = requirementTokens.join(" ").trim();
       if (!proposalNumber || !requirement) {
-        throw new ThreadCommandParseError(
-          "Invalid syntax for /replan. Use /replan [proposal-number] requirement.",
-        );
+        throw new ThreadCommandParseError(buildInvalidSyntaxMessage("/replan"));
       }
 
       return {
@@ -119,9 +223,7 @@ export const parseThreadCommand = (input: string): ThreadCommand => {
     }
     case "/replan-all": {
       if (!remainder) {
-        throw new ThreadCommandParseError(
-          "Invalid syntax for /replan-all. Use /replan-all requirement.",
-        );
+        throw new ThreadCommandParseError(buildInvalidSyntaxMessage("/replan-all"));
       }
 
       return {
@@ -132,9 +234,143 @@ export const parseThreadCommand = (input: string): ThreadCommand => {
     }
     default:
       throw new ThreadCommandParseError(
-        "Unsupported command. Use /approve, /ready, /replan, or /replan-all.",
+        `Unsupported command. Use ${SUPPORTED_THREAD_COMMANDS_TEXT}.`,
       );
   }
+};
+
+const tokenizeThreadCommandInput = (value: string): AutocompleteToken[] => {
+  return Array.from(value.matchAll(/\S+/g), (match) => ({
+    end: (match.index ?? 0) + match[0].length,
+    start: match.index ?? 0,
+    text: match[0],
+  }));
+};
+
+const buildCommandAutocompleteSuggestions = (
+  prefix: string,
+): ThreadCommandAutocompleteSuggestion[] => {
+  return THREAD_COMMAND_DEFINITIONS.filter((definition) =>
+    definition.command.startsWith(prefix),
+  ).map((definition) => ({
+    detail: definition.syntax,
+    insertText:
+      definition.proposalNumberMode !== "none" || definition.requiresRequirement
+        ? `${definition.command} `
+        : definition.command,
+    kind: "command",
+    label: definition.command,
+  }));
+};
+
+const buildProposalAutocompleteSuggestions = ({
+  definition,
+  prefix,
+  proposalNumbers,
+}: {
+  definition: ThreadCommandDefinition;
+  prefix: string;
+  proposalNumbers: number[];
+}): ThreadCommandAutocompleteSuggestion[] => {
+  return [...new Set(proposalNumbers)]
+    .sort((left, right) => left - right)
+    .map((proposalNumber) => String(proposalNumber))
+    .filter((proposalNumber) => proposalNumber.startsWith(prefix))
+    .map((proposalNumber) => ({
+      detail:
+        definition.proposalNumberMode === "required"
+          ? `${definition.command} continues with requirement text after proposal ${proposalNumber}.`
+          : `${definition.command} targets proposal ${proposalNumber} on the latest assignment.`,
+      insertText:
+        definition.proposalNumberMode === "required" ? `${proposalNumber} ` : proposalNumber,
+      kind: "proposal",
+      label: `Proposal ${proposalNumber}`,
+    }));
+};
+
+export const getThreadCommandAutocomplete = ({
+  cursorIndex,
+  proposalNumbers,
+  value,
+}: {
+  cursorIndex: number;
+  proposalNumbers: number[];
+  value: string;
+}): ThreadCommandAutocompleteResult | null => {
+  if (cursorIndex < 0 || cursorIndex > value.length) {
+    return null;
+  }
+
+  const tokens = tokenizeThreadCommandInput(value);
+  const commandToken = tokens[0];
+  if (!commandToken) {
+    return null;
+  }
+
+  if (
+    cursorIndex >= commandToken.start &&
+    cursorIndex <= commandToken.end &&
+    commandToken.text.startsWith("/")
+  ) {
+    const suggestions = buildCommandAutocompleteSuggestions(
+      value.slice(commandToken.start, cursorIndex),
+    );
+    if (suggestions.length === 0) {
+      return null;
+    }
+
+    return {
+      from: commandToken.start,
+      suggestions,
+      to: commandToken.end,
+    };
+  }
+
+  const definition = getThreadCommandDefinition(commandToken.text);
+  if (!definition || definition.proposalNumberMode === "none") {
+    return null;
+  }
+
+  const proposalToken = tokens[1];
+  if (!proposalToken) {
+    if (cursorIndex <= commandToken.end || /\S/.test(value.slice(commandToken.end, cursorIndex))) {
+      return null;
+    }
+
+    const suggestions = buildProposalAutocompleteSuggestions({
+      definition,
+      prefix: "",
+      proposalNumbers,
+    });
+    if (suggestions.length === 0) {
+      return null;
+    }
+
+    return {
+      from: cursorIndex,
+      suggestions,
+      to: cursorIndex,
+    };
+  }
+
+  if (cursorIndex < proposalToken.start || cursorIndex > proposalToken.end) {
+    return null;
+  }
+
+  const suggestions = buildProposalAutocompleteSuggestions({
+    definition,
+    prefix: value.slice(proposalToken.start, cursorIndex),
+    proposalNumbers,
+  });
+  if (suggestions.length === 0) {
+    return null;
+  }
+
+  return {
+    from: proposalToken.start,
+    suggestions,
+    to: proposalToken.end,
+  };
 };
 
 const hasActiveThreadCommandWork = (
@@ -214,10 +450,22 @@ export const sortProposalLanes = <TLane extends Pick<TeamWorkerLaneRecord, "lane
   );
 };
 
+export const getCommandProposalLanesFromLanes = <TLane extends ProposalLaneLike>(
+  lanes: TLane[],
+): TLane[] => {
+  return sortProposalLanes(lanes.filter((lane) => isProposalLane(lane)));
+};
+
 export const getCommandProposalLanes = (
   assignment: Pick<TeamDispatchAssignment, "lanes">,
 ): TeamWorkerLaneRecord[] => {
-  return sortProposalLanes(assignment.lanes.filter((lane) => isProposalLane(lane)));
+  return getCommandProposalLanesFromLanes(assignment.lanes);
+};
+
+export const getThreadCommandProposalNumbers = <TLane extends ProposalLaneLike>(
+  lanes: TLane[],
+): number[] => {
+  return getCommandProposalLanesFromLanes(lanes).map((lane) => lane.laneIndex);
 };
 
 const hasRetryableFinalApprovalStatus = (

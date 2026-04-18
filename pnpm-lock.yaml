@@ -12,8 +12,8 @@ importers:
         specifier: ^12.8.0
         version: 12.8.0
       codemirror:
-        specifier: workspace:*
-        version: link:packages/codemirror
+        specifier: 5.65.20
+        version: 5.65.20
       markdown-it:
         specifier: 14.1.0
         version: 14.1.0
@@ -72,8 +72,6 @@ importers:
       esbuild:
         specifier: 0.21.5
         version: 0.21.5
-
-  packages/codemirror: {}
 
   packages/meow-prompt:
     dependencies:
@@ -1462,6 +1460,9 @@ packages:
 
   client-only@0.0.1:
     resolution: {integrity: sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA==}
+
+  codemirror@5.65.20:
+    resolution: {integrity: sha512-kfSezY/S8Vd0/rYz7tWtwTQ8ycMck/vTae8CToU0tuEmxqa2P9xgQaOM/fmMCxBHy/jVsL5L7ZuQ1UfOymjHkA==}
 
   color-convert@2.0.1:
     resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
@@ -4345,6 +4346,8 @@ snapshots:
   chownr@1.1.4: {}
 
   client-only@0.0.1: {}
+
+  codemirror@5.65.20: {}
 
   color-convert@2.0.1:
     dependencies:

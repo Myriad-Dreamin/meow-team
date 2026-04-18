@@ -13,7 +13,7 @@ describe("ThreadCommandEditor review guard", () => {
       dependencies?: Record<string, string>;
     };
 
-    expect(packageJson.dependencies?.codemirror).toBe("workspace:*");
+    expect(packageJson.dependencies?.codemirror).toBe("5.65.20");
   });
 
   it("does not hot-link the editor runtime from codemirror.net", () => {
@@ -22,6 +22,15 @@ describe("ThreadCommandEditor review guard", () => {
       "utf8",
     );
 
+    expect(editorSource).not.toContain("@/packages/codemirror");
     expect(editorSource).not.toContain("codemirror.net");
+  });
+
+  it("records the upstream CodeMirror package contract in the lockfile", () => {
+    const lockfile = readFileSync(path.join(rootDirectory, "pnpm-lock.yaml"), "utf8");
+
+    expect(lockfile).toContain("specifier: 5.65.20");
+    expect(lockfile).toContain("codemirror@5.65.20:");
+    expect(lockfile).not.toContain("version: link:packages/codemirror");
   });
 });

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  getThreadCommandAutocomplete,
   getThreadCommandDisabledReason,
   parseThreadCommand,
+  THREAD_COMMAND_DEFINITIONS,
   THREAD_COMMAND_NO_ASSIGNMENT_REASON,
+  THREAD_COMMAND_PLACEHOLDER,
   THREAD_COMMAND_REPLANNING_REASON,
   ThreadCommandParseError,
 } from "@/lib/team/thread-command";
@@ -86,6 +89,69 @@ describe("parseThreadCommand", () => {
     expect(() => parseThreadCommand("/replan 2")).toThrowError(ThreadCommandParseError);
     expect(() => parseThreadCommand("/replan-all")).toThrowError(ThreadCommandParseError);
     expect(() => parseThreadCommand("/unknown")).toThrowError(ThreadCommandParseError);
+  });
+});
+
+describe("thread command metadata and autocomplete", () => {
+  it("keeps placeholder guidance aligned with the supported commands", () => {
+    expect(THREAD_COMMAND_DEFINITIONS.map((definition) => definition.command)).toEqual([
+      "/approve",
+      "/ready",
+      "/replan",
+      "/replan-all",
+    ]);
+    expect(THREAD_COMMAND_PLACEHOLDER).toBe("/approve\n/ready\n/replan\n/replan-all");
+  });
+
+  it("suggests only supported slash commands with parser-aligned syntax copy", () => {
+    const result = getThreadCommandAutocomplete({
+      cursorIndex: "/re".length,
+      proposalNumbers: [3, 1, 2],
+      value: "/re",
+    });
+
+    expect(result?.suggestions.map((suggestion) => suggestion.label)).toEqual([
+      "/ready",
+      "/replan",
+      "/replan-all",
+    ]);
+    expect(result?.suggestions.map((suggestion) => suggestion.detail)).toEqual([
+      "/ready [proposal-number]",
+      "/replan [proposal-number] requirement",
+      "/replan-all requirement",
+    ]);
+  });
+
+  it("sorts and filters proposal-number suggestions from latest-assignment lanes", () => {
+    const result = getThreadCommandAutocomplete({
+      cursorIndex: "/approve ".length,
+      proposalNumbers: [3, 2, 2, 1],
+      value: "/approve ",
+    });
+
+    expect(result?.suggestions.map((suggestion) => suggestion.label)).toEqual([
+      "Proposal 1",
+      "Proposal 2",
+      "Proposal 3",
+    ]);
+    expect(result?.suggestions.map((suggestion) => suggestion.insertText)).toEqual(["1", "2", "3"]);
+  });
+
+  it("stops offering proposal suggestions after free-form requirement text begins", () => {
+    expect(
+      getThreadCommandAutocomplete({
+        cursorIndex: "/replan 2 ".length,
+        proposalNumbers: [1, 2],
+        value: "/replan 2 ",
+      }),
+    ).toBeNull();
+    expect(
+      getThreadCommandAutocomplete({
+        cursorIndex: "/replan 2 tighten scope".length,
+        proposalNumbers: [1, 2],
+        value: "/replan 2 tighten scope",
+      }),
+    ).toBeNull();
   });
 });
 
