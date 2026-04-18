@@ -7,10 +7,49 @@ import type {
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
 
-export const THREAD_COMMAND_HELP_TEXT =
-  "Supported commands: /approve [proposal-number], /ready [proposal-number], /replan [proposal-number] requirement, /replan-all requirement.";
+export type ThreadCommandKind = "approve" | "ready" | "replan" | "replan-all";
 
-export const THREAD_COMMAND_PLACEHOLDER = ["/approve, /ready, /replan, /replan-all"].join("\n");
+export type ThreadCommandDefinition = {
+  kind: ThreadCommandKind;
+  command: `/${ThreadCommandKind}`;
+  syntax: string;
+  insertText: `/${ThreadCommandKind}`;
+};
+
+export const SUPPORTED_THREAD_COMMANDS = [
+  {
+    kind: "approve",
+    command: "/approve",
+    syntax: "/approve [proposal-number]",
+    insertText: "/approve",
+  },
+  {
+    kind: "ready",
+    command: "/ready",
+    syntax: "/ready [proposal-number]",
+    insertText: "/ready",
+  },
+  {
+    kind: "replan",
+    command: "/replan",
+    syntax: "/replan [proposal-number] requirement",
+    insertText: "/replan",
+  },
+  {
+    kind: "replan-all",
+    command: "/replan-all",
+    syntax: "/replan-all requirement",
+    insertText: "/replan-all",
+  },
+] as const satisfies readonly ThreadCommandDefinition[];
+
+export const THREAD_COMMAND_HELP_TEXT = `Supported commands: ${SUPPORTED_THREAD_COMMANDS.map(
+  (command) => command.syntax,
+).join(", ")}.`;
+
+export const THREAD_COMMAND_PLACEHOLDER = SUPPORTED_THREAD_COMMANDS.map(
+  (command) => command.command,
+).join(", ");
 
 export const THREAD_COMMAND_ARCHIVED_REASON =
   "Archived threads are read-only. Thread commands only run while the latest assignment is idle.";
@@ -24,7 +63,7 @@ export const THREAD_COMMAND_BUSY_REASON =
 export const THREAD_COMMAND_REPLANNING_REASON =
   "Thread commands are unavailable while the latest assignment is being replanned. Wait for the refreshed proposal set before sending more commands.";
 
-type ProposalCommandName = "approve" | "ready";
+type ProposalCommandName = Extract<ThreadCommandKind, "approve" | "ready">;
 
 export type ThreadCommand =
   | {

@@ -48,6 +48,17 @@ export function ThreadCommandComposer({
         />
       </label>
 
+      <div className="thread-command-copy">
+        <p id={helperTextId} className="thread-detail-action-note">
+          {THREAD_COMMAND_HELP_TEXT}
+        </p>
+        {disabledReason ? (
+          <p id={disabledReasonId} className="thread-detail-action-note">
+            {disabledReason}
+          </p>
+        ) : null}
+      </div>
+
       <div className="thread-command-actions">
         <button className="secondary-button" disabled={!canSubmit} type="button" onClick={onSubmit}>
           {isPending ? "Running command..." : "Run Command"}

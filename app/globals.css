@@ -1259,6 +1259,10 @@ main {
   resize: none;
 }
 
+.thread-command-editor[data-autocomplete="open"] .CodeMirror-input {
+  padding-bottom: 136px;
+}
+
 .thread-command-editor .CodeMirror-input::placeholder {
   color: transparent;
 }
@@ -1279,6 +1283,56 @@ main {
 
 .thread-command-editor[data-disabled="true"] .CodeMirror-cursors {
   display: none;
+}
+
+.thread-command-autocomplete {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 2;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(165, 210, 236, 0.18);
+  border-radius: 16px;
+  background: rgba(5, 14, 25, 0.94);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.thread-command-autocomplete-option {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-command-autocomplete-option[data-active="true"] {
+  border-color: rgba(125, 242, 198, 0.22);
+  background: rgba(125, 242, 198, 0.12);
+}
+
+.thread-command-autocomplete-option:focus-visible {
+  outline: 2px solid rgba(125, 242, 198, 0.34);
+  outline-offset: 2px;
+}
+
+.thread-command-autocomplete-command {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.thread-command-autocomplete-syntax {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 .thread-command-actions {
