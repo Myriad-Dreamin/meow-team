@@ -27,14 +27,6 @@ export function ThreadCommandComposer({
 
   return (
     <section className="thread-command-composer">
-      <div className="thread-command-copy">
-        <p className="workspace-notification-label">Thread Commands</p>
-        <p className="workspace-notification-copy">
-          Run slash commands against the latest assignment on this thread without leaving the detail
-          view.
-        </p>
-      </div>
-
       <label className="field feedback-field thread-command-field">
         <span>Command</span>
         <textarea
@@ -45,8 +37,6 @@ export function ThreadCommandComposer({
           onChange={(event) => onChange(event.target.value)}
         />
       </label>
-
-      <p className="field-hint">{disabledReason ?? THREAD_COMMAND_HELP_TEXT}</p>
 
       <div className="thread-command-actions">
         <button className="secondary-button" disabled={!canSubmit} type="button" onClick={onSubmit}>

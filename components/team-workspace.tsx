@@ -29,6 +29,7 @@ import type {
   TeamNotificationsResponse,
 } from "@/lib/team/notifications";
 import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
+import { canArchiveThread } from "@/components/thread-view-utils";
 
 type TeamWorkspaceProps = {
   disabled: boolean;
@@ -445,6 +446,9 @@ export function TeamWorkspace({
     : null;
   const threadGroups = buildThreadRepositoryGroups(threads);
   const archivedThreadGroups = buildThreadRepositoryGroups(archivedThreads);
+  const isThreadArchived = Boolean(activeThread?.archivedAt);
+  const archiveEnabled = activeThread ? canArchiveThread(activeThread) : false;
+  const [archivePending, setArchivePending] = useState(false);
 
   const handleEnableDesktopNotifications = () => {
     if (!isNotificationSupported()) {
@@ -618,6 +622,46 @@ export function TeamWorkspace({
 
     handleSelectThreadTab(shortcutTarget.threadId);
   });
+
+  const readErrorMessage = (value: unknown): string | null => {
+    if (!isRecord(value) || typeof value.error !== "string" || !value.error.trim()) {
+      return null;
+    }
+
+    return value.error;
+  };
+
+  const handleArchive = () => {
+    if (!activeThread || !archiveEnabled) {
+      return;
+    }
+
+    startTransition(() => {
+      setArchivePending(true);
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/team/threads/${encodeURIComponent(activeThread.threadId)}/archive`,
+            {
+              method: "POST",
+            },
+          );
+          const rawPayload = await response.text();
+          const payload = tryParseJson(rawPayload);
+
+          if (!response.ok) {
+            throw new Error(readErrorMessage(payload) ?? "Unable to archive this thread.");
+          }
+        } catch (error) {
+          setRefreshError(
+            error instanceof Error ? error.message : "Unable to archive this thread.",
+          );
+        } finally {
+          setArchivePending(false);
+        }
+      })();
+    });
+  };
 
   useEffect(() => {
     const handleWindowKeyDown = (event: KeyboardEvent) => {
@@ -835,6 +879,18 @@ export function TeamWorkspace({
                 action to start a new request.
               </p>
             </>
+          )}
+          {isThreadArchived ? (
+            <span className="status-pill status-completed">Archived</span>
+          ) : (
+            <button
+              className="workspace-notification-action"
+              disabled={archivePending}
+              type="button"
+              onClick={handleArchive}
+            >
+              {archivePending ? "Archiving..." : "Archive Thread"}
+            </button>
           )}
         </div>
 

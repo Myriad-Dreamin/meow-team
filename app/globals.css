@@ -1179,7 +1179,7 @@ main {
 }
 
 .thread-command-field textarea {
-  min-height: 112px;
+  height: 48px;
   font-family: var(--font-mono);
 }
 
