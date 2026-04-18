@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ClientExceptionReporter } from "@/components/client-exception-reporter";
+import "codemirror/lib/codemirror.css";
+import "codemirror/addon/hint/show-hint.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

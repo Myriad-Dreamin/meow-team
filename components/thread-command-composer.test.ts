@@ -17,6 +17,7 @@ describe("ThreadCommandComposer", () => {
       notice: null,
       onChange: vi.fn(),
       onSubmit: vi.fn(),
+      proposalNumbers: [1, 2],
       value: "/approve",
     });
 
@@ -38,6 +39,7 @@ describe("ThreadCommandComposer", () => {
       },
       onChange: vi.fn(),
       onSubmit: vi.fn(),
+      proposalNumbers: [1],
       value: "/approve 1",
     });
 
