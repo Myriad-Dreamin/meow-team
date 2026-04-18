@@ -382,6 +382,40 @@ describe("executeThreadCommandForThread", () => {
     expect(result.outcome).toBe("success");
   });
 
+  it("skips /cancel when final approval failed instead of waiting on human approval", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "approved",
+        lanes: [
+          createLane({
+            laneId: "lane-1",
+            laneIndex: 1,
+            status: "approved",
+            pullRequest: createPullRequest({
+              status: "failed",
+              humanApprovedAt: null,
+            }),
+          }),
+        ],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "cancel",
+      outcome: "skipped",
+    });
+    expect(result.message).toContain("not waiting for human approval");
+  });
+
   it("skips /cancel when the latest request group is already terminal", async () => {
     const executors = createExecutors();
     const thread = createThread([

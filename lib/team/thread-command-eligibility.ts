@@ -80,10 +80,16 @@ export const getAssignmentThreadCommandDisabledReason = ({
   return null;
 };
 
+const hasFinalApprovalWaitStatus = (
+  pullRequest: Pick<TeamPullRequestRecord, "status"> | null,
+): boolean => {
+  return pullRequest?.status === "awaiting_human_approval";
+};
+
 const hasRetryableFinalApprovalStatus = (
   pullRequest: Pick<TeamPullRequestRecord, "status"> | null,
 ): boolean => {
-  return pullRequest?.status === "awaiting_human_approval" || pullRequest?.status === "failed";
+  return hasFinalApprovalWaitStatus(pullRequest) || pullRequest?.status === "failed";
 };
 
 const hasProposalApprovalWait = (assignment: Pick<TeamDispatchAssignment, "lanes">): boolean => {
@@ -94,7 +100,7 @@ const hasFinalApprovalWait = (assignment: Pick<TeamDispatchAssignment, "lanes">)
   return assignment.lanes.some(
     (lane) =>
       lane.status === "approved" &&
-      hasRetryableFinalApprovalStatus(lane.pullRequest) &&
+      hasFinalApprovalWaitStatus(lane.pullRequest) &&
       !lane.pullRequest?.humanApprovedAt,
   );
 };

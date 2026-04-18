@@ -54,12 +54,11 @@ cancelled lifecycle contract needs one explicit persisted source of truth.
   synchronization pass.
 - Treat `/cancel` as a request-group action with two eligible approval waits:
   proposal approval (`awaiting_human_approval`) and final approval (`approved`
-  lane plus `pullRequest.status === "awaiting_human_approval"` or retryable PR
-  failure metadata). Rationale: both are idle human-approval waits on the
-  latest assignment, and the owner asked to cancel approval-waiting threads
-  rather than only proposal-stage threads. Alternative rejected: proposal-only
-  cancellation, which would leave final approval waits without a symmetric stop
-  path.
+  lane plus `pullRequest.status === "awaiting_human_approval"`). Rationale:
+  both are idle human-approval waits on the latest assignment, and the owner
+  asked to cancel approval-waiting threads rather than only proposal-stage
+  threads. Alternative rejected: proposal-only cancellation, which would leave
+  final approval waits without a symmetric stop path.
 - Extend the shared thread-command definition table instead of hard-coding
   `/cancel` separately in the UI or parser. Rationale: the existing table is
   already the single source for placeholder text, helper text, autocomplete,
