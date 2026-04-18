@@ -173,12 +173,6 @@ export function ThreadCommandEditor({
 
   useEffect(() => {
     proposalNumbersRef.current = proposalNumbers;
-    const editor = editorRef.current;
-    if (!editor) {
-      return;
-    }
-
-    showAutocomplete(editor);
   }, [proposalNumbers]);
 
   useEffect(() => {

@@ -69,4 +69,18 @@ describe("ThreadCommandEditor review guard", () => {
       expect(source.indexOf(hintCssImport)).toBeLessThan(source.indexOf(globalsImport));
     }
   });
+
+  it("does not reopen autocomplete when proposal numbers refresh from polling", () => {
+    const editorSource = readFileSync(
+      path.join(rootDirectory, "components", "thread-command-editor.tsx"),
+      "utf8",
+    );
+
+    const proposalRefreshEffect = editorSource.match(
+      /useEffect\(\(\) => \{\s*proposalNumbersRef\.current = proposalNumbers;(?<body>[\s\S]*?)\}, \[proposalNumbers\]\);/,
+    );
+
+    expect(proposalRefreshEffect?.groups?.body).toBeDefined();
+    expect(proposalRefreshEffect?.groups?.body).not.toContain("showAutocomplete");
+  });
 });
