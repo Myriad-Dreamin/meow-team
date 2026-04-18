@@ -1,5 +1,3 @@
-import "server-only";
-
 import { execFile, type ExecFileOptions } from "node:child_process";
 
 const DEFAULT_MAX_BUFFER = 1024 * 1024 * 4;
@@ -10,9 +8,42 @@ type CommandResult = {
 };
 
 type CommandError = NodeJS.ErrnoException & {
+  code?: number | string;
   stdout?: string | Buffer;
   stderr?: string | Buffer;
 };
+
+export class CliCommandError extends Error {
+  command: string;
+  args: string[];
+  exitCode: number | string | null;
+  stdout: string;
+  stderr: string;
+
+  constructor({
+    message,
+    command,
+    args,
+    exitCode,
+    stdout,
+    stderr,
+  }: {
+    message: string;
+    command: string;
+    args: string[];
+    exitCode: number | string | null;
+    stdout: string;
+    stderr: string;
+  }) {
+    super(message);
+    this.name = "CliCommandError";
+    this.command = command;
+    this.args = args;
+    this.exitCode = exitCode;
+    this.stdout = stdout;
+    this.stderr = stderr;
+  }
+}
 
 export type ExecCliCommandOptions = {
   command: string;
@@ -76,6 +107,17 @@ const buildFailureMessage = (error: unknown, fallbackMessage: string): string =>
   return output || fallbackMessage;
 };
 
+const normalizeExitCode = (error: CommandError): number | string | null => {
+  return typeof error.code === "number" || typeof error.code === "string" ? error.code : null;
+};
+
+export const isCliCommandErrorExitCode = (
+  error: unknown,
+  exitCode: number | string,
+): error is CliCommandError => {
+  return error instanceof CliCommandError && error.exitCode === exitCode;
+};
+
 export const execCliCommand = async ({
   failureMessage,
   ...options
@@ -83,6 +125,14 @@ export const execCliCommand = async ({
   try {
     return await execFileAsync(options);
   } catch (error) {
-    throw new Error(buildFailureMessage(error, failureMessage));
+    const commandError = error as CommandError;
+    throw new CliCommandError({
+      message: buildFailureMessage(commandError, failureMessage),
+      command: options.command,
+      args: options.args,
+      exitCode: normalizeExitCode(commandError),
+      stdout: normalizeOutput(commandError.stdout),
+      stderr: normalizeOutput(commandError.stderr),
+    });
   }
 };

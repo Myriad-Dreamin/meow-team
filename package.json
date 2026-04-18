@@ -4,6 +4,9 @@
   "private": true,
   "packageManager": "pnpm@10.16.1",
   "description": "Continuous Codex CLI engineering harness.",
+  "bin": {
+    "meow-team": "./bin/meow-team.mts"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "env -u TURBOPACK next build --webpack",
@@ -30,6 +33,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
+    "clipanion": "workspace:*",
     "codemirror": "5.65.20",
     "markdown-it": "14.1.0",
     "next": "^16.2.4",

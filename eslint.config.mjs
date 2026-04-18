@@ -15,6 +15,8 @@ const config = [
       ".pnpm-store/**",
       ".meow-team-worktrees/**",
       ".codex/**",
+      "packages/clipanion/**",
+      "packages/typanion/**",
       "data/**",
       "docs/.vitepress/**",
     ],

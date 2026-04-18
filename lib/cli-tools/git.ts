@@ -1,4 +1,4 @@
-import { execCliCommand } from "@/lib/cli-tools/exec";
+import { execCliCommand } from "./exec.ts";
 
 export const runGit = async (
   repositoryPath: string,

@@ -4,6 +4,7 @@
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": false,
     "allowArbitraryExtensions": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
@@ -26,6 +27,7 @@
   "include": [
     "next-env.d.ts",
     "**/*.d.ts",
+    "**/*.mts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",

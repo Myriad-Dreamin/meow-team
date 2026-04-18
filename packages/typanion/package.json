@@ -1,0 +1,9 @@
+{
+  "name": "typanion",
+  "version": "3.14.0",
+  "private": true,
+  "description": "Vendored Typanion runtime for the meow-team CLI.",
+  "main": "lib/index",
+  "license": "MIT",
+  "sideEffects": false
+}

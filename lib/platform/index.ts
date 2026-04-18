@@ -1,29 +1,28 @@
 import "server-only";
 
 import { githubPlatformAdapter } from "@/lib/platform/gh";
+import { resolveGitPlatformAdapter } from "@/lib/platform/adapter";
 import type {
-  GitPlatformAdapter,
   PublishGitPlatformBranchArgs,
   ResolveGitPlatformPushRemoteArgs,
   SynchronizeGitPlatformPullRequestArgs,
 } from "@/lib/platform/types";
 
 export * from "@/lib/platform/types";
-
-export const gitPlatform: GitPlatformAdapter = githubPlatformAdapter;
+export * from "@/lib/platform/adapter";
 
 export const normalizeRepositoryUrl = (remoteUrl: string): string | null => {
-  return gitPlatform.normalizeRepositoryUrl(remoteUrl);
+  return githubPlatformAdapter.normalizeRepositoryUrl(remoteUrl);
 };
 
-export const resolvePushRemote = (args: ResolveGitPlatformPushRemoteArgs) => {
-  return gitPlatform.resolvePushRemote(args);
+export const resolvePushRemote = async (args: ResolveGitPlatformPushRemoteArgs) => {
+  return (await resolveGitPlatformAdapter(args.repositoryPath)).resolvePushRemote(args);
 };
 
-export const publishBranch = (args: PublishGitPlatformBranchArgs) => {
-  return gitPlatform.publishBranch(args);
+export const publishBranch = async (args: PublishGitPlatformBranchArgs) => {
+  return (await resolveGitPlatformAdapter(args.repositoryPath)).publishBranch(args);
 };
 
-export const synchronizePullRequest = (args: SynchronizeGitPlatformPullRequestArgs) => {
-  return gitPlatform.synchronizePullRequest(args);
+export const synchronizePullRequest = async (args: SynchronizeGitPlatformPullRequestArgs) => {
+  return (await resolveGitPlatformAdapter(args.repositoryPath)).synchronizePullRequest(args);
 };

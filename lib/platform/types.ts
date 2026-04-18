@@ -1,4 +1,12 @@
-export type GitPlatformId = "github";
+export const gitPlatformIds = ["github", "ugit"] as const;
+
+export type GitPlatformId = (typeof gitPlatformIds)[number];
+
+const gitPlatformIdSet = new Set<string>(gitPlatformIds);
+
+export const isGitPlatformId = (value: string): value is GitPlatformId => {
+  return gitPlatformIdSet.has(value);
+};
 
 export type ResolveGitPlatformPushRemoteArgs = {
   repositoryPath: string;
