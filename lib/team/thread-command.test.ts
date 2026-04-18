@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getThreadCommandDisabledReason,
   parseThreadCommand,
+  THREAD_COMMAND_REPLANNING_REASON,
   ThreadCommandParseError,
 } from "@/lib/team/thread-command";
 import type { TeamThreadSummary } from "@/lib/team/history";
@@ -115,5 +116,31 @@ describe("getThreadCommandDisabledReason", () => {
         }),
       ),
     ).toContain("latest assignment is idle");
+  });
+
+  it("blocks superseded and replanning latest assignments", () => {
+    expect(
+      getThreadCommandDisabledReason(
+        createThreadSummary({
+          latestAssignmentStatus: "superseded",
+        }),
+      ),
+    ).toBe(THREAD_COMMAND_REPLANNING_REASON);
+    expect(
+      getThreadCommandDisabledReason(
+        createThreadSummary({
+          latestAssignmentStatus: "planning",
+          workerCounts: {
+            idle: 1,
+            queued: 0,
+            coding: 0,
+            reviewing: 0,
+            awaitingHumanApproval: 0,
+            approved: 0,
+            failed: 0,
+          },
+        }),
+      ),
+    ).toBe(THREAD_COMMAND_REPLANNING_REASON);
   });
 });

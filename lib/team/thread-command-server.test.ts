@@ -3,7 +3,7 @@ import {
   executeThreadCommandForThread,
   type ThreadCommandExecutors,
 } from "@/lib/team/thread-command-server";
-import { parseThreadCommand } from "@/lib/team/thread-command";
+import { parseThreadCommand, THREAD_COMMAND_REPLANNING_REASON } from "@/lib/team/thread-command";
 import type { TeamThreadRecord } from "@/lib/team/history";
 import type {
   TeamDispatchAssignment,
@@ -158,6 +158,38 @@ describe("executeThreadCommandForThread", () => {
     ).rejects.toMatchObject({
       message:
         "Thread commands only run while the latest assignment is idle. Wait for queued, coding, or reviewing work to finish first.",
+      statusCode: 409,
+    });
+  });
+
+  it("rejects superseded or replanning latest assignments before executing a command", async () => {
+    await expect(
+      executeThreadCommandForThread({
+        command: parseThreadCommand("/approve 1"),
+        thread: createThread([
+          createAssignment(1, {
+            status: "superseded",
+            supersededAt: FIXED_TIMESTAMP,
+          }),
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      message: THREAD_COMMAND_REPLANNING_REASON,
+      statusCode: 409,
+    });
+
+    await expect(
+      executeThreadCommandForThread({
+        command: parseThreadCommand("/approve 1"),
+        thread: createThread([
+          createAssignment(1, {
+            status: "planning",
+            lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "idle" })],
+          }),
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      message: THREAD_COMMAND_REPLANNING_REASON,
       statusCode: 409,
     });
   });

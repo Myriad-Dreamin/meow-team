@@ -1,6 +1,7 @@
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type {
   TeamDispatchAssignment,
+  TeamDispatchAssignmentStatus,
   TeamPullRequestRecord,
   TeamWorkerLaneCounts,
   TeamWorkerLaneRecord,
@@ -21,6 +22,9 @@ export const THREAD_COMMAND_ARCHIVED_REASON =
 
 export const THREAD_COMMAND_BUSY_REASON =
   "Thread commands only run while the latest assignment is idle. Wait for queued, coding, or reviewing work to finish first.";
+
+export const THREAD_COMMAND_REPLANNING_REASON =
+  "Thread commands are unavailable while the latest assignment is being replanned. Wait for the refreshed proposal set before sending more commands.";
 
 type ProposalCommandName = "approve" | "ready";
 
@@ -141,11 +145,21 @@ const hasActiveThreadCommandWork = (
   return laneCounts.queued > 0 || laneCounts.coding > 0 || laneCounts.reviewing > 0;
 };
 
+const hasReplanningThreadCommandStatus = (
+  assignmentStatus: TeamDispatchAssignmentStatus | null | undefined,
+): boolean => {
+  return assignmentStatus === "planning" || assignmentStatus === "superseded";
+};
+
 export const getThreadCommandDisabledReason = (
-  thread: Pick<TeamThreadSummary, "archivedAt" | "workerCounts">,
+  thread: Pick<TeamThreadSummary, "archivedAt" | "latestAssignmentStatus" | "workerCounts">,
 ): string | null => {
   if (thread.archivedAt) {
     return THREAD_COMMAND_ARCHIVED_REASON;
+  }
+
+  if (hasReplanningThreadCommandStatus(thread.latestAssignmentStatus)) {
+    return THREAD_COMMAND_REPLANNING_REASON;
   }
 
   if (hasActiveThreadCommandWork(thread.workerCounts)) {
@@ -160,10 +174,14 @@ export const getAssignmentThreadCommandDisabledReason = ({
   assignment,
 }: {
   archivedAt: string | null;
-  assignment: Pick<TeamDispatchAssignment, "lanes">;
+  assignment: Pick<TeamDispatchAssignment, "lanes" | "status" | "supersededAt">;
 }): string | null => {
   if (archivedAt) {
     return THREAD_COMMAND_ARCHIVED_REASON;
+  }
+
+  if (assignment.supersededAt || hasReplanningThreadCommandStatus(assignment.status)) {
+    return THREAD_COMMAND_REPLANNING_REASON;
   }
 
   if (

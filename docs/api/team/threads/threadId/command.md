@@ -53,16 +53,17 @@ background.
 
 ## Failure modes
 
-| Status | When                                                                                                                                    |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `400`  | The request body is invalid, the slash-command syntax is unsupported, or the requested proposal number is not on the latest assignment. |
-| `404`  | No thread exists for the requested `threadId`.                                                                                          |
-| `409`  | The thread is archived, has no latest assignment yet, or the latest assignment still has queued, coding, or reviewing work.             |
-| `500`  | Command execution failed unexpectedly.                                                                                                  |
+| Status | When                                                                                                                                                                     |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `400`  | The request body is invalid, the slash-command syntax is unsupported, or the requested proposal number is not on the latest assignment.                                  |
+| `404`  | No thread exists for the requested `threadId`.                                                                                                                           |
+| `409`  | The thread is archived, has no latest assignment yet, the latest assignment is being replanned or already superseded, or it still has queued, coding, or reviewing work. |
+| `500`  | Command execution failed unexpectedly.                                                                                                                                   |
 
 ## UI notes
 
 The selected-thread detail view shows a bottom command composer that posts to
-this endpoint. The composer is disabled when the thread is archived or the
-latest assignment still has queued, coding, or reviewing work, and it shows the
-latest command result inline after each submission.
+this endpoint. The composer is disabled when the thread is archived, the latest
+assignment is being replanned or already superseded, or the latest assignment
+still has queued, coding, or reviewing work. It shows the latest command result
+inline after each submission.
