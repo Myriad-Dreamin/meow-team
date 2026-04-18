@@ -1,3 +1,7 @@
+"use client";
+
+import { useId } from "react";
+import { ThreadCommandEditor } from "@/components/thread-command-editor";
 import { THREAD_COMMAND_HELP_TEXT, THREAD_COMMAND_PLACEHOLDER } from "@/lib/team/thread-command";
 
 export type ThreadCommandComposerNotice = {
@@ -22,21 +26,38 @@ export function ThreadCommandComposer({
   onSubmit,
   value,
 }: ThreadCommandComposerProps) {
+  const helperTextId = useId();
+  const disabledReasonId = useId();
   const isDisabled = Boolean(disabledReason) || isPending;
   const canSubmit = !isDisabled && value.trim().length > 0;
+  const describedBy = [helperTextId, disabledReason ? disabledReasonId : null]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <section className="thread-command-composer">
       <label className="field feedback-field thread-command-field">
         <span>Command</span>
-        <textarea
+        <ThreadCommandEditor
+          ariaDescribedBy={describedBy || undefined}
+          ariaLabel="Command"
           disabled={isDisabled}
           placeholder={THREAD_COMMAND_PLACEHOLDER}
-          rows={4}
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={onChange}
         />
       </label>
+
+      <div className="thread-command-copy">
+        <p className="field-hint" id={helperTextId}>
+          {THREAD_COMMAND_HELP_TEXT}
+        </p>
+        {disabledReason ? (
+          <p className="thread-detail-action-note" id={disabledReasonId}>
+            {disabledReason}
+          </p>
+        ) : null}
+      </div>
 
       <div className="thread-command-actions">
         <button className="secondary-button" disabled={!canSubmit} type="button" onClick={onSubmit}>

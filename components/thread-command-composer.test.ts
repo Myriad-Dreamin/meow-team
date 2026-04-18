@@ -20,8 +20,11 @@ describe("ThreadCommandComposer", () => {
       value: "/approve",
     });
 
+    expect(html).toContain(THREAD_COMMAND_HELP_TEXT);
     expect(html).toContain("latest assignment is idle");
-    expect(html).toMatch(/<textarea[^>]*disabled/);
+    expect(html).toContain('data-thread-command-editor="codemirror"');
+    expect(html).toContain('data-disabled="true"');
+    expect(html).not.toContain("<textarea");
     expect(html).toMatch(/<button[^>]*disabled/);
   });
 
@@ -41,6 +44,8 @@ describe("ThreadCommandComposer", () => {
     expect(html).toContain(THREAD_COMMAND_HELP_TEXT);
     expect(html).toContain("Running command...");
     expect(html).toContain("Queued proposal approval for proposal 1.");
+    expect(html).toContain('data-thread-command-editor="codemirror"');
+    expect(html).not.toContain("<textarea");
     expect(html).toMatch(/<button[^>]*disabled/);
   });
 });

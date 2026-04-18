@@ -1178,9 +1178,91 @@ main {
   gap: 6px;
 }
 
-.thread-command-field textarea {
-  height: 48px;
+.thread-command-field {
+  gap: 10px;
+}
+
+.thread-command-editor {
+  position: relative;
+  min-height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(6, 16, 30, 0.85);
+  overflow: hidden;
+}
+
+.thread-command-editor:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 4px rgba(125, 242, 198, 0.08);
+}
+
+.thread-command-editor[data-disabled="true"] {
+  opacity: 0.72;
+  background: rgba(6, 16, 30, 0.58);
+}
+
+.thread-command-editor[data-disabled="true"]:focus-within {
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.thread-command-editor[data-status="loading"][data-has-content="false"]::after {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset: 0;
+  padding: 14px 16px;
+  color: rgba(227, 239, 246, 0.42);
   font-family: var(--font-mono);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.thread-command-editor-shell {
+  min-height: 96px;
+}
+
+.thread-command-editor-fallback {
+  min-height: 96px;
+  border: 0;
+  border-radius: inherit;
+  padding: 14px 16px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  outline: none;
+  resize: vertical;
+}
+
+.thread-command-editor .CodeMirror {
+  height: auto;
+  min-height: 96px;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--text);
+  background: transparent;
+}
+
+.thread-command-editor .CodeMirror-scroll {
+  min-height: 96px;
+}
+
+.thread-command-editor .CodeMirror-gutters {
+  display: none;
+}
+
+.thread-command-editor .CodeMirror-lines {
+  padding: 14px 16px;
+}
+
+.thread-command-editor .CodeMirror-placeholder {
+  color: rgba(227, 239, 246, 0.42);
+  white-space: pre-wrap;
+}
+
+.thread-command-editor[data-disabled="true"] .CodeMirror-cursors {
+  display: none;
 }
 
 .thread-command-actions {
