@@ -8,8 +8,9 @@ outline: deep
 ## Prompt Source
 
 Track the single prompt-authoring source in `lib/team/roles/*.prompt.md`,
-where each planner/coder/reviewer template carries both frontmatter metadata
-and the runtime system instructions used by the harness.
+where each planner/coder/reviewer/executor/execution-reviewer template carries
+both frontmatter metadata and the runtime system instructions used by the
+harness.
 
 ## Metadata Wiring
 
@@ -24,9 +25,10 @@ with TypeScript, Vitest, and the app/runtime loaders.
 
 ## Workflow Expectations
 
-Track how planner, coder, reviewer, and request-title prompt rendering
-preserves deterministic handoff state, archive-time behavior, and role-specific
-validation without changing the default workflow contract.
+Track how planner, coder, reviewer, executor, execution-reviewer, and
+request-title prompt rendering preserves deterministic handoff state,
+execute-mode guide lookup, archive-time behavior, and role-specific validation
+without changing the default workflow contract.
 
 ## Related Specs
 

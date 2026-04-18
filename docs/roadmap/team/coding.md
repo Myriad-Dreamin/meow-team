@@ -8,15 +8,15 @@ outline: deep
 ## Stage Orchestration
 
 Track the stage-oriented execution path in `lib/team/coding/index.ts`,
-`lib/team/coding/plan.ts`, and the peer stage modules, including the staged
-`runTeam` state machine, dispatch queue handling, and approval/archive
-transitions.
+`lib/team/coding/plan.ts`, `lib/team/executing/*`, and the peer stage modules,
+including the staged `runTeam` state machine, execute-mode routing, dispatch
+queue handling, and approval/archive transitions.
 
 ## Lane Dispatch
 
 Track planner assignment materialization, branch and worktree allocation, lane
-queue scheduling, and feedback-driven replanning so dispatch behavior stays
-deterministic as the harness evolves.
+queue scheduling, execute-mode assignment metadata, and feedback-driven
+replanning so dispatch behavior stays deterministic as the harness evolves.
 
 ## Regression Coverage
 

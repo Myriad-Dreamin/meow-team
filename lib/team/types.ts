@@ -1,4 +1,5 @@
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import type { TeamExecutionMode } from "@/lib/team/execution-mode";
 import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
 
 export type TeamRoleDecision = "continue" | "approved" | "needs_revision";
@@ -101,7 +102,14 @@ export type TeamHumanFeedbackRecord = {
   createdAt: string;
 };
 
-export type TeamWorkerEventActor = "planner" | "coder" | "reviewer" | "system" | "human";
+export type TeamWorkerEventActor =
+  | "planner"
+  | "coder"
+  | "reviewer"
+  | "executor"
+  | "execution-reviewer"
+  | "system"
+  | "human";
 
 export type TeamWorkerEvent = {
   id: string;
@@ -186,6 +194,7 @@ export type TeamDispatchAssignmentStatus =
 export type TeamDispatchAssignment = {
   assignmentNumber: number;
   status: TeamDispatchAssignmentStatus;
+  executionMode?: TeamExecutionMode | null;
   repository: TeamRepositoryOption | null;
   requestTitle: string | null;
   conventionalTitle: ConventionalTitleMetadata | null;

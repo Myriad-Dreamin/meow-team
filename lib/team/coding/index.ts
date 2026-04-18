@@ -75,6 +75,13 @@ const createHumanFeedback = ({
 };
 
 const buildProposalSnapshot = (assignment: TeamDispatchAssignment): string => {
+  const implementationLabel = assignment.executionMode
+    ? "Latest execution summary"
+    : "Latest coding summary";
+  const reviewLabel = assignment.executionMode
+    ? "Latest execution review"
+    : "Latest machine review";
+
   return assignment.lanes
     .filter((lane) => lane.taskTitle || lane.taskObjective)
     .map((lane) => {
@@ -82,8 +89,8 @@ const buildProposalSnapshot = (assignment: TeamDispatchAssignment): string => {
         `Proposal ${lane.laneIndex}: ${lane.taskTitle ?? "Untitled proposal"}`,
         `Objective: ${lane.taskObjective ?? "No objective recorded."}`,
         `Status: ${lane.status}`,
-        lane.latestCoderSummary ? `Latest coding summary: ${lane.latestCoderSummary}` : null,
-        lane.latestReviewerSummary ? `Latest machine review: ${lane.latestReviewerSummary}` : null,
+        lane.latestCoderSummary ? `${implementationLabel}: ${lane.latestCoderSummary}` : null,
+        lane.latestReviewerSummary ? `${reviewLabel}: ${lane.latestReviewerSummary}` : null,
       ]
         .filter(Boolean)
         .join("\n");
@@ -106,6 +113,7 @@ const buildFeedbackReplanInput = ({
 }): string => {
   return [
     `Original request:\n${originalRequest}`,
+    assignment.executionMode ? `Execution mode:\n${assignment.executionMode}` : null,
     assignment.requestTitle ? `Current request title:\n${assignment.requestTitle}` : null,
     assignment.plannerSummary ? `Latest planner summary:\n${assignment.plannerSummary}` : null,
     assignment.canonicalBranchName
@@ -144,6 +152,7 @@ export const prepareAssignmentReplan = async ({
   input: string;
   title: string | undefined;
   requestText: string;
+  executionMode: TeamDispatchAssignment["executionMode"];
   repositoryId: string | undefined;
 }> => {
   const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
@@ -236,6 +245,7 @@ export const prepareAssignmentReplan = async ({
     }),
     title: assignment.requestTitle ?? thread.data.requestTitle ?? undefined,
     requestText: originalRequest,
+    executionMode: assignment.executionMode,
     repositoryId: thread.data.selectedRepository?.id,
   };
 };

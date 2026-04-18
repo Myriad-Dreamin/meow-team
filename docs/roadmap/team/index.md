@@ -15,6 +15,8 @@ contracts that keep multi-lane runs deterministic.
   files capture the longer-running responsibilities behind each subsystem.
 - Use the Coding topic for dispatch, stage transitions, and archive-time
   control flow.
+- Use the Executing topic for execute-mode request parsing, executor lane
+  orchestration, and reviewable script or validation contracts.
 - Keep role behavior consolidated in the statically imported prompt templates
   and modules under `lib/team/roles`.
 - Use the Roles topic for prompt rendering, schema contracts, and role-specific
@@ -31,6 +33,7 @@ contracts that keep multi-lane runs deterministic.
 ## Topics
 
 - [Coding](/roadmap/team/coding)
+- [Executing](/roadmap/team/executing)
 - [Roles](/roadmap/team/roles)
 - [Storage](/roadmap/team/storage)
 - [Worktree](/roadmap/team/worktree)

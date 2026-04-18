@@ -54,6 +54,7 @@ import {
   updateTeamThreadRecord,
 } from "@/lib/team/history";
 import { appendTeamCodexLogEvent } from "@/lib/team/logs";
+import { runExecutingLaneCycle } from "@/lib/team/executing/reviewing";
 import type { ConventionalTitleMetadata } from "@/lib/team/request-title";
 import { coderRole } from "@/lib/team/roles/coder";
 import { reviewerRole } from "@/lib/team/roles/reviewer";
@@ -1690,11 +1691,18 @@ const ensureLaneRun = ({
   assignmentNumber,
   laneId,
   env,
+  runner,
 }: {
   threadId: string;
   assignmentNumber: number;
   laneId: string;
   env: TeamRunEnv;
+  runner: (args: {
+    threadId: string;
+    assignmentNumber: number;
+    laneId: string;
+    env: TeamRunEnv;
+  }) => Promise<void>;
 }): void => {
   const key = laneRunKey(threadId, assignmentNumber, laneId);
   if (activeLaneRuns.has(key)) {
@@ -1703,7 +1711,7 @@ const ensureLaneRun = ({
 
   const runPromise = (async () => {
     try {
-      await runLaneCycle({
+      await runner({
         threadId,
         assignmentNumber,
         laneId,
@@ -1898,11 +1906,13 @@ export const ensurePendingDispatchWork = async (
         (lane.status === "queued" || lane.status === "coding" || lane.status === "reviewing") &&
         lane.workerSlot
       ) {
+        const runner = pending.assignment.executionMode ? runExecutingLaneCycle : runLaneCycle;
         ensureLaneRun({
           threadId: pending.threadId,
           assignmentNumber: pending.assignment.assignmentNumber,
           laneId: lane.laneId,
           env,
+          runner,
         });
       }
     }

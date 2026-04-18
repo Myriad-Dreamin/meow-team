@@ -99,6 +99,7 @@ export const startAssignmentReplan = async ({
     threadId,
     title: nextRun.title,
     requestText: nextRun.requestText,
+    executionMode: nextRun.executionMode,
     repositoryId: nextRun.repositoryId,
     reset: true,
   });
