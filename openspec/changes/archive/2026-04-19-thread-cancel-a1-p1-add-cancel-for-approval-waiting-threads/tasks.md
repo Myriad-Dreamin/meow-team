@@ -17,4 +17,4 @@
 ## 4. Coverage and Validation
 
 - [x] 4.1 Add focused regression coverage for `/cancel` parser and autocomplete behavior, cancellation eligibility, persisted cancelled status derivation, archive gating, notification suppression, and UI rendering
-- [ ] 4.2 Update API or user docs for `/cancel`, then run `pnpm fmt`, `pnpm lint`, targeted tests, and `pnpm build` before review
+- [x] 4.2 Update API or user docs for `/cancel`, then run `pnpm fmt`, `pnpm lint`, targeted tests, and `pnpm build` before review
