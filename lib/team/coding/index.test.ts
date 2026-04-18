@@ -2802,7 +2802,7 @@ describe.sequential("createPlannerDispatchAssignment", () => {
     materializeAssignmentProposalsMock.mockImplementationOnce(
       async () =>
         await new Promise<void>((resolve) => {
-          resolveMaterialization = resolve;
+          resolveMaterialization = () => resolve();
         }),
     );
 
@@ -2828,7 +2828,10 @@ describe.sequential("createPlannerDispatchAssignment", () => {
     expect(pendingLane?.approvalRequestedAt).toBeNull();
     expect(pendingLane?.latestActivity).toContain("materializing");
 
-    resolveMaterialization?.();
+    const releaseMaterialization = resolveMaterialization as (() => void) | null;
+    if (releaseMaterialization) {
+      releaseMaterialization();
+    }
     const assignment = await assignmentPromise;
 
     expect(assignment.status).toBe("awaiting_human_approval");

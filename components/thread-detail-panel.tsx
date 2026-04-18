@@ -1,12 +1,17 @@
 "use client";
 
 import { startTransition, useEffect, useState } from "react";
+import {
+  ThreadCommandComposer,
+  type ThreadCommandComposerNotice,
+} from "@/components/thread-command-composer";
 import { ThreadDetailTimeline } from "@/components/thread-detail-timeline";
 import {
   canArchiveThread,
   formatTimestamp,
   type LaneApprovalAction,
 } from "@/components/thread-view-utils";
+import { getThreadCommandDisabledReason } from "@/lib/team/thread-command";
 import type { TeamThreadDetail, TeamThreadSummary } from "@/lib/team/history";
 import type { TeamHumanFeedbackScope } from "@/lib/team/types";
 
@@ -18,6 +23,11 @@ type ThreadDetailPanelProps = {
 
 type TeamThreadDetailResponse = {
   thread: TeamThreadDetail;
+};
+
+type ThreadCommandResponse = {
+  message: string;
+  ok: true;
 };
 
 const POLL_INTERVAL_MS = 5000;
@@ -46,6 +56,10 @@ const isThreadDetailResponse = (value: unknown): value is TeamThreadDetailRespon
   );
 };
 
+const isThreadCommandResponse = (value: unknown): value is ThreadCommandResponse => {
+  return isRecord(value) && value.ok === true && typeof value.message === "string";
+};
+
 const readErrorMessage = (value: unknown): string | null => {
   if (!isRecord(value) || typeof value.error !== "string" || !value.error.trim()) {
     return null;
@@ -56,6 +70,10 @@ const readErrorMessage = (value: unknown): string | null => {
 
 const buildUnexpectedResponseMessage = (response: Response): string => {
   return `Unable to recover thread details (HTTP ${response.status}).`;
+};
+
+const buildUnexpectedThreadCommandResponseMessage = (response: Response): string => {
+  return `Unable to execute the thread slash command (HTTP ${response.status}).`;
 };
 
 const fetchThreadDetail = async (threadId: string): Promise<TeamThreadDetail> => {
@@ -94,6 +112,9 @@ export function ThreadDetailPanel({
   const [archivePending, setArchivePending] = useState(false);
   const [feedbackKey, setFeedbackKey] = useState<string | null>(null);
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({});
+  const [commandDraft, setCommandDraft] = useState("");
+  const [commandPending, setCommandPending] = useState(false);
+  const [commandNotice, setCommandNotice] = useState<ThreadCommandComposerNotice | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -124,6 +145,8 @@ export function ThreadDetailPanel({
 
     setDetail(null);
     setActionNotice(null);
+    setCommandDraft("");
+    setCommandNotice(null);
     setRefreshError(null);
     void load();
 
@@ -142,6 +165,7 @@ export function ThreadDetailPanel({
   const thread = detail?.summary ?? initialSummary;
   const isThreadArchived = Boolean(thread?.archivedAt);
   const archiveEnabled = thread ? canArchiveThread(thread) : false;
+  const commandDisabledReason = thread ? getThreadCommandDisabledReason(thread) : null;
 
   const refreshAll = async () => {
     const [nextDetail] = await Promise.all([
@@ -236,6 +260,74 @@ export function ThreadDetailPanel({
       ...current,
       [key]: value,
     }));
+  };
+
+  const handleCommand = () => {
+    const command = commandDraft.trim();
+    if (!command) {
+      setCommandNotice({
+        kind: "error",
+        message: "Enter a slash command before submitting.",
+      });
+      return;
+    }
+
+    startTransition(() => {
+      setCommandPending(true);
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/team/threads/${encodeURIComponent(threadId)}/command`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                command,
+              }),
+            },
+          );
+
+          const rawPayload = await response.text();
+          const payload = tryParseJson(rawPayload);
+
+          if (!response.ok) {
+            throw new Error(
+              readErrorMessage(payload) ?? "Unable to execute the thread slash command.",
+            );
+          }
+
+          if (!isThreadCommandResponse(payload)) {
+            throw new Error(buildUnexpectedThreadCommandResponseMessage(response));
+          }
+
+          setCommandDraft("");
+          setCommandNotice({
+            kind: "info",
+            message: payload.message,
+          });
+          setRefreshError(null);
+          try {
+            await refreshAll();
+          } catch (error) {
+            setRefreshError(
+              error instanceof Error ? error.message : "Unable to recover thread details.",
+            );
+          }
+        } catch (error) {
+          setCommandNotice({
+            kind: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Unable to execute the thread slash command.",
+          });
+        } finally {
+          setCommandPending(false);
+        }
+      })();
+    });
   };
 
   const handleFeedback = ({
@@ -357,6 +449,15 @@ export function ThreadDetailPanel({
         onApprove={handleApprove}
         onFeedback={handleFeedback}
         onFeedbackChange={handleFeedbackChange}
+      />
+
+      <ThreadCommandComposer
+        disabledReason={commandDisabledReason}
+        isPending={commandPending}
+        notice={commandNotice}
+        value={commandDraft}
+        onChange={setCommandDraft}
+        onSubmit={handleCommand}
       />
     </section>
   );
