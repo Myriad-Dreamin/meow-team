@@ -19,6 +19,7 @@ Approves a proposal or pull request for a worker lane.
 | `assignmentNumber` | number                           | Yes      | Positive assignment number.                 |
 | `laneId`           | string                           | Yes      | Worker lane identifier.                     |
 | `target`           | `"proposal"` or `"pull_request"` | No       | Defaults to proposal approval when omitted. |
+| `finalizationMode` | `"archive"` or `"delete"`        | No       | Only valid for `target: "pull_request"`.    |
 
 ## Success response
 

@@ -1,8 +1,14 @@
 import type { TeamThreadSummary } from "@/lib/team/history";
+import {
+  getLaneFinalizationMode,
+  getLaneProposalDisposition,
+  hasReachedLaneFinalizationCheckpoint,
+} from "@/lib/team/finalization";
 import type {
   TeamCodexLogCursorEntry,
   TeamCodexLogSource,
   TeamHumanFeedbackScope,
+  TeamLaneFinalizationMode,
   TeamPullRequestStatus,
   TeamThreadStatus,
   TeamWorkerLaneRecord,
@@ -27,7 +33,9 @@ export const pullRequestStatusLabels: Record<TeamPullRequestStatus, string> = {
 };
 
 export type LaneApprovalAction = {
+  key: string;
   target: "proposal" | "pull_request";
+  finalizationMode?: TeamLaneFinalizationMode;
   buttonLabel: string;
   pendingLabel: string;
   successNotice: string;
@@ -198,6 +206,10 @@ export const describeThreadProgress = (thread: TeamThreadSummary): string => {
 };
 
 export const describeLane = (lane: TeamWorkerLaneRecord): string => {
+  const finalizationMode = getLaneFinalizationMode(lane);
+  const proposalDisposition = getLaneProposalDisposition(lane);
+  const hasBranchPush = hasReachedLaneFinalizationCheckpoint(lane, "branch_pushed");
+
   if (lane.status === "idle") {
     return "Idle and waiting for planner work.";
   }
@@ -205,12 +217,19 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
   if (lane.executionPhase === "final_archive" && lane.status === "queued") {
     return (
       lane.latestActivity ??
-      "Final approval queued a dedicated archive continuation before GitHub PR refresh."
+      (finalizationMode === "delete"
+        ? "Final approval queued OpenSpec change deletion before GitHub PR refresh."
+        : "Final approval queued a dedicated archive continuation before GitHub PR refresh.")
     );
   }
 
   if (lane.executionPhase === "final_archive" && lane.status === "coding") {
-    return lane.latestActivity ?? "A dedicated final archive continuation is running.";
+    return (
+      lane.latestActivity ??
+      (finalizationMode === "delete"
+        ? "Delete finalization is running for this reviewed branch."
+        : "A dedicated final archive continuation is running.")
+    );
   }
 
   if (lane.status === "awaiting_human_approval") {
@@ -239,18 +258,32 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
   if (lane.status === "approved") {
     if (lane.pullRequest?.status === "awaiting_human_approval") {
       return lane.pullRequest.humanApprovedAt
-        ? "Final human approval was recorded. The dedicated archive continuation is preparing the archived OpenSpec change and GitHub PR."
-        : "Coding, machine review, and GitHub PR prep are complete. Human approval can now archive this OpenSpec change and refresh the existing GitHub PR.";
+        ? finalizationMode === "delete"
+          ? hasBranchPush
+            ? "Final human approval was recorded. The deleted OpenSpec change is already on-branch and the GitHub PR refresh is resuming."
+            : "Final human approval was recorded. The lane is deleting the OpenSpec change before refreshing the GitHub PR."
+          : "Final human approval was recorded. The dedicated archive continuation is preparing the archived OpenSpec change and GitHub PR."
+        : "Coding, machine review, and GitHub PR prep are complete. Human approval can now archive or delete this OpenSpec change and refresh the existing GitHub PR.";
     }
 
     if (lane.pullRequest?.status === "approved") {
-      return "Human approval archived this lane's OpenSpec change and refreshed the GitHub PR for merge into the base branch.";
+      return proposalDisposition === "deleted"
+        ? "Human approval deleted this lane's OpenSpec change and refreshed the GitHub PR for merge into the base branch."
+        : "Human approval archived this lane's OpenSpec change and refreshed the GitHub PR for merge into the base branch.";
     }
 
     if (lane.pullRequest?.status === "failed") {
       return (
         lane.latestActivity ??
-        "Machine review is complete, but the OpenSpec archive or GitHub PR refresh still needs another approval pass."
+        (finalizationMode === "delete"
+          ? hasBranchPush
+            ? "Machine review is complete, and the OpenSpec change has already been deleted on-branch, but the GitHub PR refresh still needs another approval pass."
+            : proposalDisposition === "deleted"
+              ? "Machine review is complete, and delete finalization has already removed the OpenSpec change locally, but the branch push and GitHub PR refresh still need another approval pass."
+              : "Machine review is complete, but delete finalization still needs another approval pass."
+          : lane.pullRequest.humanApprovedAt
+            ? "Machine review is complete, but the OpenSpec archive or GitHub PR refresh still needs another approval pass."
+            : "Machine review is complete, but the GitHub PR still needs another finalization pass before the lane is ready.")
       );
     }
 
@@ -393,54 +426,111 @@ export const mergeThreadLogGroups = (
   return [...nextGroups, ...currentGroups];
 };
 
-export const getLaneApprovalAction = (lane: TeamWorkerLaneRecord): LaneApprovalAction | null => {
+const buildFinalizationAction = ({
+  isRetry,
+  mode,
+}: {
+  isRetry: boolean;
+  mode: TeamLaneFinalizationMode;
+}): LaneApprovalAction => {
+  const modeLabel = mode === "delete" ? "Delete" : "Archive";
+  const lowerModeLabel = mode === "delete" ? "delete" : "archive";
+
+  return {
+    key: `${isRetry ? "retry" : "approve"}-${lowerModeLabel}`,
+    target: "pull_request",
+    finalizationMode: mode,
+    buttonLabel: isRetry ? `Retry ${modeLabel} Finalization` : `Approve and ${modeLabel}`,
+    pendingLabel: isRetry
+      ? `Retrying ${lowerModeLabel} finalization...`
+      : `Queueing ${lowerModeLabel} finalization...`,
+    successNotice: isRetry
+      ? mode === "delete"
+        ? "Delete finalization retried. The reviewed branch is resuming OpenSpec deletion and GitHub PR refresh."
+        : "Archive finalization retried. The reviewed branch is resuming OpenSpec archiving and GitHub PR refresh."
+      : mode === "delete"
+        ? "Delete finalization recorded. The reviewed branch is deleting the OpenSpec change and refreshing the GitHub PR."
+        : "Archive finalization recorded. The reviewed branch is archiving the OpenSpec change and refreshing the GitHub PR.",
+    errorFallback: isRetry
+      ? `Unable to retry ${lowerModeLabel} finalization.`
+      : `Unable to queue ${lowerModeLabel} finalization.`,
+  };
+};
+
+export const getLaneApprovalActions = (lane: TeamWorkerLaneRecord): LaneApprovalAction[] => {
   if (lane.status === "awaiting_human_approval") {
-    return {
-      target: "proposal",
-      buttonLabel: "Approve Proposal",
-      pendingLabel: "Queueing proposal...",
-      successNotice:
-        "Proposal approval recorded. The draft GitHub PR is synced and the coding-review queue is refreshing.",
-      errorFallback: "Unable to approve this proposal.",
-    };
+    return [
+      {
+        key: "approve-proposal",
+        target: "proposal",
+        buttonLabel: "Approve Proposal",
+        pendingLabel: "Queueing proposal...",
+        successNotice:
+          "Proposal approval recorded. The draft GitHub PR is synced and the coding-review queue is refreshing.",
+        errorFallback: "Unable to approve this proposal.",
+      },
+    ];
   }
 
   if (lane.status !== "approved" || !lane.pullRequest) {
-    return null;
+    return [];
   }
 
+  const finalizationMode = getLaneFinalizationMode(lane) ?? "archive";
+  const hasFinalizationAttempt =
+    lane.pullRequest.humanApprovedAt !== null || getLaneFinalizationMode(lane) !== null;
+
   if (lane.pullRequest.status === "awaiting_human_approval" && !lane.pullRequest.humanApprovedAt) {
-    return {
-      target: "pull_request",
-      buttonLabel: "Approve and Archive",
-      pendingLabel: "Queueing archive pass...",
-      successNotice:
-        "Final approval recorded. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
-      errorFallback: "Unable to finalize this reviewed branch.",
-    };
+    return [
+      buildFinalizationAction({
+        isRetry: false,
+        mode: "archive",
+      }),
+      buildFinalizationAction({
+        isRetry: false,
+        mode: "delete",
+      }),
+    ];
   }
 
   if (lane.pullRequest.status === "failed") {
-    return {
-      target: "pull_request",
-      buttonLabel: "Retry Finalization",
-      pendingLabel: "Retrying archive pass...",
-      successNotice:
-        "Final approval retried. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
-      errorFallback: "Unable to retry GitHub PR finalization.",
-    };
+    return hasFinalizationAttempt
+      ? [
+          buildFinalizationAction({
+            isRetry: true,
+            mode: finalizationMode,
+          }),
+        ]
+      : [
+          buildFinalizationAction({
+            isRetry: false,
+            mode: "archive",
+          }),
+          buildFinalizationAction({
+            isRetry: false,
+            mode: "delete",
+          }),
+        ];
   }
 
-  return null;
+  return [];
+};
+
+export const getLaneApprovalAction = (lane: TeamWorkerLaneRecord): LaneApprovalAction | null => {
+  return getLaneApprovalActions(lane)[0] ?? null;
 };
 
 export const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
   if (lane.executionPhase === "final_archive" && lane.status === "queued") {
-    return "Queued for Archive";
+    return getLaneFinalizationMode(lane) === "delete" ? "Queued for Delete" : "Queued for Archive";
   }
 
   if (lane.executionPhase === "final_archive" && lane.status === "coding") {
-    return "Archiving";
+    return getLaneFinalizationMode(lane) === "delete"
+      ? hasReachedLaneFinalizationCheckpoint(lane, "branch_pushed")
+        ? "Syncing PR"
+        : "Deleting"
+      : "Archiving";
   }
 
   switch (lane.status) {

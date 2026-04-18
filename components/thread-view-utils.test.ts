@@ -5,8 +5,8 @@ import {
   describeLane,
   formatPoolSlot,
   formatCommitHash,
+  getLaneApprovalActions,
   groupThreadLogEntries,
-  getLaneApprovalAction,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
   getLaneStatusClassName,
@@ -29,6 +29,9 @@ const createLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLa
     taskObjective: "Publish the reviewed branch.",
     proposalChangeName: "change-1",
     proposalPath: "openspec/changes/change-1",
+    finalizationMode: null,
+    proposalDisposition: "active",
+    finalizationCheckpoint: null,
     workerSlot: null,
     branchName: "requests/example/a1-proposal-1",
     baseBranch: "main",
@@ -171,18 +174,21 @@ describe("thread view approval helpers", () => {
       pullRequest: null,
     });
 
-    expect(getLaneApprovalAction(lane)).toEqual({
-      target: "proposal",
-      buttonLabel: "Approve Proposal",
-      pendingLabel: "Queueing proposal...",
-      successNotice:
-        "Proposal approval recorded. The draft GitHub PR is synced and the coding-review queue is refreshing.",
-      errorFallback: "Unable to approve this proposal.",
-    });
+    expect(getLaneApprovalActions(lane)).toEqual([
+      {
+        key: "approve-proposal",
+        target: "proposal",
+        buttonLabel: "Approve Proposal",
+        pendingLabel: "Queueing proposal...",
+        successNotice:
+          "Proposal approval recorded. The draft GitHub PR is synced and the coding-review queue is refreshing.",
+        errorFallback: "Unable to approve this proposal.",
+      },
+    ]);
     expect(describeLane(lane)).toContain("waiting for human approval");
   });
 
-  it("surfaces final approval in machine-reviewed state and hides it once finalization starts", () => {
+  it("surfaces both finalization modes in machine-reviewed state and hides them once finalization starts", () => {
     const lane = createLane({
       pullRequest: {
         id: "pr-1",
@@ -201,29 +207,48 @@ describe("thread view approval helpers", () => {
       },
     });
 
-    expect(getLaneApprovalAction(lane)).toEqual({
-      target: "pull_request",
-      buttonLabel: "Approve and Archive",
-      pendingLabel: "Queueing archive pass...",
-      successNotice:
-        "Final approval recorded. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
-      errorFallback: "Unable to finalize this reviewed branch.",
-    });
+    expect(getLaneApprovalActions(lane)).toEqual([
+      {
+        key: "approve-archive",
+        target: "pull_request",
+        finalizationMode: "archive",
+        buttonLabel: "Approve and Archive",
+        pendingLabel: "Queueing archive finalization...",
+        successNotice:
+          "Archive finalization recorded. The reviewed branch is archiving the OpenSpec change and refreshing the GitHub PR.",
+        errorFallback: "Unable to queue archive finalization.",
+      },
+      {
+        key: "approve-delete",
+        target: "pull_request",
+        finalizationMode: "delete",
+        buttonLabel: "Approve and Delete",
+        pendingLabel: "Queueing delete finalization...",
+        successNotice:
+          "Delete finalization recorded. The reviewed branch is deleting the OpenSpec change and refreshing the GitHub PR.",
+        errorFallback: "Unable to queue delete finalization.",
+      },
+    ]);
     expect(describeLane(lane)).toContain("refresh the existing GitHub PR");
 
     expect(
-      getLaneApprovalAction({
+      getLaneApprovalActions({
         ...lane,
+        finalizationMode: "archive",
+        finalizationCheckpoint: "requested",
         pullRequest: {
           ...lane.pullRequest!,
           humanApprovedAt: "2026-04-11T09:00:00.000Z",
         },
       }),
-    ).toBeNull();
+    ).toEqual([]);
   });
 
-  it("marks finalized lanes as completed and exposes retry after finalization failures", () => {
+  it("marks finalized lanes as completed and exposes mode-specific retry after finalization failures", () => {
     const finalizedLane = createLane({
+      finalizationMode: "delete",
+      proposalDisposition: "deleted",
+      finalizationCheckpoint: "completed",
       pullRequest: {
         id: "pr-1",
         provider: "github",
@@ -241,6 +266,9 @@ describe("thread view approval helpers", () => {
       },
     });
     const failedLane = createLane({
+      finalizationMode: "delete",
+      proposalDisposition: "deleted",
+      finalizationCheckpoint: "branch_pushed",
       pullRequest: {
         ...finalizedLane.pullRequest!,
         provider: "local-ci",
@@ -251,15 +279,19 @@ describe("thread view approval helpers", () => {
 
     expect(getLaneStatusLabel(finalizedLane)).toBe("Completed");
     expect(getLaneStatusClassName(finalizedLane)).toBe("status-completed");
-    expect(describeLane(finalizedLane)).toContain("GitHub PR");
-    expect(getLaneApprovalAction(failedLane)).toEqual({
-      target: "pull_request",
-      buttonLabel: "Retry Finalization",
-      pendingLabel: "Retrying archive pass...",
-      successNotice:
-        "Final approval retried. The dedicated archive continuation is refreshing the OpenSpec change and GitHub PR.",
-      errorFallback: "Unable to retry GitHub PR finalization.",
-    });
+    expect(describeLane(finalizedLane)).toContain("deleted this lane's OpenSpec change");
+    expect(getLaneApprovalActions(failedLane)).toEqual([
+      {
+        key: "retry-delete",
+        target: "pull_request",
+        finalizationMode: "delete",
+        buttonLabel: "Retry Delete Finalization",
+        pendingLabel: "Retrying delete finalization...",
+        successNotice:
+          "Delete finalization retried. The reviewed branch is resuming OpenSpec deletion and GitHub PR refresh.",
+        errorFallback: "Unable to retry delete finalization.",
+      },
+    ]);
   });
 
   it("shows archive-specific labels and messaging while the final archive pass is running", () => {
@@ -286,7 +318,59 @@ describe("thread view approval helpers", () => {
 
     expect(getLaneStatusLabel(lane)).toBe("Archiving");
     expect(describeLane(lane)).toContain("/opsx:archive");
-    expect(getLaneApprovalAction(lane)).toBeNull();
+    expect(getLaneApprovalActions(lane)).toEqual([]);
+  });
+
+  it("shows delete-specific labels and retry messaging while delete finalization is running or failed", () => {
+    const lane = createLane({
+      executionPhase: "final_archive",
+      finalizationMode: "delete",
+      finalizationCheckpoint: "artifacts_applied",
+      latestActivity:
+        "Final approval deleted the OpenSpec change and is pushing the refreshed branch head.",
+      pullRequest: {
+        id: "pr-1",
+        provider: "local-ci",
+        title: "Ship the feature",
+        summary: "Machine review approved the branch.",
+        branchName: "requests/example/a1-proposal-1",
+        baseBranch: "main",
+        status: "awaiting_human_approval",
+        requestedAt: FIXED_TIMESTAMP,
+        humanApprovalRequestedAt: FIXED_TIMESTAMP,
+        humanApprovedAt: FIXED_TIMESTAMP,
+        machineReviewedAt: FIXED_TIMESTAMP,
+        updatedAt: FIXED_TIMESTAMP,
+        url: null,
+      },
+      status: "coding",
+    });
+
+    expect(getLaneStatusLabel(lane)).toBe("Deleting");
+    expect(describeLane(lane)).toContain("deleted the OpenSpec change");
+
+    expect(
+      getLaneApprovalActions({
+        ...lane,
+        executionPhase: null,
+        status: "approved",
+        pullRequest: {
+          ...lane.pullRequest!,
+          status: "failed",
+        },
+      }),
+    ).toEqual([
+      {
+        key: "retry-delete",
+        target: "pull_request",
+        finalizationMode: "delete",
+        buttonLabel: "Retry Delete Finalization",
+        pendingLabel: "Retrying delete finalization...",
+        successNotice:
+          "Delete finalization retried. The reviewed branch is resuming OpenSpec deletion and GitHub PR refresh.",
+        errorFallback: "Unable to retry delete finalization.",
+      },
+    ]);
   });
 });
 

@@ -174,6 +174,9 @@ const createReplayLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWo
   proposalChangeName: "replay-change",
   proposalPath: "openspec/changes/replay-change",
   proposalCommitHash: null,
+  finalizationMode: null,
+  proposalDisposition: "active",
+  finalizationCheckpoint: null,
   workerSlot: null,
   branchName: "requests/replay/a1-proposal-1",
   baseBranch: "main",
@@ -1777,6 +1780,7 @@ describe.sequential("runTeam", () => {
       threadId: "thread-finalize",
       assignmentNumber: 4,
       laneId: "lane-2",
+      finalizationMode: "archive",
     });
     await persistTeamRunState(env, initialState);
 
@@ -1842,6 +1846,7 @@ describe.sequential("runTeam", () => {
         threadId: "thread-archiving-replay",
         assignmentNumber: 4,
         laneId: "lane-2",
+        finalizationMode: "archive",
       },
       worktree: createWorktree({
         path: "/tmp/worktrees/meow-1",
@@ -1895,6 +1900,11 @@ const createDispatchLane = ({
   proposalChangeName = `change-${laneId}`,
   proposalPath = `openspec/changes/change-${laneId}`,
   proposalCommitHash = null,
+  finalizationMode = null,
+  proposalDisposition = proposalPath.startsWith("openspec/changes/archive/")
+    ? "archived"
+    : "active",
+  finalizationCheckpoint = null,
   latestImplementationCommit = null,
   pushedCommit = null,
   latestDecision = null,
@@ -1925,6 +1935,9 @@ const createDispatchLane = ({
   proposalChangeName?: string;
   proposalPath?: string;
   proposalCommitHash?: string | null;
+  finalizationMode?: TeamWorkerLaneRecord["finalizationMode"];
+  proposalDisposition?: TeamWorkerLaneRecord["proposalDisposition"];
+  finalizationCheckpoint?: TeamWorkerLaneRecord["finalizationCheckpoint"];
   latestImplementationCommit?: TeamWorkerLaneRecord["latestImplementationCommit"];
   pushedCommit?: TeamWorkerLaneRecord["pushedCommit"];
   latestDecision?: TeamWorkerLaneRecord["latestDecision"];
@@ -1952,6 +1965,9 @@ const createDispatchLane = ({
     proposalChangeName,
     proposalPath,
     proposalCommitHash,
+    finalizationMode,
+    proposalDisposition,
+    finalizationCheckpoint,
     workerSlot,
     branchName,
     baseBranch,
@@ -3891,6 +3907,7 @@ describe.sequential("approveLanePullRequest", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
+      finalizationMode: "archive",
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
@@ -3963,6 +3980,7 @@ describe.sequential("approveLanePullRequest", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
+      finalizationMode: "archive",
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
@@ -3974,6 +3992,57 @@ describe.sequential("approveLanePullRequest", () => {
       }),
     );
     expect(lane?.pullRequest?.title).toBe("dev(vsc/command): Ship the feature");
+  });
+
+  it("deletes the active OpenSpec change, pushes the branch, and refreshes the GitHub PR", async () => {
+    const coderRun = vi.fn();
+    getBranchHeadMock.mockResolvedValue("delete-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/delete-commit",
+      commitHash: "delete-commit",
+    });
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/55",
+    });
+
+    await writeApprovalThreadStore(createApprovalLane());
+
+    await approveLanePullRequest({
+      env: createArchiveEnv({
+        coderRun: coderRun as TeamRoleDependencies["coderAgent"]["run"],
+      }),
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      finalizationMode: "delete",
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(coderRun).not.toHaveBeenCalled();
+    expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
+      worktreePath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+      message: "docs: delete change-1",
+      pathspecs: ["openspec/changes/change-1"],
+    });
+    expect(lane?.finalizationMode).toBe("delete");
+    expect(lane?.proposalDisposition).toBe("deleted");
+    expect(lane?.finalizationCheckpoint).toBe("completed");
+    expect(lane?.proposalPath).toBe("openspec/changes/change-1");
+    expect(lane?.latestImplementationCommit).toBe("delete-commit");
+    expect(lane?.pushedCommit?.commitHash).toBe("delete-commit");
+    expect(lane?.latestActivity).toBe(
+      "Human approval finalized the machine-reviewed branch, deleted the OpenSpec change, and refreshed the GitHub PR.",
+    );
+    expect(lane?.events.at(-2)?.message).toContain(
+      "Deleted OpenSpec change at openspec/changes/change-1",
+    );
+    expect(lane?.events.at(-1)?.message).toContain("GitHub PR refreshed");
+    expect(thread?.dispatchAssignments[0]?.plannerNotes.at(-1)?.message).toContain(
+      "was deleted from requests/example/a1-proposal-1",
+    );
   });
 
   it("resumes archived final approval without duplicating the human approval event", async () => {
@@ -4036,6 +4105,7 @@ describe.sequential("approveLanePullRequest", () => {
       threadId: "thread-1",
       assignmentNumber: 1,
       laneId: "lane-1",
+      finalizationMode: "archive",
     });
 
     const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
@@ -4048,6 +4118,55 @@ describe.sequential("approveLanePullRequest", () => {
     expect(lane?.pullRequest?.status).toBe("approved");
     expect(lane?.pullRequest?.humanApprovedAt).toBe(FIXED_TIMESTAMP);
     expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/88");
+  });
+
+  it("resumes delete finalization after the branch push without deleting or recommitting twice", async () => {
+    getBranchHeadMock.mockResolvedValue("delete-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitUrl: "https://github.com/example/meow-team/commit/delete-commit",
+      commitHash: "delete-commit",
+    });
+    synchronizePullRequestMock.mockRejectedValueOnce(new Error("gh auth token missing"));
+
+    await writeApprovalThreadStore(createApprovalLane());
+
+    await expect(
+      approveLanePullRequest({
+        env: createArchiveEnv(),
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+        finalizationMode: "delete",
+      }),
+    ).rejects.toThrow("gh auth token missing");
+
+    commitWorktreeChangesMock.mockClear();
+    inspectOpenSpecChangeArchiveStateMock.mockReset();
+    pushLaneBranchMock.mockClear();
+    synchronizePullRequestMock.mockResolvedValue({
+      url: "https://github.com/example/meow-team/pull/56",
+    });
+
+    await approveLanePullRequest({
+      env: createArchiveEnv(),
+      threadId: "thread-1",
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      finalizationMode: "delete",
+    });
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(inspectOpenSpecChangeArchiveStateMock).not.toHaveBeenCalled();
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(pushLaneBranchMock).not.toHaveBeenCalled();
+    expect(lane?.finalizationMode).toBe("delete");
+    expect(lane?.proposalDisposition).toBe("deleted");
+    expect(lane?.finalizationCheckpoint).toBe("completed");
+    expect(lane?.pullRequest?.status).toBe("approved");
+    expect(lane?.pullRequest?.url).toBe("https://github.com/example/meow-team/pull/56");
   });
 
   it("records an archive failure when the coder pass leaves the change unarchived", async () => {
@@ -4067,6 +4186,7 @@ describe.sequential("approveLanePullRequest", () => {
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
+        finalizationMode: "archive",
       }),
     ).rejects.toThrow("Final archive coder pass did not archive OpenSpec change change-1.");
 
@@ -4101,6 +4221,7 @@ describe.sequential("approveLanePullRequest", () => {
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
+        finalizationMode: "archive",
       }),
     ).rejects.toThrow("gh auth token missing");
 
@@ -4128,6 +4249,7 @@ describe.sequential("approveLanePullRequest", () => {
         threadId: "thread-1",
         assignmentNumber: 1,
         laneId: "lane-1",
+        finalizationMode: "archive",
       }),
     ).rejects.toThrow("git user identity missing");
 
@@ -4150,5 +4272,71 @@ describe.sequential("approveLanePullRequest", () => {
     );
     expect(thread?.dispatchAssignments[0]?.status).toBe("failed");
     expect(thread?.run?.status).toBe("failed");
+  });
+
+  it("fails delete finalization when the proposal is already archived", async () => {
+    await writeApprovalThreadStore(
+      createApprovalLane({
+        proposalPath: "openspec/changes/archive/2026-04-11-change-1",
+        proposalDisposition: "archived",
+      }),
+    );
+
+    await expect(
+      approveLanePullRequest({
+        env: createArchiveEnv(),
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+        finalizationMode: "delete",
+      }),
+    ).rejects.toThrow("already archived");
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(lane?.pullRequest?.status).toBe("failed");
+    expect(lane?.lastError).toContain("already archived");
+  });
+
+  it("fails archive finalization when the proposal is already deleted", async () => {
+    await writeApprovalThreadStore(
+      createApprovalLane({
+        finalizationMode: "delete",
+        proposalDisposition: "deleted",
+        finalizationCheckpoint: "branch_pushed",
+        pullRequest: {
+          id: "pr-1",
+          provider: "local-ci",
+          title: "Ship the feature",
+          summary: "Machine review approved the branch.",
+          branchName: "requests/example/a1-proposal-1",
+          baseBranch: "main",
+          status: "failed",
+          requestedAt: FIXED_TIMESTAMP,
+          humanApprovalRequestedAt: FIXED_TIMESTAMP,
+          humanApprovedAt: FIXED_TIMESTAMP,
+          machineReviewedAt: FIXED_TIMESTAMP,
+          updatedAt: FIXED_TIMESTAMP,
+          url: null,
+        },
+      }),
+    );
+
+    await expect(
+      approveLanePullRequest({
+        env: createArchiveEnv(),
+        threadId: "thread-1",
+        assignmentNumber: 1,
+        laneId: "lane-1",
+        finalizationMode: "archive",
+      }),
+    ).rejects.toThrow("already deleted");
+
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-1");
+    const lane = thread?.dispatchAssignments[0]?.lanes[0];
+
+    expect(lane?.pullRequest?.status).toBe("failed");
+    expect(lane?.lastError).toContain("already deleted");
   });
 });

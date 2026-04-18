@@ -322,7 +322,7 @@ export const executeThreadCommandForThread = async ({
         command,
         executors,
         singleSuccessMessage: (proposalNumber) =>
-          `Proposal ${proposalNumber} final approval recorded. The archive continuation was queued.`,
+          `Proposal ${proposalNumber} final approval recorded. The finalization continuation was queued.`,
         skipReasonForLane: getReadyCommandSkipReason,
         successSentence: (proposalNumbers) =>
           `Queued final approval for ${formatProposalList(proposalNumbers)}.`,

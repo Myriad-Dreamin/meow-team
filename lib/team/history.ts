@@ -8,6 +8,11 @@ import {
   resolveThreadOwnedWorktree,
 } from "@/lib/team/coding/thread-worktree";
 import {
+  getLaneFinalizationCheckpoint,
+  getLaneFinalizationMode,
+  getLaneProposalDisposition,
+} from "@/lib/team/finalization";
+import {
   buildTeamRepositoryPickerModel,
   type TeamRepositoryPickerModel,
   type TeamRepositoryUsageRecord,
@@ -296,6 +301,9 @@ const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord =
     proposalChangeName: lane.proposalChangeName ?? null,
     proposalPath: lane.proposalPath ?? null,
     proposalCommitHash: lane.proposalCommitHash ?? null,
+    finalizationMode: getLaneFinalizationMode(lane),
+    proposalDisposition: getLaneProposalDisposition(lane),
+    finalizationCheckpoint: getLaneFinalizationCheckpoint(lane),
     workerSlot: lane.workerSlot ?? null,
     latestImplementationCommit: lane.latestImplementationCommit ?? null,
     pushedCommit: normalizePushedCommit(lane.pushedCommit),
