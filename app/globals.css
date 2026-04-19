@@ -1182,32 +1182,45 @@ main {
   gap: 10px;
 }
 
-.thread-command-editor {
+.thread-command-editor,
+.team-request-editor {
   position: relative;
-  height: 48px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgba(6, 16, 30, 0.85);
   overflow: hidden;
 }
 
-.thread-command-editor:focus-within {
+.thread-command-editor {
+  height: 48px;
+}
+
+.team-request-editor {
+  min-height: 184px;
+}
+
+.thread-command-editor:focus-within,
+.team-request-editor:focus-within {
   border-color: var(--line-strong);
   box-shadow: 0 0 0 4px rgba(125, 242, 198, 0.08);
 }
 
-.thread-command-editor[data-disabled="true"] {
+.thread-command-editor[data-disabled="true"],
+.team-request-editor[data-disabled="true"] {
   opacity: 0.72;
   background: rgba(6, 16, 30, 0.58);
 }
 
-.thread-command-editor[data-disabled="true"]:focus-within {
+.thread-command-editor[data-disabled="true"]:focus-within,
+.team-request-editor[data-disabled="true"]:focus-within {
   border-color: var(--line);
   box-shadow: none;
 }
 
 .thread-command-editor[data-status="loading"][data-has-content="false"]::after,
-.thread-command-editor[data-status="error"][data-has-content="false"]::after {
+.thread-command-editor[data-status="error"][data-has-content="false"]::after,
+.team-request-editor[data-status="loading"][data-has-content="false"]::after,
+.team-request-editor[data-status="error"][data-has-content="false"]::after {
   content: attr(data-placeholder);
   position: absolute;
   inset: 0;
@@ -1224,52 +1237,79 @@ main {
   min-height: 96px;
 }
 
-.thread-command-editor .CodeMirror {
+.team-request-editor-shell {
+  min-height: 184px;
+}
+
+.thread-command-editor .CodeMirror,
+.team-request-editor .CodeMirror {
   position: relative;
   display: block;
   height: auto;
-  min-height: 96px;
   font-family: var(--font-mono);
   font-size: 0.95rem;
   color: var(--text);
   background: transparent;
 }
 
-.thread-command-editor .CodeMirror-scroll {
-  position: relative;
+.thread-command-editor .CodeMirror,
+.thread-command-editor .CodeMirror-scroll,
+.thread-command-editor .CodeMirror-sizer,
+.thread-command-editor .CodeMirror-lines,
+.thread-command-editor .CodeMirror pre.CodeMirror-placeholder {
   min-height: 96px;
+}
+
+.team-request-editor .CodeMirror,
+.team-request-editor .CodeMirror-scroll,
+.team-request-editor .CodeMirror-sizer,
+.team-request-editor .CodeMirror-lines,
+.team-request-editor .CodeMirror pre.CodeMirror-placeholder {
+  min-height: 184px;
+}
+
+.thread-command-editor .CodeMirror-scroll,
+.team-request-editor .CodeMirror-scroll {
+  position: relative;
 }
 
 .thread-command-editor .CodeMirror-sizer,
 .thread-command-editor .CodeMirror-lines,
-.thread-command-editor .CodeMirror pre.CodeMirror-placeholder {
+.thread-command-editor .CodeMirror pre.CodeMirror-placeholder,
+.team-request-editor .CodeMirror-sizer,
+.team-request-editor .CodeMirror-lines,
+.team-request-editor .CodeMirror pre.CodeMirror-placeholder {
   position: relative;
-  min-height: 96px;
 }
 
-.thread-command-editor .CodeMirror-focused {
+.thread-command-editor .CodeMirror-focused,
+.team-request-editor .CodeMirror-focused {
   outline: none;
 }
 
-.thread-command-editor .CodeMirror-lines {
+.thread-command-editor .CodeMirror-lines,
+.team-request-editor .CodeMirror-lines {
   padding: 14px 0;
 }
 
 .thread-command-editor .CodeMirror-line,
-.thread-command-editor .CodeMirror-placeholder {
+.thread-command-editor .CodeMirror-placeholder,
+.team-request-editor .CodeMirror-line,
+.team-request-editor .CodeMirror-placeholder {
   padding: 0 16px;
   line-height: 1.55;
   white-space: pre-wrap;
 }
 
-.thread-command-editor .CodeMirror-placeholder {
+.thread-command-editor .CodeMirror-placeholder,
+.team-request-editor .CodeMirror-placeholder {
   color: rgba(227, 239, 246, 0.42);
   pointer-events: none;
 }
 
-.thread-command-editor .CodeMirror textarea {
+.thread-command-editor .CodeMirror textarea,
+.team-request-editor .CodeMirror textarea {
   width: 100%;
-  min-height: 96px;
   border: 0;
   padding: 14px 16px;
   color: inherit;
@@ -1279,15 +1319,26 @@ main {
   resize: none;
 }
 
-.thread-command-editor .CodeMirror-cursor {
+.thread-command-editor .CodeMirror textarea {
+  min-height: 96px;
+}
+
+.team-request-editor .CodeMirror textarea {
+  min-height: 184px;
+}
+
+.thread-command-editor .CodeMirror-cursor,
+.team-request-editor .CodeMirror-cursor {
   border-left: 1px solid rgba(227, 239, 246, 0.9);
 }
 
-.thread-command-editor[data-disabled="true"] .CodeMirror textarea {
+.thread-command-editor[data-disabled="true"] .CodeMirror textarea,
+.team-request-editor[data-disabled="true"] .CodeMirror textarea {
   cursor: default;
 }
 
-.thread-command-editor[data-disabled="true"] .CodeMirror-cursors {
+.thread-command-editor[data-disabled="true"] .CodeMirror-cursors,
+.team-request-editor[data-disabled="true"] .CodeMirror-cursors {
   display: none;
 }
 

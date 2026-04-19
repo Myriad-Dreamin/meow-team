@@ -1,12 +1,13 @@
 "use client";
 
-import { startTransition, useEffect, useState, type FormEvent } from "react";
+import { startTransition, useEffect, useId, useState, type FormEvent } from "react";
 import {
   applyRequestedTeamConsoleRepositorySelection,
   createAutoTeamConsoleRepositorySelection,
   createManualTeamConsoleRepositorySelection,
   reconcileTeamConsoleRepositorySelection,
 } from "@/components/team-console-repository-selection";
+import { TeamRequestEditor } from "@/components/team-request-editor";
 import {
   TeamThreadLogPanel,
   isTeamCodexLogEntry,
@@ -14,6 +15,7 @@ import {
 } from "@/components/thread-log-panel";
 import type { TeamRunSummary } from "@/lib/team/coding";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
+import { TEAM_EXECUTION_MODE_DEFINITIONS } from "@/lib/team/execution-mode";
 import type { TeamRepositoryPickerModel } from "@/lib/team/repository-picker";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 
@@ -103,6 +105,8 @@ type PendingBranchDeletion = {
 
 const ACTIVE_LOG_THREAD_ID_STORAGE_KEY = "team-console.active-log-thread-id";
 const ACTIVE_LOG_STARTED_AT_STORAGE_KEY = "team-console.active-log-started-at";
+const REQUEST_PLACEHOLDER =
+  "Plan multiple proposals for a new onboarding flow, wait for human approval, then queue coding and machine review for the approved proposals.";
 
 const initialRunState: RunState = {
   status: "idle",
@@ -207,6 +211,7 @@ export function TeamConsole({
   repositoryPicker,
   workerCount,
 }: TeamConsoleProps) {
+  const requestFieldHintId = useId();
   const [prompt, setPrompt] = useState(initialPrompt);
   const [title, setTitle] = useState("");
   const [threadId, setThreadId] = useState("");
@@ -554,14 +559,28 @@ export function TeamConsole({
       <form className="console-form" onSubmit={handleFormSubmit}>
         <label className="field">
           <span>Request</span>
-          <textarea
-            name="prompt"
-            rows={8}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Plan multiple proposals for a new onboarding flow, wait for human approval, then queue coding and machine review for the approved proposals."
+          <input name="prompt" readOnly type="hidden" value={prompt} />
+          <TeamRequestEditor
+            ariaDescribedBy={requestFieldHintId}
+            ariaLabel="Request"
             disabled={disabled || isBusy}
+            onChange={setPrompt}
+            placeholder={REQUEST_PLACEHOLDER}
+            value={prompt}
           />
+          <p className="field-hint" id={requestFieldHintId}>
+            Optional execution-mode prefixes:{" "}
+            {TEAM_EXECUTION_MODE_DEFINITIONS.map((definition, index) => (
+              <span key={definition.mode}>
+                <code>{definition.prefix}</code>
+                {index < TEAM_EXECUTION_MODE_DEFINITIONS.length - 2
+                  ? ", "
+                  : index === TEAM_EXECUTION_MODE_DEFINITIONS.length - 2
+                    ? ", or "
+                    : "."}
+              </span>
+            ))}
+          </p>
         </label>
 
         <label className="field">
