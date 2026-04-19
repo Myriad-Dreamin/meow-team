@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   archiveTeamThread,
+  cancelLatestThreadAssignmentApprovalWait,
   claimTeamThreadWorktree,
   countActiveDispatchThreads,
   getTeamRepositoryPickerModel,
@@ -12,6 +13,7 @@ import {
   getTeamWorkspaceStatusSnapshot,
   updateTeamThreadRecord,
 } from "@/lib/team/history";
+import { THREAD_COMMAND_BUSY_REASON } from "@/lib/team/thread-command";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunState } from "@/lib/team/coding/shared";
 import {
@@ -21,6 +23,7 @@ import {
 } from "@/lib/storage/thread";
 import type {
   TeamDispatchAssignment,
+  TeamPullRequestRecord,
   TeamThreadStatus,
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
@@ -116,6 +119,27 @@ const createLane = ({
     startedAt: FIXED_TIMESTAMP,
     finishedAt: null,
     updatedAt: FIXED_TIMESTAMP,
+  };
+};
+
+const createPullRequest = (
+  overrides: Partial<TeamPullRequestRecord> = {},
+): TeamPullRequestRecord => {
+  return {
+    id: "pr-1",
+    provider: "github",
+    title: "Proposal 1",
+    summary: "Machine review approved the branch.",
+    branchName: "requests/example/a1-proposal-1",
+    baseBranch: "main",
+    status: "awaiting_human_approval",
+    requestedAt: FIXED_TIMESTAMP,
+    humanApprovalRequestedAt: FIXED_TIMESTAMP,
+    humanApprovedAt: null,
+    machineReviewedAt: FIXED_TIMESTAMP,
+    updatedAt: FIXED_TIMESTAMP,
+    url: "https://github.com/example/meow-team/pull/1",
+    ...overrides,
   };
 };
 
@@ -450,6 +474,229 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
         threadId: "awaiting-final-approval",
       }),
     ).rejects.toThrow("Only inactive threads can be archived.");
+  });
+
+  it("persists cancelled latest assignments as terminal and archivable", async () => {
+    const storePath = createSqliteStorePath("team-history-cancelled");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      cancelled: createStoredThread({
+        threadId: "cancelled",
+        status: "awaiting_human_approval",
+        dispatchAssignments: [
+          createAssignment({
+            status: "awaiting_human_approval",
+            lanes: [
+              {
+                ...createLane({
+                  laneId: "cancelled-lane-1",
+                  laneIndex: 1,
+                  status: "awaiting_human_approval",
+                }),
+                approvalRequestedAt: FIXED_TIMESTAMP,
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await cancelLatestThreadAssignmentApprovalWait({
+      threadFile: storePath,
+      threadId: "cancelled",
+      assignmentNumber: 1,
+    });
+
+    const cancelledThread = await getTeamThreadRecord(storePath, "cancelled");
+    const snapshot = await getTeamWorkspaceStatusSnapshot(storePath);
+
+    expect(cancelledThread?.dispatchAssignments[0]?.cancelledAt).toBeTruthy();
+    expect(cancelledThread?.dispatchAssignments[0]?.plannerSummary).toContain("cancelled");
+    expect(cancelledThread?.dispatchAssignments[0]?.status).toBe("cancelled");
+    expect(cancelledThread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("cancelled");
+    expect(cancelledThread?.dispatchAssignments[0]?.lanes[0]?.latestActivity).toContain(
+      "cancelled",
+    );
+    expect(cancelledThread?.run?.status).toBe("cancelled");
+    expect(snapshot).toEqual({
+      activeThreadCount: 0,
+      livingThreadCount: 1,
+      archivedThreadCount: 0,
+      laneCounts: {
+        idle: 0,
+        queued: 0,
+        coding: 0,
+        reviewing: 0,
+        awaitingHumanApproval: 0,
+        approved: 0,
+        failed: 0,
+      },
+    });
+
+    const archivedThread = await archiveTeamThread({
+      threadFile: storePath,
+      threadId: "cancelled",
+    });
+
+    expect(archivedThread.summary.status).toBe("cancelled");
+    expect(archivedThread.summary.latestAssignmentStatus).toBe("cancelled");
+    expect(archivedThread.summary.archivedAt).not.toBeNull();
+  });
+
+  it("keeps already-finalized lane history intact when cancelling a mixed final-approval assignment", async () => {
+    const storePath = createSqliteStorePath("team-history-cancelled-mixed-final");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      mixed: createStoredThread({
+        threadId: "mixed",
+        status: "approved",
+        dispatchAssignments: [
+          createAssignment({
+            status: "approved",
+            lanes: [
+              {
+                ...createLane({
+                  laneId: "mixed-lane-1",
+                  laneIndex: 1,
+                  status: "approved",
+                }),
+                latestActivity: "GitHub PR is finalized and ready to merge.",
+                events: [
+                  {
+                    id: "mixed-lane-1-event-1",
+                    actor: "human",
+                    message: "Final approval archived the change and refreshed the GitHub PR.",
+                    createdAt: FIXED_TIMESTAMP,
+                  },
+                ],
+                finishedAt: FIXED_TIMESTAMP,
+                pullRequest: createPullRequest({
+                  id: "pr-finalized",
+                  status: "approved",
+                  humanApprovedAt: FIXED_TIMESTAMP,
+                  updatedAt: FIXED_TIMESTAMP,
+                  url: "https://github.com/example/meow-team/pull/41",
+                }),
+              },
+              {
+                ...createLane({
+                  laneId: "mixed-lane-2",
+                  laneIndex: 2,
+                  status: "approved",
+                }),
+                latestActivity:
+                  "Coding, machine review, and GitHub PR prep are complete. Human approval can now archive this OpenSpec change and refresh the existing GitHub PR.",
+                pullRequest: createPullRequest({
+                  id: "pr-awaiting-final",
+                  updatedAt: FIXED_TIMESTAMP,
+                  url: "https://github.com/example/meow-team/pull/42",
+                }),
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await cancelLatestThreadAssignmentApprovalWait({
+      threadFile: storePath,
+      threadId: "mixed",
+      assignmentNumber: 1,
+    });
+
+    const mixedThread = await getTeamThreadRecord(storePath, "mixed");
+    const assignment = mixedThread?.dispatchAssignments[0];
+    const finalizedLane = assignment?.lanes[0];
+    const awaitingLane = assignment?.lanes[1];
+
+    expect(assignment?.status).toBe("cancelled");
+    expect(mixedThread?.run?.status).toBe("cancelled");
+    expect(finalizedLane).toMatchObject({
+      status: "approved",
+      latestActivity: "GitHub PR is finalized and ready to merge.",
+      finishedAt: FIXED_TIMESTAMP,
+      updatedAt: FIXED_TIMESTAMP,
+      pullRequest: {
+        status: "approved",
+        humanApprovedAt: FIXED_TIMESTAMP,
+      },
+    });
+    expect(finalizedLane?.events).toEqual([
+      {
+        id: "mixed-lane-1-event-1",
+        actor: "human",
+        message: "Final approval archived the change and refreshed the GitHub PR.",
+        createdAt: FIXED_TIMESTAMP,
+      },
+    ]);
+    expect(awaitingLane?.status).toBe("cancelled");
+    expect(awaitingLane?.latestActivity).toContain("final approval");
+    expect(awaitingLane?.pullRequest?.status).toBe("awaiting_human_approval");
+    expect(awaitingLane?.events.at(-1)?.message).toContain("final approval");
+  });
+
+  it("rejects cancellation once the latest assignment is no longer idle", async () => {
+    const storePath = createSqliteStorePath("team-history-cancel-race");
+    trackTemporaryStore(storePath);
+
+    await writeStoredThreadsToSqlite(storePath, {
+      busy: createStoredThread({
+        threadId: "busy",
+        status: "awaiting_human_approval",
+        dispatchAssignments: [
+          createAssignment({
+            status: "awaiting_human_approval",
+            lanes: [
+              {
+                ...createLane({
+                  laneId: "busy-lane-1",
+                  laneIndex: 1,
+                  status: "awaiting_human_approval",
+                }),
+                approvalRequestedAt: FIXED_TIMESTAMP,
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await updateTeamThreadRecord({
+      threadFile: storePath,
+      threadId: "busy",
+      updater: (thread, now) => {
+        const latestAssignment = thread.dispatchAssignments[0];
+        const latestLane = latestAssignment?.lanes[0];
+        if (!latestAssignment || !latestLane) {
+          throw new Error("Expected a latest assignment lane in the busy-thread fixture.");
+        }
+
+        latestLane.status = "queued";
+        latestLane.executionPhase = "implementation";
+        latestLane.latestActivity = "Queued after approval was granted.";
+        latestLane.queuedAt = now;
+        latestLane.updatedAt = now;
+      },
+    });
+
+    await expect(
+      cancelLatestThreadAssignmentApprovalWait({
+        threadFile: storePath,
+        threadId: "busy",
+        assignmentNumber: 1,
+      }),
+    ).rejects.toMatchObject({
+      message: THREAD_COMMAND_BUSY_REASON,
+      statusCode: 409,
+    });
+
+    const busyThread = await getTeamThreadRecord(storePath, "busy");
+
+    expect(busyThread?.dispatchAssignments[0]?.cancelledAt).toBeNull();
+    expect(busyThread?.dispatchAssignments[0]?.status).toBe("running");
+    expect(busyThread?.dispatchAssignments[0]?.lanes[0]?.status).toBe("queued");
   });
 
   it("releases a claimed meow worktree when archiving an inactive thread", async () => {

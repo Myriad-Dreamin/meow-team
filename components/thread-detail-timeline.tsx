@@ -15,6 +15,7 @@ import {
   canRestartPlanning,
   describeLane,
   describeLogEntryContext,
+  formatAssignmentStatusLabel,
   formatThreadId,
   formatFeedbackLabel,
   formatPoolSlot,
@@ -22,10 +23,10 @@ import {
   getLaneApprovalActions,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
+  getLanePullRequestStatusLabel,
   getLaneStatusClassName,
   getLaneStatusLabel,
   groupThreadLogEntries,
-  pullRequestStatusLabels,
   selectPrimaryLane,
   threadStatusLabels,
 } from "@/components/thread-view-utils";
@@ -1717,7 +1718,7 @@ export function ThreadDetailTimeline({
                         <h3>{assignment.requestTitle ?? thread.requestTitle}</h3>
                       </div>
                       <span className={`status-pill status-${assignment.status}`}>
-                        {assignment.status.replaceAll("_", " ")}
+                        {formatAssignmentStatusLabel(assignment.status)}
                       </span>
                     </div>
 
@@ -1765,7 +1766,8 @@ export function ThreadDetailTimeline({
                             isCurrentAssignment &&
                             canRestart &&
                             lane.status !== "idle" &&
-                            lane.status !== "failed";
+                            lane.status !== "failed" &&
+                            lane.status !== "cancelled";
                           const laneBranchDisplay = getLaneBranchDisplay(lane);
                           const commitDisplay = getLaneCommitDisplay(lane);
 
@@ -1818,7 +1820,7 @@ export function ThreadDetailTimeline({
                               {lane.pullRequest ? (
                                 <div className="thread-chat-pr-strip">
                                   <span className="thread-chat-meta-chip">
-                                    {pullRequestStatusLabels[lane.pullRequest.status]}
+                                    {getLanePullRequestStatusLabel(lane)}
                                   </span>
                                   {lane.pullRequest.url ? (
                                     <a

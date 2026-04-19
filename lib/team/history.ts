@@ -18,6 +18,13 @@ import {
   type TeamRepositoryUsageRecord,
 } from "@/lib/team/repository-picker";
 import {
+  getAssignmentThreadCommandDisabledReason,
+  getCancelCommandSkipReason,
+  isLaneAwaitingHumanApprovalForCancel,
+  THREAD_COMMAND_NO_ASSIGNMENT_REASON,
+} from "@/lib/team/thread-command-eligibility";
+import { TeamThreadCommandError } from "@/lib/team/thread-command-error";
+import {
   normalizeConventionalTitleMetadata,
   parseConventionalTitle,
   resolveDisplayRequestTitle,
@@ -343,6 +350,7 @@ const normalizeDispatchAssignment = (
     lanes: assignment.lanes.map(normalizeWorkerLane),
     plannerNotes: assignment.plannerNotes ?? [],
     humanFeedback: assignment.humanFeedback ?? [],
+    cancelledAt: assignment.cancelledAt ?? null,
     supersededAt: assignment.supersededAt ?? null,
     supersededReason: assignment.supersededReason ?? null,
   };
@@ -539,6 +547,8 @@ const countWorkerLanes = (lanes: TeamWorkerLaneRecord[]): TeamWorkerLaneCounts =
       case "awaiting_human_approval":
         counts.awaitingHumanApproval += 1;
         break;
+      case "cancelled":
+        break;
       case "approved":
         counts.approved += 1;
         break;
@@ -560,6 +570,10 @@ const deriveDispatchAssignmentStatus = (
 ): TeamDispatchAssignmentStatus => {
   if (assignment.supersededAt) {
     return "superseded";
+  }
+
+  if (assignment.cancelledAt) {
+    return "cancelled";
   }
 
   const assignedLanes = assignment.lanes.filter(hasAssignedTask);
@@ -606,6 +620,7 @@ const deriveDispatchAssignmentStatus = (
 
 const isTerminalDispatchAssignmentStatus = (status: TeamDispatchAssignmentStatus): boolean => {
   return (
+    status === "cancelled" ||
     status === "approved" ||
     status === "completed" ||
     status === "superseded" ||
@@ -615,6 +630,7 @@ const isTerminalDispatchAssignmentStatus = (status: TeamDispatchAssignmentStatus
 
 export const isTerminalThreadStatus = (status: TeamThreadStatus): boolean => {
   return (
+    status === "cancelled" ||
     status === "completed" ||
     status === "approved" ||
     status === "needs_revision" ||
@@ -669,6 +685,8 @@ const deriveDispatchThreadStatus = (thread: TeamThreadRecord): TeamThreadStatus 
       return "running";
     case "awaiting_human_approval":
       return "awaiting_human_approval";
+    case "cancelled":
+      return "cancelled";
     case "approved":
       return "approved";
     case "completed":
@@ -1186,6 +1204,102 @@ export const markTeamThreadFailed = async ({
         finishedAt: now,
         lastError: error,
       };
+    },
+  });
+};
+
+const getAssignmentCancellationMessage = (): string => {
+  return "Human cancelled this request group while it was waiting for approval.";
+};
+
+const getLaneCancellationMessage = (lane: TeamWorkerLaneRecord): string => {
+  if (lane.status === "approved") {
+    return "Human cancelled this request group while it was waiting for final approval.";
+  }
+
+  if (lane.status === "awaiting_human_approval") {
+    return "Human cancelled this request group while it was waiting for proposal approval.";
+  }
+
+  return "Human cancelled this request group before more work could continue.";
+};
+
+const isAssignedWorkerLane = (lane: TeamWorkerLaneRecord): boolean => {
+  return (
+    hasAssignedTask(lane) || Boolean(lane.proposalChangeName || lane.branchName || lane.pullRequest)
+  );
+};
+
+export const cancelLatestThreadAssignmentApprovalWait = async ({
+  threadFile,
+  threadId,
+  assignmentNumber,
+}: {
+  threadFile: TeamThreadStorageTarget;
+  threadId: string;
+  assignmentNumber: number;
+}): Promise<void> => {
+  await updateTeamThreadRecord({
+    threadFile,
+    threadId,
+    updater: (thread, now) => {
+      const latestAssignment = getLatestDispatchAssignment(thread);
+      if (!latestAssignment) {
+        throw new TeamThreadCommandError(THREAD_COMMAND_NO_ASSIGNMENT_REASON, 409);
+      }
+
+      if (latestAssignment.assignmentNumber !== assignmentNumber) {
+        throw new TeamThreadCommandError(
+          `Assignment ${assignmentNumber} is no longer the latest request group for thread ${threadId}.`,
+          409,
+        );
+      }
+
+      const disabledReason = getAssignmentThreadCommandDisabledReason({
+        archivedAt: thread.archivedAt,
+        assignment: latestAssignment,
+      });
+      if (disabledReason) {
+        throw new TeamThreadCommandError(disabledReason, 409);
+      }
+
+      const skipReason = getCancelCommandSkipReason(latestAssignment);
+      if (skipReason) {
+        throw new TeamThreadCommandError(
+          `Skipped request-group cancellation because ${skipReason}`,
+          409,
+        );
+      }
+
+      const assignmentMessage = getAssignmentCancellationMessage();
+      latestAssignment.cancelledAt = now;
+      latestAssignment.plannerSummary = assignmentMessage;
+      latestAssignment.finishedAt = now;
+      latestAssignment.updatedAt = now;
+
+      for (const lane of latestAssignment.lanes) {
+        if (!isAssignedWorkerLane(lane) || !isLaneAwaitingHumanApprovalForCancel(lane)) {
+          continue;
+        }
+
+        const laneMessage = getLaneCancellationMessage(lane);
+        lane.status = "cancelled";
+        lane.executionPhase = null;
+        lane.latestActivity = laneMessage;
+        lane.finishedAt = now;
+        lane.updatedAt = now;
+        lane.events = [
+          ...lane.events,
+          {
+            id: crypto.randomUUID(),
+            actor: "human",
+            message: laneMessage,
+            createdAt: now,
+          },
+        ];
+      }
+
+      synchronizeDispatchAssignment(latestAssignment, now);
     },
   });
 };

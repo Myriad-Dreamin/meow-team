@@ -5,9 +5,11 @@ import {
 } from "@/lib/team/thread-command-server";
 import {
   parseThreadCommand,
+  THREAD_COMMAND_BUSY_REASON,
   THREAD_COMMAND_NO_ASSIGNMENT_REASON,
   THREAD_COMMAND_REPLANNING_REASON,
 } from "@/lib/team/thread-command";
+import { TeamThreadCommandError } from "@/lib/team/thread-command-error";
 import type { TeamThreadRecord } from "@/lib/team/history";
 import type {
   TeamDispatchAssignment,
@@ -135,6 +137,7 @@ const createExecutors = (
   overrides: Partial<ThreadCommandExecutors> = {},
 ): ThreadCommandExecutors => {
   return {
+    cancelApprovalWait: vi.fn(async () => undefined),
     runApproval: vi.fn(async () => undefined),
     startReplan: vi.fn(async () => ({
       accepted: true as const,
@@ -322,6 +325,184 @@ describe("executeThreadCommandForThread", () => {
     expect(result.outcome).toBe("partial");
     expect(result.message).toContain("Queued final approval for proposal 1.");
     expect(result.message).toContain("Stopped on proposal 2: archive continuation failed");
+  });
+
+  it("keeps /ready retryable after archive failures that already recorded human approval", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "approved",
+        lanes: [
+          createLane({
+            laneId: "lane-1",
+            laneIndex: 1,
+            status: "approved",
+            pullRequest: createPullRequest({
+              status: "failed",
+              humanApprovedAt: FIXED_TIMESTAMP,
+            }),
+          }),
+        ],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/ready 1"),
+      executors,
+      thread,
+    });
+
+    expect(executors.runApproval).toHaveBeenCalledWith({
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      target: "pull_request",
+      threadId: "thread-1",
+    });
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "ready",
+      outcome: "success",
+    });
+    expect(result.message).toContain(
+      "Proposal 1 final approval recorded. The archive continuation was queued.",
+    );
+  });
+
+  it("cancels the latest request group while proposal approval is pending", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "awaiting_human_approval" })],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      assignmentNumber: 1,
+    });
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "cancel",
+      outcome: "success",
+    });
+    expect(result.message).toContain("Cancelled request group for assignment 1.");
+  });
+
+  it("cancels the latest request group while final approval is pending", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "approved",
+        lanes: [
+          createLane({
+            laneId: "lane-1",
+            laneIndex: 1,
+            status: "approved",
+            pullRequest: createPullRequest({
+              status: "awaiting_human_approval",
+              humanApprovedAt: null,
+            }),
+          }),
+        ],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe("success");
+  });
+
+  it("skips /cancel when final approval failed instead of waiting on human approval", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "approved",
+        lanes: [
+          createLane({
+            laneId: "lane-1",
+            laneIndex: 1,
+            status: "approved",
+            pullRequest: createPullRequest({
+              status: "failed",
+              humanApprovedAt: null,
+            }),
+          }),
+        ],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "cancel",
+      outcome: "skipped",
+    });
+    expect(result.message).toContain("not waiting for human approval");
+  });
+
+  it("skips /cancel when the latest request group is already terminal", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        status: "cancelled",
+        cancelledAt: FIXED_TIMESTAMP,
+        lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "cancelled" })],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/cancel"),
+      executors,
+      thread,
+    });
+
+    expect(executors.cancelApprovalWait).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      commandName: "cancel",
+      outcome: "skipped",
+    });
+    expect(result.message).toContain("already cancelled");
+  });
+
+  it("surfaces server-side /cancel eligibility races from the executor", async () => {
+    const executors = createExecutors({
+      cancelApprovalWait: vi.fn(async () => {
+        throw new TeamThreadCommandError(THREAD_COMMAND_BUSY_REASON, 409);
+      }),
+    });
+    const thread = createThread([
+      createAssignment(1, {
+        lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "awaiting_human_approval" })],
+      }),
+    ]);
+
+    await expect(
+      executeThreadCommandForThread({
+        command: parseThreadCommand("/cancel"),
+        executors,
+        thread,
+      }),
+    ).rejects.toMatchObject({
+      message: THREAD_COMMAND_BUSY_REASON,
+      statusCode: 409,
+    });
   });
 
   it("routes proposal and request-group replans through the existing helper inputs", async () => {

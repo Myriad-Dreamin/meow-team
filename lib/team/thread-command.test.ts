@@ -68,6 +68,10 @@ describe("parseThreadCommand", () => {
       original: "/ready 2",
       proposalNumber: 2,
     });
+    expect(parseThreadCommand("/cancel")).toEqual({
+      kind: "cancel",
+      original: "/cancel",
+    });
   });
 
   it("parses replan commands with preserved requirement text", () => {
@@ -86,6 +90,7 @@ describe("parseThreadCommand", () => {
 
   it("rejects unsupported or incomplete command syntax", () => {
     expect(() => parseThreadCommand("/approve 2 extra")).toThrowError(ThreadCommandParseError);
+    expect(() => parseThreadCommand("/cancel later")).toThrowError(ThreadCommandParseError);
     expect(() => parseThreadCommand("/replan 2")).toThrowError(ThreadCommandParseError);
     expect(() => parseThreadCommand("/replan-all")).toThrowError(ThreadCommandParseError);
     expect(() => parseThreadCommand("/unknown")).toThrowError(ThreadCommandParseError);
@@ -97,10 +102,11 @@ describe("thread command metadata and autocomplete", () => {
     expect(THREAD_COMMAND_DEFINITIONS.map((definition) => definition.command)).toEqual([
       "/approve",
       "/ready",
+      "/cancel",
       "/replan",
       "/replan-all",
     ]);
-    expect(THREAD_COMMAND_PLACEHOLDER).toBe("/approve\n/ready\n/replan\n/replan-all");
+    expect(THREAD_COMMAND_PLACEHOLDER).toBe("/approve\n/ready\n/cancel\n/replan\n/replan-all");
   });
 
   it("suggests only supported slash commands with parser-aligned syntax copy", () => {
@@ -120,6 +126,23 @@ describe("thread command metadata and autocomplete", () => {
       "/replan [proposal-number] requirement",
       "/replan-all requirement",
     ]);
+  });
+
+  it("offers /cancel as a thread-scoped command without proposal autocomplete", () => {
+    const commandResult = getThreadCommandAutocomplete({
+      cursorIndex: "/c".length,
+      proposalNumbers: [1, 2],
+      value: "/c",
+    });
+
+    expect(commandResult?.suggestions.map((suggestion) => suggestion.label)).toEqual(["/cancel"]);
+    expect(
+      getThreadCommandAutocomplete({
+        cursorIndex: "/cancel ".length,
+        proposalNumbers: [1, 2],
+        value: "/cancel ",
+      }),
+    ).toBeNull();
   });
 
   it("sorts and filters proposal-number suggestions from latest-assignment lanes", () => {

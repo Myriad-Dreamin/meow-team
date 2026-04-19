@@ -217,6 +217,33 @@ describe("collectThreadAttentionNotifications", () => {
       }),
     ]);
   });
+
+  it("suppresses approval notifications once the latest assignment is cancelled", () => {
+    const notifications = collectThreadAttentionNotifications([
+      createThread({
+        status: "cancelled",
+        latestAssignmentStatus: "cancelled",
+        workerCounts: {
+          idle: 0,
+          queued: 0,
+          coding: 0,
+          reviewing: 0,
+          awaitingHumanApproval: 1,
+          approved: 0,
+          failed: 0,
+        },
+        workerLanes: [
+          createLane({
+            laneId: "lane-cancelled",
+            status: "awaiting_human_approval",
+            approvalRequestedAt: "2026-04-11T10:04:00.000Z",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(notifications).toEqual([]);
+  });
 });
 
 describe("selectUndeliveredAttentionNotifications", () => {

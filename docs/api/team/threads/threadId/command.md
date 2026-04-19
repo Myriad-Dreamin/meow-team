@@ -20,15 +20,15 @@ one thread.
 
 ## Request body
 
-| Field     | Type   | Required | Notes                                                                                                                                                                         |
-| --------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `command` | string | Yes      | Raw slash command text. Supported forms are `/approve [proposal-number]`, `/ready [proposal-number]`, `/replan [proposal-number] requirement`, and `/replan-all requirement`. |
+| Field     | Type   | Required | Notes                                                                                                                                                                                    |
+| --------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command` | string | Yes      | Raw slash command text. Supported forms are `/approve [proposal-number]`, `/ready [proposal-number]`, `/cancel`, `/replan [proposal-number] requirement`, and `/replan-all requirement`. |
 
 ## Success response
 
-Proposal approval and final-approval commands return `200 OK`. Replan commands
-return `202 Accepted` because they start a fresh planning run in the
-background.
+Proposal approval, final-approval, and cancellation commands return `200 OK`.
+Replan commands return `202 Accepted` because they start a fresh planning run
+in the background.
 
 ```json
 {
@@ -66,5 +66,6 @@ The selected-thread detail view shows a bottom command composer that posts to
 this endpoint. The composer is disabled when the thread is archived, the thread
 has no latest assignment yet, the latest assignment is being replanned or
 already superseded, or the latest assignment still has queued, coding, or
-reviewing work. It shows the latest command result inline after each
-submission.
+reviewing work. `/cancel` is thread-scoped and skips unless the latest idle
+assignment is still waiting on proposal approval or final human approval. The
+composer shows the latest command result inline after each submission.

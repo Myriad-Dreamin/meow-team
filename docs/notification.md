@@ -91,6 +91,8 @@ Alerts should not fire in these cases:
 - The workspace toggle is off.
 - The backend target is `vscode`, which reserves delivery for the extension.
 - The backend target is `android`, which reserves delivery for the Android app.
+- The latest request group was cancelled, even if older lane metadata still
+  references an approval wait.
 - The thread is not in one of the approval or failure states listed above.
 - The same fingerprint was already delivered in this browser profile.
 - An attention state disappeared before notifications became available again.

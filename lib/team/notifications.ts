@@ -100,6 +100,10 @@ export const collectThreadAttentionNotifications = (
   const notifications: TeamAttentionNotification[] = [];
 
   for (const thread of threads) {
+    if (thread.status === "cancelled" || thread.latestAssignmentStatus === "cancelled") {
+      continue;
+    }
+
     const failedLanes = thread.workerLanes.filter(
       (lane) => lane.status === "failed" || lane.pullRequest?.status === "failed",
     );

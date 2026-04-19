@@ -14,9 +14,9 @@ import {
   getLaneApprovalActions,
   getLaneBranchDisplay,
   getLaneCommitDisplay,
+  getLanePullRequestStatusLabel,
   getLaneStatusClassName,
   getLaneStatusLabel,
-  pullRequestStatusLabels,
   threadStatusLabels,
 } from "@/components/thread-view-utils";
 import type { TeamThreadSummary } from "@/lib/team/history";
@@ -334,7 +334,10 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                       const isSendingFeedback = feedbackKey === laneFeedbackKey;
                       const approvalActions = getLaneApprovalActions(lane);
                       const canSendLaneFeedback =
-                        canRestart && lane.status !== "idle" && lane.status !== "failed";
+                        canRestart &&
+                        lane.status !== "idle" &&
+                        lane.status !== "failed" &&
+                        lane.status !== "cancelled";
                       const branchDisplay = getLaneBranchDisplay(lane);
                       const commitDisplay = getLaneCommitDisplay(lane);
 
@@ -422,7 +425,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
 
                           {lane.pullRequest ? (
                             <div className="lane-pr-strip">
-                              <span>{pullRequestStatusLabels[lane.pullRequest.status]}</span>
+                              <span>{getLanePullRequestStatusLabel(lane)}</span>
                               {lane.pullRequest.url ? (
                                 <a
                                   className="lane-meta-link"
