@@ -2,7 +2,6 @@
 
 import { useId } from "react";
 import { ThreadCommandEditor } from "@/components/thread-command-editor";
-import { THREAD_COMMAND_HELP_TEXT, THREAD_COMMAND_PLACEHOLDER } from "@/lib/team/thread-command";
 
 export type ThreadCommandComposerNotice = {
   kind: "error" | "info";
@@ -38,24 +37,12 @@ export function ThreadCommandComposer({
 
   return (
     <section className="thread-command-composer">
-      <div className="thread-command-copy">
-        <p id={helperTextId} className="thread-detail-action-note">
-          {THREAD_COMMAND_HELP_TEXT}
-        </p>
-        {disabledReason ? (
-          <p id={disabledReasonId} className="thread-detail-action-note">
-            {disabledReason}
-          </p>
-        ) : null}
-      </div>
-
       <label className="field feedback-field thread-command-field">
-        <span>Command</span>
         <ThreadCommandEditor
           ariaDescribedBy={describedBy || undefined}
           ariaLabel="Command"
           disabled={isDisabled}
-          placeholder={THREAD_COMMAND_PLACEHOLDER}
+          placeholder={"Enter slash commands..."}
           proposalNumbers={proposalNumbers}
           value={value}
           onChange={onChange}

@@ -96,14 +96,6 @@ const SUPPORTED_THREAD_COMMANDS_TEXT = joinThreadCommandList(
   THREAD_COMMAND_DEFINITIONS.map((definition) => definition.command),
 );
 
-export const THREAD_COMMAND_HELP_TEXT = `Supported commands: ${THREAD_COMMAND_DEFINITIONS.map(
-  (definition) => definition.syntax,
-).join(", ")}.`;
-
-export const THREAD_COMMAND_PLACEHOLDER = THREAD_COMMAND_DEFINITIONS.map(
-  (definition) => definition.command,
-).join("\n");
-
 type ProposalCommandName = Extract<ThreadCommandKind, "approve" | "ready">;
 
 export type ThreadCommand =

@@ -5,7 +5,6 @@ import {
   parseThreadCommand,
   THREAD_COMMAND_DEFINITIONS,
   THREAD_COMMAND_NO_ASSIGNMENT_REASON,
-  THREAD_COMMAND_PLACEHOLDER,
   THREAD_COMMAND_REPLANNING_REASON,
   ThreadCommandParseError,
 } from "@/lib/team/thread-command";
@@ -106,7 +105,6 @@ describe("thread command metadata and autocomplete", () => {
       "/replan",
       "/replan-all",
     ]);
-    expect(THREAD_COMMAND_PLACEHOLDER).toBe("/approve\n/ready\n/cancel\n/replan\n/replan-all");
   });
 
   it("suggests only supported slash commands with parser-aligned syntax copy", () => {

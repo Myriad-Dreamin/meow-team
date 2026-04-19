@@ -2,7 +2,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadCommandComposer } from "@/components/thread-command-composer";
-import { THREAD_COMMAND_HELP_TEXT } from "@/lib/team/thread-command";
 
 const renderComposer = (props: Parameters<typeof ThreadCommandComposer>[0]) => {
   return renderToStaticMarkup(createElement(ThreadCommandComposer, props));
@@ -21,7 +20,6 @@ describe("ThreadCommandComposer", () => {
       value: "/approve",
     });
 
-    expect(html).toContain(THREAD_COMMAND_HELP_TEXT);
     expect(html).toContain("latest assignment is idle");
     expect(html).toContain('data-thread-command-editor="codemirror"');
     expect(html).toContain('data-disabled="true"');
@@ -43,7 +41,6 @@ describe("ThreadCommandComposer", () => {
       value: "/approve 1",
     });
 
-    expect(html).toContain(THREAD_COMMAND_HELP_TEXT);
     expect(html).toContain("Running command...");
     expect(html).toContain("Queued proposal approval for proposal 1.");
     expect(html).toContain('data-thread-command-editor="codemirror"');

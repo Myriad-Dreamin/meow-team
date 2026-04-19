@@ -9,7 +9,7 @@ The default team follows a simple harness engineering workflow:
 - `coder` implements or proposes the concrete change.
 - `reviewer` checks the work for bugs, regressions, and missing tests.
 
-Requests prefixed with `execution:`, `benchmark:`, or `experiment:` stay on the
+Requests prefixed with `\execution`, `\benchmark`, or `\experiment` stay on the
 same planner entrypoint, but approved proposals route through execute-mode
 lanes with `executor` and `execution-reviewer` roles while the existing
 unprefixed coder/reviewer flow stays unchanged.

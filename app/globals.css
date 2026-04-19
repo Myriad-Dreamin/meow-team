@@ -1184,7 +1184,7 @@ main {
 
 .thread-command-editor {
   position: relative;
-  min-height: 96px;
+  height: 48px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgba(6, 16, 30, 0.85);
