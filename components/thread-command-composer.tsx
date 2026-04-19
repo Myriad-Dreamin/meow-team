@@ -30,6 +30,7 @@ export function ThreadCommandComposer({
   const helperTextId = useId();
   const disabledReasonId = useId();
   const isDisabled = Boolean(disabledReason) || isPending;
+  const placeholder = disabledReason ?? "Enter slash commands...";
   const canSubmit = !isDisabled && value.trim().length > 0;
   const describedBy = [helperTextId, disabledReason ? disabledReasonId : null]
     .filter(Boolean)
@@ -42,7 +43,7 @@ export function ThreadCommandComposer({
           ariaDescribedBy={describedBy || undefined}
           ariaLabel="Command"
           disabled={isDisabled}
-          placeholder={"Enter slash commands..."}
+          placeholder={placeholder}
           proposalNumbers={proposalNumbers}
           value={value}
           onChange={onChange}

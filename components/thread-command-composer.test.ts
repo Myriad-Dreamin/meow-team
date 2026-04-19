@@ -8,10 +8,11 @@ const renderComposer = (props: Parameters<typeof ThreadCommandComposer>[0]) => {
 };
 
 describe("ThreadCommandComposer", () => {
-  it("renders the disabled state with the server-enforced idle gating copy", () => {
+  it("uses the disabled reason as the placeholder for eligibility-driven read-only states", () => {
+    const disabledReason =
+      "Thread commands only run while the latest assignment is idle. Wait for queued, coding, or reviewing work to finish first.";
     const html = renderComposer({
-      disabledReason:
-        "Thread commands only run while the latest assignment is idle. Wait for queued, coding, or reviewing work to finish first.",
+      disabledReason,
       isPending: false,
       notice: null,
       onChange: vi.fn(),
@@ -20,14 +21,32 @@ describe("ThreadCommandComposer", () => {
       value: "/approve",
     });
 
-    expect(html).toContain("latest assignment is idle");
+    expect(html).toContain(`data-placeholder="${disabledReason}"`);
     expect(html).toContain('data-thread-command-editor="codemirror"');
     expect(html).toContain('data-disabled="true"');
     expect(html).not.toContain("<textarea");
     expect(html).toMatch(/<button[^>]*disabled/);
   });
 
-  it("renders the pending submission state with the command helper text", () => {
+  it("keeps the default placeholder when the editor remains editable", () => {
+    const html = renderComposer({
+      disabledReason: null,
+      isPending: false,
+      notice: null,
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      proposalNumbers: [1],
+      value: "/approve",
+    });
+
+    expect(html).toContain('data-placeholder="Enter slash commands..."');
+    expect(html).toContain('data-thread-command-editor="codemirror"');
+    expect(html).toContain('data-disabled="false"');
+    expect(html).not.toContain("<textarea");
+    expect(html).not.toMatch(/<button[^>]*disabled/);
+  });
+
+  it("keeps the default placeholder during pending-only disablement", () => {
     const html = renderComposer({
       disabledReason: null,
       isPending: true,
@@ -43,6 +62,7 @@ describe("ThreadCommandComposer", () => {
 
     expect(html).toContain("Running command...");
     expect(html).toContain("Queued proposal approval for proposal 1.");
+    expect(html).toContain('data-placeholder="Enter slash commands..."');
     expect(html).toContain('data-thread-command-editor="codemirror"');
     expect(html).not.toContain("<textarea");
     expect(html).toMatch(/<button[^>]*disabled/);
