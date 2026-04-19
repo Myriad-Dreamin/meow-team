@@ -8,7 +8,7 @@ export type TeamExecutionModeParseResult = {
   prefix: string | null;
 };
 
-const EXECUTION_MODE_PREFIX_PATTERN = /^(execution|benchmark|experiment)\s*:\s*([\s\S]*)$/iu;
+const EXECUTION_MODE_PREFIX_PATTERN = /^\/(execution|benchmark|experiment)\s+([\s\S]*)$/iu;
 
 export const normalizeTeamExecutionMode = (
   value: string | null | undefined,

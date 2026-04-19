@@ -29,6 +29,9 @@
     "format": "pnpm fmt",
     "format:check": "pnpm fmt:check"
   },
+  "bin": {
+    "meow-team": "bin/meow-team.mjs"
+  },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "clipanion": "4.0.0-rc.4",
