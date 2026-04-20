@@ -3,7 +3,7 @@
   position: relative;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: rgba(6, 16, 30, 0.85);
+  background: var(--panel-code);
   overflow: hidden;
 }
 
@@ -18,13 +18,13 @@
 .thread-command-editor:focus-within,
 .team-request-editor:focus-within {
   border-color: var(--line-strong);
-  box-shadow: 0 0 0 4px rgba(125, 242, 198, 0.08);
+  box-shadow: 0 0 0 4px var(--focus-ring);
 }
 
 .thread-command-editor[data-disabled="true"],
 .team-request-editor[data-disabled="true"] {
   opacity: 0.72;
-  background: rgba(6, 16, 30, 0.58);
+  background: var(--panel-subtle);
 }
 
 .thread-command-editor[data-disabled="true"]:focus-within,
@@ -41,7 +41,7 @@
   position: absolute;
   inset: 0;
   padding: 14px 16px;
-  color: rgba(227, 239, 246, 0.42);
+  color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: 0.95rem;
   line-height: 1.55;
@@ -121,7 +121,7 @@
 
 .thread-command-editor :global(.CodeMirror-placeholder),
 .team-request-editor :global(.CodeMirror-placeholder) {
-  color: rgba(227, 239, 246, 0.42);
+  color: var(--text-dim);
   pointer-events: none;
 }
 
@@ -148,7 +148,7 @@
 
 .thread-command-editor :global(.CodeMirror-cursor),
 .team-request-editor :global(.CodeMirror-cursor) {
-  border-left: 1px solid rgba(227, 239, 246, 0.9);
+  border-left: 1px solid rgba(237, 242, 239, 0.88);
 }
 
 .thread-command-editor[data-disabled="true"] :global(.CodeMirror) textarea,
@@ -163,18 +163,18 @@
 
 .thread-command-editor :global(.cm-header),
 .team-request-editor :global(.cm-header) {
-  color: #ffb86b;
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
 .thread-command-editor :global(.cm-formatting-header),
 .team-request-editor :global(.cm-formatting-header) {
-  color: rgba(255, 184, 107, 0.82);
+  color: rgba(208, 180, 122, 0.82);
 }
 
 .thread-command-editor :global(.cm-quote),
 .team-request-editor :global(.cm-quote) {
-  color: rgba(174, 196, 255, 0.78);
+  color: rgba(188, 200, 195, 0.78);
 }
 
 .thread-command-editor :global(.cm-comment),
@@ -183,18 +183,18 @@
 .team-request-editor :global(.cm-comment),
 .team-request-editor :global(.cm-formatting),
 .team-request-editor :global(.cm-meta) {
-  color: rgba(148, 163, 184, 0.82);
+  color: rgba(154, 168, 163, 0.82);
 }
 
 .thread-command-editor :global(.cm-em),
 .team-request-editor :global(.cm-em) {
-  color: #8be9fd;
+  color: #a7d8c7;
   font-style: italic;
 }
 
 .thread-command-editor :global(.cm-strong),
 .team-request-editor :global(.cm-strong) {
-  color: #7df2c6;
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -202,15 +202,15 @@
 .thread-command-editor :global(.cm-string.cm-url),
 .team-request-editor :global(.cm-link),
 .team-request-editor :global(.cm-string.cm-url) {
-  color: #7ed0ff;
+  color: #bdd8cc;
 }
 
 .thread-command-editor :global(.cm-string),
 .team-request-editor :global(.cm-string) {
-  color: #ffd580;
+  color: #e0c38f;
 }
 
 .thread-command-editor :global(.cm-url),
 .team-request-editor :global(.cm-url) {
-  color: rgba(126, 208, 255, 0.8);
+  color: rgba(189, 216, 204, 0.8);
 }

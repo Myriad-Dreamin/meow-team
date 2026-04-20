@@ -1,8 +1,8 @@
 .task-output-window {
   min-height: 100vh;
   background:
-    radial-gradient(circle at top right, rgba(125, 242, 198, 0.08), transparent 26%),
-    linear-gradient(180deg, rgba(7, 18, 33, 0.96) 0%, rgba(5, 13, 24, 1) 100%);
+    radial-gradient(circle at top right, var(--accent-soft), transparent 26%),
+    linear-gradient(180deg, rgba(20, 29, 28, 0.96) 0%, rgba(11, 17, 16, 1) 100%);
 }
 
 .task-output-window-header {
@@ -12,7 +12,7 @@
   gap: 18px;
   padding: 28px;
   border-bottom: 1px solid var(--line);
-  background: rgba(10, 24, 42, 0.82);
+  background: var(--panel);
 }
 
 .task-output-window-copy {
@@ -52,7 +52,7 @@
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 26px;
-  background: rgba(8, 20, 35, 0.9);
+  background: var(--panel-strong);
 }
 
 .task-output-window-panel-head {
@@ -95,12 +95,12 @@
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: 22px;
-  background: rgba(6, 16, 30, 0.76);
+  background: var(--panel-muted);
 }
 
 .task-output-window-log-stderr {
-  border-color: rgba(255, 143, 143, 0.24);
-  background: rgba(40, 12, 16, 0.72);
+  border-color: var(--danger-border);
+  background: var(--danger-panel-soft);
 }
 
 .task-output-window-log-meta {
@@ -133,7 +133,7 @@
 }
 
 .task-output-window-result {
-  background: rgba(6, 16, 30, 0.82);
+  background: var(--panel-muted);
 }
 
 .task-output-window-link {
