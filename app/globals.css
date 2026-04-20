@@ -918,7 +918,7 @@ main {
   gap: 12px;
 }
 
-.harness-form-field span {
+.harness-form-label {
   font-size: 0.84rem;
   color: var(--muted);
   letter-spacing: 0.09em;
@@ -929,9 +929,9 @@ main {
   align-items: end;
 }
 
-.harness-form-field input,
-.harness-form-field select,
-.harness-form-field textarea {
+input.harness-native-control,
+select.harness-native-control,
+textarea.harness-native-control {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -939,27 +939,27 @@ main {
   color: var(--text);
   background: rgba(6, 16, 30, 0.85);
   outline: none;
-  resize: vertical;
 }
 
 .workspace-nav::-webkit-scrollbar,
 .workspace-editor-body::-webkit-scrollbar,
 .codex-stderr-list::-webkit-scrollbar,
-.harness-form-field textarea::-webkit-scrollbar {
+textarea.harness-native-control::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
 }
 
 .codex-stderr-list,
-.harness-form-field textarea {
+textarea.harness-native-control {
   scrollbar-width: none;
   -ms-overflow-style: none;
+  resize: vertical;
 }
 
-.harness-form-field input:focus,
-.harness-form-field select:focus,
-.harness-form-field textarea:focus {
+input.harness-native-control:focus,
+select.harness-native-control:focus,
+textarea.harness-native-control:focus {
   border-color: var(--line-strong);
   box-shadow: 0 0 0 4px rgba(125, 242, 198, 0.08);
 }
@@ -1532,7 +1532,6 @@ main {
   .footer-grid {
     grid-template-columns: 1fr;
   }
-
 }
 
 @media (max-width: 920px) {
@@ -1544,7 +1543,6 @@ main {
   .lane-meta-grid,
   .detail-meta-grid,
   .thread-detail-grid,
-
   .page-shell {
     width: 100vw;
     height: 100dvh;
@@ -1588,5 +1586,4 @@ main {
     width: 100%;
     justify-self: stretch;
   }
-
 }

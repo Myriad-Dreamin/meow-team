@@ -330,7 +330,8 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                         "proposal",
                         lane.laneId,
                       );
-                      const isApproving = approvalKey?.startsWith(`${currentApprovalKey}:`) ?? false;
+                      const isApproving =
+                        approvalKey?.startsWith(`${currentApprovalKey}:`) ?? false;
                       const isSendingFeedback = feedbackKey === laneFeedbackKey;
                       const approvalActions = getLaneApprovalActions(lane);
                       const canSendLaneFeedback =
@@ -476,8 +477,9 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                           {canSendLaneFeedback ? (
                             <div className="feedback-stack">
                               <label className="harness-form-field feedback-field">
-                                <span>Proposal Feedback</span>
+                                <span className="harness-form-label">Proposal Feedback</span>
                                 <textarea
+                                  className="harness-native-control"
                                   rows={3}
                                   value={feedbackDrafts[laneFeedbackKey] ?? ""}
                                   onChange={(event) =>
@@ -518,8 +520,9 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                   canRestart ? (
                     <div className="feedback-stack thread-feedback">
                       <label className="harness-form-field feedback-field">
-                        <span>Request-Group Feedback</span>
+                        <span className="harness-form-label">Request-Group Feedback</span>
                         <textarea
+                          className="harness-native-control"
                           rows={3}
                           value={feedbackDrafts[threadFeedbackKey] ?? ""}
                           onChange={(event) =>

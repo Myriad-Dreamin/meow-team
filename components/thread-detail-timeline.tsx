@@ -1535,15 +1535,21 @@ export function ThreadDetailTimeline({
           <span className={styles["thread-chat-meta-chip"]} title={`Thread ${thread.threadId}`}>
             Thread {formatThreadId(thread.threadId)}
           </span>
-          <span className={styles["thread-chat-meta-chip"]}>Assignment #{thread.assignmentNumber}</span>
+          <span className={styles["thread-chat-meta-chip"]}>
+            Assignment #{thread.assignmentNumber}
+          </span>
           <span className={styles["thread-chat-meta-chip"]}>
             {thread.repository?.name ?? "No repository selected"}
           </span>
-          <span className={styles["thread-chat-meta-chip"]}>Updated {formatTimestamp(thread.updatedAt)}</span>
+          <span className={styles["thread-chat-meta-chip"]}>
+            Updated {formatTimestamp(thread.updatedAt)}
+          </span>
           <span className={styles["thread-chat-meta-chip"]}>
             Pool slot: {formatPoolSlot(primaryLane?.workerSlot ?? null)}
           </span>
-          <span className={styles["thread-chat-meta-chip"]}>Runs: {primaryLane?.runCount ?? 0}</span>
+          <span className={styles["thread-chat-meta-chip"]}>
+            Runs: {primaryLane?.runCount ?? 0}
+          </span>
           <span className={styles["thread-chat-meta-chip"]}>
             Revisions: {primaryLane?.revisionCount ?? 0}
           </span>
@@ -1559,7 +1565,9 @@ export function ThreadDetailTimeline({
                 PR #{getPrNumber(primaryLane.pullRequest.url)}
               </a>
             ) : (
-              <span className={styles["thread-chat-meta-chip"]}>{primaryLane.pullRequest.title}</span>
+              <span className={styles["thread-chat-meta-chip"]}>
+                {primaryLane.pullRequest.title}
+              </span>
             )
           ) : null}
         </div>
@@ -1584,7 +1592,9 @@ export function ThreadDetailTimeline({
             {logError ? <p className="error-callout">{logError}</p> : null}
 
             {timelineItems.length === 0 ? (
-              <article className={`${styles["thread-chat-card"]} ${styles["thread-chat-card-empty"]}`}>
+              <article
+                className={`${styles["thread-chat-card"]} ${styles["thread-chat-card-empty"]}`}
+              >
                 <p className={styles["thread-chat-meta"]}>Timeline</p>
                 <p className={styles["thread-chat-copy"]}>
                   {isLoadingDetail
@@ -1659,7 +1669,9 @@ export function ThreadDetailTimeline({
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
+                    <div
+                      className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}
+                    >
                       <span>{item.handoff.roleName}</span>
                       <span className={`decision-pill decision-${item.handoff.decision}`}>
                         {item.handoff.decision.replace("_", " ")}
@@ -1679,7 +1691,9 @@ export function ThreadDetailTimeline({
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
+                    <div
+                      className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}
+                    >
                       <span>
                         {formatEventActorLabel(item.event.actor)}
                         {" - "}
@@ -1697,7 +1711,10 @@ export function ThreadDetailTimeline({
 
                       <span>{formatTimestamp(item.occurredAt)}</span>
                     </div>
-                    <LaneMarkdownText className={styles["thread-chat-copy"]} text={item.event.message} />
+                    <LaneMarkdownText
+                      className={styles["thread-chat-copy"]}
+                      text={item.event.message}
+                    />
                   </article>
                 );
               }
@@ -1733,7 +1750,9 @@ export function ThreadDetailTimeline({
                         Workers: {assignment.workerCount}
                       </span>
                       {assignment.repository ? (
-                        <span className={styles["thread-chat-meta-chip"]}>{assignment.repository.name}</span>
+                        <span className={styles["thread-chat-meta-chip"]}>
+                          {assignment.repository.name}
+                        </span>
                       ) : null}
                       <span className={styles["thread-chat-meta-chip"]}>
                         Updated {formatTimestamp(assignment.updatedAt)}
@@ -1758,7 +1777,8 @@ export function ThreadDetailTimeline({
                             "proposal",
                             lane.laneId,
                           );
-                          const isApproving = approvalKey?.startsWith(`${currentApprovalKey}:`) ?? false;
+                          const isApproving =
+                            approvalKey?.startsWith(`${currentApprovalKey}:`) ?? false;
                           const isSendingFeedback = feedbackKey === laneFeedbackKey;
                           const approvalActions = isCurrentAssignment
                             ? getLaneApprovalActions(lane)
@@ -1784,7 +1804,9 @@ export function ThreadDetailTimeline({
                               <div className={styles["thread-chat-lane-head"]}>
                                 <div>
                                   <p className="timeline-title">Proposal {lane.laneIndex}</p>
-                                  <p className={`${styles["thread-chat-copy"]} ${styles["thread-chat-copy-tight"]}`}>
+                                  <p
+                                    className={`${styles["thread-chat-copy"]} ${styles["thread-chat-copy-tight"]}`}
+                                  >
                                     {lane.taskTitle ?? "Idle"}
                                   </p>
                                 </div>
@@ -1802,7 +1824,9 @@ export function ThreadDetailTimeline({
                                 <span className={styles["thread-chat-meta-chip"]}>
                                   Pool slot: {formatPoolSlot(lane.workerSlot)}
                                 </span>
-                                <span className={styles["thread-chat-meta-chip"]}>Runs: {lane.runCount}</span>
+                                <span className={styles["thread-chat-meta-chip"]}>
+                                  Runs: {lane.runCount}
+                                </span>
                                 <span className={styles["thread-chat-meta-chip"]}>
                                   Revisions: {lane.revisionCount}
                                 </span>
@@ -1875,8 +1899,9 @@ export function ThreadDetailTimeline({
                               {canSendLaneFeedback ? (
                                 <div className="feedback-stack">
                                   <label className="harness-form-field feedback-field">
-                                    <span>Proposal Feedback</span>
+                                    <span className="harness-form-label">Proposal Feedback</span>
                                     <textarea
+                                      className="harness-native-control"
                                       disabled={isSendingFeedback}
                                       placeholder="Adjust this proposal and replan the request group."
                                       rows={3}
@@ -1918,8 +1943,9 @@ export function ThreadDetailTimeline({
                       canRestart ? (
                         <div className="feedback-stack thread-feedback">
                           <label className="harness-form-field feedback-field">
-                            <span>Request-Group Feedback</span>
+                            <span className="harness-form-label">Request-Group Feedback</span>
                             <textarea
+                              className="harness-native-control"
                               disabled={
                                 feedbackKey ===
                                 buildFeedbackKey(
@@ -1995,7 +2021,9 @@ export function ThreadDetailTimeline({
                   key={item.id}
                   ref={anchorRef}
                 >
-                  <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
+                  <div
+                    className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}
+                  >
                     <span>Task output</span>
                     <span>{describeLogEntryContext(taskOutput.contextEntry)}</span>
                     <span>
@@ -2022,7 +2050,9 @@ export function ThreadDetailTimeline({
                           key={logGroup.group.id}
                           ref={stderrRef}
                         >
-                          <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
+                          <div
+                            className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}
+                          >
                             <span>{logGroup.group.source}</span>
                             <span>{formatLogTimestampRange(logGroup.group)}</span>
                             {logGroup.group.lineCount > 1 ? (
@@ -2030,12 +2060,18 @@ export function ThreadDetailTimeline({
                             ) : null}
                           </div>
 
-                          <pre className={`${styles["thread-chat-pre"]} ${styles["thread-chat-log-pre"]}`}>{content}</pre>
+                          <pre
+                            className={`${styles["thread-chat-pre"]} ${styles["thread-chat-log-pre"]}`}
+                          >
+                            {content}
+                          </pre>
 
                           {isStderr ? (
                             <div className={styles["thread-chat-log-actions"]}>
                               {logGroup.expandedMode === "live" ? (
-                                <span className={styles["thread-chat-live-badge"]}>Live stderr</span>
+                                <span className={styles["thread-chat-live-badge"]}>
+                                  Live stderr
+                                </span>
                               ) : (
                                 <button
                                   className="secondary-button"

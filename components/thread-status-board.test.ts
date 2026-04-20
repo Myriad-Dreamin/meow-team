@@ -110,4 +110,45 @@ describe("ThreadStatusBoard", () => {
     expect(html).toContain("Cancelled");
     expect(html).not.toContain("Awaiting Final Approval");
   });
+
+  it("keeps feedback textareas on the explicit native-control styling path", () => {
+    const html = renderToStaticMarkup(
+      createElement(ThreadStatusBoard, {
+        initialThreads: [
+          createThread({
+            status: "approved",
+            latestAssignmentStatus: "approved",
+            workerCounts: {
+              idle: 0,
+              queued: 0,
+              coding: 0,
+              reviewing: 0,
+              awaitingHumanApproval: 0,
+              approved: 1,
+              failed: 0,
+            },
+            workerLanes: [
+              createLane({
+                latestDecision: "approved",
+                latestActivity: "Machine review approved the proposal branch.",
+                status: "approved",
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const proposalFeedbackTag = html.match(
+      /<textarea[^>]*placeholder="Adjust this proposal and replan the request group\."[^>]*>/,
+    )?.[0];
+    const requestGroupFeedbackTag = html.match(
+      /<textarea[^>]*placeholder="Shift the overall request direction and ask the planner for a fresh proposal set\."[^>]*>/,
+    )?.[0];
+
+    expect(html).toContain('<span class="harness-form-label">Proposal Feedback</span>');
+    expect(html).toContain('<span class="harness-form-label">Request-Group Feedback</span>');
+    expect(proposalFeedbackTag).toContain('class="harness-native-control"');
+    expect(requestGroupFeedbackTag).toContain('class="harness-native-control"');
+  });
 });
