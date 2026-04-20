@@ -189,6 +189,29 @@ const assertSupportedUgitPullRequestRemote = (remoteName: string): void => {
   );
 };
 
+const buildUgitPullRequestMutationArgs = ({
+  branchName,
+  baseBranch,
+  title,
+  body,
+  draft,
+}: Pick<
+  SynchronizeGitPlatformPullRequestArgs,
+  "branchName" | "baseBranch" | "title" | "body" | "draft"
+>): string[] => {
+  return [
+    "--base",
+    baseBranch,
+    "--head",
+    branchName,
+    "--title",
+    title,
+    "--body",
+    body,
+    ...(draft ? ["--draft"] : []),
+  ];
+};
+
 export const synchronizeUgitPullRequest = async ({
   repositoryPath,
   branchName,
@@ -219,13 +242,13 @@ export const synchronizeUgitPullRequest = async ({
     await runUgit(repositoryPath, [
       "pr",
       "sync",
-      "--base",
-      baseBranch,
-      "--title",
-      title,
-      "--body",
-      body,
-      ...(draft ? ["--draft"] : []),
+      ...buildUgitPullRequestMutationArgs({
+        branchName,
+        baseBranch,
+        title,
+        body,
+        draft,
+      }),
     ]);
 
     return {
@@ -236,13 +259,13 @@ export const synchronizeUgitPullRequest = async ({
   const { stdout } = await runUgit(repositoryPath, [
     "pr",
     "create",
-    "--base",
-    baseBranch,
-    "--title",
-    title,
-    "--body",
-    body,
-    ...(draft ? ["--draft"] : []),
+    ...buildUgitPullRequestMutationArgs({
+      branchName,
+      baseBranch,
+      title,
+      body,
+      draft,
+    }),
   ]);
   const createdPullRequestId = parseUgitPullRequestId(stdout);
 
