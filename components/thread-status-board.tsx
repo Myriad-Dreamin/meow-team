@@ -475,7 +475,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
 
                           {canSendLaneFeedback ? (
                             <div className="feedback-stack">
-                              <label className="field feedback-field">
+                              <label className="harness-form-field feedback-field">
                                 <span>Proposal Feedback</span>
                                 <textarea
                                   rows={3}
@@ -517,7 +517,7 @@ export function ThreadStatusBoard({ initialThreads }: ThreadStatusBoardProps) {
                 {thread.workerLanes.length > 0 ? (
                   canRestart ? (
                     <div className="feedback-stack thread-feedback">
-                      <label className="field feedback-field">
+                      <label className="harness-form-field feedback-field">
                         <span>Request-Group Feedback</span>
                         <textarea
                           rows={3}

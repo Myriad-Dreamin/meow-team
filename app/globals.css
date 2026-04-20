@@ -2047,27 +2047,28 @@ main {
   gap: 16px;
 }
 
-.field,
-.field-row {
+/* Shared harness form primitives stay namespaced to avoid external form class collisions. */
+.harness-form-field,
+.harness-form-row {
   display: grid;
   gap: 12px;
 }
 
-.field span {
+.harness-form-field span {
   font-size: 0.84rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.09em;
 }
 
-.field-row {
+.harness-form-row {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
 }
 
-.field input,
-.field select,
-.field textarea {
+.harness-form-field input,
+.harness-form-field select,
+.harness-form-field textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -2081,26 +2082,26 @@ main {
 .workspace-nav::-webkit-scrollbar,
 .workspace-editor-body::-webkit-scrollbar,
 .codex-stderr-list::-webkit-scrollbar,
-.field textarea::-webkit-scrollbar {
+.harness-form-field textarea::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
 }
 
 .codex-stderr-list,
-.field textarea {
+.harness-form-field textarea {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
-.field input:focus,
-.field select:focus,
-.field textarea:focus {
+.harness-form-field input:focus,
+.harness-form-field select:focus,
+.harness-form-field textarea:focus {
   border-color: var(--line-strong);
   box-shadow: 0 0 0 4px rgba(125, 242, 198, 0.08);
 }
 
-.field-hint,
+.harness-form-hint,
 .meta-detail,
 .repository-root-path {
   margin: 0;
@@ -2685,7 +2686,7 @@ main {
   .hero-panel,
   .content-grid,
   .footer-grid,
-  .field-row,
+  .harness-form-row,
   .result-meta,
   .lane-meta-grid,
   .detail-meta-grid,

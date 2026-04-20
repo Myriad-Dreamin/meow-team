@@ -287,7 +287,7 @@ export function TeamThreadLogPanel({
         <p className="eyebrow">{eyebrow}</p>
         <h3>{title}</h3>
         <p className="section-copy">{description}</p>
-        <p className="field-hint">Watching thread {threadId}.</p>
+        <p className="harness-form-hint">Watching thread {threadId}.</p>
       </div>
 
       {logError ? <p className="error-callout">{logError}</p> : null}
