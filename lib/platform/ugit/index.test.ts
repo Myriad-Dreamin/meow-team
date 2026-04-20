@@ -190,30 +190,7 @@ describe("synchronizeUgitPullRequest", () => {
     ]);
   });
 
-  it("resolves publication metadata from the requested remote", async () => {
-    runGitMock
-      .mockResolvedValueOnce({
-        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team-upstream.git",
-        stderr: "",
-      })
-      .mockResolvedValueOnce({
-        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team-upstream.git",
-        stderr: "",
-      });
-    runUgitMock
-      .mockResolvedValueOnce({
-        stdout: [
-          "Pull requests for meow-team:",
-          "ID  State  CI      Base  Head          Title",
-          "9   open   queued  main  feature/test  Add ugit adapter",
-        ].join("\n"),
-        stderr: "",
-      })
-      .mockResolvedValueOnce({
-        stdout: "Synchronized meow-team:feature/test -> main.",
-        stderr: "",
-      });
-
+  it("rejects non-origin remotes before invoking ugit pull-request commands", async () => {
     await expect(
       synchronizeUgitPullRequest({
         repositoryPath: "/repo",
@@ -223,16 +200,9 @@ describe("synchronizeUgitPullRequest", () => {
         title: "Add ugit adapter",
         body: "Body",
       }),
-    ).resolves.toEqual({
-      url: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team-upstream#pull-request=9",
-    });
+    ).rejects.toThrow('ugit pull-request synchronization only supports the "origin" remote');
 
-    expect(runGitMock).toHaveBeenNthCalledWith(1, "/repo", ["remote", "get-url", "upstream"]);
-    expect(runGitMock).toHaveBeenNthCalledWith(2, "/repo", [
-      "remote",
-      "get-url",
-      "--push",
-      "upstream",
-    ]);
+    expect(runGitMock).not.toHaveBeenCalled();
+    expect(runUgitMock).not.toHaveBeenCalled();
   });
 });

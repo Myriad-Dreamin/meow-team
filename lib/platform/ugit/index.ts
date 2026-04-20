@@ -179,6 +179,16 @@ const buildUgitPullRequestUrl = (repositoryUrl: string, pullRequestId: number): 
   return appendRepositoryFragment(repositoryUrl, `pull-request=${pullRequestId}`);
 };
 
+const assertSupportedUgitPullRequestRemote = (remoteName: string): void => {
+  if (remoteName === DEFAULT_PUSH_REMOTE_NAME) {
+    return;
+  }
+
+  throw new Error(
+    `ugit pull-request synchronization only supports the "${DEFAULT_PUSH_REMOTE_NAME}" remote because the ugit CLI does not expose a remote selector for pr operations.`,
+  );
+};
+
 export const synchronizeUgitPullRequest = async ({
   repositoryPath,
   branchName,
@@ -188,6 +198,7 @@ export const synchronizeUgitPullRequest = async ({
   draft = false,
   remoteName = DEFAULT_PUSH_REMOTE_NAME,
 }: SynchronizeGitPlatformPullRequestArgs): Promise<GitPlatformPullRequest> => {
+  assertSupportedUgitPullRequestRemote(remoteName);
   const remote = await resolveUgitPushRemote({
     repositoryPath,
     remoteName,
