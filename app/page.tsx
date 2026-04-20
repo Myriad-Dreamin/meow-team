@@ -6,8 +6,8 @@ import {
 import { buildTeamNotificationsResponse } from "@/lib/team/notifications";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
 import { getTeamServerState } from "@/lib/team/server-state";
+import { getTeamRuntimeConfig } from "@/lib/config/runtime";
 import { teamConfig } from "@/team.config";
-import { teamRuntimeConfig } from "@/lib/config/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,7 @@ export default async function HomePage() {
     repositories: availableRepositories,
   });
 
-  const hasApiKey = teamRuntimeConfig.hasApiKey;
+  const hasApiKey = getTeamRuntimeConfig().hasApiKey;
   const initialNotifications = buildTeamNotificationsResponse({
     threads: threadSummaryLists.threads,
     target: teamConfig.notifications.target,

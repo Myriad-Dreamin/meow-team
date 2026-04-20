@@ -9,7 +9,7 @@ import {
   threadHasActiveDispatchAssignment,
 } from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
-import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
+import { getTeamRuntimeConfig, missingOpenAiConfigMessage } from "@/lib/config/runtime";
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     const body = runTeamSchema.parse(await request.json());
     const serverState = await getTeamServerState();
 
-    if (!teamRuntimeConfig.apiKey) {
+    if (!getTeamRuntimeConfig().apiKey) {
       return NextResponse.json(
         {
           error: missingOpenAiConfigMessage,

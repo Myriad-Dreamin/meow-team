@@ -1,6 +1,6 @@
 import "server-only";
 
-import { missingOpenAiConfigMessage, teamRuntimeConfig } from "@/lib/config/runtime";
+import { getTeamRuntimeConfig, missingOpenAiConfigMessage } from "@/lib/config/runtime";
 import { teamConfig } from "@/team.config";
 import {
   createInitialTeamRunState,
@@ -81,7 +81,7 @@ export const startAssignmentReplan = async ({
 }) => {
   const serverState = await getTeamServerState();
 
-  if (!teamRuntimeConfig.apiKey) {
+  if (!getTeamRuntimeConfig().apiKey) {
     throw new Error(missingOpenAiConfigMessage);
   }
 
