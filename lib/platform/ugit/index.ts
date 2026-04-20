@@ -186,9 +186,11 @@ export const synchronizeUgitPullRequest = async ({
   title,
   body,
   draft = false,
+  remoteName = DEFAULT_PUSH_REMOTE_NAME,
 }: SynchronizeGitPlatformPullRequestArgs): Promise<GitPlatformPullRequest> => {
   const remote = await resolveUgitPushRemote({
     repositoryPath,
+    remoteName,
   });
   const existingPullRequest = await findUgitPullRequest({
     repositoryPath,
