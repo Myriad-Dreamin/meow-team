@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { readTeamRuntimeConfig } from "./runtime";
+import { createTeamRuntimeConfigAccessor, readTeamRuntimeConfig } from "./runtime";
 
 const configPaths = {
   config: "/tmp/test-codex-config.toml",
@@ -18,6 +18,21 @@ const createReadFile = (files: Record<string, string>): typeof readFileSync => {
     error.code = "ENOENT";
     throw error;
   }) as typeof readFileSync;
+};
+
+const createStatFile = (mtimes: Record<string, number>): typeof statSync => {
+  return ((filePath: string) => {
+    const mtimeMs = mtimes[filePath];
+    if (typeof mtimeMs === "number") {
+      return {
+        mtimeMs,
+      };
+    }
+
+    const error = new Error(`ENOENT: ${filePath}`) as NodeJS.ErrnoException;
+    error.code = "ENOENT";
+    throw error;
+  }) as typeof statSync;
 };
 
 describe("readTeamRuntimeConfig", () => {
@@ -96,5 +111,124 @@ base_url = "https://codex.example.invalid"
         model: "env",
       },
     });
+  });
+});
+
+describe("createTeamRuntimeConfigAccessor", () => {
+  it("reuses the cached snapshot when the config mtime is unchanged", () => {
+    const files: Record<string, string> = {
+      [configPaths.config]: `
+model = "first-model"
+model_provider = "local"
+
+[model_providers.local]
+base_url = "https://first.example.invalid"
+`,
+      [configPaths.auth]: JSON.stringify({
+        OPENAI_API_KEY: "auth-key",
+      }),
+    };
+    const mtimes: Record<string, number> = {
+      [configPaths.config]: 10,
+    };
+    const getRuntimeConfig = createTeamRuntimeConfigAccessor({
+      env: {
+        NODE_ENV: "test",
+      },
+      readFile: createReadFile(files),
+      statFile: createStatFile(mtimes),
+      configPaths,
+    });
+
+    const first = getRuntimeConfig();
+    files[configPaths.config] = `
+model = "second-model"
+model_provider = "local"
+
+[model_providers.local]
+base_url = "https://second.example.invalid"
+`;
+
+    const second = getRuntimeConfig();
+
+    expect(second).toBe(first);
+    expect(second.model).toBe("first-model");
+    expect(second.baseUrl).toBe("https://first.example.invalid");
+  });
+
+  it("reloads the cached snapshot when the config mtime changes", () => {
+    const files: Record<string, string> = {
+      [configPaths.config]: `
+model = "first-model"
+model_provider = "local"
+
+[model_providers.local]
+base_url = "https://first.example.invalid"
+`,
+      [configPaths.auth]: JSON.stringify({
+        OPENAI_API_KEY: "auth-key",
+      }),
+    };
+    const mtimes: Record<string, number> = {
+      [configPaths.config]: 10,
+    };
+    const getRuntimeConfig = createTeamRuntimeConfigAccessor({
+      env: {
+        NODE_ENV: "test",
+      },
+      readFile: createReadFile(files),
+      statFile: createStatFile(mtimes),
+      configPaths,
+    });
+
+    const first = getRuntimeConfig();
+    files[configPaths.config] = `
+model = "second-model"
+model_provider = "local"
+
+[model_providers.local]
+base_url = "https://second.example.invalid"
+`;
+    mtimes[configPaths.config] = 11;
+
+    const second = getRuntimeConfig();
+
+    expect(second).not.toBe(first);
+    expect(second.model).toBe("second-model");
+    expect(second.baseUrl).toBe("https://second.example.invalid");
+  });
+
+  it("reloads after a missing config file later appears", () => {
+    const files: Record<string, string> = {
+      [configPaths.auth]: JSON.stringify({
+        OPENAI_API_KEY: "auth-key",
+      }),
+    };
+    const mtimes: Record<string, number> = {};
+    const getRuntimeConfig = createTeamRuntimeConfigAccessor({
+      env: {
+        NODE_ENV: "test",
+        OPENAI_MODEL: "env-model",
+      },
+      readFile: createReadFile(files),
+      statFile: createStatFile(mtimes),
+      configPaths,
+    });
+
+    const first = getRuntimeConfig();
+    files[configPaths.config] = `
+model = "codex-model"
+model_provider = "local"
+
+[model_providers.local]
+base_url = "https://codex.example.invalid"
+`;
+    mtimes[configPaths.config] = 25;
+
+    const second = getRuntimeConfig();
+
+    expect(first.model).toBe("env-model");
+    expect(second.model).toBe("codex-model");
+    expect(second.baseUrl).toBe("https://codex.example.invalid");
   });
 });

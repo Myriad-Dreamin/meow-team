@@ -1,6 +1,6 @@
 import "server-only";
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -11,6 +11,7 @@ export type TeamModelTextVerbosity = "low" | "medium" | "high";
 type TeamRuntimeSource = "codex-config" | "codex-auth" | "env" | "default" | "missing";
 
 type TeamRuntimeFileReader = typeof readFileSync;
+type TeamRuntimeFileStatReader = typeof statSync;
 
 type ParsedCodexConfig = {
   model: string | null;
@@ -301,6 +302,49 @@ export type TeamRuntimeConfig = {
   };
 };
 
+type TeamRuntimeConfigFileState = {
+  exists: boolean;
+  mtimeMs: number | null;
+};
+
+type TeamRuntimeConfigCacheEntry = {
+  configFileState: TeamRuntimeConfigFileState;
+  value: TeamRuntimeConfig;
+};
+
+const readConfigFileState = ({
+  configPath,
+  statFile,
+}: {
+  configPath: string;
+  statFile: TeamRuntimeFileStatReader;
+}): TeamRuntimeConfigFileState => {
+  try {
+    const stats = statFile(configPath) as Stats;
+    return {
+      exists: true,
+      mtimeMs: stats.mtimeMs,
+    };
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return {
+        exists: false,
+        mtimeMs: null,
+      };
+    }
+
+    throw error;
+  }
+};
+
+const isSameConfigFileState = (
+  left: TeamRuntimeConfigFileState,
+  right: TeamRuntimeConfigFileState,
+): boolean => {
+  return left.exists === right.exists && left.mtimeMs === right.mtimeMs;
+};
+
 export const readTeamRuntimeConfig = ({
   env = process.env,
   readFile = readFileSync,
@@ -352,7 +396,49 @@ export const readTeamRuntimeConfig = ({
   };
 };
 
-export const teamRuntimeConfig = readTeamRuntimeConfig();
+export const createTeamRuntimeConfigAccessor = ({
+  env = process.env,
+  readFile = readFileSync,
+  statFile = statSync,
+  configPaths = codexUserConfigPaths,
+}: {
+  env?: NodeJS.ProcessEnv;
+  readFile?: TeamRuntimeFileReader;
+  statFile?: TeamRuntimeFileStatReader;
+  configPaths?: typeof codexUserConfigPaths;
+} = {}): (() => TeamRuntimeConfig) => {
+  let cacheEntry: TeamRuntimeConfigCacheEntry | null = null;
+
+  return () => {
+    const configFileState = readConfigFileState({
+      configPath: configPaths.config,
+      statFile,
+    });
+
+    if (cacheEntry && isSameConfigFileState(cacheEntry.configFileState, configFileState)) {
+      return cacheEntry.value;
+    }
+
+    const value = readTeamRuntimeConfig({
+      env,
+      readFile,
+      configPaths,
+    });
+
+    cacheEntry = {
+      configFileState,
+      value,
+    };
+
+    return value;
+  };
+};
+
+const getCachedTeamRuntimeConfig = createTeamRuntimeConfigAccessor();
+
+export const getTeamRuntimeConfig = (): TeamRuntimeConfig => {
+  return getCachedTeamRuntimeConfig();
+};
 
 export const missingOpenAiConfigMessage = [
   "OpenAI-compatible credentials are required to run the Codex CLI harness.",

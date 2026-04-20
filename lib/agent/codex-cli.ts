@@ -5,8 +5,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { teamConfig } from "@/team.config";
-import { teamRuntimeConfig } from "@/lib/config/runtime";
+import { getTeamRuntimeConfig, type TeamRuntimeConfig } from "@/lib/config/runtime";
 import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamCodexEvent, TeamCodexLogSource } from "@/lib/team/types";
 
@@ -85,11 +84,13 @@ const buildCodexExecArgs = ({
   schemaPath,
   outputPath,
   prompt,
+  runtimeConfig,
 }: {
   worktree: Worktree;
   schemaPath: string;
   outputPath: string;
   prompt: string;
+  runtimeConfig: TeamRuntimeConfig;
 }): string[] => {
   const args = [
     "exec",
@@ -107,36 +108,42 @@ const buildCodexExecArgs = ({
     "--output-last-message",
     outputPath,
     "--model",
-    teamConfig.model.model,
+    runtimeConfig.model,
   ];
 
-  if (teamRuntimeConfig.modelProvider) {
-    args.push("-c", `model_provider=${quoteTomlString(teamRuntimeConfig.modelProvider)}`);
+  if (runtimeConfig.modelProvider) {
+    args.push("-c", `model_provider=${quoteTomlString(runtimeConfig.modelProvider)}`);
   }
 
-  args.push("-c", `model_reasoning_effort=${quoteTomlString(teamConfig.model.reasoningEffort)}`);
+  args.push("-c", `model_reasoning_effort=${quoteTomlString(runtimeConfig.reasoningEffort)}`);
   args.push("-c", "disable_response_storage=true");
   args.push("-c", 'network_access="enabled"');
 
-  if (teamRuntimeConfig.modelProvider && teamRuntimeConfig.baseUrl) {
+  if (runtimeConfig.modelProvider && runtimeConfig.baseUrl) {
     args.push(
       "-c",
-      `model_providers.${teamRuntimeConfig.modelProvider}.name=${quoteTomlString(teamRuntimeConfig.modelProvider)}`,
+      `model_providers.${runtimeConfig.modelProvider}.name=${quoteTomlString(runtimeConfig.modelProvider)}`,
     );
     args.push(
       "-c",
-      `model_providers.${teamRuntimeConfig.modelProvider}.base_url=${quoteTomlString(teamRuntimeConfig.baseUrl)}`,
+      `model_providers.${runtimeConfig.modelProvider}.base_url=${quoteTomlString(runtimeConfig.baseUrl)}`,
     );
-    args.push("-c", `model_providers.${teamRuntimeConfig.modelProvider}.wire_api="responses"`);
-    args.push("-c", `model_providers.${teamRuntimeConfig.modelProvider}.requires_openai_auth=true`);
+    args.push("-c", `model_providers.${runtimeConfig.modelProvider}.wire_api="responses"`);
+    args.push("-c", `model_providers.${runtimeConfig.modelProvider}.requires_openai_auth=true`);
   }
 
   args.push(prompt);
   return args;
 };
 
-const writeTemporaryAuthFile = async (codexHome: string): Promise<void> => {
-  if (!teamRuntimeConfig.apiKey) {
+const writeTemporaryAuthFile = async ({
+  codexHome,
+  runtimeConfig,
+}: {
+  codexHome: string;
+  runtimeConfig: TeamRuntimeConfig;
+}): Promise<void> => {
+  if (!runtimeConfig.apiKey) {
     return;
   }
 
@@ -145,7 +152,7 @@ const writeTemporaryAuthFile = async (codexHome: string): Promise<void> => {
     JSON.stringify(
       {
         auth_mode: "apikey",
-        OPENAI_API_KEY: teamRuntimeConfig.apiKey,
+        OPENAI_API_KEY: runtimeConfig.apiKey,
       },
       null,
       2,
@@ -194,9 +201,18 @@ const linkSkillEntries = async ({
   }
 };
 
-const prepareCodexHome = async ({ codexHome }: { codexHome: string }): Promise<void> => {
+const prepareCodexHome = async ({
+  codexHome,
+  runtimeConfig,
+}: {
+  codexHome: string;
+  runtimeConfig: TeamRuntimeConfig;
+}): Promise<void> => {
   await fs.mkdir(codexHome, { recursive: true });
-  await writeTemporaryAuthFile(codexHome);
+  await writeTemporaryAuthFile({
+    codexHome,
+    runtimeConfig,
+  });
 
   const skillsRoot = path.join(codexHome, "skills");
   await linkSkillEntries({
@@ -232,9 +248,11 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   const schemaPath = path.join(codexHome, "output-schema.json");
   const outputPath = path.join(codexHome, "output.json");
   let stdoutBuffer = "";
+  const runtimeConfig = getTeamRuntimeConfig();
 
   await prepareCodexHome({
     codexHome,
+    runtimeConfig,
   });
   const outputJsonSchema = z.toJSONSchema(responseSchema);
   await fs.writeFile(schemaPath, JSON.stringify(outputJsonSchema, null, 2), "utf8");
@@ -245,6 +263,7 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
       schemaPath,
       outputPath,
       prompt,
+      runtimeConfig,
     });
     let stderrBuffer = "";
     let stdoutRemainder = "";
@@ -332,7 +351,7 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
         env: {
           ...process.env,
           CODEX_HOME: codexHome,
-          OPENAI_API_KEY: teamRuntimeConfig.apiKey ?? process.env.OPENAI_API_KEY ?? "",
+          OPENAI_API_KEY: runtimeConfig.apiKey ?? process.env.OPENAI_API_KEY ?? "",
           OPENSPEC_TELEMETRY: "0",
         },
         stdio: ["ignore", "pipe", "pipe"],

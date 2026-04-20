@@ -1,6 +1,9 @@
 import path from "node:path";
 import { defineTeamConfig } from "@/lib/config/team";
-import { teamRuntimeConfig } from "@/lib/config/runtime";
+
+import { readTeamRuntimeConfig } from "@/lib/config/runtime";
+
+const teamRuntimeConfig = readTeamRuntimeConfig();
 
 export const teamConfig = defineTeamConfig({
   id: "owner-harness-team",
