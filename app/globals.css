@@ -921,7 +921,6 @@ main {
 .harness-form-field span {
   font-size: 0.84rem;
   color: var(--muted);
-  text-transform: uppercase;
   letter-spacing: 0.09em;
 }
 
