@@ -38,7 +38,7 @@ export function ThreadCommandComposer({
 
   return (
     <section className="thread-command-composer">
-      <label className="field feedback-field thread-command-field">
+      <label className="harness-form-field feedback-field thread-command-field">
         <ThreadCommandEditor
           ariaDescribedBy={describedBy || undefined}
           ariaLabel="Command"

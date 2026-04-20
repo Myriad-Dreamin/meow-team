@@ -548,7 +548,7 @@ export function TeamConsole({
           runs up to {workerCount} approved proposals at a time using reusable worktrees.
         </p>
         {hasRepositories ? (
-          <p className="field-hint">
+          <p className="harness-form-hint">
             Suggested repositories are ranked from prior Run Team requests. Every repository
             discovered from directories configured in `team.config.ts` stays selectable, and the
             picker keeps your current choice until you change it.
@@ -557,7 +557,7 @@ export function TeamConsole({
       </div>
 
       <form className="console-form" onSubmit={handleFormSubmit}>
-        <label className="field">
+        <label className="harness-form-field">
           <span>Request</span>
           <input name="prompt" readOnly type="hidden" value={prompt} />
           <TeamRequestEditor
@@ -568,7 +568,7 @@ export function TeamConsole({
             placeholder={REQUEST_PLACEHOLDER}
             value={prompt}
           />
-          <p className="field-hint" id={requestFieldHintId}>
+          <p className="harness-form-hint" id={requestFieldHintId}>
             Optional execution-mode prefixes:{" "}
             {TEAM_EXECUTION_MODE_DEFINITIONS.map((definition, index) => (
               <span key={definition.mode}>
@@ -583,7 +583,7 @@ export function TeamConsole({
           </p>
         </label>
 
-        <label className="field">
+        <label className="harness-form-field">
           <span>Request Title</span>
           <input
             name="title"
@@ -594,8 +594,8 @@ export function TeamConsole({
           />
         </label>
 
-        <div className="field-row">
-          <label className="field">
+        <div className="harness-form-row">
+          <label className="harness-form-field">
             <span>Thread ID</span>
             <input
               name="threadId"
@@ -607,7 +607,7 @@ export function TeamConsole({
           </label>
 
           {hasRepositories ? (
-            <label className="field">
+            <label className="harness-form-field">
               <span>Repository</span>
               <select
                 name="repositoryId"

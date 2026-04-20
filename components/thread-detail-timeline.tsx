@@ -1873,7 +1873,7 @@ export function ThreadDetailTimeline({
 
                               {canSendLaneFeedback ? (
                                 <div className="feedback-stack">
-                                  <label className="field feedback-field">
+                                  <label className="harness-form-field feedback-field">
                                     <span>Proposal Feedback</span>
                                     <textarea
                                       disabled={isSendingFeedback}
@@ -1916,7 +1916,7 @@ export function ThreadDetailTimeline({
                     {isCurrentAssignment ? (
                       canRestart ? (
                         <div className="feedback-stack thread-feedback">
-                          <label className="field feedback-field">
+                          <label className="harness-form-field feedback-field">
                             <span>Request-Group Feedback</span>
                             <textarea
                               disabled={
