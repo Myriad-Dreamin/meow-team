@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runGit } from "@/lib/cli-tools/git";
 import { writeRepositoryPlatformConfig } from "@/lib/config/repository";
 import {
+  normalizeRepositoryUrl,
   resolveConfiguredGitPlatformId,
   resolvePushRemote,
-  UnsupportedGitPlatformError,
 } from "@/lib/platform";
 
 const temporaryDirectories = new Set<string>();
@@ -64,8 +64,14 @@ describe("resolvePushRemote", () => {
     });
   });
 
-  it("fails early when ugit is configured", async () => {
+  it("uses the ugit adapter when ugit is configured locally", async () => {
     const repositoryPath = await createRepository();
+    await runGit(repositoryPath, [
+      "remote",
+      "add",
+      "origin",
+      "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+    ]);
     await writeRepositoryPlatformConfig({
       cwd: repositoryPath,
       platform: "ugit",
@@ -75,12 +81,12 @@ describe("resolvePushRemote", () => {
       resolvePushRemote({
         repositoryPath,
       }),
-    ).rejects.toThrowError(
-      new UnsupportedGitPlatformError({
-        platformId: "ugit",
-        repositoryPath,
-      }),
-    );
+    ).resolves.toEqual({
+      remoteName: "origin",
+      fetchUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+      pushUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+      repositoryUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team",
+    });
   });
 
   it("fails clearly for an unknown configured platform", async () => {
@@ -94,5 +100,13 @@ describe("resolvePushRemote", () => {
     ).rejects.toThrow(
       `Repository ${repositoryPath} is configured to use the unsupported "gitlab" platform.`,
     );
+  });
+});
+
+describe("normalizeRepositoryUrl", () => {
+  it("normalizes ugit remotes without routing them through GitHub-only logic", () => {
+    expect(
+      normalizeRepositoryUrl("ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git"),
+    ).toBe("ssh://ugit.example.test/srv/ugit/.data/repos/meow-team");
   });
 });
