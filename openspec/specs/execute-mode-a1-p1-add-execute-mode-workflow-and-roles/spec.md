@@ -11,19 +11,20 @@ artifacts without regressing the default coder/reviewer path.
 
 ### Requirement: Execute-mode requests persist normalized subtype metadata
 
-The system SHALL detect planning inputs that begin with `execution:`,
-`benchmark:`, or `experiment:`, normalize the prefix into explicit assignment
-mode metadata, and strip that prefix from canonical request-title,
-conventional-title, and proposal-branch inputs so execute mode remains
-machine-readable without leaking into the canonical request subject.
+The system SHALL detect planning inputs that begin, after any leading
+whitespace, with `/execution `, `/benchmark `, or `/experiment `, normalize the
+slash-prefixed command into explicit assignment mode metadata, and strip that
+command from canonical request-title, conventional-title, and proposal-branch
+inputs so execute mode remains machine-readable without leaking into the
+canonical request subject.
 
-#### Scenario: Prefixed request becomes an execute-mode assignment
+#### Scenario: Slash-prefixed request becomes an execute-mode assignment
 
-- **WHEN** a planning request starts with `benchmark: compare worktree reuse latency`
+- **WHEN** a planning request starts with `  /benchmark compare worktree reuse latency`
 - **THEN** the planner SHALL persist the assignment mode as `benchmark`
 - **AND** the canonical request-title input SHALL be `compare worktree reuse latency`
 - **AND** the generated proposal titles and branch-planning metadata SHALL omit
-  the `benchmark:` prefix
+  the `/benchmark ` command
 
 #### Scenario: Persisted execute mode survives approval routing
 
