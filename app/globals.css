@@ -1250,6 +1250,7 @@ main {
   font-size: 0.95rem;
   color: var(--text);
   background: transparent;
+  text-transform: none;
 }
 
 .thread-command-editor .CodeMirror,
@@ -1299,6 +1300,7 @@ main {
   padding: 0 16px;
   line-height: 1.55;
   white-space: pre-wrap;
+  text-transform: none;
 }
 
 .thread-command-editor .CodeMirror-placeholder,
@@ -1317,6 +1319,7 @@ main {
   line-height: 1.55;
   outline: none;
   resize: none;
+  text-transform: none;
 }
 
 .thread-command-editor .CodeMirror textarea {
@@ -1340,6 +1343,60 @@ main {
 .thread-command-editor[data-disabled="true"] .CodeMirror-cursors,
 .team-request-editor[data-disabled="true"] .CodeMirror-cursors {
   display: none;
+}
+
+.thread-command-editor .cm-header,
+.team-request-editor .cm-header {
+  color: #ffb86b;
+  font-weight: 700;
+}
+
+.thread-command-editor .cm-formatting-header,
+.team-request-editor .cm-formatting-header {
+  color: rgba(255, 184, 107, 0.82);
+}
+
+.thread-command-editor .cm-quote,
+.team-request-editor .cm-quote {
+  color: rgba(174, 196, 255, 0.78);
+}
+
+.thread-command-editor .cm-comment,
+.thread-command-editor .cm-formatting,
+.thread-command-editor .cm-meta,
+.team-request-editor .cm-comment,
+.team-request-editor .cm-formatting,
+.team-request-editor .cm-meta {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+.thread-command-editor .cm-em,
+.team-request-editor .cm-em {
+  color: #8be9fd;
+  font-style: italic;
+}
+
+.thread-command-editor .cm-strong,
+.team-request-editor .cm-strong {
+  color: #7df2c6;
+  font-weight: 700;
+}
+
+.thread-command-editor .cm-link,
+.thread-command-editor .cm-string.cm-url,
+.team-request-editor .cm-link,
+.team-request-editor .cm-string.cm-url {
+  color: #7ed0ff;
+}
+
+.thread-command-editor .cm-string,
+.team-request-editor .cm-string {
+  color: #ffd580;
+}
+
+.thread-command-editor .cm-url,
+.team-request-editor .cm-url {
+  color: rgba(126, 208, 255, 0.8);
 }
 
 .CodeMirror-hints {

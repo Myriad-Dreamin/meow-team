@@ -1,7 +1,12 @@
 import { createElement } from "react";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadCommandComposer } from "@/components/thread-command-composer";
+
+const rootDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const renderComposer = (props: Parameters<typeof ThreadCommandComposer>[0]) => {
   return renderToStaticMarkup(createElement(ThreadCommandComposer, props));
@@ -66,5 +71,15 @@ describe("ThreadCommandComposer", () => {
     expect(html).toContain('data-thread-command-editor="codemirror"');
     expect(html).not.toContain("<textarea");
     expect(html).toMatch(/<button[^>]*disabled/);
+  });
+
+  it("keeps thread command markdown styling and normal-casing rules scoped in global styles", () => {
+    const globalsCss = readFileSync(path.join(rootDirectory, "app", "globals.css"), "utf8");
+
+    expect(globalsCss).toContain(".thread-command-editor .cm-header");
+    expect(globalsCss).toContain(".thread-command-editor .cm-link");
+    expect(globalsCss).toContain(".thread-command-editor .CodeMirror-line");
+    expect(globalsCss).toContain(".thread-command-editor .CodeMirror textarea");
+    expect(globalsCss).toContain("text-transform: none;");
   });
 });
