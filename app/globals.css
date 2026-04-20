@@ -14,8 +14,8 @@
   --line: rgba(156, 176, 171, 0.18);
   --line-strong: rgba(194, 214, 208, 0.3);
   --text: #edf2ef;
-  --text-dim: rgba(237, 242, 239, 0.42);
-  --muted: #9aa8a3;
+  --text-dim: rgb(145, 152, 161);
+  --muted: rgb(145, 152, 161);
   --accent: #92ccb6;
   --accent-strong: #d0b47a;
   --accent-contrast: #08100f;
@@ -172,7 +172,6 @@ main {
 .timeline-copy,
 .warning-panel p,
 .hero-metrics p {
-  color: var(--muted);
   line-height: 1.6;
 }
 
@@ -1010,7 +1009,6 @@ textarea.harness-native-control:focus {
 .meta-detail,
 .repository-root-path {
   margin: 0;
-  color: var(--muted);
   line-height: 1.5;
   word-break: break-word;
 }

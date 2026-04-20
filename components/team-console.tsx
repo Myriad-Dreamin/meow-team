@@ -542,23 +542,10 @@ export function TeamConsole({
     <section className="console-panel">
       <div className="section-header">
         <h2>Continuous Assignment Console</h2>
-        <p className="section-copy">
-          Reuse the same thread ID to keep the planning conversation continuous. The planner creates
-          one or more proposals for the current request group, and the shared coding-review pool
-          runs up to {workerCount} approved proposals at a time using reusable worktrees.
-        </p>
-        {hasRepositories ? (
-          <p className="harness-form-hint">
-            Suggested repositories are ranked from prior Run Team requests. Every repository
-            discovered from directories configured in `team.config.ts` stays selectable, and the
-            picker keeps your current choice until you change it.
-          </p>
-        ) : null}
       </div>
 
       <form className="console-form" onSubmit={handleFormSubmit}>
         <label className="harness-form-field">
-          <span className="harness-form-label">Request</span>
           <input name="prompt" readOnly type="hidden" value={prompt} />
           <TeamRequestEditor
             ariaDescribedBy={requestFieldHintId}
@@ -568,19 +555,6 @@ export function TeamConsole({
             placeholder={REQUEST_PLACEHOLDER}
             value={prompt}
           />
-          <p className="harness-form-hint" id={requestFieldHintId}>
-            Optional execution-mode prefixes:{" "}
-            {TEAM_EXECUTION_MODE_DEFINITIONS.map((definition, index) => (
-              <span key={definition.mode}>
-                <code>{definition.prefix}</code>
-                {index < TEAM_EXECUTION_MODE_DEFINITIONS.length - 2
-                  ? ", "
-                  : index === TEAM_EXECUTION_MODE_DEFINITIONS.length - 2
-                    ? ", or "
-                    : "."}
-              </span>
-            ))}
-          </p>
         </label>
 
         <label className="harness-form-field">
