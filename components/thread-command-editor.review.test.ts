@@ -70,6 +70,37 @@ describe("ThreadCommandEditor review guard", () => {
     }
   });
 
+  it("loads markdown mode in the shared CodeMirror runtime without dropping hint addons", () => {
+    const editorSource = readFileSync(
+      path.join(rootDirectory, "components", "codemirror-text-editor.tsx"),
+      "utf8",
+    );
+
+    const placeholderImport = 'import("codemirror/addon/display/placeholder")';
+    const hintImport = 'import("codemirror/addon/hint/show-hint")';
+    const markdownImport = 'import("codemirror/mode/markdown/markdown")';
+
+    expect(editorSource).toContain(placeholderImport);
+    expect(editorSource).toContain(hintImport);
+    expect(editorSource).toContain(markdownImport);
+    expect(editorSource.indexOf(placeholderImport)).toBeLessThan(
+      editorSource.indexOf(markdownImport),
+    );
+    expect(editorSource.indexOf(hintImport)).toBeLessThan(editorSource.indexOf(markdownImport));
+    expect(editorSource).toContain('mode: "markdown"');
+  });
+
+  it("pins shared editor input behavior to normal text casing", () => {
+    const editorSource = readFileSync(
+      path.join(rootDirectory, "components", "codemirror-text-editor.tsx"),
+      "utf8",
+    );
+
+    expect(editorSource).toContain('input.setAttribute("autocapitalize", "off")');
+    expect(editorSource).toContain('input.setAttribute("autocorrect", "off")');
+    expect(editorSource).toContain("input.spellcheck = false");
+  });
+
   it("does not reopen autocomplete when proposal numbers refresh from polling", () => {
     const editorSource = readFileSync(
       path.join(rootDirectory, "components", "thread-command-editor.tsx"),

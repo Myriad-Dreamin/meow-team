@@ -40,6 +40,7 @@ declare module "codemirror" {
 
   export type EditorConfiguration = {
     lineWrapping?: boolean;
+    mode?: string;
     placeholder?: string;
     readOnly?: CodeMirrorReadOnly;
     screenReaderLabel?: string;
@@ -94,4 +95,10 @@ declare module "codemirror/addon/hint/show-hint" {
   const showHintAddon: undefined;
 
   export default showHintAddon;
+}
+
+declare module "codemirror/mode/markdown/markdown" {
+  const markdownMode: undefined;
+
+  export default markdownMode;
 }

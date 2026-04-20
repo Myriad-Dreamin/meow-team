@@ -49,6 +49,12 @@ const getEditorInput = (editor: CodeMirrorEditor): HTMLTextAreaElement => {
   return editor.getInputField();
 };
 
+const syncInputTextBehavior = (input: HTMLTextAreaElement) => {
+  input.spellcheck = false;
+  input.setAttribute("autocapitalize", "off");
+  input.setAttribute("autocorrect", "off");
+};
+
 const syncEditorAttributes = ({
   ariaDescribedBy,
   ariaLabel,
@@ -68,11 +74,13 @@ const syncEditorAttributes = ({
   updateAttribute(wrapper, "aria-describedby", ariaDescribedBy);
 
   const input = getEditorInput(editor);
+  syncInputTextBehavior(input);
   input.setAttribute("aria-label", ariaLabel);
   input.setAttribute("aria-disabled", disabled ? "true" : "false");
   updateAttribute(input, "aria-describedby", ariaDescribedBy);
 
   const sourceTextArea = editor.getTextArea();
+  syncInputTextBehavior(sourceTextArea);
   sourceTextArea.setAttribute("aria-label", ariaLabel);
   sourceTextArea.setAttribute("aria-disabled", disabled ? "true" : "false");
   updateAttribute(sourceTextArea, "aria-describedby", ariaDescribedBy);
@@ -104,6 +112,7 @@ const loadCodeMirror = async () => {
     import("codemirror"),
     import("codemirror/addon/display/placeholder"),
     import("codemirror/addon/hint/show-hint"),
+    import("codemirror/mode/markdown/markdown"),
   ]);
 
   return resolveCodeMirrorRuntime(codeMirrorModule);
@@ -228,7 +237,7 @@ export function CodeMirrorTextEditor({
 
     const initialize = async () => {
       const textarea = document.createElement("textarea");
-      textarea.spellcheck = false;
+      syncInputTextBehavior(textarea);
       textarea.value = valueRef.current;
       hostElement.replaceChildren(textarea);
 
@@ -241,6 +250,7 @@ export function CodeMirrorTextEditor({
 
         const options: CodeMirrorEditorConfiguration = {
           lineWrapping: true,
+          mode: "markdown",
           placeholder: placeholderRef.current,
           readOnly: disabledRef.current ? "nocursor" : false,
           screenReaderLabel: ariaLabelRef.current,
