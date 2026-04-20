@@ -14,8 +14,7 @@ type RootLayoutProps = Readonly<{
   children: ReactNode;
 }>;
 
-const SYSTEM_SANS_STACK =
-  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const SYSTEM_SANS_STACK = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 const rootFontStyle: CSSProperties = {
   ["--font-sans" as string]: SYSTEM_SANS_STACK,
