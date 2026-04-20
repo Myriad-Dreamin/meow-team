@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useState } from "react";
 import { ClientExceptionSurface } from "@/components/client-exception-surface";
+import styles from "./client-exception-surface.module.css";
 import {
   formatUnhandledRejectionException,
   formatWindowErrorException,
@@ -46,7 +47,7 @@ export function ClientExceptionReporter() {
   }
 
   return (
-    <div className="client-exception-overlay">
+    <div className={styles["client-exception-overlay"]}>
       <ClientExceptionSurface
         actions={[
           {

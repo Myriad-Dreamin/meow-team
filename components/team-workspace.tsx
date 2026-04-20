@@ -3,6 +3,7 @@
 import { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 import { TeamConsole } from "@/components/team-console";
 import { TeamStatusBar } from "@/components/team-status-bar";
+import statusBarStyles from "@/components/team-status-bar.module.css";
 import { resolveTeamWorkspaceShortcutTarget } from "@/components/team-workspace-shortcuts";
 import {
   getNextTeamWorkspaceSidebarVisibility,
@@ -810,12 +811,16 @@ export function TeamWorkspace({
               </div>
               <button
                 aria-pressed={resolvedSelectedTab.type === "run"}
-                className={`workspace-icon-button ${resolvedSelectedTab.type === "run" ? "workspace-icon-button-active" : ""}`}
+                className={`${statusBarStyles["workspace-icon-button"]} ${
+                  resolvedSelectedTab.type === "run"
+                    ? statusBarStyles["workspace-icon-button-active"]
+                    : ""
+                }`}
                 title="Run Team"
                 type="button"
                 onClick={handleSelectRunTab}
               >
-                <PlusIcon className="workspace-icon" />
+                <PlusIcon className={statusBarStyles["workspace-icon"]} />
                 <span className="sr-only">Run Team</span>
               </button>
             </div>

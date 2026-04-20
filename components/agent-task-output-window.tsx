@@ -13,6 +13,7 @@ import {
 } from "@/components/thread-view-utils";
 import type { TeamThreadDetail } from "@/lib/team/history";
 import type { TeamCodexLogCursorEntry, TeamCodexLogPageInfo } from "@/lib/team/types";
+import styles from "./agent-task-output-window.module.css";
 
 type AgentTaskOutputWindowProps = {
   threadId: string;
@@ -414,15 +415,15 @@ export function AgentTaskOutputWindow({
       : "Streaming";
 
   return (
-    <div className="task-output-window">
-      <header className="task-output-window-header">
-        <div className="task-output-window-copy">
+    <div className={styles["task-output-window"]}>
+      <header className={styles["task-output-window-header"]}>
+        <div className={styles["task-output-window-copy"]}>
           <p className="eyebrow">Agent Task Output</p>
           <h1>{heading}</h1>
           {subheading ? <p>{subheading}</p> : null}
         </div>
 
-        <div className="task-output-window-meta">
+        <div className={styles["task-output-window-meta"]}>
           <span title={threadId}>Thread {threadId.slice(0, 8)}</span>
           {roleId ? <span>{formatRoleName(roleId)}</span> : null}
           {typeof assignmentNumber === "number" ? <span>Assignment {assignmentNumber}</span> : null}
@@ -430,13 +431,13 @@ export function AgentTaskOutputWindow({
         </div>
       </header>
 
-      <div className="task-output-window-body">
+      <div className={styles["task-output-window-body"]}>
         {logError ? <p className="error-callout">{logError}</p> : null}
         {detailError ? <p className="error-callout">{detailError}</p> : null}
 
-        <section className="task-output-window-panel">
-          <div className="task-output-window-panel-head">
-            <div className="task-output-window-panel-copy">
+        <section className={styles["task-output-window-panel"]}>
+          <div className={styles["task-output-window-panel-head"]}>
+            <div className={styles["task-output-window-panel-copy"]}>
               <span
                 className={`status-pill ${
                   streamStateLabel === "Finished" ? resultStatusClassName : "status-running"
@@ -444,32 +445,30 @@ export function AgentTaskOutputWindow({
               >
                 {streamStateLabel}
               </span>
-              <span className="task-output-window-source-label">stdout / stderr</span>
+              <span className={styles["task-output-window-source-label"]}>stdout / stderr</span>
             </div>
             {resultUpdatedAt ? <span>Updated {formatTimestamp(resultUpdatedAt)}</span> : null}
           </div>
 
-          <div className="task-output-window-stream" ref={streamRef}>
+          <div className={styles["task-output-window-stream"]} ref={streamRef}>
             {streamGroups.length > 0 ? (
-              <div className="task-output-window-stream-list">
+              <div className={styles["task-output-window-stream-list"]}>
                 {streamGroups.map((group) => (
                   <article
-                    className={`task-output-window-log ${
-                      group.source === "stderr" ? "task-output-window-log-stderr" : ""
-                    }`}
+                    className={`${styles["task-output-window-log"]} ${group.source === "stderr" ? styles["task-output-window-log-stderr"] : ""}` }
                     key={group.id}
                   >
-                    <div className="task-output-window-log-meta">
-                      <span className="task-output-window-source-label">{group.source}</span>
+                    <div className={styles["task-output-window-log-meta"]}>
+                      <span className={styles["task-output-window-source-label"]}>{group.source}</span>
                       <span>{describeLogEntryContext(group.contextEntry)}</span>
                       <span>{formatTimestamp(group.startedAt)}</span>
                     </div>
-                    <pre className="task-output-window-pre">{group.message}</pre>
+                    <pre className={styles["task-output-window-pre"]}>{group.message}</pre>
                   </article>
                 ))}
               </div>
             ) : (
-              <p className="task-output-window-empty">
+              <p className={styles["task-output-window-empty"]}>
                 {isLoadingLogs
                   ? "Loading stdout / stderr output..."
                   : "No stdout or stderr output has been recorded for this task yet."}
@@ -479,9 +478,9 @@ export function AgentTaskOutputWindow({
         </section>
 
         {showResultCard ? (
-          <section className="task-output-window-panel task-output-window-result">
-            <div className="task-output-window-panel-head">
-              <div className="task-output-window-panel-copy">
+          <section className={`${styles["task-output-window-panel"]} ${styles["task-output-window-result"]}`}>
+            <div className={styles["task-output-window-panel-head"]}>
+              <div className={styles["task-output-window-panel-copy"]}>
                 <p className="eyebrow">
                   {laneIsTerminal || assignmentIsTerminal ? "Result" : "Task Status"}
                 </p>
@@ -490,14 +489,14 @@ export function AgentTaskOutputWindow({
               {resultUpdatedAt ? <span>{formatTimestamp(resultUpdatedAt)}</span> : null}
             </div>
 
-            <p className="task-output-window-result-copy">{resultSummary}</p>
+            <p className={styles["task-output-window-result-copy"]}>{resultSummary}</p>
 
             {lane?.pullRequest ? (
-              <div className="task-output-window-meta">
+              <div className={styles["task-output-window-meta"]}>
                 <span>{getLanePullRequestStatusLabel(lane)}</span>
                 {lane.pullRequest.url ? (
                   <a
-                    className="thread-chat-link"
+                    className={styles["task-output-window-link"]}
                     href={lane.pullRequest.url}
                     rel="noreferrer"
                     target="_blank"

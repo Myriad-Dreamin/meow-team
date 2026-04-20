@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { ClientExceptionSurface } from "@/components/client-exception-surface";
+import exceptionStyles from "@/components/client-exception-surface.module.css";
 import { formatBoundaryException } from "@/lib/client-exception";
 import "codemirror/lib/codemirror.css";
 import "codemirror/addon/hint/show-hint.css";
@@ -22,7 +23,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
   return (
     <html lang="en">
       <body>
-        <main className="client-exception-page-shell">
+        <main className={exceptionStyles["client-exception-page-shell"]}>
           <ClientExceptionSurface
             actions={[
               {

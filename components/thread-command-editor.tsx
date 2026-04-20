@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { CodeMirrorTextEditor } from "@/components/codemirror-text-editor";
+import styles from "./codemirror-text-editor.module.css";
 import { getThreadCommandAutocomplete } from "@/lib/team/thread-command";
 
 type ThreadCommandEditorProps = {
@@ -47,12 +48,12 @@ export function ThreadCommandEditor({
       ariaLabel={ariaLabel}
       autocomplete={autocomplete}
       disabled={disabled}
-      editorClassName="thread-command-editor"
+      editorClassName={styles["thread-command-editor"]}
       editorDataAttributeName="data-thread-command-editor"
       editorDataAttributeValue="codemirror"
       onChange={onChange}
       placeholder={placeholder}
-      shellClassName="thread-command-editor-shell"
+      shellClassName={styles["thread-command-editor-shell"]}
       value={value}
     />
   );

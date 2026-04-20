@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { ClientExceptionSurface } from "@/components/client-exception-surface";
+import exceptionStyles from "@/components/client-exception-surface.module.css";
 import { formatBoundaryException } from "@/lib/client-exception";
 
 type AppErrorProps = Readonly<{
@@ -17,7 +18,7 @@ export default function AppError({ error, reset }: AppErrorProps) {
   }, [error]);
 
   return (
-    <main className="client-exception-page-shell">
+    <main className={exceptionStyles["client-exception-page-shell"]}>
       <ClientExceptionSurface
         actions={[
           {
