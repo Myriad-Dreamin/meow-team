@@ -2,6 +2,7 @@ import "server-only";
 
 import path from "node:path";
 import { runGit } from "@/lib/cli-tools/git";
+import { listGitWorktrees } from "@/lib/git/ops";
 import { runUgit } from "@/lib/platform/ugit/cli";
 import type {
   GitPlatformAdapter,
@@ -189,27 +190,38 @@ const assertSupportedUgitPullRequestRemote = (remoteName: string): void => {
   );
 };
 
-const buildUgitPullRequestMutationArgs = ({
+const resolveUgitPullRequestRepositoryPath = async ({
+  repositoryPath,
   branchName,
+  baseBranch,
+}: Pick<
+  SynchronizeGitPlatformPullRequestArgs,
+  "repositoryPath" | "branchName" | "baseBranch"
+>): Promise<string> => {
+  const worktrees = await listGitWorktrees(repositoryPath);
+  const pullRequestRepositoryPath = worktrees.find(
+    (worktree) => worktree.branchName === branchName,
+  )?.worktreePath;
+
+  if (pullRequestRepositoryPath) {
+    return pullRequestRepositoryPath;
+  }
+
+  throw new Error(
+    `ugit pull-request synchronization requires branch "${branchName}" to be checked out in a worktree so ugit can target "${baseBranch}" without inferring the wrong source branch.`,
+  );
+};
+
+const buildUgitPullRequestMutationArgs = ({
   baseBranch,
   title,
   body,
   draft,
 }: Pick<
   SynchronizeGitPlatformPullRequestArgs,
-  "branchName" | "baseBranch" | "title" | "body" | "draft"
+  "baseBranch" | "title" | "body" | "draft"
 >): string[] => {
-  return [
-    "--base",
-    baseBranch,
-    "--head",
-    branchName,
-    "--title",
-    title,
-    "--body",
-    body,
-    ...(draft ? ["--draft"] : []),
-  ];
+  return ["--base", baseBranch, "--title", title, "--body", body, ...(draft ? ["--draft"] : [])];
 };
 
 export const synchronizeUgitPullRequest = async ({
@@ -222,12 +234,17 @@ export const synchronizeUgitPullRequest = async ({
   remoteName = DEFAULT_PUSH_REMOTE_NAME,
 }: SynchronizeGitPlatformPullRequestArgs): Promise<GitPlatformPullRequest> => {
   assertSupportedUgitPullRequestRemote(remoteName);
-  const remote = await resolveUgitPushRemote({
+  const pullRequestRepositoryPath = await resolveUgitPullRequestRepositoryPath({
     repositoryPath,
+    branchName,
+    baseBranch,
+  });
+  const remote = await resolveUgitPushRemote({
+    repositoryPath: pullRequestRepositoryPath,
     remoteName,
   });
   const existingPullRequest = await findUgitPullRequest({
-    repositoryPath,
+    repositoryPath: pullRequestRepositoryPath,
     branchName,
     baseBranch,
   });
@@ -239,11 +256,10 @@ export const synchronizeUgitPullRequest = async ({
       );
     }
 
-    await runUgit(repositoryPath, [
+    await runUgit(pullRequestRepositoryPath, [
       "pr",
       "sync",
       ...buildUgitPullRequestMutationArgs({
-        branchName,
         baseBranch,
         title,
         body,
@@ -256,11 +272,10 @@ export const synchronizeUgitPullRequest = async ({
     };
   }
 
-  const { stdout } = await runUgit(repositoryPath, [
+  const { stdout } = await runUgit(pullRequestRepositoryPath, [
     "pr",
     "create",
     ...buildUgitPullRequestMutationArgs({
-      branchName,
       baseBranch,
       title,
       body,
