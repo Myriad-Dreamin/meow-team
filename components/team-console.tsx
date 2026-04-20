@@ -558,7 +558,7 @@ export function TeamConsole({
 
       <form className="console-form" onSubmit={handleFormSubmit}>
         <label className="harness-form-field">
-          <span>Request</span>
+          <span className="harness-form-label">Request</span>
           <input name="prompt" readOnly type="hidden" value={prompt} />
           <TeamRequestEditor
             ariaDescribedBy={requestFieldHintId}
@@ -584,8 +584,9 @@ export function TeamConsole({
         </label>
 
         <label className="harness-form-field">
-          <span>Request Title</span>
+          <span className="harness-form-label">Request Title</span>
           <input
+            className="harness-native-control"
             name="title"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
@@ -596,8 +597,9 @@ export function TeamConsole({
 
         <div className="harness-form-row">
           <label className="harness-form-field">
-            <span>Thread ID</span>
+            <span className="harness-form-label">Thread ID</span>
             <input
+              className="harness-native-control"
               name="threadId"
               value={threadId}
               onChange={(event) => setThreadId(event.target.value)}
@@ -608,8 +610,9 @@ export function TeamConsole({
 
           {hasRepositories ? (
             <label className="harness-form-field">
-              <span>Repository</span>
+              <span className="harness-form-label">Repository</span>
               <select
+                className="harness-native-control"
                 name="repositoryId"
                 value={repositoryId}
                 onChange={(event) =>

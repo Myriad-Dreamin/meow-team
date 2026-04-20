@@ -73,6 +73,24 @@ describe("ThreadCommandComposer", () => {
     expect(html).toMatch(/<button[^>]*disabled/);
   });
 
+  it("keeps the command editor outside the harness native-control styling path", () => {
+    const html = renderComposer({
+      disabledReason: null,
+      isPending: false,
+      notice: null,
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      proposalNumbers: [1],
+      value: "/approve 1",
+    });
+
+    const editorTag = html.match(/<div[^>]*data-thread-command-editor="codemirror"[^>]*>/)?.[0];
+
+    expect(editorTag).toBeDefined();
+    expect(editorTag).not.toContain("harness-native-control");
+    expect(html).not.toContain("harness-form-label");
+  });
+
   it("keeps thread command markdown styling scoped in the editor CSS module", () => {
     const editorCss = readFileSync(
       path.join(rootDirectory, "components", "codemirror-text-editor.module.css"),

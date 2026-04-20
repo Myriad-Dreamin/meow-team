@@ -13,6 +13,29 @@ const EMPTY_REPOSITORY_PICKER: TeamRepositoryPickerModel = {
   remainingRepositories: [],
   orderedRepositories: [],
 };
+const REPOSITORY_PICKER: TeamRepositoryPickerModel = {
+  suggestedRepositories: [
+    {
+      id: "repo-alpha",
+      name: "repo-alpha",
+      path: "/tmp/repo-alpha",
+      relativePath: "repo-alpha",
+      rootId: "workspace",
+      rootLabel: "Workspace",
+    },
+  ],
+  remainingRepositories: [],
+  orderedRepositories: [
+    {
+      id: "repo-alpha",
+      name: "repo-alpha",
+      path: "/tmp/repo-alpha",
+      relativePath: "repo-alpha",
+      rootId: "workspace",
+      rootLabel: "Workspace",
+    },
+  ],
+};
 
 const renderConsole = (props: Partial<Parameters<typeof TeamConsole>[0]> = {}) => {
   return renderToStaticMarkup(
@@ -54,6 +77,29 @@ describe("TeamConsole request editor", () => {
     expect(html).toContain('data-team-request-editor="codemirror"');
     expect(html).toContain('data-disabled="true"');
     expect(html).toMatch(/<button[^>]*disabled/);
+  });
+
+  it("uses explicit native-control hooks for native fields without styling the request editor", () => {
+    const html = renderConsole({
+      repositoryPicker: REPOSITORY_PICKER,
+    });
+
+    const requestEditorTag = html.match(
+      /<div[^>]*data-team-request-editor="codemirror"[^>]*>/,
+    )?.[0];
+    const titleInputTag = html.match(/<input[^>]*name="title"[^>]*>/)?.[0];
+    const threadIdInputTag = html.match(/<input[^>]*name="threadId"[^>]*>/)?.[0];
+    const repositorySelectTag = html.match(/<select[^>]*name="repositoryId"[^>]*>/)?.[0];
+
+    expect(html).toContain('<span class="harness-form-label">Request</span>');
+    expect(html).toContain('<span class="harness-form-label">Request Title</span>');
+    expect(html).toContain('<span class="harness-form-label">Thread ID</span>');
+    expect(html).toContain('<span class="harness-form-label">Repository</span>');
+    expect(requestEditorTag).toBeDefined();
+    expect(requestEditorTag).not.toContain("harness-native-control");
+    expect(titleInputTag).toContain('class="harness-native-control"');
+    expect(threadIdInputTag).toContain('class="harness-native-control"');
+    expect(repositorySelectTag).toContain('class="harness-native-control"');
   });
 
   it("keeps request editor markdown styling scoped in the editor CSS module", () => {
