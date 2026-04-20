@@ -85,8 +85,18 @@ describe("publishUgitBranch", () => {
 });
 
 describe("synchronizeUgitPullRequest", () => {
-  it("creates a pull request when none exists yet", async () => {
+  it("creates a pull request from the dedicated branch worktree when none exists yet", async () => {
     runGitMock
+      .mockResolvedValueOnce({
+        stdout: [
+          "worktree /repo",
+          "branch refs/heads/main",
+          "",
+          "worktree /worktrees/feature-test",
+          "branch refs/heads/feature/test",
+        ].join("\n"),
+        stderr: "",
+      })
       .mockResolvedValueOnce({
         stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
         stderr: "",
@@ -118,7 +128,19 @@ describe("synchronizeUgitPullRequest", () => {
       url: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#pull-request=7",
     });
 
-    expect(runUgitMock).toHaveBeenNthCalledWith(1, "/repo", [
+    expect(runGitMock).toHaveBeenNthCalledWith(1, "/repo", ["worktree", "list", "--porcelain"]);
+    expect(runGitMock).toHaveBeenNthCalledWith(2, "/worktrees/feature-test", [
+      "remote",
+      "get-url",
+      "origin",
+    ]);
+    expect(runGitMock).toHaveBeenNthCalledWith(3, "/worktrees/feature-test", [
+      "remote",
+      "get-url",
+      "--push",
+      "origin",
+    ]);
+    expect(runUgitMock).toHaveBeenNthCalledWith(1, "/worktrees/feature-test", [
       "pr",
       "list",
       "--state",
@@ -128,7 +150,7 @@ describe("synchronizeUgitPullRequest", () => {
       "--head",
       "feature/test",
     ]);
-    expect(runUgitMock).toHaveBeenNthCalledWith(2, "/repo", [
+    expect(runUgitMock).toHaveBeenNthCalledWith(2, "/worktrees/feature-test", [
       "pr",
       "create",
       "--base",
@@ -141,8 +163,18 @@ describe("synchronizeUgitPullRequest", () => {
     ]);
   });
 
-  it("syncs an existing pull request instead of creating a duplicate", async () => {
+  it("syncs an existing pull request from the dedicated branch worktree", async () => {
     runGitMock
+      .mockResolvedValueOnce({
+        stdout: [
+          "worktree /repo",
+          "branch refs/heads/main",
+          "",
+          "worktree /worktrees/feature-test",
+          "branch refs/heads/feature/test",
+        ].join("\n"),
+        stderr: "",
+      })
       .mockResolvedValueOnce({
         stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
         stderr: "",
@@ -178,7 +210,17 @@ describe("synchronizeUgitPullRequest", () => {
       url: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#pull-request=7",
     });
 
-    expect(runUgitMock).toHaveBeenNthCalledWith(2, "/repo", [
+    expect(runUgitMock).toHaveBeenNthCalledWith(1, "/worktrees/feature-test", [
+      "pr",
+      "list",
+      "--state",
+      "all",
+      "--base",
+      "main",
+      "--head",
+      "feature/test",
+    ]);
+    expect(runUgitMock).toHaveBeenNthCalledWith(2, "/worktrees/feature-test", [
       "pr",
       "sync",
       "--base",
@@ -188,6 +230,87 @@ describe("synchronizeUgitPullRequest", () => {
       "--body",
       "Body",
     ]);
+  });
+
+  it("uses the dedicated branch worktree without passing unsupported head flags", async () => {
+    runGitMock
+      .mockResolvedValueOnce({
+        stdout: [
+          "worktree /repo",
+          "branch refs/heads/main",
+          "",
+          "worktree /worktrees/feature-test",
+          "branch refs/heads/feature/test",
+        ].join("\n"),
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+        stderr: "",
+      });
+    runUgitMock
+      .mockResolvedValueOnce({
+        stdout: "No pull requests found in meow-team.",
+        stderr: "",
+      })
+      .mockImplementationOnce(async (_repositoryPath: string, args: string[]) => {
+        if (args.includes("--head")) {
+          throw new Error("unknown option --head");
+        }
+
+        return {
+          stdout: "Created pull request #7 for meow-team:feature/test -> main.",
+          stderr: "",
+        };
+      });
+
+    await expect(
+      synchronizeUgitPullRequest({
+        repositoryPath: "/repo",
+        branchName: "feature/test",
+        baseBranch: "main",
+        title: "Add ugit adapter",
+        body: "Body",
+      }),
+    ).resolves.toEqual({
+      url: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#pull-request=7",
+    });
+
+    expect(runUgitMock).toHaveBeenNthCalledWith(2, "/worktrees/feature-test", [
+      "pr",
+      "create",
+      "--base",
+      "main",
+      "--title",
+      "Add ugit adapter",
+      "--body",
+      "Body",
+    ]);
+  });
+
+  it("fails clearly when the dedicated branch is not checked out in any worktree", async () => {
+    runGitMock.mockResolvedValueOnce({
+      stdout: ["worktree /repo", "branch refs/heads/main"].join("\n"),
+      stderr: "",
+    });
+
+    await expect(
+      synchronizeUgitPullRequest({
+        repositoryPath: "/repo",
+        branchName: "feature/test",
+        baseBranch: "main",
+        title: "Add ugit adapter",
+        body: "Body",
+      }),
+    ).rejects.toThrow(
+      'ugit pull-request synchronization requires branch "feature/test" to be checked out in a worktree',
+    );
+
+    expect(runUgitMock).not.toHaveBeenCalled();
   });
 
   it("rejects non-origin remotes before invoking ugit pull-request commands", async () => {
