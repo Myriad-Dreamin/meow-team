@@ -108,10 +108,11 @@ describe("ThreadCommandEditor review guard", () => {
     );
 
     const proposalRefreshEffect = editorSource.match(
-      /useEffect\(\(\) => \{\s*proposalNumbersRef\.current = proposalNumbers;(?<body>[\s\S]*?)\}, \[proposalNumbers\]\);/,
+      /useEffect\(\(\) => \{\s*proposalNumbersRef\.current = proposalNumbers;([\s\S]*?)\}, \[proposalNumbers\]\);/,
     );
+    const proposalRefreshEffectBody = proposalRefreshEffect?.[1];
 
-    expect(proposalRefreshEffect?.groups?.body).toBeDefined();
-    expect(proposalRefreshEffect?.groups?.body).not.toContain("showAutocomplete");
+    expect(proposalRefreshEffectBody).toBeDefined();
+    expect(proposalRefreshEffectBody).not.toContain("showAutocomplete");
   });
 });
