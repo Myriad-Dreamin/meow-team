@@ -1,0 +1,216 @@
+.thread-command-editor,
+.team-request-editor {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(6, 16, 30, 0.85);
+  overflow: hidden;
+}
+
+.thread-command-editor {
+  height: 48px;
+}
+
+.team-request-editor {
+  min-height: 184px;
+}
+
+.thread-command-editor:focus-within,
+.team-request-editor:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 4px rgba(125, 242, 198, 0.08);
+}
+
+.thread-command-editor[data-disabled="true"],
+.team-request-editor[data-disabled="true"] {
+  opacity: 0.72;
+  background: rgba(6, 16, 30, 0.58);
+}
+
+.thread-command-editor[data-disabled="true"]:focus-within,
+.team-request-editor[data-disabled="true"]:focus-within {
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.thread-command-editor[data-status="loading"][data-has-content="false"]::after,
+.thread-command-editor[data-status="error"][data-has-content="false"]::after,
+.team-request-editor[data-status="loading"][data-has-content="false"]::after,
+.team-request-editor[data-status="error"][data-has-content="false"]::after {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset: 0;
+  padding: 14px 16px;
+  color: rgba(227, 239, 246, 0.42);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.thread-command-editor-shell {
+  min-height: 96px;
+}
+
+.team-request-editor-shell {
+  min-height: 184px;
+}
+
+.thread-command-editor :global(.CodeMirror),
+.team-request-editor :global(.CodeMirror) {
+  position: relative;
+  display: block;
+  height: auto;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--text);
+  background: transparent;
+  text-transform: none;
+}
+
+.thread-command-editor :global(.CodeMirror),
+.thread-command-editor :global(.CodeMirror-scroll),
+.thread-command-editor :global(.CodeMirror-sizer),
+.thread-command-editor :global(.CodeMirror-lines),
+.thread-command-editor :global(.CodeMirror) pre:global(.CodeMirror-placeholder) {
+  min-height: 96px;
+}
+
+.team-request-editor :global(.CodeMirror),
+.team-request-editor :global(.CodeMirror-scroll),
+.team-request-editor :global(.CodeMirror-sizer),
+.team-request-editor :global(.CodeMirror-lines),
+.team-request-editor :global(.CodeMirror) pre:global(.CodeMirror-placeholder) {
+  min-height: 184px;
+}
+
+.thread-command-editor :global(.CodeMirror-scroll),
+.team-request-editor :global(.CodeMirror-scroll) {
+  position: relative;
+}
+
+.thread-command-editor :global(.CodeMirror-sizer),
+.thread-command-editor :global(.CodeMirror-lines),
+.thread-command-editor :global(.CodeMirror) pre:global(.CodeMirror-placeholder),
+.team-request-editor :global(.CodeMirror-sizer),
+.team-request-editor :global(.CodeMirror-lines),
+.team-request-editor :global(.CodeMirror) pre:global(.CodeMirror-placeholder) {
+  position: relative;
+}
+
+.thread-command-editor :global(.CodeMirror-focused),
+.team-request-editor :global(.CodeMirror-focused) {
+  outline: none;
+}
+
+.thread-command-editor :global(.CodeMirror-lines),
+.team-request-editor :global(.CodeMirror-lines) {
+  padding: 14px 0;
+}
+
+.thread-command-editor :global(.CodeMirror-line),
+.thread-command-editor :global(.CodeMirror-placeholder),
+.team-request-editor :global(.CodeMirror-line),
+.team-request-editor :global(.CodeMirror-placeholder) {
+  padding: 0 16px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  text-transform: none;
+}
+
+.thread-command-editor :global(.CodeMirror-placeholder),
+.team-request-editor :global(.CodeMirror-placeholder) {
+  color: rgba(227, 239, 246, 0.42);
+  pointer-events: none;
+}
+
+.thread-command-editor :global(.CodeMirror) textarea,
+.team-request-editor :global(.CodeMirror) textarea {
+  width: 100%;
+  border: 0;
+  padding: 14px 16px;
+  color: inherit;
+  font: inherit;
+  line-height: 1.55;
+  outline: none;
+  resize: none;
+  text-transform: none;
+}
+
+.thread-command-editor :global(.CodeMirror) textarea {
+  min-height: 96px;
+}
+
+.team-request-editor :global(.CodeMirror) textarea {
+  min-height: 184px;
+}
+
+.thread-command-editor :global(.CodeMirror-cursor),
+.team-request-editor :global(.CodeMirror-cursor) {
+  border-left: 1px solid rgba(227, 239, 246, 0.9);
+}
+
+.thread-command-editor[data-disabled="true"] :global(.CodeMirror) textarea,
+.team-request-editor[data-disabled="true"] :global(.CodeMirror) textarea {
+  cursor: default;
+}
+
+.thread-command-editor[data-disabled="true"] :global(.CodeMirror-cursors),
+.team-request-editor[data-disabled="true"] :global(.CodeMirror-cursors) {
+  display: none;
+}
+
+.thread-command-editor :global(.cm-header),
+.team-request-editor :global(.cm-header) {
+  color: #ffb86b;
+  font-weight: 700;
+}
+
+.thread-command-editor :global(.cm-formatting-header),
+.team-request-editor :global(.cm-formatting-header) {
+  color: rgba(255, 184, 107, 0.82);
+}
+
+.thread-command-editor :global(.cm-quote),
+.team-request-editor :global(.cm-quote) {
+  color: rgba(174, 196, 255, 0.78);
+}
+
+.thread-command-editor :global(.cm-comment),
+.thread-command-editor :global(.cm-formatting),
+.thread-command-editor :global(.cm-meta),
+.team-request-editor :global(.cm-comment),
+.team-request-editor :global(.cm-formatting),
+.team-request-editor :global(.cm-meta) {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+.thread-command-editor :global(.cm-em),
+.team-request-editor :global(.cm-em) {
+  color: #8be9fd;
+  font-style: italic;
+}
+
+.thread-command-editor :global(.cm-strong),
+.team-request-editor :global(.cm-strong) {
+  color: #7df2c6;
+  font-weight: 700;
+}
+
+.thread-command-editor :global(.cm-link),
+.thread-command-editor :global(.cm-string.cm-url),
+.team-request-editor :global(.cm-link),
+.team-request-editor :global(.cm-string.cm-url) {
+  color: #7ed0ff;
+}
+
+.thread-command-editor :global(.cm-string),
+.team-request-editor :global(.cm-string) {
+  color: #ffd580;
+}
+
+.thread-command-editor :global(.cm-url),
+.team-request-editor :global(.cm-url) {
+  color: rgba(126, 208, 255, 0.8);
+}

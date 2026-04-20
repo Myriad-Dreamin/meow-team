@@ -73,13 +73,16 @@ describe("ThreadCommandComposer", () => {
     expect(html).toMatch(/<button[^>]*disabled/);
   });
 
-  it("keeps thread command markdown styling and normal-casing rules scoped in global styles", () => {
-    const globalsCss = readFileSync(path.join(rootDirectory, "app", "globals.css"), "utf8");
+  it("keeps thread command markdown styling scoped in the editor CSS module", () => {
+    const editorCss = readFileSync(
+      path.join(rootDirectory, "components", "codemirror-text-editor.module.css"),
+      "utf8",
+    );
 
-    expect(globalsCss).toContain(".thread-command-editor .cm-header");
-    expect(globalsCss).toContain(".thread-command-editor .cm-link");
-    expect(globalsCss).toContain(".thread-command-editor .CodeMirror-line");
-    expect(globalsCss).toContain(".thread-command-editor .CodeMirror textarea");
-    expect(globalsCss).toContain("text-transform: none;");
+    expect(editorCss).toContain(".thread-command-editor :global(.cm-header)");
+    expect(editorCss).toContain(".thread-command-editor :global(.cm-link)");
+    expect(editorCss).toContain(".thread-command-editor :global(.CodeMirror-line)");
+    expect(editorCss).toContain(".thread-command-editor :global(.CodeMirror) textarea");
+    expect(editorCss).toContain("text-transform: none;");
   });
 });

@@ -26,6 +26,7 @@ import {
 } from "@/components/team-workspace-sidebar-visibility";
 import type { TeamThreadSummary } from "@/lib/team/history";
 import type { TeamStatusSnapshotResponse } from "@/lib/team/status";
+import styles from "./team-status-bar.module.css";
 
 type RefreshState = "loading" | "live" | "stale" | "error";
 
@@ -252,7 +253,7 @@ export function TeamStatusBarLaneList({
   onSelectLaneThread,
 }: TeamStatusBarLaneListProps) {
   if (laneTotals.length === 0) {
-    return <span className="workspace-status-note">No active lanes.</span>;
+    return <span className={styles["workspace-status-note"]}>No active lanes.</span>;
   }
 
   return (
@@ -265,7 +266,7 @@ export function TeamStatusBarLaneList({
 
         return (
           <div
-            className={`workspace-status-lane-popover ${isOpen ? "workspace-status-lane-popover-open" : ""}`}
+            className={`${styles["workspace-status-lane-popover"]} ${isOpen ? styles["workspace-status-lane-popover-open"] : ""}`}
             data-status-lane-key={item.key}
             key={item.key}
             ref={(element) => {
@@ -281,47 +282,47 @@ export function TeamStatusBarLaneList({
               aria-controls={lanePopoverId}
               aria-expanded={isOpen}
               aria-haspopup="dialog"
-              className={`status-pill workspace-status-lane-trigger ${item.className}`}
+              className={`status-pill ${styles["workspace-status-lane-trigger"]} ${item.className}`}
               data-status-lane-trigger={item.key}
               type="button"
               onClick={() => onLaneClick(item.key)}
             >
               <span>{item.label}</span>
-              <span className="workspace-status-lane-trigger-count">{item.value}</span>
+              <span className={styles["workspace-status-lane-trigger-count"]}>{item.value}</span>
             </button>
 
             {isOpen ? (
               <div
                 aria-label={`${item.label} living threads`}
-                className="workspace-status-lane-panel"
+                className={styles["workspace-status-lane-panel"]}
                 id={lanePopoverId}
                 role="dialog"
               >
-                <div className="workspace-status-lane-panel-head">
-                  <p className="workspace-status-lane-panel-title">{item.label}</p>
-                  <p className="workspace-status-lane-panel-summary">{popoverCopy.summary}</p>
+                <div className={styles["workspace-status-lane-panel-head"]}>
+                  <p className={styles["workspace-status-lane-panel-title"]}>{item.label}</p>
+                  <p className={styles["workspace-status-lane-panel-summary"]}>{popoverCopy.summary}</p>
                   {popoverCopy.detail ? (
-                    <p className="workspace-status-lane-panel-detail">{popoverCopy.detail}</p>
+                    <p className={styles["workspace-status-lane-panel-detail"]}>{popoverCopy.detail}</p>
                   ) : null}
                 </div>
 
                 {matchingThreads.length > 0 ? (
-                  <div className="workspace-status-lane-thread-list">
+                  <div className={styles["workspace-status-lane-thread-list"]}>
                     {matchingThreads.map((thread) => (
                       <button
                         aria-label={`Open thread ${thread.shortThreadId}: ${thread.title}`}
-                        className="workspace-status-lane-thread-button"
+                        className={styles["workspace-status-lane-thread-button"]}
                         data-thread-id={thread.threadId}
                         key={thread.threadId}
                         type="button"
                         onClick={() => onSelectLaneThread(thread.threadId)}
                         onPointerDown={handleTeamStatusLaneThreadPointerDown}
                       >
-                        <span className="workspace-status-lane-thread-title">{thread.title}</span>
-                        <span className="workspace-status-lane-thread-meta">
+                        <span className={styles["workspace-status-lane-thread-title"]}>{thread.title}</span>
+                        <span className={styles["workspace-status-lane-thread-meta"]}>
                           <span>Thread {thread.shortThreadId}</span>
                           {thread.matchingLaneCount > 1 ? (
-                            <span className="workspace-status-lane-thread-multiplicity">
+                            <span className={styles["workspace-status-lane-thread-multiplicity"]}>
                               {thread.matchingLaneCount} matching lanes
                             </span>
                           ) : null}
@@ -330,7 +331,7 @@ export function TeamStatusBarLaneList({
                     ))}
                   </div>
                 ) : (
-                  <p className="workspace-status-lane-empty">
+                  <p className={styles["workspace-status-lane-empty"]}>
                     Waiting for the latest living-thread refresh.
                   </p>
                 )}
@@ -538,35 +539,35 @@ export function TeamStatusBar({
   };
 
   return (
-    <section aria-label="Workspace status" className="workspace-status-bar">
-      <div className="workspace-status-group">
-        <div className="workspace-status-actions">
+    <section aria-label="Workspace status" className={styles["workspace-status-bar"]}>
+      <div className={styles["workspace-status-group"]}>
+        <div className={styles["workspace-status-actions"]}>
           <button
             aria-controls={TEAM_WORKSPACE_SIDEBAR_ID}
             aria-expanded={isSidebarVisible}
             aria-label={sidebarToggleState.actionLabel}
             aria-pressed={sidebarToggleState.isPressed}
-            className={`workspace-status-toggle ${sidebarToggleState.isPressed ? "workspace-status-toggle-active" : ""}`}
+            className={`${styles["workspace-status-toggle"]} ${sidebarToggleState.isPressed ? styles["workspace-status-toggle-active"] : ""}`}
             title={sidebarToggleState.actionLabel}
             type="button"
             onClick={onToggleSidebar}
           >
-            <SidebarIcon className="workspace-icon" isSidebarVisible={isSidebarVisible} />
+            <SidebarIcon className={styles["workspace-icon"]} isSidebarVisible={isSidebarVisible} />
             <span aria-hidden="true">Sidebar</span>
           </button>
           <button
             aria-pressed={isSettingsSelected}
-            className={`workspace-icon-button workspace-status-icon-button ${isSettingsSelected ? "workspace-icon-button-active" : ""}`}
+            className={`${styles["workspace-icon-button"]} ${styles["workspace-status-icon-button"]} ${isSettingsSelected ? styles["workspace-icon-button-active"] : ""}`}
             title="Settings"
             type="button"
             onClick={onSelectSettings}
           >
-            <SettingsIcon className="workspace-icon" />
+            <SettingsIcon className={styles["workspace-icon"]} />
             <span className="sr-only">Settings</span>
           </button>
           <button
             aria-pressed={isArchivedThreadsRevealed}
-            className={`workspace-icon-button workspace-status-icon-button ${isArchivedThreadsRevealed ? "workspace-icon-button-active" : ""}`}
+            className={`${styles["workspace-icon-button"]} ${styles["workspace-status-icon-button"]} ${isArchivedThreadsRevealed ? styles["workspace-icon-button-active"] : ""}`}
             title={
               isArchivedThreadsRevealed
                 ? `Hide ${archivedThreadButtonLabel}`
@@ -575,9 +576,9 @@ export function TeamStatusBar({
             type="button"
             onClick={onToggleArchivedThreads}
           >
-            <ArchiveIcon className="workspace-icon" />
+            <ArchiveIcon className={styles["workspace-icon"]} />
             {archivedThreadCount && archivedThreadCount > 0 ? (
-              <span className="workspace-icon-button-badge">
+              <span className={styles["workspace-icon-button-badge"]}>
                 {archivedThreadCount > 99 ? "99+" : archivedThreadCount}
               </span>
             ) : null}
@@ -588,19 +589,19 @@ export function TeamStatusBar({
             </span>
           </button>
         </div>
-        <div className="workspace-status-inline-metric">
-          <span className="workspace-status-inline-value">
+        <div className={styles["workspace-status-inline-metric"]}>
+          <span className={styles["workspace-status-inline-value"]}>
             {activeThreadCount === null ? "--" : activeThreadCount}
           </span>
           <span>active</span>
         </div>
-        <div className="workspace-status-inline-metric">
-          <span className="workspace-status-inline-value">
+        <div className={styles["workspace-status-inline-metric"]}>
+          <span className={styles["workspace-status-inline-value"]}>
             {livingThreadCount === null ? "--" : livingThreadCount}
           </span>
           <span>living</span>
         </div>
-        <div className="workspace-status-lane-list">
+        <div className={styles["workspace-status-lane-list"]}>
           {laneTotals.length > 0 ? (
             <TeamStatusBarLaneList
               laneThreadsByStatus={laneThreadsByStatus}
@@ -616,23 +617,23 @@ export function TeamStatusBar({
               onSelectLaneThread={handleSelectLaneThread}
             />
           ) : (
-            <span className="workspace-status-note">
+            <span className={styles["workspace-status-note"]}>
               {activeThreadCount && activeThreadCount > 0 ? "Planning only." : "No active lanes."}
             </span>
           )}
         </div>
       </div>
 
-      <div className="workspace-status-group workspace-status-group-right">
-        <div className="workspace-status-inline-metric">
-          <span className="workspace-status-inline-key">CPU</span>
-          <span className="workspace-status-inline-value">{cpuSummary}</span>
+      <div className={`${styles["workspace-status-group"]} ${styles["workspace-status-group-right"]}`}>
+        <div className={styles["workspace-status-inline-metric"]}>
+          <span className={styles["workspace-status-inline-key"]}>CPU</span>
+          <span className={styles["workspace-status-inline-value"]}>{cpuSummary}</span>
         </div>
-        <div className="workspace-status-inline-metric">
-          <span className="workspace-status-inline-key">Memory</span>
-          <span className="workspace-status-inline-value">{memorySummary}</span>
+        <div className={styles["workspace-status-inline-metric"]}>
+          <span className={styles["workspace-status-inline-key"]}>Memory</span>
+          <span className={styles["workspace-status-inline-value"]}>{memorySummary}</span>
         </div>
-        <p className="workspace-status-note">{statusNote}</p>
+        <p className={styles["workspace-status-note"]}>{statusNote}</p>
       </div>
     </section>
   );

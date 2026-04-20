@@ -9,6 +9,7 @@ import {
   type RefCallback,
 } from "react";
 import { LaneMarkdownText } from "@/components/lane-markdown";
+import styles from "./thread-detail-timeline.module.css";
 import type { LaneApprovalAction, ThreadLogGroup } from "@/components/thread-view-utils";
 import {
   buildFeedbackKey,
@@ -1515,41 +1516,41 @@ export function ThreadDetailTimeline({
   };
 
   return (
-    <div className="thread-chat-shell">
-      <header className="thread-chat-header">
-        <div className="thread-chat-header-copy">
+    <div className={styles["thread-chat-shell"]}>
+      <header className={styles["thread-chat-header"]}>
+        <div className={styles["thread-chat-header-copy"]}>
           <p>
             {primaryLane?.latestActivity ??
               thread.latestPlanSummary ??
               "Timeline view stays pinned to the latest activity until you scroll away."}
           </p>
         </div>
-        <div className="thread-chat-link-strip">
+        <div className={styles["thread-chat-link-strip"]}>
           <span className={`status-pill status-${thread.status}`}>
             {threadStatusLabels[thread.status]}
           </span>
           {thread.archivedAt ? (
             <span className="status-pill status-completed">Archived</span>
           ) : null}
-          <span className="thread-chat-meta-chip" title={`Thread ${thread.threadId}`}>
+          <span className={styles["thread-chat-meta-chip"]} title={`Thread ${thread.threadId}`}>
             Thread {formatThreadId(thread.threadId)}
           </span>
-          <span className="thread-chat-meta-chip">Assignment #{thread.assignmentNumber}</span>
-          <span className="thread-chat-meta-chip">
+          <span className={styles["thread-chat-meta-chip"]}>Assignment #{thread.assignmentNumber}</span>
+          <span className={styles["thread-chat-meta-chip"]}>
             {thread.repository?.name ?? "No repository selected"}
           </span>
-          <span className="thread-chat-meta-chip">Updated {formatTimestamp(thread.updatedAt)}</span>
-          <span className="thread-chat-meta-chip">
+          <span className={styles["thread-chat-meta-chip"]}>Updated {formatTimestamp(thread.updatedAt)}</span>
+          <span className={styles["thread-chat-meta-chip"]}>
             Pool slot: {formatPoolSlot(primaryLane?.workerSlot ?? null)}
           </span>
-          <span className="thread-chat-meta-chip">Runs: {primaryLane?.runCount ?? 0}</span>
-          <span className="thread-chat-meta-chip">
+          <span className={styles["thread-chat-meta-chip"]}>Runs: {primaryLane?.runCount ?? 0}</span>
+          <span className={styles["thread-chat-meta-chip"]}>
             Revisions: {primaryLane?.revisionCount ?? 0}
           </span>
           {primaryLane?.pullRequest ? (
             primaryLane.pullRequest.url ? (
               <a
-                className="thread-chat-link"
+                className={styles["thread-chat-link"]}
                 href={primaryLane.pullRequest.url}
                 rel="noreferrer"
                 target="_blank"
@@ -1558,18 +1559,18 @@ export function ThreadDetailTimeline({
                 PR #{getPrNumber(primaryLane.pullRequest.url)}
               </a>
             ) : (
-              <span className="thread-chat-meta-chip">{primaryLane.pullRequest.title}</span>
+              <span className={styles["thread-chat-meta-chip"]}>{primaryLane.pullRequest.title}</span>
             )
           ) : null}
         </div>
       </header>
 
-      <div className="thread-chat-body">
-        <div className="thread-chat-main" ref={scrollContainerRef}>
-          <div className="thread-chat-main-inner" id="thread-chat-top">
+      <div className={styles["thread-chat-body"]}>
+        <div className={styles["thread-chat-main"]} ref={scrollContainerRef}>
+          <div className={styles["thread-chat-main-inner"]} id="thread-chat-top">
             {logPageInfo.hasOlder ? (
               <button
-                className="thread-chat-history-button"
+                className={styles["thread-chat-history-button"]}
                 disabled={isLoadingOlder}
                 type="button"
                 onClick={() => {
@@ -1583,9 +1584,9 @@ export function ThreadDetailTimeline({
             {logError ? <p className="error-callout">{logError}</p> : null}
 
             {timelineItems.length === 0 ? (
-              <article className="thread-chat-card thread-chat-card-empty">
-                <p className="thread-chat-meta">Timeline</p>
-                <p className="thread-chat-copy">
+              <article className={`${styles["thread-chat-card"]} ${styles["thread-chat-card-empty"]}`}>
+                <p className={styles["thread-chat-meta"]}>Timeline</p>
+                <p className={styles["thread-chat-copy"]}>
                   {isLoadingDetail
                     ? "Recovering the selected thread timeline..."
                     : "No persisted thread activity has been recorded yet."}
@@ -1602,16 +1603,16 @@ export function ThreadDetailTimeline({
               if (item.kind === "message") {
                 return (
                   <article
-                    className={`thread-chat-bubble thread-chat-bubble-${item.variant}`}
+                    className={`${styles["thread-chat-bubble"]} ${styles[`thread-chat-bubble-${item.variant}`]}`}
                     id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className="thread-chat-meta">
+                    <div className={styles["thread-chat-meta"]}>
                       <span>{item.title}</span>
                       <span>{formatTimestamp(item.occurredAt)}</span>
                     </div>
-                    <pre className="thread-chat-pre">{item.text}</pre>
+                    <pre className={styles["thread-chat-pre"]}>{item.text}</pre>
                   </article>
                 );
               }
@@ -1619,16 +1620,16 @@ export function ThreadDetailTimeline({
               if (item.kind === "planner-note") {
                 return (
                   <article
-                    className="thread-chat-card"
+                    className={styles["thread-chat-card"]}
                     id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className="thread-chat-meta">
+                    <div className={styles["thread-chat-meta"]}>
                       <span>Planner note</span>
                       <span>{formatTimestamp(item.occurredAt)}</span>
                     </div>
-                    <p className="thread-chat-copy">{item.note}</p>
+                    <p className={styles["thread-chat-copy"]}>{item.note}</p>
                   </article>
                 );
               }
@@ -1636,16 +1637,16 @@ export function ThreadDetailTimeline({
               if (item.kind === "human-feedback") {
                 return (
                   <article
-                    className="thread-chat-card"
+                    className={styles["thread-chat-card"]}
                     id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className="thread-chat-meta">
+                    <div className={styles["thread-chat-meta"]}>
                       <span>{formatFeedbackLabel(thread, item.feedback.laneId)}</span>
                       <span>{formatTimestamp(item.occurredAt)}</span>
                     </div>
-                    <p className="thread-chat-copy">{item.feedback.message}</p>
+                    <p className={styles["thread-chat-copy"]}>{item.feedback.message}</p>
                   </article>
                 );
               }
@@ -1653,19 +1654,19 @@ export function ThreadDetailTimeline({
               if (item.kind === "handoff") {
                 return (
                   <article
-                    className="thread-chat-card"
+                    className={styles["thread-chat-card"]}
                     id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className="thread-chat-meta thread-chat-meta-split">
+                    <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
                       <span>{item.handoff.roleName}</span>
                       <span className={`decision-pill decision-${item.handoff.decision}`}>
                         {item.handoff.decision.replace("_", " ")}
                       </span>
                     </div>
-                    <p className="thread-chat-copy">{item.handoff.summary}</p>
-                    <pre className="thread-chat-pre">{item.handoff.deliverable}</pre>
+                    <p className={styles["thread-chat-copy"]}>{item.handoff.summary}</p>
+                    <pre className={styles["thread-chat-pre"]}>{item.handoff.deliverable}</pre>
                   </article>
                 );
               }
@@ -1673,17 +1674,17 @@ export function ThreadDetailTimeline({
               if (item.kind === "lane-event") {
                 return (
                   <article
-                    className="thread-chat-card thread-chat-card-lane-event"
+                    className={`${styles["thread-chat-card"]} ${styles["thread-chat-lane-event"]}`}
                     id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className="thread-chat-meta thread-chat-meta-split">
+                    <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
                       <span>
                         {formatEventActorLabel(item.event.actor)}
                         {" - "}
                         <a
-                          className="thread-chat-link"
+                          className={styles["thread-chat-link"]}
                           href={`#${item.proposalAnchorId}`}
                           onClick={(event) => {
                             event.preventDefault();
@@ -1696,7 +1697,7 @@ export function ThreadDetailTimeline({
 
                       <span>{formatTimestamp(item.occurredAt)}</span>
                     </div>
-                    <LaneMarkdownText className="thread-chat-copy" text={item.event.message} />
+                    <LaneMarkdownText className={styles["thread-chat-copy"]} text={item.event.message} />
                   </article>
                 );
               }
@@ -1707,12 +1708,12 @@ export function ThreadDetailTimeline({
 
                 return (
                   <article
-                    className="thread-chat-card thread-chat-card-assignment"
+                    className={`${styles["thread-chat-card"]} ${styles["thread-chat-card-assignment"]}`}
                     id={item.anchorId}
                     key={item.id}
                     ref={anchorRef}
                   >
-                    <div className="thread-chat-card-head">
+                    <div className={styles["thread-chat-card-head"]}>
                       <div>
                         <p className="eyebrow">Assignment {assignment.assignmentNumber}</p>
                         <h3>{assignment.requestTitle ?? thread.requestTitle}</h3>
@@ -1722,24 +1723,24 @@ export function ThreadDetailTimeline({
                       </span>
                     </div>
 
-                    <p className="thread-chat-copy">
+                    <p className={styles["thread-chat-copy"]}>
                       {assignment.plannerSummary ??
                         "No planner summary recorded for this assignment yet."}
                     </p>
 
-                    <div className="thread-chat-assignment-meta">
-                      <span className="thread-chat-meta-chip">
+                    <div className={styles["thread-chat-assignment-meta"]}>
+                      <span className={styles["thread-chat-meta-chip"]}>
                         Workers: {assignment.workerCount}
                       </span>
                       {assignment.repository ? (
-                        <span className="thread-chat-meta-chip">{assignment.repository.name}</span>
+                        <span className={styles["thread-chat-meta-chip"]}>{assignment.repository.name}</span>
                       ) : null}
-                      <span className="thread-chat-meta-chip">
+                      <span className={styles["thread-chat-meta-chip"]}>
                         Updated {formatTimestamp(assignment.updatedAt)}
                       </span>
                       {assignment.canonicalBranchName ? (
                         <span
-                          className="thread-chat-meta-chip"
+                          className={styles["thread-chat-meta-chip"]}
                           title={assignment.canonicalBranchName}
                         >
                           Branch: {assignment.canonicalBranchName}
@@ -1748,7 +1749,7 @@ export function ThreadDetailTimeline({
                     </div>
 
                     {assignment.lanes.length > 0 ? (
-                      <div className="thread-chat-lane-list">
+                      <div className={styles["thread-chat-lane-list"]}>
                         {assignment.lanes.map((lane) => {
                           const currentApprovalKey = `${thread.threadId}:${thread.assignmentNumber}:${lane.laneId}`;
                           const laneFeedbackKey = buildFeedbackKey(
@@ -1773,17 +1774,17 @@ export function ThreadDetailTimeline({
 
                           return (
                             <section
-                              className="thread-chat-lane-card"
+                              className={styles["thread-chat-lane-card"]}
                               id={buildLaneAnchorId(assignment.assignmentNumber, lane.laneId)}
                               key={lane.laneId}
                               ref={registerAnchorElement(
                                 buildLaneAnchorId(assignment.assignmentNumber, lane.laneId),
                               )}
                             >
-                              <div className="thread-chat-lane-head">
+                              <div className={styles["thread-chat-lane-head"]}>
                                 <div>
                                   <p className="timeline-title">Proposal {lane.laneIndex}</p>
-                                  <p className="thread-chat-copy thread-chat-copy-tight">
+                                  <p className={`${styles["thread-chat-copy"]} ${styles["thread-chat-copy-tight"]}`}>
                                     {lane.taskTitle ?? "Idle"}
                                   </p>
                                 </div>
@@ -1793,38 +1794,38 @@ export function ThreadDetailTimeline({
                               </div>
 
                               <LaneMarkdownText
-                                className="thread-chat-copy"
+                                className={styles["thread-chat-copy"]}
                                 text={describeLane(lane)}
                               />
 
-                              <div className="thread-chat-lane-meta">
-                                <span className="thread-chat-meta-chip">
+                              <div className={styles["thread-chat-lane-meta"]}>
+                                <span className={styles["thread-chat-meta-chip"]}>
                                   Pool slot: {formatPoolSlot(lane.workerSlot)}
                                 </span>
-                                <span className="thread-chat-meta-chip">Runs: {lane.runCount}</span>
-                                <span className="thread-chat-meta-chip">
+                                <span className={styles["thread-chat-meta-chip"]}>Runs: {lane.runCount}</span>
+                                <span className={styles["thread-chat-meta-chip"]}>
                                   Revisions: {lane.revisionCount}
                                 </span>
-                                <span className="thread-chat-meta-chip">
+                                <span className={styles["thread-chat-meta-chip"]}>
                                   Worktree: {lane.worktreePath ?? "Not allocated"}
                                 </span>
-                                <span className="thread-chat-meta-chip">
+                                <span className={styles["thread-chat-meta-chip"]}>
                                   Branch: {laneBranchDisplay.value}
                                 </span>
-                                <span className="thread-chat-meta-chip">
+                                <span className={styles["thread-chat-meta-chip"]}>
                                   {commitDisplay?.label ?? "Review Commit"}:{" "}
                                   {commitDisplay?.value ?? "Not requested"}
                                 </span>
                               </div>
 
                               {lane.pullRequest ? (
-                                <div className="thread-chat-pr-strip">
-                                  <span className="thread-chat-meta-chip">
+                                <div className={styles["thread-chat-pr-strip"]}>
+                                  <span className={styles["thread-chat-meta-chip"]}>
                                     {getLanePullRequestStatusLabel(lane)}
                                   </span>
                                   {lane.pullRequest.url ? (
                                     <a
-                                      className="thread-chat-link"
+                                      className={styles["thread-chat-link"]}
                                       href={lane.pullRequest.url}
                                       rel="noreferrer"
                                       target="_blank"
@@ -1832,11 +1833,11 @@ export function ThreadDetailTimeline({
                                       {lane.pullRequest.title}
                                     </a>
                                   ) : (
-                                    <span className="thread-chat-meta-chip">
+                                    <span className={styles["thread-chat-meta-chip"]}>
                                       {lane.pullRequest.title}
                                     </span>
                                   )}
-                                  <span className="thread-chat-meta-chip">
+                                  <span className={styles["thread-chat-meta-chip"]}>
                                     {formatTimestamp(lane.pullRequest.updatedAt)}
                                   </span>
                                 </div>
@@ -1975,7 +1976,7 @@ export function ThreadDetailTimeline({
                           </button>
                         </div>
                       ) : (
-                        <p className="thread-chat-copy">{replanBlockedCopy}</p>
+                        <p className={styles["thread-chat-copy"]}>{replanBlockedCopy}</p>
                       )
                     ) : null}
                   </article>
@@ -1989,12 +1990,12 @@ export function ThreadDetailTimeline({
 
               return (
                 <article
-                  className="thread-chat-card thread-chat-card-log"
+                  className={`${styles["thread-chat-card"]} ${styles["thread-chat-card-log"]}`}
                   id={item.anchorId}
                   key={item.id}
                   ref={anchorRef}
                 >
-                  <div className="thread-chat-meta thread-chat-meta-split">
+                  <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
                     <span>Task output</span>
                     <span>{describeLogEntryContext(taskOutput.contextEntry)}</span>
                     <span>
@@ -2007,7 +2008,7 @@ export function ThreadDetailTimeline({
                     {taskOutput.lineCount > 1 ? <span>{taskOutput.lineCount} lines</span> : null}
                   </div>
 
-                  <div className="thread-chat-log-stack">
+                  <div className={styles["thread-chat-log-stack"]}>
                     {taskOutput.groups.map((logGroup) => {
                       const isStderr = logGroup.group.source === "stderr";
                       const stderrRef = isStderr
@@ -2017,13 +2018,11 @@ export function ThreadDetailTimeline({
 
                       return (
                         <section
-                          className={`thread-chat-log-block ${
-                            isStderr ? "thread-chat-log-block-stderr" : ""
-                          }`}
+                          className={`${styles["thread-chat-log-block"]} ${isStderr ? styles["thread-chat-log-block-stderr"] : ""}`}
                           key={logGroup.group.id}
                           ref={stderrRef}
                         >
-                          <div className="thread-chat-meta thread-chat-meta-split">
+                          <div className={`${styles["thread-chat-meta"]} ${styles["thread-chat-meta-split"]}`}>
                             <span>{logGroup.group.source}</span>
                             <span>{formatLogTimestampRange(logGroup.group)}</span>
                             {logGroup.group.lineCount > 1 ? (
@@ -2031,12 +2030,12 @@ export function ThreadDetailTimeline({
                             ) : null}
                           </div>
 
-                          <pre className="thread-chat-pre thread-chat-log-pre">{content}</pre>
+                          <pre className={`${styles["thread-chat-pre"]} ${styles["thread-chat-log-pre"]}`}>{content}</pre>
 
                           {isStderr ? (
-                            <div className="thread-chat-log-actions">
+                            <div className={styles["thread-chat-log-actions"]}>
                               {logGroup.expandedMode === "live" ? (
-                                <span className="thread-chat-live-badge">Live stderr</span>
+                                <span className={styles["thread-chat-live-badge"]}>Live stderr</span>
                               ) : (
                                 <button
                                   className="secondary-button"
@@ -2061,7 +2060,7 @@ export function ThreadDetailTimeline({
                   </div>
 
                   {canOpenTaskOutput ? (
-                    <div className="thread-chat-log-actions">
+                    <div className={styles["thread-chat-log-actions"]}>
                       <button
                         className="secondary-button"
                         type="button"
@@ -2077,18 +2076,18 @@ export function ThreadDetailTimeline({
           </div>
         </div>
 
-        <aside className="thread-chat-rail">
-          <div className="thread-chat-rail-card">
-            <div className="thread-chat-rail-links" ref={railLinksRef}>
+        <aside className={styles["thread-chat-rail"]}>
+          <div className={styles["thread-chat-rail-card"]}>
+            <div className={styles["thread-chat-rail-links"]} ref={railLinksRef}>
               {timelineAnchors.map((anchor) => (
                 <a
-                  className={`thread-chat-rail-link ${
-                    activeAnchorId === anchor.id ? "thread-chat-rail-link-active" : ""
+                  className={`${styles["thread-chat-rail-link"]} ${
+                    activeAnchorId === anchor.id ? styles["thread-chat-rail-link-active"] : ""
                   } ${
                     anchor.level === "secondary"
-                      ? "thread-chat-rail-link-secondary"
+                      ? styles["thread-chat-rail-link-secondary"]
                       : anchor.level === "tertiary"
-                        ? "thread-chat-rail-link-tertiary"
+                        ? styles["thread-chat-rail-link-tertiary"]
                         : ""
                   }`}
                   aria-current={activeAnchorId === anchor.id ? "location" : undefined}
@@ -2108,7 +2107,7 @@ export function ThreadDetailTimeline({
 
             {isScrollable && showScrollToTop ? (
               <a
-                className="thread-chat-scroll-top"
+                className={styles["thread-chat-scroll-top"]}
                 href="#thread-chat-top"
                 onClick={(event) => {
                   event.preventDefault();

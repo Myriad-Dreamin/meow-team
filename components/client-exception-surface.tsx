@@ -2,6 +2,7 @@
 
 import type { ClientExceptionViewModel } from "@/lib/client-exception";
 import { isClientExceptionDebugEnabled } from "@/lib/client-exception";
+import styles from "./client-exception-surface.module.css";
 
 type ClientExceptionAction = {
   label: string;
@@ -29,22 +30,22 @@ export function ClientExceptionSurface({
   return (
     <section
       aria-live="assertive"
-      className={`client-exception-surface client-exception-surface-${variant}`}
+      className={`${styles["client-exception-surface"]} ${styles[`client-exception-surface-${variant}`]}`}
       role="alert"
     >
-      <div className="client-exception-head">
-        <p className="client-exception-badge">{details.badge}</p>
+      <div className={styles["client-exception-head"]}>
+        <p className={styles["client-exception-badge"]}>{details.badge}</p>
       </div>
 
-      <div className="client-exception-copy">
+      <div className={styles["client-exception-copy"]}>
         <h1>{details.title}</h1>
         <p>{details.summary}</p>
       </div>
 
       {metadata.length > 0 ? (
-        <div className="client-exception-meta">
+        <div className={styles["client-exception-meta"]}>
           {metadata.map((item) => (
-            <span className="client-exception-meta-pill" key={item}>
+            <span className={styles["client-exception-meta-pill"]} key={item}>
               {item}
             </span>
           ))}
@@ -52,7 +53,7 @@ export function ClientExceptionSurface({
       ) : null}
 
       {actions.length > 0 ? (
-        <div className="client-exception-actions">
+        <div className={styles["client-exception-actions"]}>
           {actions.map((action) => (
             <button
               className={action.kind === "primary" ? "primary-button" : "secondary-button"}
@@ -67,14 +68,14 @@ export function ClientExceptionSurface({
       ) : null}
 
       {isClientExceptionDebugEnabled && (details.stack || details.debugValue) ? (
-        <details className="client-exception-debug" open>
+        <details className={styles["client-exception-debug"]} open>
           <summary>Debug details</summary>
 
           {details.stack ? (
-            <pre className="client-exception-debug-block">{details.stack}</pre>
+            <pre className={styles["client-exception-debug-block"]}>{details.stack}</pre>
           ) : null}
           {details.debugValue ? (
-            <pre className="client-exception-debug-block">{details.debugValue}</pre>
+            <pre className={styles["client-exception-debug-block"]}>{details.debugValue}</pre>
           ) : null}
         </details>
       ) : null}

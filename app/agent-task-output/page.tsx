@@ -1,3 +1,4 @@
+import styles from "@/components/agent-task-output-window.module.css";
 import { AgentTaskOutputWindow } from "@/components/agent-task-output-window";
 
 type AgentTaskOutputPageProps = {
@@ -35,9 +36,9 @@ export default async function AgentTaskOutputPage({ searchParams }: AgentTaskOut
 
   if (!threadId) {
     return (
-      <div className="task-output-window">
-        <header className="task-output-window-header">
-          <div className="task-output-window-copy">
+      <div className={styles["task-output-window"]}>
+        <header className={styles["task-output-window-header"]}>
+          <div className={styles["task-output-window-copy"]}>
             <p className="eyebrow">Agent Task Output</p>
             <h1>Invalid task output window request</h1>
             <p>Open this window from a thread log card so the task context is filled in.</p>

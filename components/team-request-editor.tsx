@@ -1,6 +1,7 @@
 "use client";
 
 import { CodeMirrorTextEditor } from "@/components/codemirror-text-editor";
+import styles from "./codemirror-text-editor.module.css";
 import { getTeamExecutionModeAutocomplete } from "@/lib/team/execution-mode";
 
 type TeamRequestEditorProps = {
@@ -26,12 +27,12 @@ export function TeamRequestEditor({
       ariaLabel={ariaLabel}
       autocomplete={getTeamExecutionModeAutocomplete}
       disabled={disabled}
-      editorClassName="team-request-editor"
+      editorClassName={styles["team-request-editor"]}
       editorDataAttributeName="data-team-request-editor"
       editorDataAttributeValue="codemirror"
       onChange={onChange}
       placeholder={placeholder}
-      shellClassName="team-request-editor-shell"
+      shellClassName={styles["team-request-editor-shell"]}
       value={value}
     />
   );
