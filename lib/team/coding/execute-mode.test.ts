@@ -210,7 +210,7 @@ const createRunState = ({
     path: "/tmp/team-worktrees/meow-1",
     rootPath: "/tmp/team-worktrees",
   }),
-  latestInput: executionMode ? `${executionMode}: Refresh fixtures` : "Refresh fixtures",
+  latestInput: executionMode ? `/${executionMode} Refresh fixtures` : "Refresh fixtures",
   forceReset: false,
 });
 

@@ -6,7 +6,9 @@ Define the Continuous Assignment Console request editor capability that
 replaces the planner request textarea with a CodeMirror-based editor while
 preserving the existing submission lifecycle and sharing canonical
 execution-mode prefix metadata between parsing and autocomplete.
+
 ## Requirements
+
 ### Requirement: Continuous Assignment Console uses a CodeMirror request editor
 
 The system SHALL replace the Continuous Assignment Console `Request` textarea
@@ -56,35 +58,36 @@ The request editor SHALL suggest execution-mode prefixes from shared metadata
 in `lib/team/execution-mode.ts`, and the same metadata SHALL define the parser
 contract for accepted execution modes.
 
-#### Scenario: Start-of-request autocomplete suggests canonical prefixes
+#### Scenario: Start-of-request slash input suggests canonical prefixes
 
-- **WHEN** the owner focuses the request editor or types a partial
-  execution-mode prefix at the start of the request
-- **THEN** the editor SHALL suggest only `execution:`, `benchmark:`, and
-  `experiment:`
+- **WHEN** the owner types a partial slash-prefixed execution-mode command at
+  the start of the request
+- **THEN** the editor SHALL suggest only `/execution `, `/benchmark `, and
+  `/experiment `
 - **AND** the suggestion labels or helper copy SHALL match the same canonical
   prefixes that planner parsing accepts
 
-#### Scenario: Unsupported slash prefixes are not suggested
+#### Scenario: Bare mode names are not suggested
 
-- **WHEN** the owner opens request-editor autocomplete
-- **THEN** the editor SHALL NOT suggest slash-prefixed execution-mode forms
-  that the approved execute-mode spec does not accept
+- **WHEN** the owner types `execution` at the start of the request without a
+  leading slash
+- **THEN** the editor SHALL NOT suggest execution-mode forms that the approved
+  execute-mode spec does not accept
 - **AND** the UI SHALL avoid presenting parser-invalid prefixes as valid
 
-### Requirement: Execution-mode parsing matches the approved colon syntax
+### Requirement: Execution-mode parsing matches the approved slash syntax
 
 The planner SHALL parse execution-mode requests according to the approved
-colon-prefixed contract and strip the accepted prefix from the canonical
+slash-prefixed contract and strip the accepted command from the canonical
 request text that downstream planning uses.
 
-#### Scenario: Colon-prefixed request becomes an execution-mode assignment
+#### Scenario: Slash-prefixed request becomes an execution-mode assignment
 
-- **WHEN** the request input starts with `benchmark: compare worktree reuse latency`
+- **WHEN** the request input starts with `  /benchmark compare worktree reuse latency`
 - **THEN** the parser SHALL persist the execution mode as `benchmark`
 - **AND** SHALL return `compare worktree reuse latency` as the canonical
   request text
-- **AND** SHALL expose `benchmark:` as the normalized prefix metadata
+- **AND** SHALL expose `/benchmark ` as the normalized prefix metadata
 
 #### Scenario: Unprefixed request remains unchanged
 
@@ -102,7 +105,7 @@ Vitest constraints.
 #### Scenario: Prefix drift fails focused tests
 
 - **WHEN** parser behavior, autocomplete suggestions, or helper copy drifts
-  away from the approved `mode:` prefixes
+  away from the approved slash-prefixed execution-mode commands
 - **THEN** focused Vitest coverage SHALL fail before the change is treated as
   complete
 
