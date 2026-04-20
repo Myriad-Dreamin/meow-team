@@ -31,7 +31,7 @@ const renderConsole = (props: Partial<Parameters<typeof TeamConsole>[0]> = {}) =
 describe("TeamConsole request editor", () => {
   it("renders the request field as a CodeMirror editor with canonical prefix helper copy", () => {
     const html = renderConsole({
-      initialPrompt: "benchmark: compare worktree reuse latency",
+      initialPrompt: "/benchmark compare worktree reuse latency",
     });
 
     expect(html).toContain('data-team-request-editor="codemirror"');
@@ -40,9 +40,9 @@ describe("TeamConsole request editor", () => {
     expect(html).toContain(
       "Plan multiple proposals for a new onboarding flow, wait for human approval, then queue coding and machine review for the approved proposals.",
     );
-    expect(html).toContain("execution:");
-    expect(html).toContain("benchmark:");
-    expect(html).toContain("experiment:");
+    expect(html).toContain("/execution ");
+    expect(html).toContain("/benchmark ");
+    expect(html).toContain("/experiment ");
     expect(html).not.toContain("<textarea");
   });
 

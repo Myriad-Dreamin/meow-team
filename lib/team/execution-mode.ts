@@ -2,17 +2,17 @@ export const TEAM_EXECUTION_MODE_DEFINITIONS = [
   {
     detail: "Queue the standard execution workflow for implementation work.",
     mode: "execution",
-    prefix: "execution:",
+    prefix: "/execution ",
   },
   {
     detail: "Queue the benchmark workflow for performance measurement work.",
     mode: "benchmark",
-    prefix: "benchmark:",
+    prefix: "/benchmark ",
   },
   {
     detail: "Queue the experiment workflow for exploratory or data-gathering work.",
     mode: "experiment",
-    prefix: "experiment:",
+    prefix: "/experiment ",
   },
 ] as const;
 
@@ -70,11 +70,11 @@ const getExecutionModeAutocompleteTokenRange = (
   const tokenStart = leadingWhitespaceMatch?.[0].length ?? 0;
 
   if (clampedCursorIndex < tokenStart) {
-    return {
-      from: tokenStart,
-      query: "",
-      to: tokenStart,
-    };
+    return null;
+  }
+
+  if (value[tokenStart] !== "/") {
+    return null;
   }
 
   const tokenEndMatch = value.slice(tokenStart).match(/\s/u);
@@ -100,14 +100,17 @@ export const normalizeTeamExecutionMode = (
 export const parseExecutionModeInput = (
   value: string | null | undefined,
 ): TeamExecutionModeParseResult => {
-  const normalized = value?.trim() ?? "";
+  const rawValue = value ?? "";
+  const normalized = rawValue.trim();
+  const startBoundValue = rawValue.trimStart();
+  const lowerStartBoundValue = startBoundValue.toLowerCase();
 
   for (const definition of TEAM_EXECUTION_MODE_DEFINITIONS) {
-    if (!normalized.toLowerCase().startsWith(definition.prefix)) {
+    if (!lowerStartBoundValue.startsWith(definition.prefix)) {
       continue;
     }
 
-    const requestText = normalized.slice(definition.prefix.length).trim();
+    const requestText = startBoundValue.slice(definition.prefix.length).trim();
 
     return {
       executionMode: definition.mode,
