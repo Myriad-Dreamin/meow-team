@@ -2,6 +2,7 @@ import "server-only";
 
 import { readRepositoryHarnessConfig } from "@/lib/config/repository";
 import { githubPlatformAdapter } from "@/lib/platform/gh";
+import { ugitPlatformAdapter } from "@/lib/platform/ugit";
 import type {
   GitPlatformId,
   GitPlatformAdapter,
@@ -15,6 +16,7 @@ export * from "@/lib/platform/types";
 
 const gitPlatformAdapters: Partial<Record<GitPlatformId, GitPlatformAdapter>> = {
   github: githubPlatformAdapter,
+  ugit: ugitPlatformAdapter,
 };
 
 export class UnsupportedGitPlatformError extends Error {
@@ -23,9 +25,7 @@ export class UnsupportedGitPlatformError extends Error {
 
   constructor({ platformId, repositoryPath }: { platformId: string; repositoryPath: string }) {
     super(
-      platformId === "ugit"
-        ? `Repository ${repositoryPath} is configured to use the "${platformId}" platform, but that adapter is not supported yet.`
-        : `Repository ${repositoryPath} is configured to use the unsupported "${platformId}" platform. Set meow-team.platform to github or ugit.`,
+      `Repository ${repositoryPath} is configured to use the unsupported "${platformId}" platform. Set meow-team.platform to github or ugit.`,
     );
     this.name = "UnsupportedGitPlatformError";
     this.platformId = platformId;
@@ -53,7 +53,14 @@ export const resolveGitPlatform = async (repositoryPath: string): Promise<GitPla
 };
 
 export const normalizeRepositoryUrl = (remoteUrl: string): string | null => {
-  return githubPlatformAdapter.normalizeRepositoryUrl(remoteUrl);
+  for (const gitPlatform of Object.values(gitPlatformAdapters)) {
+    const repositoryUrl = gitPlatform?.normalizeRepositoryUrl(remoteUrl);
+    if (repositoryUrl) {
+      return repositoryUrl;
+    }
+  }
+
+  return null;
 };
 
 export const resolvePushRemote = async (args: ResolveGitPlatformPushRemoteArgs) => {
