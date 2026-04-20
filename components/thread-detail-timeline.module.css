@@ -114,7 +114,7 @@
 
 .thread-chat-bubble-human {
   justify-self: end;
-  background: var(--accent-soft);
+  background: var(--bg);
   border-color: var(--accent-border);
 }
 

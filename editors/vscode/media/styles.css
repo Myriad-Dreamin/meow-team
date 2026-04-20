@@ -10,9 +10,7 @@
 body {
   margin: 0;
   color: var(--vscode-foreground);
-  background:
-    radial-gradient(circle at top, color-mix(in srgb, var(--vscode-button-background) 18%, transparent), transparent 42%),
-    var(--vscode-editor-background);
+  background: var(--bg);
 }
 
 button,
