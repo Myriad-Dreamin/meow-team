@@ -99,7 +99,7 @@ export const publishUgitBranch = async ({
     "--force-with-lease",
     "--set-upstream",
     remote.remoteName,
-    `HEAD:${branchName}`,
+    `${branchName}:${branchName}`,
   ]);
 
   return {

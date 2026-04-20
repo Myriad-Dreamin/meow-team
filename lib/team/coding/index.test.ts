@@ -3180,8 +3180,13 @@ describe.sequential("approveLaneProposal", () => {
       startPoint: "requests/example/a1",
       forceUpdate: true,
     });
+    expect(pushLaneBranchMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath: laneWorktree.path,
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "proposal-commit",
+    });
     expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(1, {
-      repositoryPath: dispatchRepository.path,
+      repositoryPath: laneWorktree.path,
       branchName: "requests/example/a1-proposal-1",
       baseBranch: "main",
       title: "Ship the feature",
@@ -3213,12 +3218,12 @@ describe.sequential("approveLaneProposal", () => {
       baseBranch: "main",
     });
     expect(pushLaneBranchMock).toHaveBeenNthCalledWith(2, {
-      repositoryPath: dispatchRepository.path,
+      repositoryPath: laneWorktree.path,
       branchName: "requests/example/a1-proposal-1",
       commitHash: "rebased-review-commit",
     });
     expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(2, {
-      repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+      repositoryPath: laneWorktree.path,
       branchName: "requests/example/a1-proposal-1",
       baseBranch: "main",
       title: "Ship the feature",
@@ -3502,7 +3507,7 @@ describe.sequential("approveLaneProposal", () => {
       forceUpdate: true,
     });
     expect(pushLaneBranchMock).toHaveBeenCalledWith({
-      repositoryPath: dispatchRepository.path,
+      repositoryPath: threadWorktreePath,
       branchName: laneBranchName,
       commitHash: "proposal-commit",
     });
@@ -4239,7 +4244,7 @@ describe.sequential("approveLanePullRequest", () => {
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
     expect(pushLaneBranchMock).toHaveBeenCalledTimes(1);
     expect(pushLaneBranchMock).toHaveBeenCalledWith({
-      repositoryPath: dispatchRepository.path,
+      repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
       branchName: "requests/example/a1-proposal-1",
       commitHash: "delete-commit",
     });

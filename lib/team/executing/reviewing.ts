@@ -398,7 +398,7 @@ const runFinalArchiveCycle = async ({
 
     updatedPushedCommit = latestImplementationCommit
       ? await pushLaneBranch({
-          repositoryPath: assignment.repository.path,
+          repositoryPath: laneWorktree.path,
           branchName: lane.branchName,
           commitHash: latestImplementationCommit,
         })
@@ -1040,7 +1040,7 @@ export const runExecutingLaneCycle = async ({
     let pushedCommit: Awaited<ReturnType<typeof pushLaneBranch>> | null = null;
     try {
       pushedCommit = await pushLaneBranch({
-        repositoryPath: assignment.repository.path,
+        repositoryPath: laneWorktree.path,
         branchName: lane.branchName,
         commitHash: latestImplementationCommit,
       });

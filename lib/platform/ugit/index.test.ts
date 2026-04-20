@@ -79,7 +79,7 @@ describe("publishUgitBranch", () => {
       "--force-with-lease",
       "--set-upstream",
       "origin",
-      "HEAD:feature/test",
+      "feature/test:feature/test",
     ]);
   });
 });

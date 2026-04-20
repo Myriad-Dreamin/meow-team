@@ -11,7 +11,7 @@ import {
   getBranchHead,
 } from "@/lib/git/ops";
 import { synchronizePullRequest } from "@/lib/platform";
-import { pushLaneBranch } from "@/lib/team/git";
+import { ensureLaneWorktree, pushLaneBranch } from "@/lib/team/git";
 import {
   getTeamThreadRecord,
   synchronizeDispatchAssignment,
@@ -282,14 +282,22 @@ export const approveLaneProposal = async ({
   let pushedCommit: Awaited<ReturnType<typeof pushLaneBranch>> | null = null;
 
   try {
-    pushedCommit = await pushLaneBranch({
+    await ensureLaneWorktree({
       repositoryPath: assignment.repository.path,
+      worktreeRoot: threadWorktree.rootPath ?? undefined,
+      worktreePath: threadWorktree.path,
+      branchName: lane.branchName,
+      startPoint: proposalCommit,
+    });
+
+    pushedCommit = await pushLaneBranch({
+      repositoryPath: threadWorktree.path,
       branchName: lane.branchName,
       commitHash: proposalCommit,
     });
 
     const synchronizedPullRequest = await synchronizePullRequest({
-      repositoryPath: assignment.repository.path,
+      repositoryPath: threadWorktree.path,
       branchName: lane.branchName,
       baseBranch: lane.baseBranch,
       title: pullRequestDraft.title,
