@@ -11,6 +11,7 @@ vi.mock("@/lib/cli-tools/git", () => ({
 import {
   commitWorktreeChanges,
   listCommittedPathsBetweenRevisions,
+  listTrackedPaths,
   listWorktreeChanges,
 } from "@/lib/git/ops";
 
@@ -90,6 +91,44 @@ describe("commitWorktreeChanges", () => {
       "-m",
       "docs: add openspec proposals",
     ]);
+  });
+});
+
+describe("listTrackedPaths", () => {
+  beforeEach(() => {
+    runGitMock.mockReset();
+  });
+
+  it("returns tracked paths for the requested pathspecs", async () => {
+    runGitMock.mockResolvedValue({
+      stdout: "README.md\n.codex/materializer/session.json\nREADME.md\n",
+      stderr: "",
+    });
+
+    await expect(
+      listTrackedPaths({
+        repositoryPath: "/repo",
+        pathspecs: [" README.md ", ".codex/materializer/session.json", "README.md"],
+      }),
+    ).resolves.toEqual([".codex/materializer/session.json", "README.md"]);
+    expect(runGitMock).toHaveBeenCalledWith("/repo", [
+      "ls-files",
+      "--cached",
+      "--full-name",
+      "--",
+      "README.md",
+      ".codex/materializer/session.json",
+    ]);
+  });
+
+  it("skips git when no pathspecs remain after normalization", async () => {
+    await expect(
+      listTrackedPaths({
+        repositoryPath: "/repo",
+        pathspecs: [" ", ""],
+      }),
+    ).resolves.toEqual([]);
+    expect(runGitMock).not.toHaveBeenCalled();
   });
 });
 

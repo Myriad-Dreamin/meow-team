@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
+import ignore from "ignore";
 import { runOpenSpec } from "@/lib/cli-tools/openspec";
 import {
   commitContainsPath,
@@ -12,6 +13,7 @@ import {
   getSymbolicHeadReference,
   hasWorktreeChanges,
   listCommittedPathsBetweenRevisions,
+  listTrackedPaths,
   listWorktreeChanges,
 } from "@/lib/git/ops";
 import { formatHarnessCommitMessage } from "@/lib/team/commit-message";
@@ -52,6 +54,8 @@ type MaterializationGitState = {
   plannerHeadCommit: string;
   plannerHeadReference: string | null;
 };
+
+type GitIgnoreMatcher = ReturnType<typeof ignore>;
 
 const toPosixPath = (value: string): string => {
   return value.split(path.sep).join("/");
@@ -188,25 +192,87 @@ const calculateChangedPathDelta = ({
   });
 };
 
-const assertProposalChangeDeltaIsIsolated = ({
+const loadWorktreeIgnoreMatcher = async (worktreePath: string): Promise<GitIgnoreMatcher> => {
+  const worktreeIgnoreMatcher = ignore();
+
+  try {
+    worktreeIgnoreMatcher.add(await fs.readFile(path.join(worktreePath, ".gitignore"), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return worktreeIgnoreMatcher;
+};
+
+const listIgnoredUntrackedUnexpectedPaths = async ({
+  unexpectedPaths,
+  worktreePath,
+  worktreeIgnoreMatcher,
+}: {
+  unexpectedPaths: string[];
+  worktreePath: string;
+  worktreeIgnoreMatcher: GitIgnoreMatcher;
+}): Promise<Set<string>> => {
+  const ignoredUnexpectedPaths = unexpectedPaths.filter((changedPath) =>
+    worktreeIgnoreMatcher.ignores(changedPath),
+  );
+
+  if (ignoredUnexpectedPaths.length === 0) {
+    return new Set();
+  }
+
+  const trackedIgnoredPaths = new Set(
+    await listTrackedPaths({
+      repositoryPath: worktreePath,
+      pathspecs: ignoredUnexpectedPaths,
+    }),
+  );
+  const ignoredUntrackedUnexpectedPaths = (
+    await Promise.all(
+      ignoredUnexpectedPaths.map(async (changedPath) => {
+        const exists = await hasFileAtPath(path.join(worktreePath, changedPath));
+        return exists && !trackedIgnoredPaths.has(changedPath) ? changedPath : null;
+      }),
+    )
+  ).filter((changedPath): changedPath is string => Boolean(changedPath));
+
+  return new Set(ignoredUntrackedUnexpectedPaths);
+};
+
+const assertProposalChangeDeltaIsIsolated = async ({
   changedPaths,
   proposalChangeName,
   proposalPath,
+  worktreePath,
+  worktreeIgnoreMatcher,
 }: {
   changedPaths: string[];
   proposalChangeName: string;
   proposalPath: string;
-}): void => {
+  worktreePath: string;
+  worktreeIgnoreMatcher: GitIgnoreMatcher;
+}): Promise<void> => {
   const unexpectedPaths = changedPaths.filter(
     (changedPath) => !isPathWithinProposalPath(changedPath, proposalPath),
   );
 
-  if (unexpectedPaths.length === 0) {
+  const ignoredUntrackedUnexpectedPaths = await listIgnoredUntrackedUnexpectedPaths({
+    unexpectedPaths,
+    worktreePath,
+    worktreeIgnoreMatcher,
+  });
+  const disallowedUnexpectedPaths = unexpectedPaths.filter(
+    (changedPath) => !ignoredUntrackedUnexpectedPaths.has(changedPath),
+  );
+
+  if (disallowedUnexpectedPaths.length === 0) {
     return;
   }
 
   throw new Error(
-    `OpenSpec materializer changed planner worktree paths outside ${proposalChangeName}: ${unexpectedPaths.join(
+    `OpenSpec materializer changed planner worktree paths outside ${proposalChangeName}: ${disallowedUnexpectedPaths.join(
       ", ",
     )}.`,
   );
@@ -568,6 +634,7 @@ export const materializeAssignmentProposals = async ({
     rootPath: worktreeRoot,
   });
   const materializedProposalSnapshots: MaterializedProposalSnapshot[] = [];
+  const worktreeIgnoreMatcher = await loadWorktreeIgnoreMatcher(plannerWorktreePath);
 
   for (const lane of activeLanes) {
     const changedPathsBeforeMaterialization =
@@ -630,6 +697,8 @@ export const materializeAssignmentProposals = async ({
       changedPaths: proposalChangeDelta,
       proposalChangeName: lane.proposalChangeName,
       proposalPath: lane.proposalPath,
+      worktreePath: plannerWorktreePath,
+      worktreeIgnoreMatcher,
     });
     await assertPriorProposalSnapshotsRemainUnchanged({
       worktreePath: plannerWorktreePath,
