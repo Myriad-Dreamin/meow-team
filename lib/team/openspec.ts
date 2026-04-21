@@ -55,7 +55,7 @@ type MaterializationGitState = {
   plannerHeadReference: string | null;
 };
 
-type RepositoryIgnoreMatcher = ReturnType<typeof ignore>;
+type GitIgnoreMatcher = ReturnType<typeof ignore>;
 
 const toPosixPath = (value: string): string => {
   return value.split(path.sep).join("/");
@@ -192,33 +192,31 @@ const calculateChangedPathDelta = ({
   });
 };
 
-const loadRepositoryIgnoreMatcher = async (
-  repositoryPath: string,
-): Promise<RepositoryIgnoreMatcher> => {
-  const repositoryIgnoreMatcher = ignore();
+const loadWorktreeIgnoreMatcher = async (worktreePath: string): Promise<GitIgnoreMatcher> => {
+  const worktreeIgnoreMatcher = ignore();
 
   try {
-    repositoryIgnoreMatcher.add(await fs.readFile(path.join(repositoryPath, ".gitignore"), "utf8"));
+    worktreeIgnoreMatcher.add(await fs.readFile(path.join(worktreePath, ".gitignore"), "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
   }
 
-  return repositoryIgnoreMatcher;
+  return worktreeIgnoreMatcher;
 };
 
 const listIgnoredUntrackedUnexpectedPaths = async ({
   unexpectedPaths,
   worktreePath,
-  repositoryIgnoreMatcher,
+  worktreeIgnoreMatcher,
 }: {
   unexpectedPaths: string[];
   worktreePath: string;
-  repositoryIgnoreMatcher: RepositoryIgnoreMatcher;
+  worktreeIgnoreMatcher: GitIgnoreMatcher;
 }): Promise<Set<string>> => {
   const ignoredUnexpectedPaths = unexpectedPaths.filter((changedPath) =>
-    repositoryIgnoreMatcher.ignores(changedPath),
+    worktreeIgnoreMatcher.ignores(changedPath),
   );
 
   if (ignoredUnexpectedPaths.length === 0) {
@@ -248,13 +246,13 @@ const assertProposalChangeDeltaIsIsolated = async ({
   proposalChangeName,
   proposalPath,
   worktreePath,
-  repositoryIgnoreMatcher,
+  worktreeIgnoreMatcher,
 }: {
   changedPaths: string[];
   proposalChangeName: string;
   proposalPath: string;
   worktreePath: string;
-  repositoryIgnoreMatcher: RepositoryIgnoreMatcher;
+  worktreeIgnoreMatcher: GitIgnoreMatcher;
 }): Promise<void> => {
   const unexpectedPaths = changedPaths.filter(
     (changedPath) => !isPathWithinProposalPath(changedPath, proposalPath),
@@ -263,7 +261,7 @@ const assertProposalChangeDeltaIsIsolated = async ({
   const ignoredUntrackedUnexpectedPaths = await listIgnoredUntrackedUnexpectedPaths({
     unexpectedPaths,
     worktreePath,
-    repositoryIgnoreMatcher,
+    worktreeIgnoreMatcher,
   });
   const disallowedUnexpectedPaths = unexpectedPaths.filter(
     (changedPath) => !ignoredUntrackedUnexpectedPaths.has(changedPath),
@@ -636,7 +634,7 @@ export const materializeAssignmentProposals = async ({
     rootPath: worktreeRoot,
   });
   const materializedProposalSnapshots: MaterializedProposalSnapshot[] = [];
-  const repositoryIgnoreMatcher = await loadRepositoryIgnoreMatcher(repositoryPath);
+  const worktreeIgnoreMatcher = await loadWorktreeIgnoreMatcher(plannerWorktreePath);
 
   for (const lane of activeLanes) {
     const changedPathsBeforeMaterialization =
@@ -700,7 +698,7 @@ export const materializeAssignmentProposals = async ({
       proposalChangeName: lane.proposalChangeName,
       proposalPath: lane.proposalPath,
       worktreePath: plannerWorktreePath,
-      repositoryIgnoreMatcher,
+      worktreeIgnoreMatcher,
     });
     await assertPriorProposalSnapshotsRemainUnchanged({
       worktreePath: plannerWorktreePath,
