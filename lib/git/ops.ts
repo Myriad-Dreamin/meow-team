@@ -239,6 +239,42 @@ export const listWorktreeChanges = async (worktreePath: string): Promise<string[
   });
 };
 
+export const listTrackedPaths = async ({
+  repositoryPath,
+  pathspecs,
+}: {
+  repositoryPath: string;
+  pathspecs: string[];
+}): Promise<string[]> => {
+  const normalizedPathspecs = Array.from(
+    new Set(
+      pathspecs
+        .map((pathspec) => pathspec.trim())
+        .filter((pathspec): pathspec is string => pathspec.length > 0),
+    ),
+  );
+
+  if (normalizedPathspecs.length === 0) {
+    return [];
+  }
+
+  const { stdout } = await runGit(repositoryPath, [
+    "ls-files",
+    "--cached",
+    "--full-name",
+    "--",
+    ...normalizedPathspecs,
+  ]);
+
+  return Array.from(new Set(listNamedPaths(stdout))).sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    return left < right ? -1 : 1;
+  });
+};
+
 export const listCommittedPathsBetweenRevisions = async ({
   repositoryPath,
   fromRevision,

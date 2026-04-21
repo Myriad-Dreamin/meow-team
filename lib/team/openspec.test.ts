@@ -18,6 +18,7 @@ const {
   getSymbolicHeadReferenceMock,
   hasWorktreeChangesMock,
   listCommittedPathsBetweenRevisionsMock,
+  listTrackedPathsMock,
   listWorktreeChangesMock,
   runOpenSpecMock,
 } = vi.hoisted(() => ({
@@ -29,6 +30,7 @@ const {
   getSymbolicHeadReferenceMock: vi.fn(),
   hasWorktreeChangesMock: vi.fn(),
   listCommittedPathsBetweenRevisionsMock: vi.fn(),
+  listTrackedPathsMock: vi.fn(),
   listWorktreeChangesMock: vi.fn(),
   runOpenSpecMock: vi.fn(),
 }));
@@ -45,6 +47,7 @@ vi.mock("@/lib/git/ops", () => ({
   getSymbolicHeadReference: getSymbolicHeadReferenceMock,
   hasWorktreeChanges: hasWorktreeChangesMock,
   listCommittedPathsBetweenRevisions: listCommittedPathsBetweenRevisionsMock,
+  listTrackedPaths: listTrackedPathsMock,
   listWorktreeChanges: listWorktreeChangesMock,
 }));
 
@@ -168,6 +171,8 @@ describe("materializeAssignmentProposals", () => {
     hasWorktreeChangesMock.mockResolvedValue(false);
     listCommittedPathsBetweenRevisionsMock.mockReset();
     listCommittedPathsBetweenRevisionsMock.mockResolvedValue([]);
+    listTrackedPathsMock.mockReset();
+    listTrackedPathsMock.mockResolvedValue([]);
     listWorktreeChangesMock.mockReset();
     listWorktreeChangesMock.mockResolvedValue([]);
     runOpenSpecMock.mockReset();
@@ -570,6 +575,91 @@ describe("materializeAssignmentProposals", () => {
       }),
     ).rejects.toThrow(
       "OpenSpec materializer changed planner worktree paths outside change-1: README.md.",
+    );
+
+    expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
+    expect(ensureBranchRefMock).not.toHaveBeenCalled();
+  });
+
+  it("fails when ignored planner worktree changes are already tracked", async () => {
+    const repositoryPath = await createTemporaryDirectory();
+    const worktreeRoot = path.join(repositoryPath, "worktrees");
+    const plannerWorktreePath = path.join(worktreeRoot, "meow-1");
+    const proposalChangeName = "change-1";
+    const proposalPath = "openspec/changes/change-1";
+    const ignoredTrackedPath = ".codex/materializer/session.json";
+
+    await writeRepositoryGitignore({
+      repositoryPath,
+      content: ".codex/*\n",
+    });
+
+    hasWorktreeChangesMock.mockResolvedValue(true);
+    listCommittedPathsBetweenRevisionsMock.mockResolvedValue([ignoredTrackedPath]);
+    listTrackedPathsMock.mockResolvedValue([ignoredTrackedPath]);
+    listWorktreeChangesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        `${proposalPath}/.openspec.yaml`,
+        `${proposalPath}/design.md`,
+        `${proposalPath}/proposal.md`,
+        `${proposalPath}/specs/${proposalChangeName}/spec.md`,
+        `${proposalPath}/tasks.md`,
+      ]);
+
+    const openSpecMaterializerAgent: {
+      run: (input: OpenSpecMaterializerInput) => Promise<OpenSpecMaterializerOutput>;
+    } = {
+      run: vi.fn(async () => {
+        const artifactsCreated = await writeExpectedProposalArtifacts({
+          worktreePath: plannerWorktreePath,
+          proposalChangeName,
+          proposalPath,
+        });
+
+        await writeArtifact({
+          worktreePath: plannerWorktreePath,
+          relativePath: ignoredTrackedPath,
+          content: '{"status":"tracked"}\n',
+        });
+
+        return {
+          summary: "Materialized the OpenSpec proposal artifacts.",
+          deliverable: "Wrote the expected artifacts and a tracked ignored path.",
+          artifactsCreated,
+        };
+      }),
+    };
+
+    await expect(
+      materializeAssignmentProposals({
+        repositoryPath,
+        baseBranch: "main",
+        canonicalBranchName: "requests/example/thread-1/a1",
+        requestTitle: "feat(dispatch): Materialize proposal artifacts",
+        conventionalTitle: {
+          type: "feat",
+          scope: "dispatch",
+        },
+        plannerSummary: "Planner summary",
+        plannerDeliverable: "Planner deliverable",
+        requestInput: "Materialize proposal artifacts through the agent.",
+        worktreeRoot,
+        plannerWorktreePath,
+        lanes: [
+          {
+            laneIndex: 1,
+            taskTitle: "Materialize proposal artifacts",
+            taskObjective: "Write the proposal files from the agent.",
+            proposalChangeName,
+            proposalPath,
+            branchName: "requests/example/thread-1/a1-proposal-1",
+          },
+        ],
+        openSpecMaterializerAgent,
+      }),
+    ).rejects.toThrow(
+      "OpenSpec materializer changed planner worktree paths outside change-1: .codex/materializer/session.json.",
     );
 
     expect(commitWorktreeChangesMock).not.toHaveBeenCalled();
