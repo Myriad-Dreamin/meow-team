@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { runGitMock, runUgitMock } = vi.hoisted(() => ({
+const { resolveRepositoryUgitBrowserBaseUrlMock, runGitMock, runUgitMock } = vi.hoisted(() => ({
+  resolveRepositoryUgitBrowserBaseUrlMock: vi.fn(),
   runGitMock: vi.fn(),
   runUgitMock: vi.fn(),
 }));
 
 vi.mock("@/lib/cli-tools/git", () => ({
   runGit: runGitMock,
+}));
+
+vi.mock("@/lib/config/repository", () => ({
+  resolveRepositoryUgitBrowserBaseUrl: resolveRepositoryUgitBrowserBaseUrlMock,
 }));
 
 vi.mock("@/lib/platform/ugit/cli", () => ({
@@ -16,12 +21,24 @@ vi.mock("@/lib/platform/ugit/cli", () => ({
 import {
   normalizeUgitRepositoryUrl,
   publishUgitBranch,
+  resolveUgitPushRemote,
   synchronizeUgitPullRequest,
 } from "@/lib/platform/ugit";
 
 beforeEach(() => {
   runGitMock.mockReset();
   runUgitMock.mockReset();
+  resolveRepositoryUgitBrowserBaseUrlMock.mockReset();
+  runGitMock.mockImplementation(async (_repositoryPath: string, args: string[]) => {
+    throw new Error(`Unexpected runGit call: ${args.join(" ")}`);
+  });
+  runUgitMock.mockImplementation(async (_repositoryPath: string, args: string[]) => {
+    throw new Error(`Unexpected runUgit call: ${args.join(" ")}`);
+  });
+  resolveRepositoryUgitBrowserBaseUrlMock.mockImplementation(async (cwd = process.cwd()) => ({
+    repositoryPath: cwd,
+    baseUrl: "http://localhost:17121/",
+  }));
 });
 
 describe("normalizeUgitRepositoryUrl", () => {
@@ -47,6 +64,14 @@ describe("publishUgitBranch", () => {
         stderr: "",
       })
       .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
         stdout: "",
         stderr: "",
       });
@@ -60,9 +85,9 @@ describe("publishUgitBranch", () => {
       }),
     ).resolves.toEqual({
       remoteName: "origin",
-      repositoryUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team",
-      branchUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#branch=feature%2Ftest",
-      commitUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#commit=abcdef1234567890",
+      repositoryUrl: "http://localhost:17121/Myriad-Dreamin/meow-team",
+      branchUrl: "http://localhost:17121/Myriad-Dreamin/meow-team#branch=feature%2Ftest",
+      commitUrl: "http://localhost:17121/Myriad-Dreamin/meow-team#commit=abcdef1234567890",
       commitHash: "abcdef1234567890",
       pushedAt: "2026-04-20T00:00:00.000Z",
     });
@@ -74,13 +99,88 @@ describe("publishUgitBranch", () => {
       "--push",
       "origin",
     ]);
-    expect(runGitMock).toHaveBeenNthCalledWith(3, "/repo", [
+    expect(runGitMock).toHaveBeenNthCalledWith(3, "/repo", ["remote", "get-url", "upstream"]);
+    expect(runGitMock).toHaveBeenNthCalledWith(4, "/repo", [
+      "remote",
+      "get-url",
+      "--push",
+      "upstream",
+    ]);
+    expect(runGitMock).toHaveBeenNthCalledWith(5, "/repo", [
       "push",
       "--force-with-lease",
       "--set-upstream",
       "origin",
       "feature/test:feature/test",
     ]);
+  });
+});
+
+describe("resolveUgitPushRemote", () => {
+  it("derives the browser repository URL from stable metadata when origin is a local path", async () => {
+    runGitMock
+      .mockResolvedValueOnce({
+        stdout: "/home/kamiyoru/work/ts/ugit/.data/repos/revival.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "/home/kamiyoru/work/ts/ugit/.data/repos/revival.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/revival.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/revival.git",
+        stderr: "",
+      });
+
+    await expect(
+      resolveUgitPushRemote({
+        repositoryPath: "/repo",
+      }),
+    ).resolves.toEqual({
+      remoteName: "origin",
+      fetchUrl: "/home/kamiyoru/work/ts/ugit/.data/repos/revival.git",
+      pushUrl: "/home/kamiyoru/work/ts/ugit/.data/repos/revival.git",
+      repositoryUrl: "http://localhost:17121/Myriad-Dreamin/revival",
+    });
+  });
+
+  it("uses explicit base-url overrides while keeping ssh origin transport metadata", async () => {
+    resolveRepositoryUgitBrowserBaseUrlMock.mockResolvedValueOnce({
+      repositoryPath: "/repo",
+      baseUrl: "http://ugit.example.test/review/",
+    });
+    runGitMock
+      .mockResolvedValueOnce({
+        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/revival.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/revival.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "ssh://git@github.com/Myriad-Dreamin/revival.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "ssh://git@github.com/Myriad-Dreamin/revival.git",
+        stderr: "",
+      });
+
+    await expect(
+      resolveUgitPushRemote({
+        repositoryPath: "/repo",
+      }),
+    ).resolves.toEqual({
+      remoteName: "origin",
+      fetchUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/revival.git",
+      pushUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/revival.git",
+      repositoryUrl: "http://ugit.example.test/review/Myriad-Dreamin/revival",
+    });
   });
 });
 
@@ -98,11 +198,19 @@ describe("synchronizeUgitPullRequest", () => {
         stderr: "",
       })
       .mockResolvedValueOnce({
-        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+        stdout: "/srv/ugit/.data/repos/meow-team.git",
         stderr: "",
       })
       .mockResolvedValueOnce({
-        stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+        stdout: "/srv/ugit/.data/repos/meow-team.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
         stderr: "",
       });
     runUgitMock
@@ -125,7 +233,7 @@ describe("synchronizeUgitPullRequest", () => {
         draft: true,
       }),
     ).resolves.toEqual({
-      url: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#pull-request=7",
+      url: "http://localhost:17121/Myriad-Dreamin/meow-team/pull-requests/7",
     });
 
     expect(runGitMock).toHaveBeenNthCalledWith(1, "/repo", ["worktree", "list", "--porcelain"]);
@@ -139,6 +247,17 @@ describe("synchronizeUgitPullRequest", () => {
       "get-url",
       "--push",
       "origin",
+    ]);
+    expect(runGitMock).toHaveBeenNthCalledWith(4, "/worktrees/feature-test", [
+      "remote",
+      "get-url",
+      "upstream",
+    ]);
+    expect(runGitMock).toHaveBeenNthCalledWith(5, "/worktrees/feature-test", [
+      "remote",
+      "get-url",
+      "--push",
+      "upstream",
     ]);
     expect(runUgitMock).toHaveBeenNthCalledWith(1, "/worktrees/feature-test", [
       "pr",
@@ -182,6 +301,14 @@ describe("synchronizeUgitPullRequest", () => {
       .mockResolvedValueOnce({
         stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
         stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
+        stderr: "",
       });
     runUgitMock
       .mockResolvedValueOnce({
@@ -207,7 +334,7 @@ describe("synchronizeUgitPullRequest", () => {
         draft: false,
       }),
     ).resolves.toEqual({
-      url: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#pull-request=7",
+      url: "http://localhost:17121/Myriad-Dreamin/meow-team/pull-requests/7",
     });
 
     expect(runUgitMock).toHaveBeenNthCalledWith(1, "/worktrees/feature-test", [
@@ -251,6 +378,14 @@ describe("synchronizeUgitPullRequest", () => {
       .mockResolvedValueOnce({
         stdout: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
         stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: "git@github.com:Myriad-Dreamin/meow-team.git",
+        stderr: "",
       });
     runUgitMock
       .mockResolvedValueOnce({
@@ -277,7 +412,7 @@ describe("synchronizeUgitPullRequest", () => {
         body: "Body",
       }),
     ).resolves.toEqual({
-      url: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team#pull-request=7",
+      url: "http://localhost:17121/Myriad-Dreamin/meow-team/pull-requests/7",
     });
 
     expect(runUgitMock).toHaveBeenNthCalledWith(2, "/worktrees/feature-test", [

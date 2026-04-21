@@ -70,7 +70,13 @@ describe("resolvePushRemote", () => {
       "remote",
       "add",
       "origin",
-      "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
+      path.join(os.tmpdir(), "ugit", ".data", "repos", "meow-team.git"),
+    ]);
+    await runGit(repositoryPath, [
+      "remote",
+      "add",
+      "upstream",
+      "git@github.com:Myriad-Dreamin/meow-team.git",
     ]);
     await writeRepositoryPlatformConfig({
       cwd: repositoryPath,
@@ -83,9 +89,9 @@ describe("resolvePushRemote", () => {
       }),
     ).resolves.toEqual({
       remoteName: "origin",
-      fetchUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
-      pushUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team.git",
-      repositoryUrl: "ssh://ugit.example.test/srv/ugit/.data/repos/meow-team",
+      fetchUrl: path.join(os.tmpdir(), "ugit", ".data", "repos", "meow-team.git"),
+      pushUrl: path.join(os.tmpdir(), "ugit", ".data", "repos", "meow-team.git"),
+      repositoryUrl: "http://localhost:17121/Myriad-Dreamin/meow-team",
     });
   });
 

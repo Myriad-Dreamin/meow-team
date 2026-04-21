@@ -4,7 +4,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runGit } from "@/lib/cli-tools/git";
 import {
+  DEFAULT_UGIT_BROWSER_BASE_URL,
+  REPOSITORY_UGIT_BROWSER_BASE_URL_CONFIG_KEY,
   readRepositoryHarnessConfig,
+  resolveRepositoryUgitBrowserBaseUrl,
+  writeRepositoryUgitBrowserBaseUrl,
   writeRepositoryPlatformConfig,
 } from "@/lib/config/repository";
 
@@ -86,6 +90,44 @@ describe("writeRepositoryPlatformConfig", () => {
   });
 });
 
+describe("writeRepositoryUgitBrowserBaseUrl", () => {
+  it("writes the ugit browser base URL into the repository-local git config", async () => {
+    const repositoryPath = await createRepository();
+
+    await expect(
+      writeRepositoryUgitBrowserBaseUrl({
+        cwd: repositoryPath,
+        baseUrl: "http://ugit.example.test/review/",
+      }),
+    ).resolves.toEqual({
+      repositoryPath,
+      baseUrl: "http://ugit.example.test/review/",
+    });
+
+    await expect(
+      runGit(repositoryPath, [
+        "config",
+        "--local",
+        "--get",
+        REPOSITORY_UGIT_BROWSER_BASE_URL_CONFIG_KEY,
+      ]),
+    ).resolves.toMatchObject({
+      stdout: "http://ugit.example.test/review/",
+    });
+  });
+
+  it("rejects invalid ugit browser base URLs", async () => {
+    const repositoryPath = await createRepository();
+
+    await expect(
+      writeRepositoryUgitBrowserBaseUrl({
+        cwd: repositoryPath,
+        baseUrl: "not-a-url",
+      }),
+    ).rejects.toThrow("Ugit browser base URL must be an absolute URL.");
+  });
+});
+
 describe("readRepositoryHarnessConfig", () => {
   it("returns null when the platform config is unset", async () => {
     const repositoryPath = await createRepository();
@@ -93,6 +135,36 @@ describe("readRepositoryHarnessConfig", () => {
     await expect(readRepositoryHarnessConfig(repositoryPath)).resolves.toEqual({
       repositoryPath,
       platform: null,
+      ugit: {
+        browserBaseUrl: null,
+      },
+    });
+  });
+
+  it("includes the configured ugit browser base URL", async () => {
+    const repositoryPath = await createRepository();
+    await writeRepositoryUgitBrowserBaseUrl({
+      cwd: repositoryPath,
+      baseUrl: "http://ugit.example.test/review/",
+    });
+
+    await expect(readRepositoryHarnessConfig(repositoryPath)).resolves.toEqual({
+      repositoryPath,
+      platform: null,
+      ugit: {
+        browserBaseUrl: "http://ugit.example.test/review/",
+      },
+    });
+  });
+});
+
+describe("resolveRepositoryUgitBrowserBaseUrl", () => {
+  it("defaults to localhost when the ugit browser config is unset", async () => {
+    const repositoryPath = await createRepository();
+
+    await expect(resolveRepositoryUgitBrowserBaseUrl(repositoryPath)).resolves.toEqual({
+      repositoryPath,
+      baseUrl: DEFAULT_UGIT_BROWSER_BASE_URL,
     });
   });
 });

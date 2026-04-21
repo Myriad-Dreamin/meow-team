@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { Builtins, Cli, type BaseContext } from "clipanion";
 import { ConfigCommand } from "./commands/config.ts";
 import { ConfigPlatformCommand } from "./commands/config-platform.ts";
+import { ConfigUgitBaseUrlCommand } from "./commands/config-ugit-base-url.ts";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as {
@@ -15,6 +16,7 @@ export type MeowTeamCliContext = BaseContext & {
 const meowTeamCommands = [
   ConfigCommand,
   ConfigPlatformCommand,
+  ConfigUgitBaseUrlCommand,
   Builtins.HelpCommand,
   Builtins.VersionCommand,
 ];
