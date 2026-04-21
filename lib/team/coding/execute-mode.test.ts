@@ -220,10 +220,20 @@ const createRunState = ({
 const writeStoredThread = async ({
   executionMode,
   threadId,
+  laneOverrides = {},
 }: {
   executionMode: TeamDispatchAssignment["executionMode"];
   threadId: string;
+  laneOverrides?: Partial<TeamWorkerLaneRecord>;
 }) => {
+  const assignment = createAssignment({ executionMode });
+  assignment.lanes = [
+    {
+      ...assignment.lanes[0]!,
+      ...laneOverrides,
+    },
+  ];
+
   const thread: TeamThreadRecord = {
     threadId,
     data: createRunState({ executionMode }),
@@ -236,7 +246,7 @@ const writeStoredThread = async ({
         timestamp: FIXED_TIMESTAMP,
       },
     ],
-    dispatchAssignments: [createAssignment({ executionMode })],
+    dispatchAssignments: [assignment],
     archivedAt: null,
     run: {
       status: "running",
@@ -526,6 +536,102 @@ describe("execute-mode lane routing", () => {
 
     resolveSecondExecutor({
       summary: "Working on the execution-reviewer feedback.",
+      deliverable: "No new execution artifacts yet.",
+      decision: "continue",
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    });
+    await waitForLaneRunCompletion(threadId, 1, "lane-1");
+  });
+
+  it("publishes an execute-mode reviewing lane head when pushed metadata is missing", async () => {
+    const threadId = "execute-review-retry-missing-push";
+    const persistedExecutorHandoff = {
+      roleId: "executor",
+      roleName: "Executor",
+      summary: "Committed the execution artifacts.",
+      deliverable: "Execution artifacts are ready for validation.",
+      decision: "continue" as const,
+      sequence: 1,
+      assignmentNumber: 1,
+      updatedAt: FIXED_TIMESTAMP,
+    };
+    await writeStoredThread({
+      executionMode: "execution",
+      threadId,
+      laneOverrides: {
+        status: "reviewing",
+        latestImplementationCommit: "commit-after",
+        pushedCommit: null,
+        latestCoderHandoff: persistedExecutorHandoff,
+        latestCoderSummary: persistedExecutorHandoff.summary,
+        latestDecision: persistedExecutorHandoff.decision,
+        latestActivity:
+          "Execution reviewer is retrying after the previous validation attempt failed.",
+      },
+    });
+    getBranchHeadMock.mockResolvedValueOnce("commit-after");
+    pushLaneBranchMock.mockResolvedValueOnce({
+      remoteName: "origin",
+      repositoryUrl: "https://example.com/repo.git",
+      branchUrl: "https://example.com/repo/tree/branch",
+      commitUrl: "https://example.com/repo/commit/commit-after",
+      commitHash: "commit-after",
+      pushedAt: FIXED_TIMESTAMP,
+    });
+
+    let secondExecutorStarted = false;
+    let resolveSecondExecutor: (
+      value: Awaited<ReturnType<TeamRoleDependencies["executorAgent"]["run"]>>,
+    ) => void = () => undefined;
+    const secondExecutorPromise = new Promise<
+      Awaited<ReturnType<TeamRoleDependencies["executorAgent"]["run"]>>
+    >((resolve) => {
+      resolveSecondExecutor = resolve;
+    });
+    const env = createEnv({
+      coderAgent: { run: vi.fn() },
+      reviewerAgent: { run: vi.fn() },
+      executorAgent: {
+        run: vi.fn(() => {
+          secondExecutorStarted = true;
+          return secondExecutorPromise;
+        }),
+      },
+      executionReviewerAgent: {
+        run: vi.fn(async () => ({
+          summary: "Retry execution reviewer requested changes.",
+          deliverable: "Address the retried execution-review feedback.",
+          decision: "needs_revision" as const,
+          pullRequestTitle: null,
+          pullRequestSummary: null,
+        })),
+      },
+    });
+
+    await ensurePendingDispatchWork(env, threadId);
+
+    await vi.waitFor(async () => {
+      expect(secondExecutorStarted).toBe(true);
+      const updatedLane = (await getTeamThreadRecord(teamConfig.storage.threadFile, threadId))
+        ?.dispatchAssignments[0]?.lanes[0];
+      expect(updatedLane?.status).toBe("coding");
+      expect(updatedLane?.requeueReason).toBe("reviewer_requested_changes");
+      expect(updatedLane?.latestImplementationCommit).toBe("commit-after");
+      expect(updatedLane?.pushedCommit?.commitHash).toBe("commit-after");
+      expect(updatedLane?.latestActivity).toContain("addressing execution-reviewer feedback");
+    });
+
+    expect(env.deps.executionReviewerAgent.run).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: "/tmp/team-worktrees/meow-1",
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "commit-after",
+    });
+
+    resolveSecondExecutor({
+      summary: "Working on the retried execution-reviewer feedback.",
       deliverable: "No new execution artifacts yet.",
       decision: "continue",
       pullRequestTitle: null,

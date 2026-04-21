@@ -3501,6 +3501,106 @@ describe.sequential("approveLaneProposal", () => {
     await waitForLaneRunCompletion("thread-review-feedback-publish", 1, "lane-1");
   });
 
+  it("publishes a reviewing lane head when retrying without pushed metadata", async () => {
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+    const persistedCoderHandoff = {
+      roleId: "coder",
+      roleName: "Coder",
+      summary: "Implemented the approved proposal.",
+      deliverable: "Implementation is ready for machine review.",
+      decision: "continue" as const,
+      sequence: 1,
+      assignmentNumber: 1,
+      updatedAt: FIXED_TIMESTAMP,
+    };
+    let secondCoderStarted = false;
+    let resolveSecondCoder: (
+      value: Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>,
+    ) => void = () => undefined;
+    const secondCoderPromise = new Promise<
+      Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>
+    >((resolve) => {
+      resolveSecondCoder = resolve;
+    });
+    const coderRun = vi.fn(() => {
+      secondCoderStarted = true;
+      return secondCoderPromise;
+    }) as TeamRoleDependencies["coderAgent"]["run"];
+    const reviewerRun = vi.fn(async () => ({
+      summary: "Retry reviewer requested changes.",
+      deliverable: "Address the retried review feedback.",
+      decision: "needs_revision" as const,
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    })) as TeamRoleDependencies["reviewerAgent"]["run"];
+
+    getBranchHeadMock.mockResolvedValueOnce("implementation-commit");
+    pushLaneBranchMock.mockResolvedValueOnce({
+      ...basePushedCommit,
+      commitHash: "implementation-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/implementation-commit",
+    });
+
+    await writeExecutionThreadStore({
+      threadId: "thread-review-retry-missing-push",
+      lane: createProposalApprovalLane({
+        status: "reviewing",
+        executionPhase: "implementation",
+        workerSlot: 1,
+        worktreePath: `${worktreeRoot}/meow-1`,
+        approvalGrantedAt: FIXED_TIMESTAMP,
+        latestImplementationCommit: "implementation-commit",
+        pushedCommit: null,
+        latestCoderHandoff: persistedCoderHandoff,
+        latestCoderSummary: persistedCoderHandoff.summary,
+        latestDecision: persistedCoderHandoff.decision,
+        latestActivity: "Reviewer is retrying after the previous validation attempt failed.",
+        pullRequest: createDraftTrackingPullRequest(),
+      }),
+      assignmentOverrides: {
+        status: "running",
+      },
+      runStatus: "running",
+    });
+
+    await ensurePendingDispatchWork(
+      createExecutionEnv({
+        coderRun,
+        reviewerRun,
+      }),
+      "thread-review-retry-missing-push",
+    );
+
+    await vi.waitFor(async () => {
+      expect(secondCoderStarted).toBe(true);
+      const lane = (
+        await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-review-retry-missing-push")
+      )?.dispatchAssignments[0]?.lanes[0];
+      expect(lane?.status).toBe("coding");
+      expect(lane?.requeueReason).toBe("reviewer_requested_changes");
+      expect(lane?.latestImplementationCommit).toBe("implementation-commit");
+      expect(lane?.pushedCommit?.commitHash).toBe("implementation-commit");
+      expect(lane?.latestActivity).toContain("addressing reviewer-requested changes");
+    });
+
+    expect(reviewerRun).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: `${worktreeRoot}/meow-1`,
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "implementation-commit",
+    });
+
+    resolveSecondCoder({
+      summary: "Working on the retried reviewer feedback.",
+      deliverable: "No follow-up branch changes yet.",
+      decision: "continue",
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    });
+    await waitForLaneRunCompletion("thread-review-retry-missing-push", 1, "lane-1");
+  });
+
   it("fails the lane when publishing the implementation head before review fails", async () => {
     const reviewerRun = vi.fn() as TeamRoleDependencies["reviewerAgent"]["run"];
 
