@@ -172,6 +172,7 @@ const createProposalLane = ({
     runCount: 0,
     revisionCount: 0,
     requeueReason: null,
+    retryState: null,
     lastError: null,
     pullRequest: null,
     events: [createLaneEvent("planner", `Planner proposed: ${task.title}`, now)],
@@ -1305,6 +1306,7 @@ export const handlePlanningStageError = async ({
             startedAt: thread.run?.startedAt ?? thread.createdAt,
             finishedAt: now,
             lastError: error.message,
+            plannerRetryState: null,
           };
         },
       });

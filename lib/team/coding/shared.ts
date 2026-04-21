@@ -144,6 +144,8 @@ export type TeamRunPlanningContext = {
   requestMetadata: InitialRequestMetadata;
 };
 
+export type TeamPlannerRetryResumeContext = Omit<TeamRunPlanningContext, "existingThread">;
+
 export type TeamRunInitState = {
   stage: "init";
   args: TeamRunArgs;
@@ -161,6 +163,33 @@ export type TeamRunMetadataGenerationStageState = {
   context: TeamRunPlanningContext;
   plannerResponse: PlannerAgentResult;
   plannerRoleName: string;
+};
+
+export type TeamPlannerRetryResumeState =
+  | {
+      stage: "planning";
+      args: TeamPlanningRunArgs;
+      context: TeamPlannerRetryResumeContext;
+    }
+  | {
+      stage: "metadata-generation";
+      args: TeamPlanningRunArgs;
+      context: TeamPlannerRetryResumeContext;
+      plannerResponse: PlannerAgentResult;
+      plannerRoleName: string;
+    };
+
+export type TeamPlannerRetryState = {
+  roleId: "planner";
+  roleName: "Planner";
+  attempts: number;
+  maxAttempts: number;
+  round: number;
+  nextRetryAt: string | null;
+  awaitingConfirmationSince: string | null;
+  lastError: string | null;
+  updatedAt: string;
+  resumeState: TeamPlannerRetryResumeState;
 };
 
 export type TeamRunCodingStageState = {

@@ -2,7 +2,11 @@ import "server-only";
 
 import { teamConfig } from "@/team.config";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
-import { DispatchThreadCapacityError, type TeamRunState } from "@/lib/team/coding/shared";
+import {
+  DispatchThreadCapacityError,
+  type TeamPlannerRetryState,
+  type TeamRunState,
+} from "@/lib/team/coding/shared";
 import {
   claimThreadOwnedWorktree,
   resolveThreadOwnedWorktree,
@@ -63,6 +67,7 @@ type StoredRun = {
   startedAt: string | null;
   finishedAt: string | null;
   lastError: string | null;
+  plannerRetryState?: TeamPlannerRetryState | null;
 };
 
 type StoredLegacyMessagePart = {
@@ -136,6 +141,7 @@ export type TeamThreadSummary = {
   finishedAt: string | null;
   updatedAt: string;
   lastError: string | null;
+  plannerRetryAwaitingConfirmation: boolean;
   latestAssignmentStatus: TeamDispatchAssignmentStatus | null;
   latestPlanSummary: string | null;
   latestBranchPrefix: string | null;
@@ -320,6 +326,7 @@ const normalizeWorkerLane = (lane: TeamWorkerLaneRecord): TeamWorkerLaneRecord =
     approvalRequestedAt: lane.approvalRequestedAt ?? null,
     approvalGrantedAt: lane.approvalGrantedAt ?? null,
     queuedAt: lane.queuedAt ?? null,
+    retryState: lane.retryState ?? null,
     pullRequest: lane.pullRequest
       ? {
           ...lane.pullRequest,
@@ -443,6 +450,12 @@ const buildUpsertedThreadRecord = ({
   now: string;
   appendUserMessage: boolean;
 }): TeamThreadRecord => {
+  const preservedPlannerRetryState =
+    existingThread?.run?.plannerRetryState?.resumeState.context.state.assignmentNumber ===
+    state.assignmentNumber
+      ? existingThread.run.plannerRetryState
+      : null;
+
   return {
     threadId,
     data: {
@@ -469,6 +482,7 @@ const buildUpsertedThreadRecord = ({
       startedAt: existingThread?.run?.startedAt ?? now,
       finishedAt: null,
       lastError: null,
+      plannerRetryState: preservedPlannerRetryState,
     },
     createdAt: existingThread?.createdAt ?? now,
     updatedAt: now,
@@ -545,6 +559,7 @@ const countWorkerLanes = (lanes: TeamWorkerLaneRecord[]): TeamWorkerLaneCounts =
         counts.reviewing += 1;
         break;
       case "awaiting_human_approval":
+      case "awaiting_retry_approval":
         counts.awaitingHumanApproval += 1;
         break;
       case "cancelled":
@@ -608,9 +623,15 @@ const deriveDispatchAssignmentStatus = (
 
   if (
     assignedLanes.every(
-      (lane) => lane.status === "approved" || lane.status === "awaiting_human_approval",
+      (lane) =>
+        lane.status === "approved" ||
+        lane.status === "awaiting_human_approval" ||
+        lane.status === "awaiting_retry_approval",
     ) &&
-    assignedLanes.some((lane) => lane.status === "awaiting_human_approval")
+    assignedLanes.some(
+      (lane) =>
+        lane.status === "awaiting_human_approval" || lane.status === "awaiting_retry_approval",
+    )
   ) {
     return "awaiting_human_approval";
   }
@@ -737,6 +758,7 @@ export const synchronizeTeamThreadRun = (
     startedAt: thread.run?.startedAt ?? thread.createdAt,
     finishedAt: isTerminalThreadStatus(status) ? (thread.run?.finishedAt ?? now) : null,
     lastError: deriveThreadLastError(thread),
+    plannerRetryState: thread.run?.plannerRetryState ?? null,
   };
 
   return thread;
@@ -802,6 +824,9 @@ const summarizeThreadRecord = (thread: TeamThreadRecord): TeamThreadSummary => {
     finishedAt: thread.run?.finishedAt ?? null,
     updatedAt: thread.updatedAt,
     lastError: thread.run?.lastError ?? null,
+    plannerRetryAwaitingConfirmation: Boolean(
+      thread.run?.plannerRetryState?.awaitingConfirmationSince,
+    ),
     latestAssignmentStatus: latestAssignment?.status ?? null,
     latestPlanSummary: latestAssignment?.plannerSummary ?? null,
     latestBranchPrefix: latestAssignment?.branchPrefix ?? null,
@@ -1203,6 +1228,7 @@ export const markTeamThreadFailed = async ({
         startedAt: thread.run?.startedAt ?? thread.createdAt,
         finishedAt: now,
         lastError: error,
+        plannerRetryState: thread.run?.plannerRetryState ?? null,
       };
     },
   });
@@ -1219,6 +1245,10 @@ const getLaneCancellationMessage = (lane: TeamWorkerLaneRecord): string => {
 
   if (lane.status === "awaiting_human_approval") {
     return "Human cancelled this request group while it was waiting for proposal approval.";
+  }
+
+  if (lane.status === "awaiting_retry_approval") {
+    return "Human cancelled this request group while it was waiting for agent retry confirmation.";
   }
 
   return "Human cancelled this request group before more work could continue.";

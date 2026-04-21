@@ -22,13 +22,13 @@ one thread.
 
 | Field     | Type   | Required | Notes                                                                                                                                                                                    |
 | --------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `command` | string | Yes      | Raw slash command text. Supported forms are `/approve [proposal-number]`, `/ready [proposal-number]`, `/cancel`, `/replan [proposal-number] requirement`, and `/replan-all requirement`. |
+| `command` | string | Yes      | Raw slash command text. Supported forms are `/approve [proposal-number]`, `/ready [proposal-number]`, `/retry [proposal-number]`, `/cancel`, `/replan [proposal-number] requirement`, and `/replan-all requirement`. |
 
 ## Success response
 
-Proposal approval, final-approval, and cancellation commands return `200 OK`.
-Replan commands return `202 Accepted` because they start a fresh planning run
-in the background.
+Proposal approval, final-approval, retry confirmation, and cancellation
+commands return `200 OK`. Replan commands return `202 Accepted` because they
+start a fresh planning run in the background.
 
 ```json
 {
@@ -67,5 +67,7 @@ this endpoint. The composer is disabled when the thread is archived, the thread
 has no latest assignment yet, the latest assignment is being replanned or
 already superseded, or the latest assignment still has queued, coding, or
 reviewing work. `/cancel` is thread-scoped and skips unless the latest idle
-assignment is still waiting on proposal approval or final human approval. The
-composer shows the latest command result inline after each submission.
+assignment is still waiting on proposal approval, agent retry confirmation, or
+final human approval. `/retry` confirms another 10-attempt automatic retry round
+for proposals whose agent retries paused for human confirmation. The composer
+shows the latest command result inline after each submission.

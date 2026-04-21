@@ -138,6 +138,8 @@ const createExecutors = (
 ): ThreadCommandExecutors => {
   return {
     cancelApprovalWait: vi.fn(async () => undefined),
+    confirmPlannerRetry: vi.fn(async () => undefined),
+    confirmRetry: vi.fn(async () => undefined),
     runApproval: vi.fn(async () => undefined),
     startReplan: vi.fn(async () => ({
       accepted: true as const,
@@ -364,8 +366,156 @@ describe("executeThreadCommandForThread", () => {
       outcome: "success",
     });
     expect(result.message).toContain(
-      "Proposal 1 final approval recorded. The archive continuation was queued.",
+      "Proposal 1 final approval recorded. The finalization continuation was queued.",
     );
+  });
+
+  it("confirms another agent retry round for proposals awaiting retry approval", async () => {
+    const executors = createExecutors();
+    const retryLane = createLane({
+      laneId: "lane-1",
+      laneIndex: 1,
+      status: "awaiting_retry_approval",
+      retryState: {
+        roleId: "coder",
+        roleName: "Coder",
+        attempts: 10,
+        maxAttempts: 10,
+        round: 1,
+        nextRetryAt: null,
+        awaitingConfirmationSince: FIXED_TIMESTAMP,
+        resumeStatus: "coding",
+        resumeExecutionPhase: "implementation",
+        lastError: "Codex CLI exited with status 1.",
+        updatedAt: FIXED_TIMESTAMP,
+      },
+    });
+    const thread = createThread([
+      createAssignment(1, {
+        status: "awaiting_human_approval",
+        lanes: [retryLane],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/retry 1"),
+      executors,
+      thread,
+    });
+
+    expect(executors.confirmRetry).toHaveBeenCalledWith({
+      assignmentNumber: 1,
+      laneId: "lane-1",
+      threadId: "thread-1",
+    });
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "retry",
+      outcome: "success",
+    });
+    expect(result.message).toContain(
+      "Proposal 1 retry confirmed. The agent can make another 10 automatic retry attempts.",
+    );
+  });
+
+  it("confirms planner retry rounds even when replanning superseded the latest assignment", async () => {
+    const executors = createExecutors();
+    const thread = createThread(
+      [
+        createAssignment(1, {
+          status: "superseded",
+          supersededAt: FIXED_TIMESTAMP,
+        }),
+      ],
+      {
+        run: {
+          status: "failed",
+          startedAt: FIXED_TIMESTAMP,
+          finishedAt: FIXED_TIMESTAMP,
+          lastError: "Planner exhausted 10 automatic retry attempts.",
+          plannerRetryState: {
+            roleId: "planner",
+            roleName: "Planner",
+            attempts: 10,
+            maxAttempts: 10,
+            round: 1,
+            nextRetryAt: null,
+            awaitingConfirmationSince: FIXED_TIMESTAMP,
+            lastError: "Codex CLI exited with status 1.",
+            updatedAt: FIXED_TIMESTAMP,
+            resumeState: {
+              stage: "planning",
+              args: {
+                kind: "planning",
+                input: "Retry the planner.",
+                threadId: "thread-1",
+                reset: true,
+              },
+              context: {
+                threadId: "thread-1",
+                worktree: {
+                  path: "/tmp/meow-1",
+                  rootPath: null,
+                  slot: null,
+                },
+                selectedRepository: null,
+                shouldResetAssignment: true,
+                state: {
+                  assignmentNumber: 1,
+                } as TeamThreadRecord["data"],
+                requestMetadata: {
+                  requestTitle: "Assignment 1",
+                  conventionalTitle: null,
+                  executionMode: null,
+                  requestText: "Support thread slash commands.",
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/retry"),
+      executors,
+      thread,
+    });
+
+    expect(executors.confirmPlannerRetry).toHaveBeenCalledWith({
+      threadId: "thread-1",
+    });
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "retry",
+      outcome: "success",
+    });
+    expect(result.message).toContain(
+      "Planner retry confirmed. The planner can make another 10 automatic retry attempts.",
+    );
+  });
+
+  it("skips retry confirmation for proposals that are not paused for retries", async () => {
+    const executors = createExecutors();
+    const thread = createThread([
+      createAssignment(1, {
+        lanes: [createLane({ laneId: "lane-1", laneIndex: 1, status: "awaiting_human_approval" })],
+      }),
+    ]);
+
+    const result = await executeThreadCommandForThread({
+      command: parseThreadCommand("/retry 1"),
+      executors,
+      thread,
+    });
+
+    expect(executors.confirmRetry).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      assignmentNumber: 1,
+      commandName: "retry",
+      outcome: "skipped",
+    });
+    expect(result.message).toContain("not waiting for agent retry confirmation");
   });
 
   it("cancels the latest request group while proposal approval is pending", async () => {

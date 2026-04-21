@@ -4,6 +4,8 @@ import { teamConfig } from "@/team.config";
 import type { LaneApprovalTarget } from "@/lib/team/thread-actions";
 import {
   cancelThreadApprovalWait,
+  confirmLaneAgentRetry,
+  confirmPlannerRetry,
   runLaneApproval,
   startAssignmentReplan,
 } from "@/lib/team/thread-actions";
@@ -13,6 +15,7 @@ import {
   getCancelCommandSkipReason,
   getCommandProposalLanes,
   THREAD_COMMAND_NO_ASSIGNMENT_REASON,
+  getRetryCommandSkipReason,
   getReadyCommandSkipReason,
   getReplanCommandSkipReason,
   parseThreadCommand,
@@ -42,6 +45,12 @@ export type ThreadCommandExecutors = {
     target: LaneApprovalTarget;
     threadId: string;
   }) => Promise<void>;
+  confirmRetry: (args: {
+    assignmentNumber: number;
+    laneId: string;
+    threadId: string;
+  }) => Promise<void>;
+  confirmPlannerRetry: (args: { threadId: string }) => Promise<void>;
   startReplan: typeof startAssignmentReplan;
 };
 
@@ -52,6 +61,8 @@ type BatchSkip = {
 
 const defaultExecutors: ThreadCommandExecutors = {
   cancelApprovalWait: cancelThreadApprovalWait,
+  confirmPlannerRetry,
+  confirmRetry: confirmLaneAgentRetry,
   runApproval: runLaneApproval,
   startReplan: startAssignmentReplan,
 };
@@ -196,6 +207,38 @@ const buildBatchSummary = ({
   });
 };
 
+const executePlannerRetryCommand = async ({
+  command,
+  executors,
+  thread,
+}: {
+  command: Extract<ThreadCommand, { kind: "retry" }>;
+  executors: ThreadCommandExecutors;
+  thread: TeamThreadRecord;
+}): Promise<ThreadCommandResult | null> => {
+  if (command.proposalNumber !== null) {
+    return null;
+  }
+
+  const retryState = thread.run?.plannerRetryState;
+  if (!retryState?.awaitingConfirmationSince) {
+    return null;
+  }
+
+  await executors.confirmPlannerRetry({
+    threadId: thread.threadId,
+  });
+
+  return createResult({
+    assignmentNumber: retryState.resumeState.context.state.assignmentNumber,
+    commandName: command.kind,
+    details: [
+      `Planner retry confirmed. The planner can make another ${retryState.maxAttempts} automatic retry attempts.`,
+    ],
+    outcome: "success",
+  });
+};
+
 const executeApprovalCommand = async ({
   assignment,
   command,
@@ -324,6 +367,90 @@ const executeCancelCommand = async ({
   });
 };
 
+const executeRetryCommand = async ({
+  assignment,
+  command,
+  executors,
+  threadId,
+}: {
+  assignment: TeamDispatchAssignment;
+  command: Extract<ThreadCommand, { kind: "retry" }>;
+  executors: ThreadCommandExecutors;
+  threadId: string;
+}): Promise<ThreadCommandResult> => {
+  const lanes = getCommandProposalLanes(assignment);
+
+  if (command.proposalNumber !== null) {
+    const lane = findProposalLane(assignment, command.proposalNumber);
+    const skipReason = getRetryCommandSkipReason(lane);
+    if (skipReason) {
+      return createResult({
+        assignmentNumber: assignment.assignmentNumber,
+        commandName: command.kind,
+        details: [`Skipped proposal ${lane.laneIndex} because ${skipReason}`],
+        outcome: "skipped",
+      });
+    }
+
+    await executors.confirmRetry({
+      assignmentNumber: assignment.assignmentNumber,
+      laneId: lane.laneId,
+      threadId,
+    });
+
+    return createResult({
+      assignmentNumber: assignment.assignmentNumber,
+      commandName: command.kind,
+      details: [
+        `Proposal ${lane.laneIndex} retry confirmed. The agent can make another 10 automatic retry attempts.`,
+      ],
+      outcome: "success",
+    });
+  }
+
+  const succeeded: number[] = [];
+  const skipped: BatchSkip[] = [];
+  let failureSentence: string | null = null;
+
+  for (const lane of lanes) {
+    const skipReason = getRetryCommandSkipReason(lane);
+    if (skipReason) {
+      skipped.push({
+        proposalNumber: lane.laneIndex,
+        reason: skipReason,
+      });
+      continue;
+    }
+
+    try {
+      await executors.confirmRetry({
+        assignmentNumber: assignment.assignmentNumber,
+        laneId: lane.laneId,
+        threadId,
+      });
+      succeeded.push(lane.laneIndex);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "The command runner failed before the remaining proposals could be processed.";
+      failureSentence = `Stopped on proposal ${lane.laneIndex}: ${message}`;
+      break;
+    }
+  }
+
+  return buildBatchSummary({
+    actionSentence: (proposalNumbers) =>
+      `Confirmed another retry round for ${formatProposalList(proposalNumbers)}.`,
+    assignmentNumber: assignment.assignmentNumber,
+    commandName: command.kind,
+    emptySentence: "No latest-assignment proposals were waiting for retry confirmation.",
+    failureSentence,
+    skipped,
+    succeeded,
+  });
+};
+
 export const executeThreadCommandForThread = async ({
   command,
   executors = defaultExecutors,
@@ -333,6 +460,17 @@ export const executeThreadCommandForThread = async ({
   executors?: ThreadCommandExecutors;
   thread: TeamThreadRecord;
 }): Promise<ThreadCommandResult> => {
+  if (command.kind === "retry") {
+    const plannerRetryResult = await executePlannerRetryCommand({
+      command,
+      executors,
+      thread,
+    });
+    if (plannerRetryResult) {
+      return plannerRetryResult;
+    }
+  }
+
   const assignment = getRequiredAssignment(thread);
 
   switch (command.kind) {
@@ -366,6 +504,13 @@ export const executeThreadCommandForThread = async ({
         successSentence: (proposalNumbers) =>
           `Queued final approval for ${formatProposalList(proposalNumbers)}.`,
         target: "pull_request",
+        threadId: thread.threadId,
+      });
+    case "retry":
+      return executeRetryCommand({
+        assignment,
+        command,
+        executors,
         threadId: thread.threadId,
       });
     case "replan": {

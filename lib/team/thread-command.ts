@@ -3,6 +3,7 @@ export {
   getApproveCommandSkipReason,
   getAssignmentThreadCommandDisabledReason,
   getCancelCommandSkipReason,
+  getRetryCommandSkipReason,
   getReadyCommandSkipReason,
   getReplanCommandSkipReason,
   getThreadCommandDisabledReason,
@@ -12,7 +13,7 @@ export {
   THREAD_COMMAND_REPLANNING_REASON,
 } from "@/lib/team/thread-command-eligibility";
 
-type ThreadCommandKind = "approve" | "ready" | "cancel" | "replan" | "replan-all";
+type ThreadCommandKind = "approve" | "ready" | "retry" | "cancel" | "replan" | "replan-all";
 type ProposalNumberMode = "none" | "optional" | "required";
 
 type ThreadCommandDefinition = {
@@ -46,6 +47,13 @@ export const THREAD_COMMAND_DEFINITIONS: ThreadCommandDefinition[] = [
     kind: "ready",
     command: "/ready",
     syntax: "/ready [proposal-number]",
+    proposalNumberMode: "optional",
+    requiresRequirement: false,
+  },
+  {
+    kind: "retry",
+    command: "/retry",
+    syntax: "/retry [proposal-number]",
     proposalNumberMode: "optional",
     requiresRequirement: false,
   },
@@ -96,14 +104,30 @@ const SUPPORTED_THREAD_COMMANDS_TEXT = joinThreadCommandList(
   THREAD_COMMAND_DEFINITIONS.map((definition) => definition.command),
 );
 
-type ProposalCommandName = Extract<ThreadCommandKind, "approve" | "ready">;
+type ProposalCommandName = Extract<ThreadCommandKind, "approve" | "ready" | "retry">;
+
+type ProposalThreadCommand = {
+  kind: "approve";
+  original: string;
+  proposalNumber: number | null;
+};
+
+type ReadyThreadCommand = {
+  kind: "ready";
+  original: string;
+  proposalNumber: number | null;
+};
+
+type RetryThreadCommand = {
+  kind: "retry";
+  original: string;
+  proposalNumber: number | null;
+};
 
 export type ThreadCommand =
-  | {
-      kind: ProposalCommandName;
-      original: string;
-      proposalNumber: number | null;
-    }
+  | ProposalThreadCommand
+  | ReadyThreadCommand
+  | RetryThreadCommand
   | {
       kind: "cancel";
       original: string;
@@ -202,6 +226,8 @@ export const parseThreadCommand = (input: string): ThreadCommand => {
       return parseProposalCommand("approve", original, remainder);
     case "/ready":
       return parseProposalCommand("ready", original, remainder);
+    case "/retry":
+      return parseProposalCommand("retry", original, remainder);
     case "/cancel":
       if (remainder) {
         throw new ThreadCommandParseError(buildInvalidSyntaxMessage("/cancel"));

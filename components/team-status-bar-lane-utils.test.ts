@@ -64,6 +64,7 @@ const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSum
   finishedAt: null,
   updatedAt: "2026-04-16T10:05:00.000Z",
   lastError: null,
+  plannerRetryAwaitingConfirmation: false,
   latestAssignmentStatus: "running",
   latestPlanSummary: "Implement lane tooltip interactions.",
   latestBranchPrefix: "requests/status-lane-tooltip",

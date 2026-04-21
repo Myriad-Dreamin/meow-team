@@ -18,6 +18,7 @@ import {
   runTeam,
   type TeamRunSummary,
 } from "@/lib/team/coding";
+import { TeamPlannerRetryConfirmationRequiredError } from "@/lib/team/planner-retry";
 import { getTeamServerState } from "@/lib/team/server-state";
 import type { TeamCodexLogEntry } from "@/lib/team/types";
 
@@ -191,6 +192,12 @@ export async function POST(request: Request) {
                 threadId,
                 error: message,
                 branches: error.branchNames,
+              });
+            } else if (error instanceof TeamPlannerRetryConfirmationRequiredError) {
+              writeEvent({
+                type: "error",
+                threadId,
+                error: message,
               });
             } else {
               try {

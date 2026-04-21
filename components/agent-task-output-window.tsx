@@ -365,6 +365,7 @@ export function AgentTaskOutputWindow({
 
   const laneIsTerminal = lane
     ? lane.status === "awaiting_human_approval" ||
+      lane.status === "awaiting_retry_approval" ||
       lane.status === "cancelled" ||
       lane.status === "approved" ||
       lane.status === "failed" ||

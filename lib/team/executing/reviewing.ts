@@ -14,6 +14,10 @@ import {
   tryRebaseWorktreeBranch,
 } from "@/lib/git/ops";
 import { synchronizePullRequest } from "@/lib/platform";
+import {
+  TeamAgentRetryConfirmationRequiredError,
+  runLaneAgentWithRetry,
+} from "@/lib/team/agent-retry";
 import { formatHarnessCommitMessage } from "@/lib/team/commit-message";
 import { ensureLaneWorktree, pushLaneBranch } from "@/lib/team/git";
 import {
@@ -336,21 +340,32 @@ const runFinalArchiveCycle = async ({
           assignmentNumber,
         }),
       });
-      const executorResponse = await env.deps.executorAgent.run({
-        state: executorState,
-        input: buildFinalArchiveInput({
-          lane,
-        }),
-        onEvent: async (event) => {
-          await appendTeamCodexLogEvent({
-            threadFile: teamConfig.storage.threadFile,
-            threadId,
-            assignmentNumber,
-            roleId: executorRole.id,
-            laneId,
-            event,
-          });
-        },
+      const executorResponse = await runLaneAgentWithRetry({
+        threadId,
+        assignmentNumber,
+        laneId,
+        roleId: executorRole.id,
+        roleName: executorRole.name,
+        actor: "executor",
+        resumeStatus: "coding",
+        resumeExecutionPhase: "final_archive",
+        run: () =>
+          env.deps.executorAgent.run({
+            state: executorState,
+            input: buildFinalArchiveInput({
+              lane,
+            }),
+            onEvent: async (event) => {
+              await appendTeamCodexLogEvent({
+                threadFile: teamConfig.storage.threadFile,
+                threadId,
+                assignmentNumber,
+                roleId: executorRole.id,
+                laneId,
+                event,
+              });
+            },
+          }),
       });
 
       executorHandoff = applyHandoff({
@@ -504,6 +519,10 @@ const runFinalArchiveCycle = async ({
       },
     });
   } catch (error) {
+    if (error instanceof TeamAgentRetryConfirmationRequiredError) {
+      throw error;
+    }
+
     const errorSummary = summarizeGitFailure(
       error instanceof Error ? error.message : "GitHub PR finalization failed.",
     );
@@ -640,33 +659,60 @@ export const runExecutingLaneCycle = async ({
       return;
     }
 
-    await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
-      threadId,
-      updater: (mutableThread, now) => {
-        const mutableAssignment = findAssignment(
-          mutableThread.dispatchAssignments,
-          assignmentNumber,
-        );
-        const mutableLane = findLane(mutableAssignment, laneId);
-        mutableLane.status = "coding";
-        mutableLane.executionPhase ??= "implementation";
-        mutableLane.lastError = null;
-        mutableLane.latestImplementationCommit = null;
-        mutableLane.pushedCommit = null;
-        mutableLane.startedAt = mutableLane.startedAt ?? now;
-        mutableLane.finishedAt = null;
-        mutableLane.latestActivity =
-          mutableLane.requeueReason === "planner_detected_conflict"
-            ? "Executor is resolving a planner-detected pull request conflict."
-            : mutableLane.requeueReason === "reviewer_requested_changes"
-              ? "Executor is addressing execution-reviewer feedback."
-              : "Executor is implementing the approved execution plan in the dedicated worktree.";
-        mutableLane.updatedAt = now;
-        appendLaneEvent(mutableLane, "executor", mutableLane.latestActivity, now);
-        synchronizeDispatchAssignment(mutableAssignment, now);
-      },
-    });
+    const retryingReviewer =
+      lane.status === "reviewing" &&
+      Boolean(lane.latestImplementationCommit && lane.latestCoderHandoff);
+
+    if (retryingReviewer) {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (mutableThread, now) => {
+          const mutableAssignment = findAssignment(
+            mutableThread.dispatchAssignments,
+            assignmentNumber,
+          );
+          const mutableLane = findLane(mutableAssignment, laneId);
+          mutableLane.status = "reviewing";
+          mutableLane.executionPhase = "implementation";
+          mutableLane.lastError = null;
+          mutableLane.finishedAt = null;
+          mutableLane.latestActivity =
+            "Execution reviewer is retrying after the previous validation attempt failed.";
+          mutableLane.updatedAt = now;
+          appendLaneEvent(mutableLane, "execution-reviewer", mutableLane.latestActivity, now);
+          synchronizeDispatchAssignment(mutableAssignment, now);
+        },
+      });
+    } else {
+      await updateTeamThreadRecord({
+        threadFile: teamConfig.storage.threadFile,
+        threadId,
+        updater: (mutableThread, now) => {
+          const mutableAssignment = findAssignment(
+            mutableThread.dispatchAssignments,
+            assignmentNumber,
+          );
+          const mutableLane = findLane(mutableAssignment, laneId);
+          mutableLane.status = "coding";
+          mutableLane.executionPhase ??= "implementation";
+          mutableLane.lastError = null;
+          mutableLane.latestImplementationCommit = null;
+          mutableLane.pushedCommit = null;
+          mutableLane.startedAt = mutableLane.startedAt ?? now;
+          mutableLane.finishedAt = null;
+          mutableLane.latestActivity =
+            mutableLane.requeueReason === "planner_detected_conflict"
+              ? "Executor is resolving a planner-detected pull request conflict."
+              : mutableLane.requeueReason === "reviewer_requested_changes"
+                ? "Executor is addressing execution-reviewer feedback."
+                : "Executor is implementing the approved execution plan in the dedicated worktree.";
+          mutableLane.updatedAt = now;
+          appendLaneEvent(mutableLane, "executor", mutableLane.latestActivity, now);
+          synchronizeDispatchAssignment(mutableAssignment, now);
+        },
+      });
+    }
 
     await ensureLaneWorktree({
       repositoryPath: assignment.repository.path,
@@ -683,62 +729,145 @@ export const runExecutingLaneCycle = async ({
         lane.baseBranch,
     });
 
-    const branchHeadBeforeExecution = await getBranchHead({
-      repositoryPath: assignment.repository.path,
-      branchName: lane.branchName,
-    });
+    let executorHandoff = lane.latestCoderHandoff;
+    let branchHeadAfterExecution = lane.latestImplementationCommit;
 
-    const executorState = await buildExecutionLaneRunState({
-      repository: assignment.repository,
-      worktree: laneWorktree,
-      lane,
-      assignment,
-      workflow: getLaneWorkflow(),
-      handoffs: buildLanePersistedHandoffs({
+    if (!retryingReviewer) {
+      const branchHeadBeforeExecution = await getBranchHead({
+        repositoryPath: assignment.repository.path,
+        branchName: lane.branchName,
+      });
+
+      const executorState = await buildExecutionLaneRunState({
+        repository: assignment.repository,
+        worktree: laneWorktree,
         lane,
+        assignment,
+        workflow: getLaneWorkflow(),
+        handoffs: buildLanePersistedHandoffs({
+          lane,
+          assignmentNumber,
+        }),
+      });
+      const executorResponse = await runLaneAgentWithRetry({
+        threadId,
         assignmentNumber,
-      }),
-    });
-    const executorResponse = await env.deps.executorAgent.run({
-      state: executorState,
-      input:
-        lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Execute the task.",
-      onEvent: async (event) => {
+        laneId,
+        roleId: executorRole.id,
+        roleName: executorRole.name,
+        actor: "executor",
+        resumeStatus: "coding",
+        resumeExecutionPhase: "implementation",
+        run: () =>
+          env.deps.executorAgent.run({
+            state: executorState,
+            input:
+              lane.taskObjective ??
+              lane.taskTitle ??
+              assignment.plannerSummary ??
+              "Execute the task.",
+            onEvent: async (event) => {
+              await appendTeamCodexLogEvent({
+                threadFile: teamConfig.storage.threadFile,
+                threadId,
+                assignmentNumber,
+                roleId: executorRole.id,
+                laneId,
+                event,
+              });
+            },
+          }),
+      });
+
+      executorHandoff = applyHandoff({
+        state: executorState,
+        role: executorRole,
+        summary: executorResponse.summary,
+        deliverable: executorResponse.deliverable,
+        decision: executorResponse.decision,
+      });
+
+      if (await hasWorktreeChanges(laneWorktree.path)) {
+        await commitWorktreeChanges({
+          worktreePath: laneWorktree.path,
+          message: buildExecutorCommitMessage({
+            lane,
+            conventionalTitle: assignment.conventionalTitle,
+          }),
+        });
+      }
+
+      branchHeadAfterExecution = await getBranchHead({
+        repositoryPath: assignment.repository.path,
+        branchName: lane.branchName,
+      });
+      const completedExecutorHandoff = executorHandoff;
+      const completedImplementationCommit = branchHeadAfterExecution;
+
+      if (branchHeadAfterExecution === branchHeadBeforeExecution) {
+        await updateTeamThreadRecord({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          updater: (mutableThread, now) => {
+            const mutableAssignment = findAssignment(
+              mutableThread.dispatchAssignments,
+              assignmentNumber,
+            );
+            const mutableLane = findLane(mutableAssignment, laneId);
+            mutableLane.status = "failed";
+            mutableLane.executionPhase = null;
+            mutableLane.latestImplementationCommit = null;
+            mutableLane.pushedCommit = null;
+            mutableLane.latestCoderHandoff = completedExecutorHandoff;
+            mutableLane.latestCoderSummary = completedExecutorHandoff.summary;
+            mutableLane.latestDecision = completedExecutorHandoff.decision;
+            mutableLane.latestActivity = "Executor finished without producing branch output.";
+            mutableLane.retryState = null;
+            mutableLane.lastError = noBranchOutputMessage;
+            mutableLane.runCount += 1;
+            mutableLane.workerSlot = null;
+            mutableLane.worktreePath = laneWorktree.path;
+            if (mutableLane.pullRequest) {
+              mutableLane.pullRequest = {
+                ...mutableLane.pullRequest,
+                status: "failed",
+                updatedAt: now,
+              };
+            }
+            mutableLane.updatedAt = now;
+            mutableLane.finishedAt = now;
+            appendLaneEvent(
+              mutableLane,
+              "executor",
+              `Executor handoff: ${completedExecutorHandoff.summary}`,
+              now,
+            );
+            appendLaneEvent(mutableLane, "system", noBranchOutputMessage, now);
+            appendPlannerNote(
+              mutableAssignment,
+              `Lane ${mutableLane.laneIndex} stopped because the executor produced no branch output.`,
+              now,
+            );
+            synchronizeDispatchAssignment(mutableAssignment, now);
+          },
+        });
+
         await appendTeamCodexLogEvent({
           threadFile: teamConfig.storage.threadFile,
           threadId,
           assignmentNumber,
           roleId: executorRole.id,
           laneId,
-          event,
+          event: {
+            source: "system",
+            message: noBranchOutputMessage,
+            createdAt: new Date().toISOString(),
+          },
         });
-      },
-    });
 
-    const executorHandoff = applyHandoff({
-      state: executorState,
-      role: executorRole,
-      summary: executorResponse.summary,
-      deliverable: executorResponse.deliverable,
-      decision: executorResponse.decision,
-    });
+        return;
+      }
 
-    if (await hasWorktreeChanges(laneWorktree.path)) {
-      await commitWorktreeChanges({
-        worktreePath: laneWorktree.path,
-        message: buildExecutorCommitMessage({
-          lane,
-          conventionalTitle: assignment.conventionalTitle,
-        }),
-      });
-    }
-
-    const branchHeadAfterExecution = await getBranchHead({
-      repositoryPath: assignment.repository.path,
-      branchName: lane.branchName,
-    });
-
-    if (branchHeadAfterExecution === branchHeadBeforeExecution) {
       await updateTeamThreadRecord({
         threadFile: teamConfig.storage.threadFile,
         threadId,
@@ -748,90 +877,37 @@ export const runExecutingLaneCycle = async ({
             assignmentNumber,
           );
           const mutableLane = findLane(mutableAssignment, laneId);
-          mutableLane.status = "failed";
-          mutableLane.executionPhase = null;
-          mutableLane.latestImplementationCommit = null;
+          const reviewCommit = formatCommitActivityReference({
+            commitHash: completedImplementationCommit,
+          });
+          mutableLane.status = "reviewing";
+          mutableLane.executionPhase = "implementation";
+          mutableLane.latestImplementationCommit = completedImplementationCommit;
           mutableLane.pushedCommit = null;
-          mutableLane.latestCoderHandoff = executorHandoff;
-          mutableLane.latestCoderSummary = executorHandoff.summary;
-          mutableLane.latestDecision = executorHandoff.decision;
-          mutableLane.latestActivity = "Executor finished without producing branch output.";
-          mutableLane.lastError = noBranchOutputMessage;
-          mutableLane.runCount += 1;
-          mutableLane.workerSlot = null;
-          mutableLane.worktreePath = laneWorktree.path;
-          if (mutableLane.pullRequest) {
-            mutableLane.pullRequest = {
-              ...mutableLane.pullRequest,
-              status: "failed",
-              updatedAt: now,
-            };
-          }
+          mutableLane.latestCoderHandoff = completedExecutorHandoff;
+          mutableLane.latestCoderSummary = completedExecutorHandoff.summary;
+          mutableLane.latestDecision = completedExecutorHandoff.decision;
+          mutableLane.retryState = null;
+          mutableLane.lastError = null;
+          mutableLane.latestActivity = `Execution reviewer is validating implementation commit ${reviewCommit}.`;
           mutableLane.updatedAt = now;
-          mutableLane.finishedAt = now;
           appendLaneEvent(
             mutableLane,
             "executor",
-            `Executor handoff: ${executorHandoff.summary}`,
+            `Executor requested review for commit ${reviewCommit}: ${completedExecutorHandoff.summary}`,
             now,
           );
-          appendLaneEvent(mutableLane, "system", noBranchOutputMessage, now);
-          appendPlannerNote(
-            mutableAssignment,
-            `Lane ${mutableLane.laneIndex} stopped because the executor produced no branch output.`,
-            now,
-          );
+          appendLaneEvent(mutableLane, "execution-reviewer", mutableLane.latestActivity, now);
           synchronizeDispatchAssignment(mutableAssignment, now);
         },
       });
-
-      await appendTeamCodexLogEvent({
-        threadFile: teamConfig.storage.threadFile,
-        threadId,
-        assignmentNumber,
-        roleId: executorRole.id,
-        laneId,
-        event: {
-          source: "system",
-          message: noBranchOutputMessage,
-          createdAt: new Date().toISOString(),
-        },
-      });
-
-      return;
     }
 
-    await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
-      threadId,
-      updater: (mutableThread, now) => {
-        const mutableAssignment = findAssignment(
-          mutableThread.dispatchAssignments,
-          assignmentNumber,
-        );
-        const mutableLane = findLane(mutableAssignment, laneId);
-        const reviewCommit = formatCommitActivityReference({
-          commitHash: branchHeadAfterExecution,
-        });
-        mutableLane.status = "reviewing";
-        mutableLane.executionPhase = "implementation";
-        mutableLane.latestImplementationCommit = branchHeadAfterExecution;
-        mutableLane.pushedCommit = null;
-        mutableLane.latestCoderHandoff = executorHandoff;
-        mutableLane.latestCoderSummary = executorHandoff.summary;
-        mutableLane.latestDecision = executorHandoff.decision;
-        mutableLane.latestActivity = `Execution reviewer is validating implementation commit ${reviewCommit}.`;
-        mutableLane.updatedAt = now;
-        appendLaneEvent(
-          mutableLane,
-          "executor",
-          `Executor requested review for commit ${reviewCommit}: ${executorHandoff.summary}`,
-          now,
-        );
-        appendLaneEvent(mutableLane, "execution-reviewer", mutableLane.latestActivity, now);
-        synchronizeDispatchAssignment(mutableAssignment, now);
-      },
-    });
+    if (!branchHeadAfterExecution || !executorHandoff) {
+      throw new Error(
+        "Lane is missing the implementation commit or executor handoff required for review.",
+      );
+    }
 
     const reviewerLane: TeamWorkerLaneRecord = {
       ...lane,
@@ -858,23 +934,34 @@ export const runExecutingLaneCycle = async ({
         executor: executorHandoff,
       },
     });
-    const executionReviewerResponse = await env.deps.executionReviewerAgent.run({
-      state: executionReviewerState,
-      input:
-        lane.taskObjective ??
-        lane.taskTitle ??
-        assignment.plannerSummary ??
-        "Review the lane output.",
-      onEvent: async (event) => {
-        await appendTeamCodexLogEvent({
-          threadFile: teamConfig.storage.threadFile,
-          threadId,
-          assignmentNumber,
-          roleId: executionReviewerRole.id,
-          laneId,
-          event,
-        });
-      },
+    const executionReviewerResponse = await runLaneAgentWithRetry({
+      threadId,
+      assignmentNumber,
+      laneId,
+      roleId: executionReviewerRole.id,
+      roleName: executionReviewerRole.name,
+      actor: "execution-reviewer",
+      resumeStatus: "reviewing",
+      resumeExecutionPhase: "implementation",
+      run: () =>
+        env.deps.executionReviewerAgent.run({
+          state: executionReviewerState,
+          input:
+            lane.taskObjective ??
+            lane.taskTitle ??
+            assignment.plannerSummary ??
+            "Review the lane output.",
+          onEvent: async (event) => {
+            await appendTeamCodexLogEvent({
+              threadFile: teamConfig.storage.threadFile,
+              threadId,
+              assignmentNumber,
+              roleId: executionReviewerRole.id,
+              laneId,
+              event,
+            });
+          },
+        }),
     });
     const executionReviewerHandoff = applyHandoff({
       state: executionReviewerState,

@@ -60,6 +60,7 @@ const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSum
   finishedAt: null,
   updatedAt: "2026-04-11T10:05:00.000Z",
   lastError: null,
+  plannerRetryAwaitingConfirmation: false,
   latestAssignmentStatus: "running",
   latestPlanSummary: "Waiting on coding lanes.",
   latestBranchPrefix: "requests/desktop-attention",

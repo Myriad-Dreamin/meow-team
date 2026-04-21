@@ -65,11 +65,26 @@ export type TeamWorkerLaneStatus =
   | "coding"
   | "reviewing"
   | "awaiting_human_approval"
+  | "awaiting_retry_approval"
   | "cancelled"
   | "approved"
   | "failed";
 
 export type TeamWorkerLaneExecutionPhase = "implementation" | "final_archive";
+
+export type TeamAgentRetryState = {
+  roleId: string;
+  roleName: string;
+  attempts: number;
+  maxAttempts: number;
+  round: number;
+  nextRetryAt: string | null;
+  awaitingConfirmationSince: string | null;
+  resumeStatus: Extract<TeamWorkerLaneStatus, "coding" | "reviewing">;
+  resumeExecutionPhase: TeamWorkerLaneExecutionPhase;
+  lastError: string | null;
+  updatedAt: string;
+};
 
 export type TeamLaneFinalizationMode = "archive" | "delete";
 
@@ -176,6 +191,7 @@ export type TeamWorkerLaneRecord = {
   runCount: number;
   revisionCount: number;
   requeueReason: "reviewer_requested_changes" | "planner_detected_conflict" | null;
+  retryState?: TeamAgentRetryState | null;
   lastError: string | null;
   pullRequest: TeamPullRequestRecord | null;
   events: TeamWorkerEvent[];

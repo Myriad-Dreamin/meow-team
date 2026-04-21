@@ -33,10 +33,15 @@ const hasReplanningThreadCommandStatus = (
 export const getThreadCommandDisabledReason = (thread: {
   archivedAt: string | null;
   latestAssignmentStatus: TeamDispatchAssignmentStatus | null | undefined;
+  plannerRetryAwaitingConfirmation?: boolean;
   workerCounts: Pick<TeamWorkerLaneCounts, "queued" | "coding" | "reviewing">;
 }): string | null => {
   if (thread.archivedAt) {
     return THREAD_COMMAND_ARCHIVED_REASON;
+  }
+
+  if (thread.plannerRetryAwaitingConfirmation) {
+    return null;
   }
 
   if (thread.latestAssignmentStatus === null) {
@@ -101,7 +106,7 @@ const hasRetryableFinalApprovalFailure = (
 export const isLaneAwaitingHumanApprovalForCancel = (
   lane: Pick<TeamWorkerLaneRecord, "pullRequest" | "status">,
 ): boolean => {
-  if (lane.status === "awaiting_human_approval") {
+  if (lane.status === "awaiting_human_approval" || lane.status === "awaiting_retry_approval") {
     return true;
   }
 
@@ -130,6 +135,16 @@ export const getApproveCommandSkipReason = (
   }
 
   return "it is not awaiting proposal approval.";
+};
+
+export const getRetryCommandSkipReason = (
+  lane: Pick<TeamWorkerLaneRecord, "retryState" | "status">,
+): string | null => {
+  if (lane.status === "awaiting_retry_approval" && lane.retryState?.awaitingConfirmationSince) {
+    return null;
+  }
+
+  return "it is not waiting for agent retry confirmation.";
 };
 
 export const getReadyCommandSkipReason = (

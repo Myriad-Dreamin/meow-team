@@ -9,7 +9,13 @@ import {
   prepareAssignmentReplan,
   runTeam,
 } from "@/lib/team/coding";
+import { confirmLaneAgentRetryRound } from "@/lib/team/agent-retry";
+import {
+  confirmPlannerRetryRound,
+  TeamPlannerRetryConfirmationRequiredError,
+} from "@/lib/team/planner-retry";
 import { findAssignment, findLane } from "@/lib/team/coding/shared";
+import { ensurePendingDispatchWork } from "@/lib/team/coding/reviewing";
 import { getLaneFinalizationMode } from "@/lib/team/finalization";
 import { cancelLatestThreadAssignmentApprovalWait, markTeamThreadFailed } from "@/lib/team/history";
 import { getTeamThreadRecord } from "@/lib/team/history";
@@ -66,6 +72,47 @@ export const runLaneApproval = async ({
   await runTeam(env, initialState);
 };
 
+export const confirmLaneAgentRetry = async ({
+  threadId,
+  assignmentNumber,
+  laneId,
+}: {
+  threadId: string;
+  assignmentNumber: number;
+  laneId: string;
+}) => {
+  const env = createTeamRunEnv();
+  await confirmLaneAgentRetryRound({
+    threadId,
+    assignmentNumber,
+    laneId,
+  });
+  await ensurePendingDispatchWork(env, threadId);
+};
+
+export const confirmPlannerRetry = async ({ threadId }: { threadId: string }) => {
+  const serverState = await getTeamServerState();
+  const env = createTeamRunEnv();
+  const resumedState = await confirmPlannerRetryRound({
+    threadId,
+  });
+  await persistTeamRunState(env, resumedState);
+
+  void runTeam(env, resumedState).catch(async (error) => {
+    if (error instanceof TeamPlannerRetryConfirmationRequiredError) {
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : "Unknown error.";
+    console.error(`[team-planner-retry:${threadId}] ${message}`);
+    await markTeamThreadFailed({
+      threadFile: serverState.threadStorage,
+      threadId,
+      error: message,
+    });
+  });
+};
+
 export const startAssignmentReplan = async ({
   threadId,
   assignmentNumber,
@@ -107,6 +154,10 @@ export const startAssignmentReplan = async ({
   await persistTeamRunState(env, initialState);
 
   void runTeam(env, initialState).catch(async (error) => {
+    if (error instanceof TeamPlannerRetryConfirmationRequiredError) {
+      return;
+    }
+
     const message = error instanceof Error ? error.message : "Unknown error.";
     console.error(`[team-feedback:${threadId}] ${message}`);
     await markTeamThreadFailed({

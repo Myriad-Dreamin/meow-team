@@ -108,7 +108,7 @@ export const collectThreadAttentionNotifications = (
       (lane) => lane.status === "failed" || lane.pullRequest?.status === "failed",
     );
     const approvalLanes = thread.workerLanes.filter((lane) => {
-      if (lane.status === "awaiting_human_approval") {
+      if (lane.status === "awaiting_human_approval" || lane.status === "awaiting_retry_approval") {
         return true;
       }
 

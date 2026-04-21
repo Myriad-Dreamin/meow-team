@@ -104,6 +104,7 @@ const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSum
     finishedAt: FIXED_TIMESTAMP,
     updatedAt: FIXED_TIMESTAMP,
     lastError: null,
+    plannerRetryAwaitingConfirmation: false,
     latestAssignmentStatus: "completed",
     latestPlanSummary: "Thread is complete.",
     latestBranchPrefix: "requests/archive-thread",

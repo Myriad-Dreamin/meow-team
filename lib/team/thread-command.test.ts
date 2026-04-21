@@ -34,6 +34,7 @@ const createThreadSummary = (overrides: Partial<TeamThreadSummary> = {}): TeamTh
     finishedAt: FIXED_TIMESTAMP,
     updatedAt: FIXED_TIMESTAMP,
     lastError: null,
+    plannerRetryAwaitingConfirmation: false,
     latestAssignmentStatus: "completed",
     latestPlanSummary: "Machine review is done.",
     latestBranchPrefix: "requests/thread-command",
@@ -66,6 +67,16 @@ describe("parseThreadCommand", () => {
       kind: "ready",
       original: "/ready 2",
       proposalNumber: 2,
+    });
+    expect(parseThreadCommand("/retry")).toEqual({
+      kind: "retry",
+      original: "/retry",
+      proposalNumber: null,
+    });
+    expect(parseThreadCommand("/retry 3")).toEqual({
+      kind: "retry",
+      original: "/retry 3",
+      proposalNumber: 3,
     });
     expect(parseThreadCommand("/cancel")).toEqual({
       kind: "cancel",
@@ -101,6 +112,7 @@ describe("thread command metadata and autocomplete", () => {
     expect(THREAD_COMMAND_DEFINITIONS.map((definition) => definition.command)).toEqual([
       "/approve",
       "/ready",
+      "/retry",
       "/cancel",
       "/replan",
       "/replan-all",
@@ -116,11 +128,13 @@ describe("thread command metadata and autocomplete", () => {
 
     expect(result?.suggestions.map((suggestion) => suggestion.label)).toEqual([
       "/ready",
+      "/retry",
       "/replan",
       "/replan-all",
     ]);
     expect(result?.suggestions.map((suggestion) => suggestion.detail)).toEqual([
       "/ready [proposal-number]",
+      "/retry [proposal-number]",
       "/replan [proposal-number] requirement",
       "/replan-all requirement",
     ]);
@@ -253,5 +267,16 @@ describe("getThreadCommandDisabledReason", () => {
         }),
       ),
     ).toBe(THREAD_COMMAND_REPLANNING_REASON);
+  });
+
+  it("keeps commands enabled while planner retry confirmation is waiting", () => {
+    expect(
+      getThreadCommandDisabledReason(
+        createThreadSummary({
+          latestAssignmentStatus: "superseded",
+          plannerRetryAwaitingConfirmation: true,
+        }),
+      ),
+    ).toBeNull();
   });
 });

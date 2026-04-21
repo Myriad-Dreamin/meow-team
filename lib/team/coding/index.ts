@@ -36,6 +36,7 @@ import type {
   TeamRunResult,
 } from "@/lib/team/coding/shared";
 import { createWorktree } from "@/lib/team/coding/worktree";
+import { runPlanningStateWithRetry } from "@/lib/team/planner-retry";
 import type {
   TeamDispatchAssignment,
   TeamHumanFeedbackScope,
@@ -342,20 +343,19 @@ export const runTeam = async (
   let currentState = initialState;
 
   while (currentState.stage !== "completed") {
-    try {
-      currentState = await advanceTeamRunState(env, currentState);
+    if (isPlanningMachineState(currentState)) {
+      currentState = await runPlanningStateWithRetry({
+        advance: (planningState) => advanceTeamRunState(env, planningState),
+        currentState,
+        env,
+        onTerminalError: handlePlanningStageError,
+      });
       await env.persistState(currentState);
-    } catch (error) {
-      if (isPlanningMachineState(currentState)) {
-        await handlePlanningStageError({
-          env,
-          currentState,
-          error,
-        });
-      }
-
-      throw error;
+      continue;
     }
+
+    currentState = await advanceTeamRunState(env, currentState);
+    await env.persistState(currentState);
   }
 
   return currentState.result;

@@ -78,6 +78,7 @@ const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSum
   finishedAt: FIXED_TIMESTAMP,
   updatedAt: FIXED_TIMESTAMP,
   lastError: null,
+  plannerRetryAwaitingConfirmation: false,
   latestAssignmentStatus: "cancelled",
   latestPlanSummary: "Cancel the stale approval wait.",
   latestBranchPrefix: "requests/thread-cancel",

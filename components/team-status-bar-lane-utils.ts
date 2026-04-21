@@ -94,6 +94,7 @@ const getTeamStatusLaneBucketKey = (
     case "reviewing":
       return "reviewing";
     case "awaiting_human_approval":
+    case "awaiting_retry_approval":
       return "awaitingHumanApproval";
     case "cancelled":
       return null;

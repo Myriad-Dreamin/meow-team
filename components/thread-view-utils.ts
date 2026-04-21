@@ -264,6 +264,13 @@ export const describeLane = (lane: TeamWorkerLaneRecord): string => {
     return "Planner proposed this work and is waiting for human approval before coding and review begin.";
   }
 
+  if (lane.status === "awaiting_retry_approval") {
+    return (
+      lane.latestActivity ??
+      "Agent retries are paused until a human confirms another retry round with `/retry`."
+    );
+  }
+
   if (lane.pullRequest?.status === "conflict") {
     return "Planner detected a pull request conflict and requeued this proposal.";
   }
@@ -573,6 +580,8 @@ export const getLaneStatusLabel = (lane: TeamWorkerLaneRecord): string => {
       return "Reviewing";
     case "awaiting_human_approval":
       return "Awaiting Approval";
+    case "awaiting_retry_approval":
+      return "Awaiting Retry";
     case "cancelled":
       return "Cancelled";
     case "approved":
@@ -601,6 +610,7 @@ export const getLaneStatusClassName = (lane: TeamWorkerLaneRecord): string => {
     case "reviewing":
       return "status-reviewing";
     case "awaiting_human_approval":
+    case "awaiting_retry_approval":
       return "status-awaiting_human_approval";
     case "cancelled":
       return "status-cancelled";

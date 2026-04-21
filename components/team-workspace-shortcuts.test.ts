@@ -41,6 +41,7 @@ const createThread = (overrides: Partial<TeamThreadSummary> = {}): TeamThreadSum
   finishedAt: null,
   updatedAt: FIXED_TIMESTAMP,
   lastError: null,
+  plannerRetryAwaitingConfirmation: false,
   latestAssignmentStatus: "running",
   latestPlanSummary: "Implementing the approved change.",
   latestBranchPrefix: "requests/thread-shortcuts",
