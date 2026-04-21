@@ -2,37 +2,54 @@
 
 ## Purpose
 
-Define the planner materialization ignore-handling capability for the harness
-so OpenSpec proposal checks honor planner worktree `.gitignore` rules for
-ignored residue while still rejecting non-ignored unrelated edits.
+Define the planner materialization isolation capability for the harness so
+OpenSpec proposal checks tolerate untracked residue outside the proposal path
+while still rejecting tracked or committed unrelated edits.
 
 ## Requirements
 
-### Requirement: Planner materialization respects repository ignore rules
+### Requirement: Planner materialization tolerates untracked residue outside the proposal path
 
-The planner SHALL filter materialization path deltas through repository
-`.gitignore` rules before it treats paths outside the proposal directory as
-unexpected changes.
+The planner SHALL ignore materialization residue outside the proposal
+directory when that residue is not tracked in git and is not part of the
+committed path delta produced during proposal materialization.
 
-#### Scenario: Ignored `.codex` residue does not fail materialization
+#### Scenario: Untracked `.codex` residue does not fail materialization
 
 - **WHEN** OpenSpec materialization writes the expected proposal artifacts and
-  also leaves a planner-side path under `.codex/` that matches repository
-  ignore rules
-- **THEN** the planner SHALL treat the ignored path as allowed residue
-- **AND** the proposal materialization SHALL continue as long as no
-  non-ignored unexpected paths remain
+  also leaves `.codex/materializer/session.json` as an untracked planner-side
+  path outside the proposal directory
+- **THEN** the planner SHALL allow proposal materialization to continue
+- **AND** the outside-path validation SHALL not report
+  `.codex/materializer/session.json`
 
-### Requirement: Non-ignored planner worktree edits still fail
+### Requirement: Tracked unexpected planner paths still fail isolation
 
-The planner SHALL preserve the existing outside-path failure for unexpected
-paths that are outside the proposal directory and do not match repository
-ignore rules.
+The planner SHALL fail proposal materialization when a path outside the
+proposal directory is part of the uncommitted materialization delta and is
+tracked in git, even if that path lives under a directory that looks like
+untracked residue.
 
-#### Scenario: README change still fails isolation
+#### Scenario: Tracked `.codex` path still fails isolation
 
-- **WHEN** OpenSpec materialization changes `README.md` outside the proposal
-  directory and that path does not match repository ignore rules
+- **WHEN** OpenSpec materialization changes
+  `.codex/materializer/session.json` outside the proposal directory and that
+  path is tracked in git
+- **THEN** the planner SHALL fail the run with the outside-path validation
+  error
+- **AND** the reported path list SHALL include
+  `.codex/materializer/session.json`
+
+### Requirement: Committed unexpected planner paths still fail isolation
+
+The planner SHALL preserve the outside-path validation failure for committed
+materialization deltas outside the proposal directory, even when those paths do
+not remain as uncommitted worktree residue after the planner commit.
+
+#### Scenario: Committed `README.md` change still fails isolation
+
+- **WHEN** OpenSpec materialization advances planner HEAD with a commit that
+  includes `README.md` outside the proposal directory
 - **THEN** the planner SHALL fail the run with the outside-path validation
   error
 - **AND** the reported path list SHALL include `README.md`
@@ -53,17 +70,17 @@ request-group replanning.
 ### Requirement: Conventional title metadata stays explicit
 
 The system SHALL carry the canonical request/PR title
-`fix(openspec/planner): honor ignored planner paths` and conventional-title
-metadata `fix(openspec/planner)` through the materialized OpenSpec artifacts
-without encoding slash-delimited roadmap/topic scope into `branchPrefix` or
-OpenSpec change paths.
+`fix(planner/openspec): limit planner materialization to tracked paths` and
+conventional-title metadata `fix(planner/openspec)` through the materialized
+OpenSpec artifacts without encoding slash-delimited roadmap/topic scope into
+`branchPrefix` or OpenSpec change paths.
 
 #### Scenario: Materialized artifacts mirror approved metadata
 
 - **WHEN** planner materializes this proposal
 - **THEN** the generated proposal, design, spec, and tasks SHALL reference the
   canonical request/PR title
-  `fix(openspec/planner): honor ignored planner paths`
+  `fix(planner/openspec): limit planner materialization to tracked paths`
 - **AND** the slash-delimited roadmap/topic scope SHALL remain metadata instead
   of changing the proposal change path
   `planner-ignore-paths-a1-p1-respect-ignored-planner-paths-during-openspec`

@@ -17,9 +17,6 @@ importers:
       codemirror:
         specifier: 5.65.20
         version: 5.65.20
-      ignore:
-        specifier: ^7.0.5
-        version: 7.0.5
       markdown-it:
         specifier: 14.1.0
         version: 14.1.0

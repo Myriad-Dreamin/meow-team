@@ -16,8 +16,8 @@ committed path delta produced during proposal materialization.
 ### Requirement: Tracked unexpected planner paths still fail isolation
 The planner SHALL fail proposal materialization when a path outside the
 proposal directory is part of the uncommitted materialization delta and is
-tracked in git, even if that path lives under a directory that repository
-ignore rules would normally match.
+tracked in git, even if that path lives under a directory that looks like
+untracked residue.
 
 #### Scenario: Tracked `.codex` path still fails isolation
 - **WHEN** OpenSpec materialization changes
