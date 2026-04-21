@@ -9,7 +9,7 @@ import {
   threadHasActiveDispatchAssignment,
 } from "@/lib/team/history";
 import { findConfiguredRepository } from "@/lib/team/repositories";
-import { getTeamRuntimeConfig, missingOpenAiConfigMessage } from "@/lib/config/runtime";
+import { assertTeamCodexAuthFileExists } from "@/lib/config/runtime";
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
@@ -64,15 +64,7 @@ export async function POST(request: Request) {
   try {
     const body = runTeamSchema.parse(await request.json());
     const serverState = await getTeamServerState();
-
-    if (!getTeamRuntimeConfig().apiKey) {
-      return NextResponse.json(
-        {
-          error: missingOpenAiConfigMessage,
-        },
-        { status: 500 },
-      );
-    }
+    assertTeamCodexAuthFileExists();
 
     if (body.threadId) {
       const hasActiveDispatch = await threadHasActiveDispatchAssignment(

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getTeamRuntimeConfig, missingOpenAiConfigMessage } from "@/lib/config/runtime";
+import { assertTeamCodexAuthFileExists } from "@/lib/config/runtime";
 import { teamConfig } from "@/team.config";
 import {
   createInitialTeamRunState,
@@ -128,9 +128,7 @@ export const startAssignmentReplan = async ({
 }) => {
   const serverState = await getTeamServerState();
 
-  if (!getTeamRuntimeConfig().apiKey) {
-    throw new Error(missingOpenAiConfigMessage);
-  }
+  assertTeamCodexAuthFileExists();
 
   const nextRun = await prepareAssignmentReplan({
     threadId,

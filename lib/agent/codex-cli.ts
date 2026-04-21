@@ -5,7 +5,12 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { getTeamRuntimeConfig, type TeamRuntimeConfig } from "@/lib/config/runtime";
+import {
+  assertTeamCodexAuthFileExists,
+  codexUserConfigPaths,
+  getTeamRuntimeConfig,
+  type TeamRuntimeConfig,
+} from "@/lib/config/runtime";
 import type { Worktree } from "@/lib/team/coding/worktree";
 import type { TeamCodexEvent, TeamCodexLogSource } from "@/lib/team/types";
 
@@ -138,28 +143,18 @@ const buildCodexExecArgs = ({
 
 const writeTemporaryAuthFile = async ({
   codexHome,
-  runtimeConfig,
+  sourceAuthPath = codexUserConfigPaths.auth,
 }: {
   codexHome: string;
-  runtimeConfig: TeamRuntimeConfig;
+  sourceAuthPath?: string;
 }): Promise<void> => {
-  if (!runtimeConfig.apiKey) {
-    return;
-  }
+  const targetAuthPath = path.join(codexHome, "auth.json");
 
-  await fs.writeFile(
-    path.join(codexHome, "auth.json"),
-    JSON.stringify(
-      {
-        auth_mode: "apikey",
-        OPENAI_API_KEY: runtimeConfig.apiKey,
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
+  await fs.mkdir(codexHome, { recursive: true });
+  await fs.copyFile(sourceAuthPath, targetAuthPath);
 };
+
+export { writeTemporaryAuthFile };
 
 const linkSkillEntries = async ({
   sourceRoot,
@@ -201,17 +196,10 @@ const linkSkillEntries = async ({
   }
 };
 
-const prepareCodexHome = async ({
-  codexHome,
-  runtimeConfig,
-}: {
-  codexHome: string;
-  runtimeConfig: TeamRuntimeConfig;
-}): Promise<void> => {
+const prepareCodexHome = async ({ codexHome }: { codexHome: string }): Promise<void> => {
   await fs.mkdir(codexHome, { recursive: true });
   await writeTemporaryAuthFile({
     codexHome,
-    runtimeConfig,
   });
 
   const skillsRoot = path.join(codexHome, "skills");
@@ -248,11 +236,11 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
   const schemaPath = path.join(codexHome, "output-schema.json");
   const outputPath = path.join(codexHome, "output.json");
   let stdoutBuffer = "";
+  assertTeamCodexAuthFileExists();
   const runtimeConfig = getTeamRuntimeConfig();
 
   await prepareCodexHome({
     codexHome,
-    runtimeConfig,
   });
   const outputJsonSchema = z.toJSONSchema(responseSchema);
   await fs.writeFile(schemaPath, JSON.stringify(outputJsonSchema, null, 2), "utf8");
@@ -346,14 +334,16 @@ export const runCodexStructuredOutput = async <TSchema extends z.ZodTypeAny>({
     );
 
     const exitCode = await new Promise<number>((resolve, reject) => {
+      const childEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        CODEX_HOME: codexHome,
+        OPENSPEC_TELEMETRY: "0",
+      };
+      delete childEnv.OPENAI_API_KEY;
+
       const child = spawn("codex", args, {
         cwd: worktree.path,
-        env: {
-          ...process.env,
-          CODEX_HOME: codexHome,
-          OPENAI_API_KEY: runtimeConfig.apiKey ?? process.env.OPENAI_API_KEY ?? "",
-          OPENSPEC_TELEMETRY: "0",
-        },
+        env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
       });
 

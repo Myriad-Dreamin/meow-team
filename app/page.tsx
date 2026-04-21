@@ -6,7 +6,6 @@ import {
 import { buildTeamNotificationsResponse } from "@/lib/team/notifications";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
 import { getTeamServerState } from "@/lib/team/server-state";
-import { getTeamRuntimeConfig } from "@/lib/config/runtime";
 import { teamConfig } from "@/team.config";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +20,6 @@ export default async function HomePage() {
     threadFile: serverState.threadStorage,
     repositories: availableRepositories,
   });
-
-  const hasApiKey = getTeamRuntimeConfig().hasApiKey;
   const initialNotifications = buildTeamNotificationsResponse({
     threads: threadSummaryLists.threads,
     target: teamConfig.notifications.target,
@@ -31,7 +28,7 @@ export default async function HomePage() {
   return (
     <main className="page-shell">
       <TeamWorkspace
-        disabled={!hasApiKey}
+        disabled={false}
         initialPrompt={
           "Create multiple implementation proposals for a new onboarding flow, wait for human approval, and then queue coding plus machine review for the approved proposals."
         }

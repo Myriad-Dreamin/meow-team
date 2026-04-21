@@ -3,12 +3,11 @@ import "server-only";
 import { readFileSync, statSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { z } from "zod";
 
 export type TeamModelReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 export type TeamModelTextVerbosity = "low" | "medium" | "high";
 
-type TeamRuntimeSource = "codex-config" | "codex-auth" | "env" | "default" | "missing";
+type TeamRuntimeSource = "codex-config" | "env" | "default";
 
 type TeamRuntimeFileReader = typeof readFileSync;
 type TeamRuntimeFileStatReader = typeof statSync;
@@ -21,16 +20,7 @@ type ParsedCodexConfig = {
   textVerbosity: TeamModelTextVerbosity | null;
 };
 
-type ParsedCodexAuth = {
-  apiKey: string | null;
-};
-
 const DEFAULT_MODEL = "gpt-5.2-codex";
-const codexAuthSchema = z
-  .object({
-    OPENAI_API_KEY: z.string().trim().min(1).optional(),
-  })
-  .passthrough();
 
 export const codexUserConfigPaths = {
   config: path.join(homedir(), ".codex", "config.toml"),
@@ -252,51 +242,14 @@ const readCodexConfig = ({
   };
 };
 
-const readCodexAuth = ({
-  authPath,
-  readFile,
-}: {
-  authPath: string;
-  readFile: TeamRuntimeFileReader;
-}): ParsedCodexAuth => {
-  const rawAuth = readOptionalFile(authPath, readFile);
-  if (!rawAuth) {
-    return {
-      apiKey: null,
-    };
-  }
-
-  try {
-    const parsedAuth = codexAuthSchema.safeParse(JSON.parse(rawAuth));
-    if (!parsedAuth.success) {
-      return {
-        apiKey: null,
-      };
-    }
-
-    const apiKey = parsedAuth.data.OPENAI_API_KEY ?? null;
-
-    return {
-      apiKey,
-    };
-  } catch {
-    return {
-      apiKey: null,
-    };
-  }
-};
-
 export type TeamRuntimeConfig = {
   ownerName: string;
   model: string;
   modelProvider: string | null;
   reasoningEffort: TeamModelReasoningEffort;
   textVerbosity: TeamModelTextVerbosity;
-  apiKey: string | null;
   baseUrl: string | undefined;
-  hasApiKey: boolean;
   sources: {
-    apiKey: TeamRuntimeSource;
     baseUrl: TeamRuntimeSource;
     model: TeamRuntimeSource;
   };
@@ -358,11 +311,6 @@ export const readTeamRuntimeConfig = ({
     configPath: configPaths.config,
     readFile,
   });
-  const codexAuth = readCodexAuth({
-    authPath: configPaths.auth,
-    readFile,
-  });
-  const envApiKey = normalizeEnvValue(env.OPENAI_API_KEY);
   const envBaseUrl = normalizeEnvValue(env.OPENAI_BASE_URL);
   const envModel = normalizeEnvValue(env.OPENAI_MODEL);
   const envOwnerName = normalizeEnvValue(env.TEAM_OWNER_NAME);
@@ -373,15 +321,8 @@ export const readTeamRuntimeConfig = ({
     modelProvider: codexConfig.modelProvider,
     reasoningEffort: codexConfig.reasoningEffort ?? "medium",
     textVerbosity: codexConfig.textVerbosity ?? "medium",
-    apiKey: codexAuth.apiKey ?? envApiKey,
     baseUrl: codexConfig.baseUrl ?? envBaseUrl ?? undefined,
-    hasApiKey: Boolean(codexAuth.apiKey ?? envApiKey),
     sources: {
-      apiKey: (codexAuth.apiKey
-        ? "codex-auth"
-        : envApiKey
-          ? "env"
-          : "missing") satisfies TeamRuntimeSource,
       baseUrl: (codexConfig.baseUrl
         ? "codex-config"
         : envBaseUrl
@@ -440,8 +381,27 @@ export const getTeamRuntimeConfig = (): TeamRuntimeConfig => {
   return getCachedTeamRuntimeConfig();
 };
 
-export const missingOpenAiConfigMessage = [
-  "OpenAI-compatible credentials are required to run the Codex CLI harness.",
-  `The app first looks for model settings in ${codexUserConfigDisplayPaths.config} and credentials in ${codexUserConfigDisplayPaths.auth}.`,
-  "You can still provide OPENAI_API_KEY and OPENAI_BASE_URL as environment fallbacks when needed.",
+export const missingCodexAuthMessage = [
+  "Codex credentials are required to run the Codex CLI harness.",
+  `The backend expects a Codex auth file at ${codexUserConfigDisplayPaths.auth}.`,
+  `Model settings continue to load from ${codexUserConfigDisplayPaths.config}, and OPENAI_MODEL plus OPENAI_BASE_URL remain optional backend overrides.`,
 ].join(" ");
+
+export const assertTeamCodexAuthFileExists = ({
+  readFile = readFileSync,
+  configPaths = codexUserConfigPaths,
+}: {
+  readFile?: TeamRuntimeFileReader;
+  configPaths?: typeof codexUserConfigPaths;
+} = {}): void => {
+  try {
+    readFile(configPaths.auth, "utf8");
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      throw new Error(missingCodexAuthMessage);
+    }
+
+    throw error;
+  }
+};

@@ -53,22 +53,21 @@ project-local `.env.local` file:
 With the current local setup, that means the team inherits the same OpenAI
 compatible provider and model selection that your Codex CLI already uses.
 Restart the dev server after changing your Codex config so the server reloads
-those settings.
+those settings. The backend now requires `~/.codex/auth.json` for credentials.
 
-### Optional Environment Fallbacks
+### Optional Environment Overrides
 
-If you are running outside that Codex setup, the server still accepts these
-environment variables:
+The backend still accepts these optional overrides for model selection and the
+displayed team owner name:
 
 ```bash
-OPENAI_API_KEY=your_openai_api_key
 OPENAI_BASE_URL=
 OPENAI_MODEL=gpt-5.2-codex
 TEAM_OWNER_NAME=Your Team
 ```
 
-`OPENAI_MODEL` falls back to `gpt-5.2-codex` when neither the Codex config nor
-the environment provides a model override.
+`OPENAI_MODEL` falls back to `gpt-5.2-codex` when neither
+`~/.codex/config.toml` nor the environment provides a model override.
 
 ## Project Layout
 

@@ -1,6 +1,11 @@
 import { readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { createTeamRuntimeConfigAccessor, readTeamRuntimeConfig } from "./runtime";
+import {
+  assertTeamCodexAuthFileExists,
+  createTeamRuntimeConfigAccessor,
+  missingCodexAuthMessage,
+  readTeamRuntimeConfig,
+} from "./runtime";
 
 const configPaths = {
   config: "/tmp/test-codex-config.toml",
@@ -36,11 +41,10 @@ const createStatFile = (mtimes: Record<string, number>): typeof statSync => {
 };
 
 describe("readTeamRuntimeConfig", () => {
-  it("prefers Codex config and auth values over environment fallbacks", () => {
+  it("prefers Codex config values over environment fallbacks", () => {
     const config = readTeamRuntimeConfig({
       env: {
         NODE_ENV: "test",
-        OPENAI_API_KEY: "env-key",
         OPENAI_BASE_URL: "https://env.example.invalid",
         OPENAI_MODEL: "env-model",
         TEAM_OWNER_NAME: "Env Owner",
@@ -55,9 +59,6 @@ model_verbosity = "low"
 [model_providers.local]
 base_url = "https://codex.example.invalid"
 `,
-        [configPaths.auth]: JSON.stringify({
-          OPENAI_API_KEY: "auth-key",
-        }),
       }),
       configPaths,
     });
@@ -68,31 +69,23 @@ base_url = "https://codex.example.invalid"
       modelProvider: "local",
       reasoningEffort: "high",
       textVerbosity: "low",
-      apiKey: "auth-key",
       baseUrl: "https://codex.example.invalid",
-      hasApiKey: true,
       sources: {
-        apiKey: "codex-auth",
         baseUrl: "codex-config",
         model: "codex-config",
       },
     });
   });
 
-  it("falls back to environment values when Codex files are missing or invalid", () => {
+  it("falls back to environment values when the Codex config is missing", () => {
     const config = readTeamRuntimeConfig({
       env: {
         NODE_ENV: "test",
-        OPENAI_API_KEY: "env-key",
         OPENAI_BASE_URL: "https://env.example.invalid",
         OPENAI_MODEL: "env-model",
         TEAM_OWNER_NAME: "Env Owner",
       },
-      readFile: createReadFile({
-        [configPaths.auth]: JSON.stringify({
-          OPENAI_API_KEY: 42,
-        }),
-      }),
+      readFile: createReadFile({}),
       configPaths,
     });
 
@@ -102,15 +95,37 @@ base_url = "https://codex.example.invalid"
       modelProvider: null,
       reasoningEffort: "medium",
       textVerbosity: "medium",
-      apiKey: "env-key",
       baseUrl: "https://env.example.invalid",
-      hasApiKey: true,
       sources: {
-        apiKey: "env",
         baseUrl: "env",
         model: "env",
       },
     });
+  });
+});
+
+describe("assertTeamCodexAuthFileExists", () => {
+  it("accepts an existing Codex auth file without inspecting its auth mode", () => {
+    expect(() =>
+      assertTeamCodexAuthFileExists({
+        readFile: createReadFile({
+          [configPaths.auth]: JSON.stringify({
+            auth_mode: "oauth",
+            refresh_token: "refresh-token",
+          }),
+        }),
+        configPaths,
+      }),
+    ).not.toThrow();
+  });
+
+  it("throws the backend auth-file error when the Codex auth file is missing", () => {
+    expect(() =>
+      assertTeamCodexAuthFileExists({
+        readFile: createReadFile({}),
+        configPaths,
+      }),
+    ).toThrow(missingCodexAuthMessage);
   });
 });
 
@@ -124,9 +139,6 @@ model_provider = "local"
 [model_providers.local]
 base_url = "https://first.example.invalid"
 `,
-      [configPaths.auth]: JSON.stringify({
-        OPENAI_API_KEY: "auth-key",
-      }),
     };
     const mtimes: Record<string, number> = {
       [configPaths.config]: 10,
@@ -165,9 +177,6 @@ model_provider = "local"
 [model_providers.local]
 base_url = "https://first.example.invalid"
 `,
-      [configPaths.auth]: JSON.stringify({
-        OPENAI_API_KEY: "auth-key",
-      }),
     };
     const mtimes: Record<string, number> = {
       [configPaths.config]: 10,
@@ -199,11 +208,7 @@ base_url = "https://second.example.invalid"
   });
 
   it("reloads after a missing config file later appears", () => {
-    const files: Record<string, string> = {
-      [configPaths.auth]: JSON.stringify({
-        OPENAI_API_KEY: "auth-key",
-      }),
-    };
+    const files: Record<string, string> = {};
     const mtimes: Record<string, number> = {};
     const getRuntimeConfig = createTeamRuntimeConfigAccessor({
       env: {
