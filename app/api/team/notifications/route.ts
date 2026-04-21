@@ -1,5 +1,6 @@
 // API docs: docs/api/team/notifications.md
 import { NextResponse } from "next/server";
+import { getTeamConfig } from "@/lib/config/team-loader";
 import { getTeamWorkspaceThreadSummaryLists } from "@/lib/team/history";
 import { buildTeamNotificationsResponse } from "@/lib/team/notifications";
 import {
@@ -9,7 +10,6 @@ import {
   runTeam,
 } from "@/lib/team/coding";
 import { getTeamServerState } from "@/lib/team/server-state";
-import { teamConfig } from "@/team.config";
 
 export const runtime = "nodejs";
 
@@ -22,6 +22,7 @@ export async function GET() {
     await persistTeamRunState(env, initialState);
     await runTeam(env, initialState);
     const serverState = await getTeamServerState();
+    const teamConfig = getTeamConfig();
     const threadSummaryLists = await getTeamWorkspaceThreadSummaryLists(serverState.threadStorage);
 
     return NextResponse.json(

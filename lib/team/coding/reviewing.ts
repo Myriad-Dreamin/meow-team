@@ -3,7 +3,11 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { teamConfig } from "@/team.config";
+import {
+  getTeamConfig,
+  getTeamThreadFile,
+  resolveTeamDispatchWorktreeRoot,
+} from "@/lib/config/team-loader";
 import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
 import { applyHandoff } from "@/lib/team/agent-helpers";
 import {
@@ -82,7 +86,7 @@ export const waitForLaneRunCompletion = async (
 };
 
 const getLaneWorkflow = (): string[] => {
-  return teamConfig.workflow.filter((roleId) => roleId === "coder" || roleId === "reviewer");
+  return getTeamConfig().workflow.filter((roleId) => roleId === "coder" || roleId === "reviewer");
 };
 
 const getThreadOwnedWorktreeOrThrow = ({
@@ -425,7 +429,8 @@ const runFinalArchiveCycle = async ({
   laneId: string;
   env: TeamRunEnv;
 }): Promise<void> => {
-  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  const threadFile = getTeamThreadFile();
+  const thread = await getTeamThreadRecord(threadFile, threadId);
   if (!thread) {
     return;
   }
@@ -448,9 +453,7 @@ const runFinalArchiveCycle = async ({
   }
 
   const repositoryPath = assignment.repository.path;
-  const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
-    ? teamConfig.dispatch.worktreeRoot
-    : path.join(repositoryPath, teamConfig.dispatch.worktreeRoot);
+  const laneWorktreeRoot = resolveTeamDispatchWorktreeRoot(repositoryPath);
   const laneBranchName = lane.branchName;
   const pullRequestSummary =
     lane.pullRequest.summary?.trim() ||
@@ -484,7 +487,7 @@ const runFinalArchiveCycle = async ({
   };
   const persistFinalizationProgress = async (latestActivity: string) => {
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -531,7 +534,7 @@ const runFinalArchiveCycle = async ({
 
   try {
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -670,7 +673,7 @@ const runFinalArchiveCycle = async ({
           }),
           onEvent: async (event) => {
             await appendTeamCodexLogEvent({
-              threadFile: teamConfig.storage.threadFile,
+              threadFile,
               threadId,
               assignmentNumber,
               roleId: coderRole.id,
@@ -784,7 +787,7 @@ const runFinalArchiveCycle = async ({
     });
 
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -874,7 +877,7 @@ const runFinalArchiveCycle = async ({
     );
 
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -944,7 +947,7 @@ const runFinalArchiveCycle = async ({
     });
 
     await appendTeamCodexLogEvent({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       assignmentNumber,
       roleId: null,
@@ -969,8 +972,9 @@ const runLaneCycle = async ({
   laneId: string;
   env: TeamRunEnv;
 }): Promise<void> => {
+  const threadFile = getTeamThreadFile();
   while (true) {
-    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+    const thread = await getTeamThreadRecord(threadFile, threadId);
     if (!thread) {
       return;
     }
@@ -993,9 +997,7 @@ const runLaneCycle = async ({
       threadId,
       worktree: thread.data.threadWorktree,
     });
-    const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
-      ? teamConfig.dispatch.worktreeRoot
-      : path.join(assignment.repository.path, teamConfig.dispatch.worktreeRoot);
+    const laneWorktreeRoot = resolveTeamDispatchWorktreeRoot(assignment.repository.path);
 
     if (isFinalArchivePhase(lane)) {
       await runFinalArchiveCycle({
@@ -1008,7 +1010,7 @@ const runLaneCycle = async ({
     }
 
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -1072,7 +1074,7 @@ const runLaneCycle = async ({
         lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Implement the task.",
       onEvent: async (event) => {
         await appendTeamCodexLogEvent({
-          threadFile: teamConfig.storage.threadFile,
+          threadFile,
           threadId,
           assignmentNumber,
           roleId: coderRole.id,
@@ -1107,7 +1109,7 @@ const runLaneCycle = async ({
 
     if (branchHeadAfterCoding === branchHeadBeforeCoding) {
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (mutableThread, now) => {
           const mutableAssignment = findAssignment(
@@ -1148,7 +1150,7 @@ const runLaneCycle = async ({
       });
 
       await appendTeamCodexLogEvent({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         assignmentNumber,
         roleId: coderRole.id,
@@ -1164,7 +1166,7 @@ const runLaneCycle = async ({
     }
 
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -1229,7 +1231,7 @@ const runLaneCycle = async ({
         "Review the lane output.",
       onEvent: async (event) => {
         await appendTeamCodexLogEvent({
-          threadFile: teamConfig.storage.threadFile,
+          threadFile,
           threadId,
           assignmentNumber,
           roleId: reviewerRole.id,
@@ -1256,7 +1258,7 @@ const runLaneCycle = async ({
 
     if (reviewerHandoff.decision === "needs_revision") {
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (mutableThread, now) => {
           const mutableAssignment = findAssignment(
@@ -1352,7 +1354,7 @@ const runLaneCycle = async ({
 
     if (rebaseErrorSummary) {
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (mutableThread, mutableNow) => {
           const mutableAssignment = findAssignment(
@@ -1408,7 +1410,7 @@ const runLaneCycle = async ({
       const pushErrorMessage = `GitHub push failed for ${lane.branchName}: ${pushErrorSummary}`;
 
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (mutableThread, mutableNow) => {
           const mutableAssignment = findAssignment(
@@ -1470,7 +1472,7 @@ const runLaneCycle = async ({
       });
 
       await appendTeamCodexLogEvent({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         assignmentNumber,
         roleId: null,
@@ -1506,7 +1508,7 @@ const runLaneCycle = async ({
       const pullRequestErrorMessage = `GitHub PR refresh failed for ${lane.branchName}: ${pullRequestErrorSummary}`;
 
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (mutableThread, mutableNow) => {
           const mutableAssignment = findAssignment(
@@ -1581,7 +1583,7 @@ const runLaneCycle = async ({
       });
 
       await appendTeamCodexLogEvent({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         assignmentNumber,
         roleId: null,
@@ -1597,7 +1599,7 @@ const runLaneCycle = async ({
     }
 
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (mutableThread, mutableNow) => {
         const mutableAssignment = findAssignment(
@@ -1704,6 +1706,7 @@ const ensureLaneRun = ({
     env: TeamRunEnv;
   }) => Promise<void>;
 }): void => {
+  const threadFile = getTeamThreadFile();
   const key = laneRunKey(threadId, assignmentNumber, laneId);
   if (activeLaneRuns.has(key)) {
     return;
@@ -1720,7 +1723,7 @@ const ensureLaneRun = ({
     } catch (error) {
       const message = error instanceof Error ? error.message : "Background lane execution failed.";
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (thread, now) => {
           const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
@@ -1754,7 +1757,7 @@ const ensureLaneRun = ({
         },
       });
       await appendTeamCodexLogEvent({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         assignmentNumber,
         roleId: null,
@@ -1790,9 +1793,10 @@ export const ensurePendingDispatchWork = async (
   env: TeamRunEnv,
   threadId?: string,
 ): Promise<void> => {
-  const pendingAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
+  const threadFile = getTeamThreadFile();
+  const pendingAssignments = await listPendingDispatchAssignments(threadFile);
   for (const pending of pendingAssignments) {
-    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, pending.threadId);
+    const thread = await getTeamThreadRecord(threadFile, pending.threadId);
     applyThreadOwnedWorktreeToAssignment({
       assignment: pending.assignment,
       worktree: thread?.data.threadWorktree ?? null,
@@ -1816,9 +1820,7 @@ export const ensurePendingDispatchWork = async (
   assignPendingDispatchWorkerSlots({
     pendingAssignments,
     resolveAssignmentWorktreeRoot: (pending) =>
-      path.isAbsolute(teamConfig.dispatch.worktreeRoot)
-        ? teamConfig.dispatch.worktreeRoot
-        : path.join(pending.assignment.repository?.path ?? "", teamConfig.dispatch.worktreeRoot),
+      resolveTeamDispatchWorktreeRoot(pending.assignment.repository?.path ?? ""),
   });
 
   const plannedLaneStateByKey = new Map<string, PlannedLanePoolState>();
@@ -1859,7 +1861,7 @@ export const ensurePendingDispatchWork = async (
     }
 
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId: currentThreadId,
       updater: (thread, now) => {
         for (const pending of pendingForThread) {
@@ -1898,7 +1900,7 @@ export const ensurePendingDispatchWork = async (
     });
   }
 
-  const refreshedAssignments = await listPendingDispatchAssignments(teamConfig.storage.threadFile);
+  const refreshedAssignments = await listPendingDispatchAssignments(threadFile);
 
   for (const pending of refreshedAssignments) {
     for (const lane of pending.assignment.lanes) {

@@ -1,8 +1,10 @@
 import "server-only";
 
-import path from "node:path";
-
-import { teamConfig } from "@/team.config";
+import {
+  getTeamConfig,
+  getTeamThreadFile,
+  resolveTeamDispatchWorktreeRoot,
+} from "@/lib/config/team-loader";
 import { applyHandoff } from "@/lib/team/agent-helpers";
 import { listExistingBranches, resolveRepositoryBaseBranch } from "@/lib/git/ops";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
@@ -251,6 +253,8 @@ export const createPlannerDispatchAssignment = async ({
   dependencies?: Pick<TeamRoleDependencies, "openSpecMaterializerAgent">;
   onMaterializerEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 }): Promise<TeamDispatchAssignment> => {
+  const teamConfig = getTeamConfig();
+  const threadFile = getTeamThreadFile();
   if (!repository) {
     throw new Error("Dispatching worker lanes requires a selected repository.");
   }
@@ -265,9 +269,7 @@ export const createPlannerDispatchAssignment = async ({
       repository.path,
       teamConfig.dispatch.baseBranch,
     );
-    const resolvedWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
-      ? teamConfig.dispatch.worktreeRoot
-      : path.join(repository.path, teamConfig.dispatch.worktreeRoot);
+    const resolvedWorktreeRoot = resolveTeamDispatchWorktreeRoot(repository.path);
     const canonicalBranchName = buildCanonicalBranchName({
       threadId,
       branchPrefix,
@@ -323,7 +325,7 @@ export const createPlannerDispatchAssignment = async ({
     });
 
     await updateTeamThreadRecord({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       updater: (thread) => {
         thread.data.threadWorktree = worktree;
@@ -383,7 +385,7 @@ export const createPlannerDispatchAssignment = async ({
       markAssignmentReadyForHumanApproval(assignment, new Date().toISOString());
 
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (thread) => {
           thread.dispatchAssignments = [
@@ -398,7 +400,7 @@ export const createPlannerDispatchAssignment = async ({
       return assignment;
     } catch (error) {
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (thread) => {
           thread.dispatchAssignments = thread.dispatchAssignments.filter(
@@ -458,6 +460,7 @@ const buildInitialState = (
   forceReset: boolean,
   selectedRepository: TeamRepositoryOption | null,
 ): TeamRunState => {
+  const teamConfig = getTeamConfig();
   return {
     teamId: teamConfig.id,
     teamName: teamConfig.name,
@@ -676,13 +679,12 @@ const preparePlanningWorktree = async ({
     return;
   }
 
+  const teamConfig = getTeamConfig();
   const resolvedBaseBranch = await resolveRepositoryBaseBranch(
     repository.path,
     teamConfig.dispatch.baseBranch,
   );
-  const resolvedWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
-    ? teamConfig.dispatch.worktreeRoot
-    : path.join(repository.path, teamConfig.dispatch.worktreeRoot);
+  const resolvedWorktreeRoot = resolveTeamDispatchWorktreeRoot(repository.path);
 
   // Planner-side Codex runs need a real checkout on disk before they can `--cd`
   // into the claimed meow slot for request-title and planning work.
@@ -704,6 +706,7 @@ const ensurePlanningStageWorktree = async ({
   input: string;
   state: TeamRunState;
 }): Promise<Worktree> => {
+  const teamConfig = getTeamConfig();
   const selectedRepository = state.selectedRepository;
   if (!selectedRepository) {
     return createRepositoryWorktree({
@@ -712,7 +715,7 @@ const ensurePlanningStageWorktree = async ({
   }
 
   const worktree = await claimTeamThreadWorktree({
-    threadFile: teamConfig.storage.threadFile,
+    threadFile: getTeamThreadFile(),
     threadId,
     state,
     input,
@@ -1002,9 +1005,10 @@ const createPlannerEventForwarder = ({
   threadId: string;
   assignmentNumber: number;
 }) => {
+  const threadFile = getTeamThreadFile();
   return async (event: TeamCodexEvent): Promise<void> => {
     const entry = await appendTeamCodexLogEvent({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       assignmentNumber,
       roleId: "planner",
@@ -1028,6 +1032,8 @@ export const buildPlanningStageState = async (
   env: TeamRunEnv,
   args: TeamPlanningRunArgs,
 ): Promise<TeamRunPlanningStageState> => {
+  const teamConfig = getTeamConfig();
+  const threadFile = getTeamThreadFile();
   const selectedRepository = await findConfiguredRepository(teamConfig, args.repositoryId);
 
   if (args.repositoryId && !selectedRepository) {
@@ -1036,7 +1042,7 @@ export const buildPlanningStageState = async (
     );
   }
 
-  const existingThread = await getTeamThreadRecord(teamConfig.storage.threadFile, args.threadId);
+  const existingThread = await getTeamThreadRecord(threadFile, args.threadId);
   const { state, shouldResetAssignment } = buildRunState({
     input: args.input,
     reset: Boolean(args.reset),
@@ -1090,6 +1096,7 @@ export const runPlanningStage = async (
   env: TeamRunEnv,
   currentState: TeamRunPlanningStageState,
 ): Promise<TeamRunMetadataGenerationStageState> => {
+  const threadFile = getTeamThreadFile();
   const {
     args,
     context: { threadId, selectedRepository, state, worktree },
@@ -1102,7 +1109,7 @@ export const runPlanningStage = async (
   });
 
   await upsertTeamThreadRun({
-    threadFile: teamConfig.storage.threadFile,
+    threadFile,
     threadId,
     state,
     input: args.input,
@@ -1143,10 +1150,8 @@ export const runMetadataGenerationStage = async (
   env: TeamRunEnv,
   currentState: TeamRunMetadataGenerationStageState,
 ): Promise<TeamRunReviewingStageState | TeamRunCompletedState> => {
-  const persistedThread = await getTeamThreadRecord(
-    teamConfig.storage.threadFile,
-    currentState.context.threadId,
-  );
+  const threadFile = getTeamThreadFile();
+  const persistedThread = await getTeamThreadRecord(threadFile, currentState.context.threadId);
   const {
     args,
     context: { threadId, selectedRepository, requestMetadata, state, worktree },
@@ -1241,7 +1246,7 @@ export const runMetadataGenerationStage = async (
     });
   if (!persistedPlannerStep) {
     await appendTeamExecutionStep({
-      threadFile: teamConfig.storage.threadFile,
+      threadFile,
       threadId,
       state,
       step,
@@ -1287,6 +1292,7 @@ export const handlePlanningStageError = async ({
   currentState: TeamRunPlanningStageState | TeamRunMetadataGenerationStageState;
   error: unknown;
 }): Promise<void> => {
+  const threadFile = getTeamThreadFile();
   const { threadId, state } = currentState.context;
   const forwardPlannerEvent = createPlannerEventForwarder({
     env,
@@ -1297,7 +1303,7 @@ export const handlePlanningStageError = async ({
   if (error instanceof ExistingBranchesRequireDeleteError) {
     try {
       await updateTeamThreadRecord({
-        threadFile: teamConfig.storage.threadFile,
+        threadFile,
         threadId,
         updater: (thread, now) => {
           thread.run = {

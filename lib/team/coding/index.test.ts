@@ -2,6 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defineTeamConfig } from "@/lib/config/team";
+import {
+  resetTeamConfigLoaderForTests,
+  setTeamConfigOverrideForTests,
+} from "@/lib/config/team-loader";
 
 const {
   commitContainsPathMock,
@@ -95,7 +100,6 @@ vi.mock("@/lib/team/repositories", async (importOriginal) => {
   };
 });
 
-import { teamConfig } from "@/team.config";
 import { buildCanonicalBranchName, buildLaneBranchName } from "@/lib/team/git";
 import * as historyModule from "@/lib/team/history";
 import {
@@ -132,6 +136,59 @@ type RequestTitleAgentArgs = Parameters<TeamRoleDependencies["requestTitleAgent"
 type PlannerAgentArgs = Parameters<TeamRoleDependencies["plannerAgent"]["run"]>;
 type PlannerAgentResult = Awaited<ReturnType<TeamRoleDependencies["plannerAgent"]["run"]>>;
 const FIXED_TIMESTAMP = "2026-04-11T08:00:00.000Z";
+
+const createTestTeamConfig = () => {
+  return defineTeamConfig({
+    id: "test-team",
+    name: "Test Team",
+    owner: {
+      name: "Owner",
+      objective: "Ship reliable GitHub delivery.",
+    },
+    model: {
+      provider: "openai",
+      model: "gpt-5",
+      reasoningEffort: "medium",
+      textVerbosity: "medium",
+      maxOutputTokens: 3200,
+    },
+    workflow: ["planner", "coder", "reviewer"],
+    storage: {
+      threadFile: "/tmp/team-thread.json",
+    },
+    dispatch: {
+      workerCount: 2,
+      maxProposalCount: 6,
+      branchPrefix: "team-dispatch",
+      baseBranch: "main",
+      worktreeRoot: "tmp/team-worktrees",
+    },
+    notifications: {
+      target: "browser",
+    },
+    repositories: {
+      roots: [
+        {
+          id: "test-root",
+          label: "Test Root",
+          directory: "/tmp",
+        },
+      ],
+    },
+  });
+};
+
+let teamConfig = createTestTeamConfig();
+
+beforeEach(() => {
+  resetTeamConfigLoaderForTests();
+  teamConfig = createTestTeamConfig();
+  setTeamConfigOverrideForTests(teamConfig);
+});
+
+afterEach(() => {
+  resetTeamConfigLoaderForTests();
+});
 
 const repository: TeamRepositoryOption = {
   id: "repo-1",
