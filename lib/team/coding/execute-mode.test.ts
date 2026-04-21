@@ -8,6 +8,7 @@ const {
   getBranchHeadMock,
   hasWorktreeChangesMock,
   inspectOpenSpecChangeArchiveStateMock,
+  publishLaneBranchHeadMock,
   pushLaneBranchMock,
   synchronizePullRequestMock,
   tryRebaseWorktreeBranchMock,
@@ -18,6 +19,7 @@ const {
   getBranchHeadMock: vi.fn(),
   hasWorktreeChangesMock: vi.fn(),
   inspectOpenSpecChangeArchiveStateMock: vi.fn(),
+  publishLaneBranchHeadMock: vi.fn(),
   pushLaneBranchMock: vi.fn(),
   synchronizePullRequestMock: vi.fn(),
   tryRebaseWorktreeBranchMock: vi.fn(),
@@ -84,6 +86,7 @@ vi.mock("@/lib/team/git", async () => {
   return {
     ...actual,
     ensureLaneWorktree: ensureLaneWorktreeMock,
+    publishLaneBranchHead: publishLaneBranchHeadMock,
     pushLaneBranch: pushLaneBranchMock,
   };
 });
@@ -284,6 +287,48 @@ const createEnv = ({
   persistState: async () => undefined,
 });
 
+const configurePublishLaneBranchHeadMock = () => {
+  publishLaneBranchHeadMock.mockReset();
+  publishLaneBranchHeadMock.mockImplementation(
+    async ({
+      repositoryPath,
+      branchName,
+      commitHash,
+      pushedCommit,
+    }: {
+      repositoryPath: string;
+      branchName: string;
+      commitHash: string;
+      pushedCommit?: TeamWorkerLaneRecord["pushedCommit"];
+    }) => {
+      if (pushedCommit?.commitHash === commitHash) {
+        return {
+          published: false,
+          pushedCommit,
+        };
+      }
+
+      const pushedResult = await pushLaneBranchMock({
+        repositoryPath,
+        branchName,
+        commitHash,
+      });
+
+      return {
+        published: true,
+        pushedCommit: {
+          remoteName: pushedResult?.remoteName ?? "origin",
+          repositoryUrl: pushedResult?.repositoryUrl ?? "https://example.com/repo.git",
+          branchUrl: pushedResult?.branchUrl ?? `https://example.com/repo/tree/${branchName}`,
+          commitUrl: pushedResult?.commitUrl ?? `https://example.com/repo/commit/${commitHash}`,
+          commitHash,
+          pushedAt: pushedResult?.pushedAt ?? FIXED_TIMESTAMP,
+        },
+      };
+    },
+  );
+};
+
 describe("execute-mode lane routing", () => {
   beforeEach(async () => {
     await resetTeamThreadStorageStateCacheForTests();
@@ -292,6 +337,7 @@ describe("execute-mode lane routing", () => {
     detectBranchConflictMock.mockReset();
     tryRebaseWorktreeBranchMock.mockReset();
     pushLaneBranchMock.mockReset();
+    configurePublishLaneBranchHeadMock();
     synchronizePullRequestMock.mockReset();
     ensureLaneWorktreeMock.mockReset();
     commitWorktreeChangesMock.mockReset();
@@ -376,7 +422,116 @@ describe("execute-mode lane routing", () => {
     expect(reviewerAgent.run).not.toHaveBeenCalled();
     expect(lane?.latestCoderSummary).toBe("Committed the execution artifacts.");
     expect(lane?.latestReviewerSummary).toBe("Validated the execution artifacts.");
+    expect(lane?.latestImplementationCommit).toBe("commit-after");
+    expect(lane?.pushedCommit?.commitHash).toBe("commit-after");
     expect(lane?.pullRequest?.status).toBe("awaiting_human_approval");
+    expect(pushLaneBranchMock).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: "/tmp/team-worktrees/meow-1",
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "commit-after",
+    });
+  });
+
+  it("publishes execution-reviewer feedback commits before requeueing execute-mode lanes", async () => {
+    const threadId = "execute-feedback-thread";
+    await writeStoredThread({
+      executionMode: "execution",
+      threadId,
+    });
+    getBranchHeadMock
+      .mockResolvedValueOnce("commit-before")
+      .mockResolvedValueOnce("commit-after")
+      .mockResolvedValueOnce("review-feedback-commit");
+    pushLaneBranchMock
+      .mockResolvedValueOnce({
+        remoteName: "origin",
+        repositoryUrl: "https://example.com/repo.git",
+        branchUrl: "https://example.com/repo/tree/branch",
+        commitUrl: "https://example.com/repo/commit/commit-after",
+        commitHash: "commit-after",
+        pushedAt: FIXED_TIMESTAMP,
+      })
+      .mockResolvedValueOnce({
+        remoteName: "origin",
+        repositoryUrl: "https://example.com/repo.git",
+        branchUrl: "https://example.com/repo/tree/branch",
+        commitUrl: "https://example.com/repo/commit/review-feedback-commit",
+        commitHash: "review-feedback-commit",
+        pushedAt: FIXED_TIMESTAMP,
+      });
+
+    let secondExecutorStarted = false;
+    let resolveSecondExecutor: (
+      value: Awaited<ReturnType<TeamRoleDependencies["executorAgent"]["run"]>>,
+    ) => void = () => undefined;
+    const secondExecutorPromise = new Promise<
+      Awaited<ReturnType<TeamRoleDependencies["executorAgent"]["run"]>>
+    >((resolve) => {
+      resolveSecondExecutor = resolve;
+    });
+    const env = createEnv({
+      coderAgent: { run: vi.fn() },
+      reviewerAgent: { run: vi.fn() },
+      executorAgent: {
+        run: vi
+          .fn<TeamRoleDependencies["executorAgent"]["run"]>()
+          .mockResolvedValueOnce({
+            summary: "Committed the execution artifacts.",
+            deliverable: "Added the script, validator, and summary artifact.",
+            decision: "continue" as const,
+            pullRequestTitle: null,
+            pullRequestSummary: null,
+          })
+          .mockImplementationOnce(() => {
+            secondExecutorStarted = true;
+            return secondExecutorPromise;
+          }),
+      },
+      executionReviewerAgent: {
+        run: vi.fn(async () => ({
+          summary: "Left a direct follow-up commit for the executor.",
+          deliverable: "Address the execution-reviewer feedback commit.",
+          decision: "needs_revision" as const,
+          pullRequestTitle: null,
+          pullRequestSummary: null,
+        })),
+      },
+    });
+
+    await ensurePendingDispatchWork(env, threadId);
+
+    await vi.waitFor(async () => {
+      expect(secondExecutorStarted).toBe(true);
+      const updatedLane = (await getTeamThreadRecord(teamConfig.storage.threadFile, threadId))
+        ?.dispatchAssignments[0]?.lanes[0];
+      expect(updatedLane?.status).toBe("coding");
+      expect(updatedLane?.requeueReason).toBe("reviewer_requested_changes");
+      expect(updatedLane?.latestImplementationCommit).toBe("review-feedback-commit");
+      expect(updatedLane?.pushedCommit?.commitHash).toBe("review-feedback-commit");
+      expect(updatedLane?.latestActivity).toContain("addressing execution-reviewer feedback");
+    });
+
+    expect(pushLaneBranchMock).toHaveBeenNthCalledWith(1, {
+      repositoryPath: "/tmp/team-worktrees/meow-1",
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "commit-after",
+    });
+    expect(pushLaneBranchMock).toHaveBeenNthCalledWith(2, {
+      repositoryPath: "/tmp/team-worktrees/meow-1",
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "review-feedback-commit",
+    });
+    expect(synchronizePullRequestMock).not.toHaveBeenCalled();
+
+    resolveSecondExecutor({
+      summary: "Working on the execution-reviewer feedback.",
+      deliverable: "No new execution artifacts yet.",
+      decision: "continue",
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    });
+    await waitForLaneRunCompletion(threadId, 1, "lane-1");
   });
 
   it("keeps unprefixed lanes on the existing coder and reviewer path", async () => {

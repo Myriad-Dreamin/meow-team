@@ -25,7 +25,11 @@ import {
   getLaneFinalizationMode,
   getLaneProposalDisposition,
 } from "@/lib/team/finalization";
-import { ensureLaneWorktree, pushLaneBranch } from "@/lib/team/git";
+import {
+  ensureLaneWorktree,
+  publishLaneBranchHead,
+  resolvePushedCommitForHead,
+} from "@/lib/team/git";
 import {
   assignPendingDispatchWorkerSlots,
   buildLanePoolStateKey,
@@ -68,6 +72,7 @@ import type {
   TeamLaneFinalizationMode,
   TeamLaneProposalDisposition,
   TeamRoleHandoff,
+  TeamPushedCommitRecord,
   TeamWorkerLaneRecord,
 } from "@/lib/team/types";
 
@@ -229,6 +234,38 @@ const buildCoderCommitMessage = ({
     conventionalTitle,
     summary: `implement ${taskLabel}`,
   });
+};
+
+const buildReviewerFeedbackCommitMessage = ({
+  lane,
+}: {
+  lane: Pick<TeamWorkerLaneRecord, "laneIndex" | "taskTitle">;
+}): string => {
+  const taskLabel = lane.taskTitle?.trim() || `proposal ${lane.laneIndex}`;
+
+  return formatHarnessCommitMessage({
+    intent: "repair",
+    summary: `record reviewer feedback for ${taskLabel}`,
+  });
+};
+
+const buildBranchPublishEventMessage = ({
+  commitHash,
+  pushedCommit,
+  published,
+}: {
+  commitHash: string;
+  pushedCommit: TeamPushedCommitRecord;
+  published: boolean;
+}): string => {
+  const commitReference = formatCommitActivityReference({
+    commitHash,
+    commitUrl: pushedCommit.commitUrl,
+  });
+
+  return published
+    ? `Published commit ${commitReference} to GitHub via ${pushedCommit.remoteName}.`
+    : `Commit ${commitReference} was already published to GitHub via ${pushedCommit.remoteName}.`;
 };
 
 const noBranchOutputMessage =
@@ -589,6 +626,7 @@ const runFinalArchiveCycle = async ({
       !hasFinalizationArtifactsApplied(finalizationCheckpoint)
     ) {
       latestImplementationCommit = null;
+      updatedPushedCommit = null;
       finalizationCheckpoint = "artifacts_applied";
       await persistFinalizationProgress(
         buildFinalizationWorkActivity({
@@ -646,6 +684,7 @@ const runFinalArchiveCycle = async ({
         proposalDisposition = "deleted";
         proposalArtifactsChangedThisRun = true;
         latestImplementationCommit = null;
+        updatedPushedCommit = null;
         finalizationCheckpoint = "artifacts_applied";
         await persistFinalizationProgress(
           buildFinalizationWorkActivity({
@@ -738,6 +777,10 @@ const runFinalArchiveCycle = async ({
 
       if (!hasFinalizationArtifactsApplied(finalizationCheckpoint)) {
         await refreshLatestImplementationCommit();
+        updatedPushedCommit = resolvePushedCommitForHead({
+          commitHash: latestImplementationCommit,
+          pushedCommit: updatedPushedCommit,
+        });
         finalizationCheckpoint = "artifacts_applied";
         await persistFinalizationProgress(
           buildFinalizationWorkActivity({
@@ -755,12 +798,20 @@ const runFinalArchiveCycle = async ({
         await refreshLatestImplementationCommit();
       }
 
+      updatedPushedCommit = resolvePushedCommitForHead({
+        commitHash: latestImplementationCommit,
+        pushedCommit: updatedPushedCommit,
+      });
+
       updatedPushedCommit = latestImplementationCommit
-        ? await pushLaneBranch({
-            repositoryPath: laneWorktree.path,
-            branchName: lane.branchName,
-            commitHash: latestImplementationCommit,
-          })
+        ? (
+            await publishLaneBranchHead({
+              repositoryPath: laneWorktree.path,
+              branchName: lane.branchName,
+              commitHash: latestImplementationCommit,
+              pushedCommit: updatedPushedCommit,
+            })
+          ).pushedCommit
         : null;
 
       if (!latestImplementationCommit || !updatedPushedCommit) {
@@ -1042,6 +1093,10 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "reviewing";
           mutableLane.executionPhase = "implementation";
+          mutableLane.pushedCommit = resolvePushedCommitForHead({
+            commitHash: mutableLane.latestImplementationCommit,
+            pushedCommit: mutableLane.pushedCommit,
+          });
           mutableLane.lastError = null;
           mutableLane.finishedAt = null;
           mutableLane.latestActivity =
@@ -1064,8 +1119,10 @@ const runLaneCycle = async ({
           mutableLane.status = "coding";
           mutableLane.executionPhase ??= "implementation";
           mutableLane.lastError = null;
-          mutableLane.latestImplementationCommit = null;
-          mutableLane.pushedCommit = null;
+          mutableLane.pushedCommit = resolvePushedCommitForHead({
+            commitHash: mutableLane.latestImplementationCommit,
+            pushedCommit: mutableLane.pushedCommit,
+          });
           mutableLane.startedAt = mutableLane.startedAt ?? now;
           mutableLane.finishedAt = null;
           mutableLane.latestActivity =
@@ -1098,6 +1155,11 @@ const runLaneCycle = async ({
 
     let coderHandoff = lane.latestCoderHandoff;
     let branchHeadAfterCoding = lane.latestImplementationCommit;
+    let pushedCommitAfterCoding = resolvePushedCommitForHead({
+      commitHash: branchHeadAfterCoding,
+      pushedCommit: lane.pushedCommit,
+    });
+    let publishedImplementationCommit = pushedCommitAfterCoding;
 
     if (!retryingReviewer) {
       const branchHeadBeforeCoding = await getBranchHead({
@@ -1183,8 +1245,8 @@ const runLaneCycle = async ({
             const mutableLane = findLane(mutableAssignment, laneId);
             mutableLane.status = "failed";
             mutableLane.executionPhase = null;
-            mutableLane.latestImplementationCommit = null;
-            mutableLane.pushedCommit = null;
+            mutableLane.latestImplementationCommit = lane.latestImplementationCommit;
+            mutableLane.pushedCommit = pushedCommitAfterCoding;
             mutableLane.latestCoderHandoff = completedCoderHandoff;
             mutableLane.latestCoderSummary = completedCoderHandoff.summary;
             mutableLane.latestDecision = completedCoderHandoff.decision;
@@ -1235,6 +1297,94 @@ const runLaneCycle = async ({
         return;
       }
 
+      try {
+        const implementationPublication = await publishLaneBranchHead({
+          repositoryPath: laneWorktree.path,
+          branchName: lane.branchName,
+          commitHash: completedImplementationCommit,
+          pushedCommit: pushedCommitAfterCoding,
+        });
+        pushedCommitAfterCoding = implementationPublication.pushedCommit;
+      } catch (error) {
+        const publishErrorSummary = summarizeGitFailure(
+          error instanceof Error ? error.message : "Git push failed.",
+        );
+        const publishErrorMessage = `GitHub push failed for ${lane.branchName}: ${publishErrorSummary}`;
+
+        await updateTeamThreadRecord({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          updater: (mutableThread, now) => {
+            const mutableAssignment = findAssignment(
+              mutableThread.dispatchAssignments,
+              assignmentNumber,
+            );
+            const mutableLane = findLane(mutableAssignment, laneId);
+            mutableLane.status = "failed";
+            mutableLane.executionPhase = null;
+            mutableLane.latestImplementationCommit = completedImplementationCommit;
+            mutableLane.pushedCommit = resolvePushedCommitForHead({
+              commitHash: completedImplementationCommit,
+              pushedCommit: pushedCommitAfterCoding,
+            });
+            mutableLane.latestCoderHandoff = completedCoderHandoff;
+            mutableLane.latestCoderSummary = completedCoderHandoff.summary;
+            mutableLane.latestDecision = completedCoderHandoff.decision;
+            mutableLane.latestActivity =
+              "Coder finished implementation, but publishing the lane branch to GitHub failed before review could start.";
+            mutableLane.retryState = null;
+            mutableLane.lastError = publishErrorMessage;
+            mutableLane.runCount += 1;
+            mutableLane.workerSlot = null;
+            mutableLane.worktreePath = laneWorktree.path;
+            if (mutableLane.pullRequest) {
+              mutableLane.pullRequest = {
+                ...mutableLane.pullRequest,
+                status: "failed",
+                updatedAt: now,
+              };
+            }
+            mutableLane.updatedAt = now;
+            mutableLane.finishedAt = now;
+            appendLaneEvent(
+              mutableLane,
+              "coder",
+              `Coder handoff: ${completedCoderHandoff.summary}`,
+              now,
+            );
+            appendLaneEvent(mutableLane, "system", publishErrorMessage, now);
+            appendPlannerNote(
+              mutableAssignment,
+              `Lane ${mutableLane.laneIndex} produced commit ${completedImplementationCommit}, but publishing ${mutableLane.branchName ?? lane.branchName} failed before review could start (${publishErrorSummary}).`,
+              now,
+            );
+            synchronizeDispatchAssignment(mutableAssignment, now);
+          },
+        });
+
+        await appendTeamCodexLogEvent({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          assignmentNumber,
+          roleId: null,
+          laneId,
+          event: {
+            source: "system",
+            message: publishErrorMessage,
+            createdAt: new Date().toISOString(),
+          },
+        });
+
+        return;
+      }
+
+      if (!pushedCommitAfterCoding) {
+        throw new Error("Implementation publish did not return pushed commit metadata.");
+      }
+
+      const stagePublishedCommit = pushedCommitAfterCoding;
+      publishedImplementationCommit = stagePublishedCommit;
+
       await updateTeamThreadRecord({
         threadFile: teamConfig.storage.threadFile,
         threadId,
@@ -1246,22 +1396,33 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           const reviewCommit = formatCommitActivityReference({
             commitHash: completedImplementationCommit,
+            commitUrl: pushedCommitAfterCoding?.commitUrl ?? null,
           });
           mutableLane.status = "reviewing";
           mutableLane.executionPhase = "implementation";
           mutableLane.latestImplementationCommit = completedImplementationCommit;
-          mutableLane.pushedCommit = null;
+          mutableLane.pushedCommit = publishedImplementationCommit;
           mutableLane.latestCoderHandoff = completedCoderHandoff;
           mutableLane.latestCoderSummary = completedCoderHandoff.summary;
           mutableLane.latestDecision = completedCoderHandoff.decision;
           mutableLane.retryState = null;
           mutableLane.lastError = null;
-          mutableLane.latestActivity = `Reviewer is evaluating implementation commit ${reviewCommit}.`;
+          mutableLane.latestActivity = `Reviewer is evaluating published implementation commit ${reviewCommit}.`;
           mutableLane.updatedAt = now;
           appendLaneEvent(
             mutableLane,
             "coder",
             `Coder requested review for commit ${reviewCommit}: ${completedCoderHandoff.summary}`,
+            now,
+          );
+          appendLaneEvent(
+            mutableLane,
+            "system",
+            buildBranchPublishEventMessage({
+              commitHash: completedImplementationCommit,
+              pushedCommit: stagePublishedCommit,
+              published: true,
+            }),
             now,
           );
           appendLaneEvent(mutableLane, "reviewer", mutableLane.latestActivity, now);
@@ -1276,12 +1437,16 @@ const runLaneCycle = async ({
       );
     }
 
+    if (!publishedImplementationCommit) {
+      throw new Error("Lane is missing the pushed implementation metadata required for review.");
+    }
+
     const reviewerLane: TeamWorkerLaneRecord = {
       ...lane,
       status: "reviewing",
       executionPhase: "implementation",
       latestImplementationCommit: branchHeadAfterCoding,
-      pushedCommit: null,
+      pushedCommit: publishedImplementationCommit,
       latestCoderHandoff: coderHandoff,
       latestCoderSummary: coderHandoff.summary,
       latestDecision: coderHandoff.decision,
@@ -1347,6 +1512,124 @@ const runLaneCycle = async ({
         : null;
 
     if (reviewerHandoff.decision === "needs_revision") {
+      let latestImplementationCommit = branchHeadAfterCoding;
+      let updatedPushedCommit = resolvePushedCommitForHead({
+        commitHash: latestImplementationCommit,
+        pushedCommit: pushedCommitAfterCoding,
+      });
+
+      if (await hasWorktreeChanges(laneWorktree.path)) {
+        await commitWorktreeChanges({
+          worktreePath: laneWorktree.path,
+          message: buildReviewerFeedbackCommitMessage({
+            lane,
+          }),
+        });
+      }
+
+      latestImplementationCommit = await getBranchHead({
+        repositoryPath: assignment.repository.path,
+        branchName: lane.branchName,
+      });
+      updatedPushedCommit = resolvePushedCommitForHead({
+        commitHash: latestImplementationCommit,
+        pushedCommit: updatedPushedCommit,
+      });
+
+      let reviewerPublication: Awaited<ReturnType<typeof publishLaneBranchHead>>;
+      try {
+        reviewerPublication = await publishLaneBranchHead({
+          repositoryPath: laneWorktree.path,
+          branchName: lane.branchName,
+          commitHash: latestImplementationCommit,
+          pushedCommit: updatedPushedCommit,
+        });
+      } catch (error) {
+        const publishErrorSummary = summarizeGitFailure(
+          error instanceof Error ? error.message : "Git push failed.",
+        );
+        const publishErrorMessage = `GitHub push failed for ${lane.branchName}: ${publishErrorSummary}`;
+
+        await updateTeamThreadRecord({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          updater: (mutableThread, now) => {
+            const mutableAssignment = findAssignment(
+              mutableThread.dispatchAssignments,
+              assignmentNumber,
+            );
+            const mutableLane = findLane(mutableAssignment, laneId);
+            mutableLane.status = "failed";
+            mutableLane.executionPhase = null;
+            mutableLane.latestImplementationCommit = latestImplementationCommit;
+            mutableLane.pushedCommit = resolvePushedCommitForHead({
+              commitHash: latestImplementationCommit,
+              pushedCommit: updatedPushedCommit,
+            });
+            mutableLane.latestDecision = reviewerHandoff.decision;
+            mutableLane.latestCoderHandoff = coderHandoff;
+            mutableLane.latestReviewerHandoff = reviewerHandoff;
+            mutableLane.latestCoderSummary = coderHandoff.summary;
+            mutableLane.latestReviewerSummary = reviewerHandoff.summary;
+            mutableLane.latestActivity =
+              "Reviewer requested changes, but publishing the feedback branch head to GitHub failed before the coder could be requeued.";
+            mutableLane.runCount += 1;
+            mutableLane.workerSlot = null;
+            mutableLane.requeueReason = null;
+            mutableLane.lastError = publishErrorMessage;
+            if (mutableLane.pullRequest) {
+              mutableLane.pullRequest = {
+                ...mutableLane.pullRequest,
+                status: "failed",
+                updatedAt: now,
+              };
+            }
+            mutableLane.updatedAt = now;
+            mutableLane.finishedAt = now;
+            appendLaneEvent(
+              mutableLane,
+              "reviewer",
+              `Reviewer requested changes: ${reviewerHandoff.summary}`,
+              now,
+            );
+            appendLaneEvent(mutableLane, "system", publishErrorMessage, now);
+            appendPlannerNote(
+              mutableAssignment,
+              `Proposal ${mutableLane.laneIndex} received reviewer feedback, but publishing ${mutableLane.branchName ?? lane.branchName} failed before the coder could be requeued (${publishErrorSummary}).`,
+              now,
+            );
+            synchronizeDispatchAssignment(mutableAssignment, now);
+          },
+        });
+
+        await appendTeamCodexLogEvent({
+          threadFile: teamConfig.storage.threadFile,
+          threadId,
+          assignmentNumber,
+          roleId: null,
+          laneId,
+          event: {
+            source: "system",
+            message: publishErrorMessage,
+            createdAt: new Date().toISOString(),
+          },
+        });
+
+        return;
+      }
+
+      updatedPushedCommit = reviewerPublication.pushedCommit;
+      const feedbackCommitReference = formatCommitActivityReference({
+        commitHash: latestImplementationCommit,
+        commitUrl: updatedPushedCommit.commitUrl,
+      });
+      const reviewerCreatedFeedbackCommit = latestImplementationCommit !== branchHeadAfterCoding;
+      const latestActivity = reviewerCreatedFeedbackCommit
+        ? `Reviewer requested changes, published feedback commit ${feedbackCommitReference}, and returned the proposal to the coding-review queue.`
+        : reviewerPublication.published
+          ? `Reviewer requested changes, published implementation commit ${feedbackCommitReference}, and returned the proposal to the coding-review queue.`
+          : `Reviewer requested changes and returned the already published branch head ${feedbackCommitReference} to the coding-review queue.`;
+
       await updateTeamThreadRecord({
         threadFile: teamConfig.storage.threadFile,
         threadId,
@@ -1358,14 +1641,14 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
           mutableLane.executionPhase = "implementation";
-          mutableLane.pushedCommit = null;
+          mutableLane.latestImplementationCommit = latestImplementationCommit;
+          mutableLane.pushedCommit = updatedPushedCommit;
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderHandoff = coderHandoff;
           mutableLane.latestReviewerHandoff = reviewerHandoff;
           mutableLane.latestCoderSummary = coderHandoff.summary;
           mutableLane.latestReviewerSummary = reviewerHandoff.summary;
-          mutableLane.latestActivity =
-            "Reviewer requested changes and returned the proposal to the coding-review queue.";
+          mutableLane.latestActivity = latestActivity;
           mutableLane.runCount += 1;
           mutableLane.revisionCount += 1;
           mutableLane.queuedAt = now;
@@ -1378,6 +1661,18 @@ const runLaneCycle = async ({
             `Reviewer requested changes: ${reviewerHandoff.summary}`,
             now,
           );
+          if (reviewerCreatedFeedbackCommit || reviewerPublication.published) {
+            appendLaneEvent(
+              mutableLane,
+              "system",
+              buildBranchPublishEventMessage({
+                commitHash: latestImplementationCommit,
+                pushedCommit: updatedPushedCommit,
+                published: reviewerPublication.published,
+              }),
+              now,
+            );
+          }
           synchronizeDispatchAssignment(mutableAssignment, now);
         },
       });
@@ -1432,6 +1727,10 @@ const runLaneCycle = async ({
     }
 
     const rebasedOntoBase = latestImplementationCommit !== branchHeadAfterCoding;
+    const pushedCommitAfterRebase = resolvePushedCommitForHead({
+      commitHash: latestImplementationCommit,
+      pushedCommit: pushedCommitAfterCoding,
+    });
     const rebaseFailureActivity = hasConflict
       ? "Planner detected a pull request conflict and the auto-rebase attempt failed, so the proposal was requeued."
       : "Planner could not rebase the lane onto the base branch, so the proposal was requeued for conflict resolution.";
@@ -1454,7 +1753,7 @@ const runLaneCycle = async ({
           const mutableLane = findLane(mutableAssignment, laneId);
           mutableLane.status = "queued";
           mutableLane.executionPhase = "implementation";
-          mutableLane.pushedCommit = null;
+          mutableLane.pushedCommit = pushedCommitAfterRebase;
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderHandoff = coderHandoff;
           mutableLane.latestReviewerHandoff = reviewerHandoff;
@@ -1486,12 +1785,13 @@ const runLaneCycle = async ({
       continue;
     }
 
-    let pushedCommit: Awaited<ReturnType<typeof pushLaneBranch>> | null = null;
+    let reviewPublication: Awaited<ReturnType<typeof publishLaneBranchHead>>;
     try {
-      pushedCommit = await pushLaneBranch({
+      reviewPublication = await publishLaneBranchHead({
         repositoryPath: laneWorktree.path,
         branchName: lane.branchName,
         commitHash: latestImplementationCommit,
+        pushedCommit: pushedCommitAfterRebase,
       });
     } catch (error) {
       const pushErrorSummary = summarizeGitFailure(
@@ -1511,7 +1811,10 @@ const runLaneCycle = async ({
           mutableLane.status = "failed";
           mutableLane.executionPhase = null;
           mutableLane.latestImplementationCommit = latestImplementationCommit;
-          mutableLane.pushedCommit = null;
+          mutableLane.pushedCommit = resolvePushedCommitForHead({
+            commitHash: latestImplementationCommit,
+            pushedCommit: pushedCommitAfterRebase,
+          });
           mutableLane.latestDecision = reviewerHandoff.decision;
           mutableLane.latestCoderHandoff = coderHandoff;
           mutableLane.latestReviewerHandoff = reviewerHandoff;
@@ -1577,9 +1880,18 @@ const runLaneCycle = async ({
       return;
     }
 
-    if (!pushedCommit) {
-      return;
-    }
+    const pushedCommit = reviewPublication.pushedCommit;
+    const publishEventMessage = buildBranchPublishEventMessage({
+      commitHash: latestImplementationCommit,
+      pushedCommit,
+      published: reviewPublication.published,
+    });
+    const publishPlannerPhrase = reviewPublication.published
+      ? "pushed to GitHub"
+      : "confirmed on GitHub";
+    const publishLatestActivity = reviewPublication.published
+      ? "Reviewer completed machine review, pushed the branch to GitHub, and marked the tracking PR ready for final human approval."
+      : "Reviewer completed machine review, confirmed the published branch on GitHub, and marked the tracking PR ready for final human approval.";
 
     let synchronizedPullRequest: Awaited<ReturnType<typeof synchronizePullRequest>> | null = null;
     try {
@@ -1651,21 +1963,13 @@ const runLaneCycle = async ({
             `Reviewer completed machine review: ${reviewerHandoff.summary}`,
             mutableNow,
           );
-          appendLaneEvent(
-            mutableLane,
-            "system",
-            `Published commit ${formatCommitActivityReference({
-              commitHash: pushedCommit.commitHash,
-              commitUrl: pushedCommit.commitUrl,
-            })} to GitHub via ${pushedCommit.remoteName}.`,
-            mutableNow,
-          );
+          appendLaneEvent(mutableLane, "system", publishEventMessage, mutableNow);
           appendLaneEvent(mutableLane, "system", pullRequestErrorMessage, mutableNow);
           appendPlannerNote(
             mutableAssignment,
             rebasedOntoBase
-              ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch} and pushed to GitHub after machine review, but refreshing the tracking PR failed (${pullRequestErrorSummary}).`
-              : `Proposal ${mutableLane.laneIndex} passed machine review and was pushed to GitHub, but refreshing the tracking PR failed (${pullRequestErrorSummary}).`,
+              ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch} and ${publishPlannerPhrase} after machine review, but refreshing the tracking PR failed (${pullRequestErrorSummary}).`
+              : `Proposal ${mutableLane.laneIndex} passed machine review and was ${publishPlannerPhrase}, but refreshing the tracking PR failed (${pullRequestErrorSummary}).`,
             mutableNow,
           );
           synchronizeDispatchAssignment(mutableAssignment, mutableNow);
@@ -1709,8 +2013,7 @@ const runLaneCycle = async ({
         mutableLane.latestReviewerHandoff = reviewerHandoff;
         mutableLane.latestCoderSummary = coderHandoff.summary;
         mutableLane.latestReviewerSummary = reviewerHandoff.summary;
-        mutableLane.latestActivity =
-          "Reviewer completed machine review, pushed the branch to GitHub, and marked the tracking PR ready for final human approval.";
+        mutableLane.latestActivity = publishLatestActivity;
         mutableLane.runCount += 1;
         mutableLane.workerSlot = null;
         mutableLane.requeueReason = null;
@@ -1742,15 +2045,7 @@ const runLaneCycle = async ({
           `Reviewer completed machine review: ${reviewerHandoff.summary}`,
           mutableNow,
         );
-        appendLaneEvent(
-          mutableLane,
-          "system",
-          `Published commit ${formatCommitActivityReference({
-            commitHash: pushedCommit.commitHash,
-            commitUrl: pushedCommit.commitUrl,
-          })} to GitHub via ${pushedCommit.remoteName}.`,
-          mutableNow,
-        );
+        appendLaneEvent(mutableLane, "system", publishEventMessage, mutableNow);
         appendLaneEvent(
           mutableLane,
           "system",
@@ -1766,8 +2061,8 @@ const runLaneCycle = async ({
         appendPlannerNote(
           mutableAssignment,
           rebasedOntoBase
-            ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch}, pushed to GitHub, and marked ready on GitHub after machine review. It is now waiting for final human approval.`
-            : `Proposal ${mutableLane.laneIndex} was pushed to GitHub, marked ready on GitHub after machine review, and is now waiting for final human approval.`,
+            ? `Proposal ${mutableLane.laneIndex} was automatically rebased onto ${mutableLane.baseBranch ?? lane.baseBranch}, ${publishPlannerPhrase}, and marked ready on GitHub after machine review. It is now waiting for final human approval.`
+            : `Proposal ${mutableLane.laneIndex} was ${publishPlannerPhrase}, marked ready on GitHub after machine review, and is now waiting for final human approval.`,
           mutableNow,
         );
         synchronizeDispatchAssignment(mutableAssignment, mutableNow);

@@ -17,6 +17,7 @@ const {
   inspectOpenSpecChangeArchiveStateMock,
   listExistingBranchesMock,
   materializeAssignmentProposalsMock,
+  publishLaneBranchHeadMock,
   pushLaneBranchMock,
   resolveRepositoryBaseBranchMock,
   synchronizePullRequestMock,
@@ -36,6 +37,7 @@ const {
     inspectOpenSpecChangeArchiveStateMock: vi.fn(),
     listExistingBranchesMock: vi.fn(),
     materializeAssignmentProposalsMock: vi.fn(),
+    publishLaneBranchHeadMock: vi.fn(),
     pushLaneBranchMock: vi.fn(),
     resolveRepositoryBaseBranchMock: vi.fn(),
     synchronizePullRequestMock: vi.fn(),
@@ -75,6 +77,7 @@ vi.mock("@/lib/team/git", async () => {
     ...actual,
     deleteManagedBranches: deleteManagedBranchesMock,
     ensureLaneWorktree: ensureLaneWorktreeMock,
+    publishLaneBranchHead: publishLaneBranchHeadMock,
     pushLaneBranch: pushLaneBranchMock,
   };
 });
@@ -163,6 +166,50 @@ const createManagedPlanningWorktree = (repositoryPath: string, slot = 1) => {
 };
 
 const createPersistStateMock = () => vi.fn<TeamRunEnv["persistState"]>(async () => undefined);
+
+const configurePublishLaneBranchHeadMock = () => {
+  publishLaneBranchHeadMock.mockReset();
+  publishLaneBranchHeadMock.mockImplementation(
+    async ({
+      repositoryPath,
+      branchName,
+      commitHash,
+      pushedCommit,
+    }: {
+      repositoryPath: string;
+      branchName: string;
+      commitHash: string;
+      pushedCommit?: TeamWorkerLaneRecord["pushedCommit"];
+    }) => {
+      if (pushedCommit?.commitHash === commitHash) {
+        return {
+          published: false,
+          pushedCommit,
+        };
+      }
+
+      const pushedResult = await pushLaneBranchMock({
+        repositoryPath,
+        branchName,
+        commitHash,
+      });
+
+      return {
+        published: true,
+        pushedCommit: {
+          remoteName: pushedResult?.remoteName ?? "origin",
+          repositoryUrl: pushedResult?.repositoryUrl ?? "https://github.com/example/meow-team",
+          branchUrl:
+            pushedResult?.branchUrl ?? `https://github.com/example/meow-team/tree/${branchName}`,
+          commitUrl:
+            pushedResult?.commitUrl ?? `https://github.com/example/meow-team/commit/${commitHash}`,
+          commitHash,
+          pushedAt: pushedResult?.pushedAt ?? FIXED_TIMESTAMP,
+        },
+      };
+    },
+  );
+};
 
 const createReplayLane = (overrides: Partial<TeamWorkerLaneRecord> = {}): TeamWorkerLaneRecord => ({
   laneId: "lane-1",
@@ -332,6 +379,7 @@ describe.sequential("runTeam", () => {
       commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
       remoteName: "origin",
     });
+    configurePublishLaneBranchHeadMock();
     synchronizePullRequestMock.mockReset();
     synchronizePullRequestMock.mockResolvedValue({
       url: "https://github.com/example/meow-team/pull/42",
@@ -1486,6 +1534,7 @@ describe.sequential("runTeam", () => {
       .mockResolvedValueOnce("review-commit")
       .mockResolvedValueOnce("rebased-review-commit");
     pushLaneBranchMock.mockReset();
+    configurePublishLaneBranchHeadMock();
     pushLaneBranchMock.mockResolvedValue({
       ...basePushedCommit,
       commitHash: "rebased-review-commit",
@@ -1573,14 +1622,21 @@ describe.sequential("runTeam", () => {
     getBranchHeadMock.mockReset();
     getBranchHeadMock
       .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("proposal-commit")
       .mockResolvedValueOnce("review-commit")
       .mockResolvedValueOnce("rebased-review-commit");
     pushLaneBranchMock.mockReset();
+    configurePublishLaneBranchHeadMock();
     pushLaneBranchMock
       .mockResolvedValueOnce({
         ...basePushedCommit,
         commitHash: "proposal-commit",
         commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+      })
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        commitHash: "review-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/review-commit",
       })
       .mockResolvedValueOnce({
         ...basePushedCommit,
@@ -3075,6 +3131,7 @@ describe.sequential("approveLaneProposal", () => {
     hasWorktreeChangesMock.mockReset();
     hasWorktreeChangesMock.mockResolvedValue(false);
     pushLaneBranchMock.mockReset();
+    configurePublishLaneBranchHeadMock();
     tryRebaseWorktreeBranchMock.mockReset();
     tryRebaseWorktreeBranchMock.mockResolvedValue({
       applied: true,
@@ -3133,6 +3190,11 @@ describe.sequential("approveLaneProposal", () => {
         ...basePushedCommit,
         commitHash: "proposal-commit",
         commitUrl: "https://github.com/example/meow-team/commit/proposal-commit",
+      })
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        commitHash: "review-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/review-commit",
       })
       .mockResolvedValueOnce({
         ...basePushedCommit,
@@ -3220,6 +3282,11 @@ describe.sequential("approveLaneProposal", () => {
     expect(pushLaneBranchMock).toHaveBeenNthCalledWith(2, {
       repositoryPath: laneWorktree.path,
       branchName: "requests/example/a1-proposal-1",
+      commitHash: "review-commit",
+    });
+    expect(pushLaneBranchMock).toHaveBeenNthCalledWith(3, {
+      repositoryPath: laneWorktree.path,
+      branchName: "requests/example/a1-proposal-1",
       commitHash: "rebased-review-commit",
     });
     expect(synchronizePullRequestMock).toHaveBeenNthCalledWith(2, {
@@ -3230,6 +3297,235 @@ describe.sequential("approveLaneProposal", () => {
       body: "Machine review approved the branch.",
       draft: false,
     });
+  });
+
+  it("publishes the implementation head before reviewer-requested changes requeue the lane", async () => {
+    let secondCoderStarted = false;
+    let resolveSecondCoder: (
+      value: Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>,
+    ) => void = () => undefined;
+    const secondCoderPromise = new Promise<
+      Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>
+    >((resolve) => {
+      resolveSecondCoder = resolve;
+    });
+    const coderRun = vi
+      .fn<TeamRoleDependencies["coderAgent"]["run"]>()
+      .mockResolvedValueOnce({
+        summary: "Implemented the approved proposal.",
+        deliverable: "Implementation is ready for machine review.",
+        decision: "continue",
+        pullRequestTitle: null,
+        pullRequestSummary: null,
+      })
+      .mockImplementationOnce(() => {
+        secondCoderStarted = true;
+        return secondCoderPromise;
+      }) as TeamRoleDependencies["coderAgent"]["run"];
+    const reviewerRun = vi.fn(async () => ({
+      summary: "Follow up on the reviewer note.",
+      deliverable: "Please address the failing path.",
+      decision: "needs_revision" as const,
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    })) as TeamRoleDependencies["reviewerAgent"]["run"];
+
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("implementation-commit")
+      .mockResolvedValueOnce("implementation-commit");
+    pushLaneBranchMock.mockResolvedValue({
+      ...basePushedCommit,
+      commitHash: "implementation-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/implementation-commit",
+    });
+
+    await writeExecutionThreadStore({
+      threadId: "thread-stage-publish-requeue",
+      lane: createProposalApprovalLane({
+        status: "queued",
+        workerSlot: 1,
+        worktreePath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+        approvalGrantedAt: FIXED_TIMESTAMP,
+        queuedAt: FIXED_TIMESTAMP,
+        pullRequest: createDraftTrackingPullRequest(),
+      }),
+      assignmentOverrides: {
+        status: "running",
+      },
+      runStatus: "running",
+    });
+
+    await ensurePendingDispatchWork(
+      createExecutionEnv({
+        coderRun,
+        reviewerRun,
+      }),
+      "thread-stage-publish-requeue",
+    );
+
+    await vi.waitFor(async () => {
+      expect(secondCoderStarted).toBe(true);
+      const lane = (
+        await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-stage-publish-requeue")
+      )?.dispatchAssignments[0]?.lanes[0];
+      expect(lane?.status).toBe("coding");
+      expect(lane?.requeueReason).toBe("reviewer_requested_changes");
+      expect(lane?.latestImplementationCommit).toBe("implementation-commit");
+      expect(lane?.pushedCommit?.commitHash).toBe("implementation-commit");
+      expect(lane?.latestActivity).toContain("addressing reviewer-requested changes");
+    });
+
+    expect(pushLaneBranchMock).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "implementation-commit",
+    });
+
+    resolveSecondCoder({
+      summary: "Still implementing the requested changes.",
+      deliverable: "No branch changes yet.",
+      decision: "continue",
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    });
+    await waitForLaneRunCompletion("thread-stage-publish-requeue", 1, "lane-1");
+  });
+
+  it("publishes reviewer feedback artifacts before requeueing the coder", async () => {
+    let secondCoderStarted = false;
+    let resolveSecondCoder: (
+      value: Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>,
+    ) => void = () => undefined;
+    const secondCoderPromise = new Promise<
+      Awaited<ReturnType<TeamRoleDependencies["coderAgent"]["run"]>>
+    >((resolve) => {
+      resolveSecondCoder = resolve;
+    });
+    const coderRun = vi
+      .fn<TeamRoleDependencies["coderAgent"]["run"]>()
+      .mockResolvedValueOnce({
+        summary: "Implemented the approved proposal.",
+        deliverable: "Implementation is ready for machine review.",
+        decision: "continue",
+        pullRequestTitle: null,
+        pullRequestSummary: null,
+      })
+      .mockImplementationOnce(() => {
+        secondCoderStarted = true;
+        return secondCoderPromise;
+      }) as TeamRoleDependencies["coderAgent"]["run"];
+    const reviewerRun = vi.fn(async () => ({
+      summary: "The reviewer left a failing artifact to fix.",
+      deliverable: "Repair the failing review artifact.",
+      decision: "needs_revision" as const,
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    })) as TeamRoleDependencies["reviewerAgent"]["run"];
+
+    hasWorktreeChangesMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("implementation-commit")
+      .mockResolvedValueOnce("review-feedback-commit");
+    pushLaneBranchMock
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        commitHash: "implementation-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/implementation-commit",
+      })
+      .mockResolvedValueOnce({
+        ...basePushedCommit,
+        commitHash: "review-feedback-commit",
+        commitUrl: "https://github.com/example/meow-team/commit/review-feedback-commit",
+      });
+
+    const worktreeRoot = path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot);
+    await writeExecutionThreadStore({
+      threadId: "thread-review-feedback-publish",
+      lane: createProposalApprovalLane({
+        status: "queued",
+        workerSlot: 1,
+        worktreePath: `${worktreeRoot}/meow-1`,
+        approvalGrantedAt: FIXED_TIMESTAMP,
+        queuedAt: FIXED_TIMESTAMP,
+        pullRequest: createDraftTrackingPullRequest(),
+      }),
+      assignmentOverrides: {
+        status: "running",
+      },
+      runStatus: "running",
+    });
+
+    await ensurePendingDispatchWork(
+      createExecutionEnv({
+        coderRun,
+        reviewerRun,
+      }),
+      "thread-review-feedback-publish",
+    );
+    await vi.waitFor(async () => {
+      expect(secondCoderStarted).toBe(true);
+      const lane = (
+        await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-review-feedback-publish")
+      )?.dispatchAssignments[0]?.lanes[0];
+      expect(commitWorktreeChangesMock).toHaveBeenCalledWith({
+        worktreePath: `${worktreeRoot}/meow-1`,
+        message: "fix: record reviewer feedback for Ship the feature",
+      });
+      expect(pushLaneBranchMock).toHaveBeenNthCalledWith(1, {
+        repositoryPath: `${worktreeRoot}/meow-1`,
+        branchName: "requests/example/a1-proposal-1",
+        commitHash: "implementation-commit",
+      });
+      expect(pushLaneBranchMock).toHaveBeenNthCalledWith(2, {
+        repositoryPath: `${worktreeRoot}/meow-1`,
+        branchName: "requests/example/a1-proposal-1",
+        commitHash: "review-feedback-commit",
+      });
+      expect(lane?.status).toBe("coding");
+      expect(lane?.requeueReason).toBe("reviewer_requested_changes");
+      expect(lane?.latestImplementationCommit).toBe("review-feedback-commit");
+      expect(lane?.pushedCommit?.commitHash).toBe("review-feedback-commit");
+      expect(lane?.latestActivity).toContain("addressing reviewer-requested changes");
+    });
+
+    resolveSecondCoder({
+      summary: "Working on the reviewer feedback.",
+      deliverable: "No follow-up commit yet.",
+      decision: "continue",
+      pullRequestTitle: null,
+      pullRequestSummary: null,
+    });
+    await waitForLaneRunCompletion("thread-review-feedback-publish", 1, "lane-1");
+  });
+
+  it("fails the lane when publishing the implementation head before review fails", async () => {
+    const reviewerRun = vi.fn() as TeamRoleDependencies["reviewerAgent"]["run"];
+
+    getBranchHeadMock
+      .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("implementation-commit");
+    pushLaneBranchMock.mockRejectedValueOnce(new Error("gh auth token missing"));
+
+    await runQueuedLaneExecution({
+      threadId: "thread-stage-publish-failure",
+      reviewerRun,
+    });
+
+    const lane = (
+      await getTeamThreadRecord(teamConfig.storage.threadFile, "thread-stage-publish-failure")
+    )?.dispatchAssignments[0]?.lanes[0];
+
+    expect(reviewerRun).not.toHaveBeenCalled();
+    expect(lane?.status).toBe("failed");
+    expect(lane?.latestImplementationCommit).toBe("implementation-commit");
+    expect(lane?.pushedCommit).toBeNull();
+    expect(lane?.latestActivity).toContain(
+      "publishing the lane branch to GitHub failed before review could start",
+    );
+    expect(lane?.lastError).toContain("gh auth token missing");
   });
 
   it("uses a dev commit prefix for default implementation work", async () => {
@@ -3664,7 +3960,13 @@ describe.sequential("approveLaneProposal", () => {
 
     getBranchHeadMock
       .mockResolvedValueOnce("proposal-commit")
+      .mockResolvedValueOnce("review-commit")
       .mockResolvedValueOnce("review-commit");
+    pushLaneBranchMock.mockResolvedValueOnce({
+      ...basePushedCommit,
+      commitHash: "review-commit",
+      commitUrl: "https://github.com/example/meow-team/commit/review-commit",
+    });
     detectBranchConflictMock.mockResolvedValueOnce(true);
     tryRebaseWorktreeBranchMock.mockResolvedValueOnce({
       applied: false,
@@ -3704,9 +4006,15 @@ describe.sequential("approveLaneProposal", () => {
       expect(lane?.pullRequest?.status).toBe("conflict");
       expect(lane?.requeueReason).toBe("planner_detected_conflict");
       expect(lane?.latestActivity).toContain("conflict");
+      expect(lane?.pushedCommit?.commitHash).toBe("review-commit");
     });
 
-    expect(pushLaneBranchMock).not.toHaveBeenCalled();
+    expect(pushLaneBranchMock).toHaveBeenCalledTimes(1);
+    expect(pushLaneBranchMock).toHaveBeenCalledWith({
+      repositoryPath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
+      branchName: "requests/example/a1-proposal-1",
+      commitHash: "review-commit",
+    });
     expect(synchronizePullRequestMock).not.toHaveBeenCalled();
     expect(tryRebaseWorktreeBranchMock).toHaveBeenCalledWith({
       worktreePath: `${path.join(dispatchRepository.path, teamConfig.dispatch.worktreeRoot)}/meow-1`,
