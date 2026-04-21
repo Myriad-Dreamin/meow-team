@@ -255,24 +255,17 @@ const assertProposalChangeDeltaIsIsolated = async ({
   worktreeIgnoreMatcher: GitIgnoreMatcher;
 }): Promise<void> => {
   const unexpectedPaths = changedPaths.filter(
-    (changedPath) => !isPathWithinProposalPath(changedPath, proposalPath),
+    (changedPath) =>
+      !isPathWithinProposalPath(changedPath, proposalPath) &&
+      !worktreeIgnoreMatcher.ignores(changedPath),
   );
 
-  const ignoredUntrackedUnexpectedPaths = await listIgnoredUntrackedUnexpectedPaths({
-    unexpectedPaths,
-    worktreePath,
-    worktreeIgnoreMatcher,
-  });
-  const disallowedUnexpectedPaths = unexpectedPaths.filter(
-    (changedPath) => !ignoredUntrackedUnexpectedPaths.has(changedPath),
-  );
-
-  if (disallowedUnexpectedPaths.length === 0) {
+  if (unexpectedPaths.length === 0) {
     return;
   }
 
   throw new Error(
-    `OpenSpec materializer changed planner worktree paths outside ${proposalChangeName}: ${disallowedUnexpectedPaths.join(
+    `OpenSpec materializer changed planner worktree paths outside ${proposalChangeName}: ${unexpectedPaths.join(
       ", ",
     )}.`,
   );

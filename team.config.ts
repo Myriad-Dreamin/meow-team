@@ -42,6 +42,11 @@ export const teamConfig = defineTeamConfig({
         directory: path.resolve(process.cwd(), ".."),
       },
       {
+        id: "work-c",
+        label: "C/C++",
+        directory: path.resolve(process.cwd(), "../../c"),
+      },
+      {
         id: "work-rust",
         label: "Rust",
         directory: path.resolve(process.cwd(), "../../rust"),
