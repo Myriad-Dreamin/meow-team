@@ -1,7 +1,7 @@
 // API docs: docs/api/team/logs.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getTeamThreadFile } from "@/lib/config/team-loader";
+import { teamConfig } from "@/team.config";
 import { expandTeamCodexStderrBlock, listTeamCodexLogWindow } from "@/lib/team/logs";
 
 export const runtime = "nodejs";
@@ -43,7 +43,6 @@ const defaultQuerySchema = z.object({
 
 export async function GET(request: Request) {
   try {
-    const threadFile = getTeamThreadFile();
     const params = Object.fromEntries(new URL(request.url).searchParams.entries());
     const mode = defaultQuerySchema.parse(params).mode;
 
@@ -53,7 +52,7 @@ export async function GET(request: Request) {
         endCursor: parsed.endCursor,
         scanLimit: parsed.scanLimit,
         startCursor: parsed.startCursor,
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId: parsed.threadId,
       });
 
@@ -72,7 +71,7 @@ export async function GET(request: Request) {
       limit: parsed.limit,
       roleId: parsed.roleId ?? null,
       source: parsed.source ?? null,
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId: parsed.threadId,
     });
 

@@ -2,11 +2,6 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defineTeamConfig } from "@/lib/config/team";
-import {
-  resetTeamConfigLoaderForTests,
-  setTeamConfigOverrideForTests,
-} from "@/lib/config/team-loader";
 import {
   archiveTeamThread,
   cancelLatestThreadAssignmentApprovalWait,
@@ -69,47 +64,6 @@ const createRunState = (): TeamRunState => {
     latestInput: "Implement the request.",
     forceReset: false,
   };
-};
-
-const createTestTeamConfig = () => {
-  return defineTeamConfig({
-    id: "test-team",
-    name: "Test Team",
-    owner: {
-      name: "Owner",
-      objective: "Keep the queue moving.",
-    },
-    model: {
-      provider: "openai",
-      model: "gpt-5",
-      reasoningEffort: "medium",
-      textVerbosity: "medium",
-      maxOutputTokens: 3200,
-    },
-    workflow: ["planner", "coder", "reviewer"],
-    storage: {
-      threadFile: "/tmp/team-thread.sqlite",
-    },
-    dispatch: {
-      workerCount: 2,
-      maxProposalCount: 6,
-      branchPrefix: "team-dispatch",
-      baseBranch: "main",
-      worktreeRoot: ".meow-team-worktrees",
-    },
-    notifications: {
-      target: "browser",
-    },
-    repositories: {
-      roots: [
-        {
-          id: "workspace",
-          label: "Workspace",
-          directory: "/repos",
-        },
-      ],
-    },
-  });
 };
 
 const createRepository = (id: string): TeamRepositoryOption => {
@@ -299,7 +253,6 @@ const writeStoredThreadsToSqlite = async (
 };
 
 afterEach(async () => {
-  resetTeamConfigLoaderForTests();
   await resetTeamThreadStorageStateCacheForTests();
 
   await Promise.all(
@@ -826,61 +779,6 @@ describe("getTeamWorkspaceStatusSnapshot", () => {
     });
 
     expect(reclaimedWorktree).toEqual(claimedWorktree);
-  });
-
-  it("keeps persisted thread worktree paths stable after dispatch root changes", async () => {
-    const storePath = createSqliteStorePath("team-history-worktree-root-change");
-    trackTemporaryStore(storePath);
-
-    const repository = createRepository("workspace:repo-root-change");
-    const persistedRoot = path.join(repository.path, ".meow-team-worktrees");
-    const persistedWorktreePath = path.join(persistedRoot, "meow-1");
-    const persistedWorktree = {
-      path: persistedWorktreePath,
-      rootPath: persistedRoot,
-      slot: 1,
-    };
-    const thread = createStoredThread({
-      threadId: "root-change-thread",
-      status: "running",
-      repository,
-      dispatchAssignments: [
-        {
-          ...createAssignment({
-            repository,
-            status: "running",
-            lanes: [
-              {
-                ...createLane({
-                  laneId: "root-change-thread-lane-1",
-                  laneIndex: 1,
-                  status: "coding",
-                }),
-                workerSlot: 1,
-                worktreePath: persistedWorktreePath,
-              },
-            ],
-          }),
-          threadSlot: 1,
-          plannerWorktreePath: persistedWorktreePath,
-        },
-      ],
-    });
-    thread.data.threadWorktree = persistedWorktree;
-
-    await writeStoredThreadToSqlite(storePath, thread);
-
-    const teamConfig = createTestTeamConfig();
-    teamConfig.dispatch.worktreeRoot = ".renamed-team-worktrees";
-    setTeamConfigOverrideForTests(teamConfig);
-
-    const loadedThread = await getTeamThreadRecord(storePath, "root-change-thread");
-
-    expect(loadedThread?.data.threadWorktree).toEqual(persistedWorktree);
-    expect(loadedThread?.dispatchAssignments[0]?.plannerWorktreePath).toBe(persistedWorktreePath);
-    expect(loadedThread?.dispatchAssignments[0]?.lanes[0]?.worktreePath).toBe(
-      persistedWorktreePath,
-    );
   });
 
   it("imports a legacy JSON store once and persists later updates in SQLite", async () => {

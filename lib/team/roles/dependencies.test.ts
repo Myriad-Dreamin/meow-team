@@ -1,24 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defineTeamConfig } from "@/lib/config/team";
-import {
-  resetTeamConfigLoaderForTests,
-  setTeamConfigOverrideForTests,
-} from "@/lib/config/team-loader";
 
 const { runCodexStructuredOutputMock } = vi.hoisted(() => ({
   runCodexStructuredOutputMock: vi.fn(),
 }));
 
-vi.mock("@/lib/agent/codex-cli", () => ({
-  runCodexStructuredOutput: runCodexStructuredOutputMock,
-}));
-
-import type { TeamRoleDependencies } from "./dependencies";
-import { createWorktree } from "@/lib/team/coding/worktree";
-import { resolveTeamRoleDependencies } from "./dependencies";
-
-const createTestTeamConfig = () => {
-  return defineTeamConfig({
+vi.mock("@/team.config", () => ({
+  teamConfig: {
     id: "test-team",
     name: "Test Team",
     owner: {
@@ -43,20 +30,19 @@ const createTestTeamConfig = () => {
       baseBranch: "main",
       worktreeRoot: "/tmp/team-worktrees",
     },
-    notifications: {
-      target: "browser",
-    },
     repositories: {
-      roots: [
-        {
-          id: "test-root",
-          label: "Test Root",
-          directory: "/tmp",
-        },
-      ],
+      roots: [],
     },
-  });
-};
+  },
+}));
+
+vi.mock("@/lib/agent/codex-cli", () => ({
+  runCodexStructuredOutput: runCodexStructuredOutputMock,
+}));
+
+import type { TeamRoleDependencies } from "./dependencies";
+import { createWorktree } from "@/lib/team/coding/worktree";
+import { resolveTeamRoleDependencies } from "./dependencies";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -80,12 +66,7 @@ const createDeferred = <T>(): Deferred<T> => {
 };
 
 describe("resolveTeamRoleDependencies", () => {
-  let teamConfig = createTestTeamConfig();
-
   beforeEach(() => {
-    resetTeamConfigLoaderForTests();
-    teamConfig = createTestTeamConfig();
-    setTeamConfigOverrideForTests(teamConfig);
     runCodexStructuredOutputMock.mockReset();
   });
 
@@ -169,118 +150,6 @@ describe("resolveTeamRoleDependencies", () => {
       conventionalTitle: null,
     });
     expect(maxActiveCount).toBe(1);
-  });
-
-  it("rebuilds the shared queued executor when workerCount changes", async () => {
-    const first = createDeferred<{
-      title: string;
-      conventionalTitle: null;
-    }>();
-    const second = createDeferred<{
-      title: string;
-      conventionalTitle: null;
-    }>();
-    const third = createDeferred<{
-      title: string;
-      conventionalTitle: null;
-    }>();
-    const fourth = createDeferred<{
-      title: string;
-      conventionalTitle: null;
-    }>();
-    const deferredByPath = new Map([
-      ["/tmp/meow-1", first],
-      ["/tmp/meow-2", second],
-      ["/tmp/meow-3", third],
-      ["/tmp/meow-4", fourth],
-    ]);
-
-    runCodexStructuredOutputMock.mockImplementation(
-      async ({ worktree }: { worktree: { path: string } }) => {
-        const deferred = deferredByPath.get(worktree.path);
-        if (!deferred) {
-          throw new Error(`Missing deferred executor result for ${worktree.path}.`);
-        }
-
-        return deferred.promise;
-      },
-    );
-
-    const firstDependencies = resolveTeamRoleDependencies();
-    const firstPromise = firstDependencies.requestTitleAgent.run({
-      input: "Queue the first request.",
-      requestText: "Queue the first request.",
-      worktree: createWorktree({ path: "/tmp/meow-1" }),
-    });
-    const secondPromise = firstDependencies.requestTitleAgent.run({
-      input: "Queue the second request.",
-      requestText: "Queue the second request.",
-      worktree: createWorktree({ path: "/tmp/meow-2" }),
-    });
-
-    await vi.waitFor(() => {
-      expect(runCodexStructuredOutputMock).toHaveBeenCalledTimes(1);
-    });
-
-    first.resolve({
-      title: "First title",
-      conventionalTitle: null,
-    });
-    await expect(firstPromise).resolves.toEqual({
-      title: "First title",
-      conventionalTitle: null,
-    });
-
-    await vi.waitFor(() => {
-      expect(runCodexStructuredOutputMock).toHaveBeenCalledTimes(2);
-    });
-
-    second.resolve({
-      title: "Second title",
-      conventionalTitle: null,
-    });
-    await expect(secondPromise).resolves.toEqual({
-      title: "Second title",
-      conventionalTitle: null,
-    });
-
-    teamConfig.dispatch.workerCount = 2;
-
-    const secondDependencies = resolveTeamRoleDependencies();
-    expect(secondDependencies.executor).not.toBe(firstDependencies.executor);
-
-    const thirdPromise = secondDependencies.requestTitleAgent.run({
-      input: "Queue the third request.",
-      requestText: "Queue the third request.",
-      worktree: createWorktree({ path: "/tmp/meow-3" }),
-    });
-    const fourthPromise = secondDependencies.requestTitleAgent.run({
-      input: "Queue the fourth request.",
-      requestText: "Queue the fourth request.",
-      worktree: createWorktree({ path: "/tmp/meow-4" }),
-    });
-
-    await vi.waitFor(() => {
-      expect(runCodexStructuredOutputMock).toHaveBeenCalledTimes(4);
-    });
-
-    third.resolve({
-      title: "Third title",
-      conventionalTitle: null,
-    });
-    fourth.resolve({
-      title: "Fourth title",
-      conventionalTitle: null,
-    });
-
-    await expect(thirdPromise).resolves.toEqual({
-      title: "Third title",
-      conventionalTitle: null,
-    });
-    await expect(fourthPromise).resolves.toEqual({
-      title: "Fourth title",
-      conventionalTitle: null,
-    });
   });
 
   it("builds default agent instances from an injected executor", async () => {

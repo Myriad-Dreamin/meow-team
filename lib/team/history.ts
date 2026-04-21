@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getTeamConfig } from "@/lib/config/team-loader";
+import { teamConfig } from "@/team.config";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { DispatchThreadCapacityError, type TeamRunState } from "@/lib/team/coding/shared";
 import {
@@ -392,7 +392,6 @@ const resolveThreadRepository = ({
 };
 
 const normalizeStoredThread = (thread: StoredThread): TeamThreadRecord => {
-  const teamConfig = getTeamConfig();
   const normalizedAssignments = (thread.dispatchAssignments ?? []).map(normalizeDispatchAssignment);
   const normalizedState = normalizeRunState(thread.data);
   const archivedAt = normalizeArchivedAt(thread.archivedAt);
@@ -1135,7 +1134,6 @@ export const claimTeamThreadWorktree = async ({
   state: TeamRunState;
   input: string;
 }): Promise<TeamRunState["threadWorktree"]> => {
-  const teamConfig = getTeamConfig();
   return mutateTeamThreadStorage({
     threadFile,
     task: ({ getRecord, listRecords, upsertRecord }) => {

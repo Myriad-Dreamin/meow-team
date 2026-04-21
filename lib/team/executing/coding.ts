@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getTeamThreadFile } from "@/lib/config/team-loader";
+import { teamConfig } from "@/team.config";
 import { synchronizePullRequest } from "@/lib/platform";
 import { ensureLaneWorktree, pushLaneBranch } from "@/lib/team/git";
 import {
@@ -41,10 +41,9 @@ export const approveExecuteLaneProposal = async ({
   laneId: string;
   worktree?: Worktree;
 }): Promise<void> => {
-  const threadFile = getTeamThreadFile();
-  const thread = await getTeamThreadRecord(threadFile, threadId);
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
-    throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
+    throw new Error(`Thread ${threadId} was not found in ${teamConfig.storage.threadFile}.`);
   }
 
   const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
@@ -119,7 +118,7 @@ export const approveExecuteLaneProposal = async ({
     });
 
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -212,7 +211,7 @@ export const approveExecuteLaneProposal = async ({
     );
 
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -294,8 +293,10 @@ export const runExecutingCodingStage = async (
   env: TeamRunEnv,
   currentState: TeamRunCodingStageState,
 ): Promise<TeamRunReviewingStageState> => {
-  const threadFile = getTeamThreadFile();
-  const persistedThread = await getTeamThreadRecord(threadFile, currentState.args.threadId);
+  const persistedThread = await getTeamThreadRecord(
+    teamConfig.storage.threadFile,
+    currentState.args.threadId,
+  );
   const persistedLane = findPersistedLane(
     persistedThread,
     currentState.args.assignmentNumber,

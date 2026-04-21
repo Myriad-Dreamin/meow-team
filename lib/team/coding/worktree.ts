@@ -16,22 +16,6 @@ export type CreateWorktreeInput = {
 
 export type CreateWorktree = (input: CreateWorktreeInput) => Worktree;
 
-const createResolvedWorktree = ({
-  path: worktreePath,
-  rootPath = null,
-  slot = null,
-}: {
-  path: string;
-  rootPath?: string | null;
-  slot?: number | null;
-}): Worktree => {
-  return {
-    path: worktreePath,
-    rootPath,
-    slot,
-  };
-};
-
 const parseManagedWorktreeSlotName = (value: string): number | null => {
   const match = /^meow-(\d+)$/u.exec(value.trim());
   if (!match) {
@@ -59,11 +43,11 @@ const parseManagedWorktreeSlot = ({
 };
 
 export const createWorktree: CreateWorktree = ({ path: worktreePath, rootPath = null }) => {
-  return createResolvedWorktree({
+  return {
     path: worktreePath,
     rootPath,
     slot: rootPath ? parseManagedWorktreeSlot({ rootPath, path: worktreePath }) : null,
-  });
+  };
 };
 
 export const createRepositoryWorktree = ({ path }: { path: string }): Worktree => {
@@ -85,21 +69,6 @@ export const createManagedWorktree = ({
 
 export const parseManagedWorktreeSlotFromPath = (worktreePath: string): number | null => {
   return parseManagedWorktreeSlotName(path.basename(worktreePath));
-};
-
-const inferPersistedManagedWorktreeRoot = ({
-  path: worktreePath,
-  slot,
-}: {
-  path: string;
-  slot: number | null;
-}): string | null => {
-  const parsedSlot = parseManagedWorktreeSlotFromPath(worktreePath);
-  if (!parsedSlot || (slot && parsedSlot !== slot)) {
-    return null;
-  }
-
-  return path.dirname(worktreePath);
 };
 
 export const resolveManagedWorktree = ({
@@ -134,50 +103,5 @@ export const resolveManagedWorktree = ({
   return createWorktree({
     path: worktreePath,
     rootPath,
-  });
-};
-
-export const resolvePersistedManagedWorktree = ({
-  configuredRootPath,
-  path: worktreePath,
-  rootPath,
-  slot,
-}: {
-  configuredRootPath: string;
-  path?: string | null;
-  rootPath?: string | null;
-  slot?: number | null;
-}): Worktree | null => {
-  const resolvedSlot = typeof slot === "number" && slot > 0 ? slot : null;
-  const persistedRootPath =
-    rootPath?.trim() ||
-    (worktreePath
-      ? inferPersistedManagedWorktreeRoot({
-          path: worktreePath,
-          slot: resolvedSlot,
-        })
-      : null);
-
-  if (worktreePath) {
-    if (persistedRootPath) {
-      return createWorktree({
-        path: worktreePath,
-        rootPath: persistedRootPath,
-      });
-    }
-
-    return createResolvedWorktree({
-      path: worktreePath,
-      slot: resolvedSlot ?? parseManagedWorktreeSlotFromPath(worktreePath),
-    });
-  }
-
-  if (!resolvedSlot) {
-    return null;
-  }
-
-  return createManagedWorktree({
-    rootPath: persistedRootPath ?? configuredRootPath,
-    slot: resolvedSlot,
   });
 };

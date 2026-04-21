@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { teamConfig } from "@/team.config";
 import type { TeamStructuredExecutor } from "@/lib/agent/executor";
-import { getTeamConfig } from "@/lib/config/team-loader";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { summarizeHandoffs } from "@/lib/team/agent-helpers";
 import type { Worktree } from "@/lib/team/coding/worktree";
@@ -28,25 +28,23 @@ const plannerTaskSchema = z.object({
   objective: z.string().trim().min(1),
 });
 
-const createPlannerOutputSchema = () => {
-  const teamConfig = getTeamConfig();
+const plannerDispatchSchema = z
+  .object({
+    planSummary: z.string().trim().min(1),
+    plannerDeliverable: z.string().trim().min(1),
+    branchPrefix: z.string().trim().min(1),
+    tasks: z.array(plannerTaskSchema).min(1).max(teamConfig.dispatch.maxProposalCount),
+  })
+  .nullable();
 
-  return z.object({
-    handoff: z.object({
-      summary: z.string().trim().min(1),
-      deliverable: z.string().trim().min(1),
-      decision: teamRoleDecisionSchema,
-    }),
-    dispatch: z
-      .object({
-        planSummary: z.string().trim().min(1),
-        plannerDeliverable: z.string().trim().min(1),
-        branchPrefix: z.string().trim().min(1),
-        tasks: z.array(plannerTaskSchema).min(1).max(teamConfig.dispatch.maxProposalCount),
-      })
-      .nullable(),
-  });
-};
+const plannerOutputSchema = z.object({
+  handoff: z.object({
+    summary: z.string().trim().min(1),
+    deliverable: z.string().trim().min(1),
+    decision: teamRoleDecisionSchema,
+  }),
+  dispatch: plannerDispatchSchema,
+});
 
 export type PlannerRoleState = {
   teamName: string;
@@ -70,7 +68,7 @@ export type PlannerRoleInput = {
   onEvent?: (event: TeamCodexEvent) => Promise<void> | void;
 };
 
-export type PlannerRoleOutput = z.infer<ReturnType<typeof createPlannerOutputSchema>>;
+export type PlannerRoleOutput = z.infer<typeof plannerOutputSchema>;
 type PlannerPromptInput = Omit<PlannerRoleInput, "onEvent">;
 
 export const plannerRole = createTeamRoleDefinition({
@@ -139,7 +137,6 @@ const buildPlannerRequestContext = (input: PlannerRoleState): string => {
 };
 
 const buildPlannerPrompt = ({ state }: PlannerPromptInput): string => {
-  const teamConfig = getTeamConfig();
   const repositoryContext = state.selectedRepository
     ? `Selected repository: ${state.selectedRepository.name} at ${state.selectedRepository.path}.`
     : "Selected repository: none. Proposal dispatch is blocked until a repository is selected.";
@@ -172,7 +169,7 @@ export class PlannerAgent {
     return this.executor({
       worktree: roleInput.worktree,
       prompt: buildPlannerPrompt(roleInput),
-      responseSchema: createPlannerOutputSchema(),
+      responseSchema: plannerOutputSchema,
       codexHomePrefix: "planner",
       onEvent,
     });

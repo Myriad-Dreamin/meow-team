@@ -1,11 +1,7 @@
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { resolveWorktreeRoot } from "@/lib/team/git";
 import type { TeamRunState } from "@/lib/team/coding/shared";
-import {
-  resolveManagedWorktree,
-  resolvePersistedManagedWorktree,
-  type Worktree,
-} from "@/lib/team/coding/worktree";
+import { resolveManagedWorktree, type Worktree } from "@/lib/team/coding/worktree";
 import type { TeamDispatchAssignment } from "@/lib/team/types";
 
 type ThreadOwnedWorktreeCandidate = {
@@ -31,8 +27,8 @@ const resolveAssignmentWorktree = ({
   assignment: TeamDispatchAssignment;
   rootPath: string;
 }): Worktree | null => {
-  const assignmentWorktree = resolvePersistedManagedWorktree({
-    configuredRootPath: rootPath,
+  const assignmentWorktree = resolveManagedWorktree({
+    rootPath,
     path: assignment.plannerWorktreePath,
     slot: assignment.threadSlot,
   });
@@ -41,8 +37,8 @@ const resolveAssignmentWorktree = ({
   }
 
   for (const lane of assignment.lanes) {
-    const laneWorktree = resolvePersistedManagedWorktree({
-      configuredRootPath: rootPath,
+    const laneWorktree = resolveManagedWorktree({
+      rootPath,
       path: lane.worktreePath,
       slot: lane.workerSlot,
     });
@@ -85,10 +81,9 @@ export const resolveThreadOwnedWorktree = ({
     configuredWorktreeRoot,
   });
 
-  const normalizedThreadWorktree = resolvePersistedManagedWorktree({
-    configuredRootPath: rootPath,
+  const normalizedThreadWorktree = resolveManagedWorktree({
+    rootPath,
     path: candidate.threadWorktree?.path,
-    rootPath: candidate.threadWorktree?.rootPath,
     slot: candidate.threadWorktree?.slot,
   });
   if (normalizedThreadWorktree?.slot) {

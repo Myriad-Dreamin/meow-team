@@ -1,5 +1,4 @@
 import { TeamWorkspace } from "@/components/team-workspace";
-import { getTeamConfig } from "@/lib/config/team-loader";
 import {
   getTeamRepositoryPickerModel,
   getTeamWorkspaceThreadSummaryLists,
@@ -8,11 +7,11 @@ import { buildTeamNotificationsResponse } from "@/lib/team/notifications";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
 import { getTeamServerState } from "@/lib/team/server-state";
 import { getTeamRuntimeConfig } from "@/lib/config/runtime";
+import { teamConfig } from "@/team.config";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const teamConfig = getTeamConfig();
   const serverState = await getTeamServerState();
   const [availableRepositories, threadSummaryLists] = await Promise.all([
     listConfiguredRepositories(teamConfig),

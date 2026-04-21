@@ -1,4 +1,4 @@
-import { getTeamConfig } from "@/lib/config/team-loader";
+import { teamConfig } from "@/team.config";
 import type { TeamRoleState } from "@/lib/team/agent-helpers";
 import type { TeamRepositoryContext, TeamRepositoryOption } from "@/lib/git/repository";
 import type {
@@ -54,7 +54,6 @@ export const buildLaneRunState = ({
   workflow: string[];
   handoffs: Partial<Record<string, TeamRoleHandoff>>;
 }): LaneRunState => {
-  const teamConfig = getTeamConfig();
   const archiveCommand =
     lane.executionPhase === "final_archive" && lane.proposalChangeName
       ? `/opsx:archive ${lane.proposalChangeName}`

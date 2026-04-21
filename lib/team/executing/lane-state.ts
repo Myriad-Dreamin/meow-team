@@ -1,4 +1,4 @@
-import { getTeamConfig } from "@/lib/config/team-loader";
+import { teamConfig } from "@/team.config";
 import type { TeamRoleState } from "@/lib/team/agent-helpers";
 import type { TeamRepositoryContext, TeamRepositoryOption } from "@/lib/git/repository";
 import {
@@ -76,7 +76,6 @@ export const buildExecutionLaneRunState = async ({
   workflow: string[];
   handoffs: Partial<Record<string, TeamRoleHandoff>>;
 }): Promise<ExecutionLaneRunState> => {
-  const teamConfig = getTeamConfig();
   const executionMode = resolveExecutionMode(assignment);
   const archiveCommand =
     lane.executionPhase === "final_archive" && lane.proposalChangeName

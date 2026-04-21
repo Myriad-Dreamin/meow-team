@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getTeamThreadFile } from "@/lib/config/team-loader";
+import { teamConfig } from "@/team.config";
 import {
   getTeamThreadRecord,
   synchronizeDispatchAssignment,
@@ -155,8 +155,7 @@ export const prepareAssignmentReplan = async ({
   executionMode: TeamDispatchAssignment["executionMode"];
   repositoryId: string | undefined;
 }> => {
-  const threadFile = getTeamThreadFile();
-  const thread = await getTeamThreadRecord(threadFile, threadId);
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
     throw new TeamThreadReplanError("not_found", `Thread ${threadId} was not found.`, 404);
   }
@@ -193,7 +192,7 @@ export const prepareAssignmentReplan = async ({
   }
 
   await updateTeamThreadRecord({
-    threadFile,
+    threadFile: teamConfig.storage.threadFile,
     threadId,
     updater: (mutableThread, now) => {
       const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
@@ -252,7 +251,7 @@ export const prepareAssignmentReplan = async ({
 };
 
 const resolveThreadRunWorktree = async (threadId: string) => {
-  const thread = await getTeamThreadRecord(getTeamThreadFile(), threadId);
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread?.data.threadWorktree?.slot) {
     throw new Error(
       `Thread ${threadId} is missing the claimed meow worktree required for repository-backed execution.`,

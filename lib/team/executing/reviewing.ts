@@ -1,6 +1,8 @@
 import "server-only";
 
-import { getTeamThreadFile, resolveTeamDispatchWorktreeRoot } from "@/lib/config/team-loader";
+import path from "node:path";
+
+import { teamConfig } from "@/team.config";
 import { formatCommitActivityReference } from "@/lib/team/activity-markdown";
 import { applyHandoff } from "@/lib/team/agent-helpers";
 import {
@@ -222,8 +224,7 @@ const runFinalArchiveCycle = async ({
   laneId: string;
   env: TeamRunEnv;
 }): Promise<void> => {
-  const threadFile = getTeamThreadFile();
-  const thread = await getTeamThreadRecord(threadFile, threadId);
+  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
   if (!thread) {
     return;
   }
@@ -246,7 +247,9 @@ const runFinalArchiveCycle = async ({
   }
 
   const repositoryPath = assignment.repository.path;
-  const laneWorktreeRoot = resolveTeamDispatchWorktreeRoot(repositoryPath);
+  const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
+    ? teamConfig.dispatch.worktreeRoot
+    : path.join(repositoryPath, teamConfig.dispatch.worktreeRoot);
   const laneBranchName = lane.branchName;
   const pullRequestSummary =
     lane.pullRequest.summary?.trim() ||
@@ -278,7 +281,7 @@ const runFinalArchiveCycle = async ({
 
   try {
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -340,7 +343,7 @@ const runFinalArchiveCycle = async ({
         }),
         onEvent: async (event) => {
           await appendTeamCodexLogEvent({
-            threadFile,
+            threadFile: teamConfig.storage.threadFile,
             threadId,
             assignmentNumber,
             roleId: executorRole.id,
@@ -420,7 +423,7 @@ const runFinalArchiveCycle = async ({
     });
 
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -506,7 +509,7 @@ const runFinalArchiveCycle = async ({
     );
 
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -570,7 +573,7 @@ const runFinalArchiveCycle = async ({
     });
 
     await appendTeamCodexLogEvent({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       assignmentNumber,
       roleId: null,
@@ -595,9 +598,8 @@ export const runExecutingLaneCycle = async ({
   laneId: string;
   env: TeamRunEnv;
 }): Promise<void> => {
-  const threadFile = getTeamThreadFile();
   while (true) {
-    const thread = await getTeamThreadRecord(threadFile, threadId);
+    const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
     if (!thread) {
       return;
     }
@@ -624,7 +626,9 @@ export const runExecutingLaneCycle = async ({
       threadId,
       worktree: thread.data.threadWorktree,
     });
-    const laneWorktreeRoot = resolveTeamDispatchWorktreeRoot(assignment.repository.path);
+    const laneWorktreeRoot = path.isAbsolute(teamConfig.dispatch.worktreeRoot)
+      ? teamConfig.dispatch.worktreeRoot
+      : path.join(assignment.repository.path, teamConfig.dispatch.worktreeRoot);
 
     if (isFinalArchivePhase(lane)) {
       await runFinalArchiveCycle({
@@ -637,7 +641,7 @@ export const runExecutingLaneCycle = async ({
     }
 
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -701,7 +705,7 @@ export const runExecutingLaneCycle = async ({
         lane.taskObjective ?? lane.taskTitle ?? assignment.plannerSummary ?? "Execute the task.",
       onEvent: async (event) => {
         await appendTeamCodexLogEvent({
-          threadFile,
+          threadFile: teamConfig.storage.threadFile,
           threadId,
           assignmentNumber,
           roleId: executorRole.id,
@@ -736,7 +740,7 @@ export const runExecutingLaneCycle = async ({
 
     if (branchHeadAfterExecution === branchHeadBeforeExecution) {
       await updateTeamThreadRecord({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         updater: (mutableThread, now) => {
           const mutableAssignment = findAssignment(
@@ -782,7 +786,7 @@ export const runExecutingLaneCycle = async ({
       });
 
       await appendTeamCodexLogEvent({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         assignmentNumber,
         roleId: executorRole.id,
@@ -798,7 +802,7 @@ export const runExecutingLaneCycle = async ({
     }
 
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, now) => {
         const mutableAssignment = findAssignment(
@@ -863,7 +867,7 @@ export const runExecutingLaneCycle = async ({
         "Review the lane output.",
       onEvent: async (event) => {
         await appendTeamCodexLogEvent({
-          threadFile,
+          threadFile: teamConfig.storage.threadFile,
           threadId,
           assignmentNumber,
           roleId: executionReviewerRole.id,
@@ -890,7 +894,7 @@ export const runExecutingLaneCycle = async ({
 
     if (executionReviewerHandoff.decision === "needs_revision") {
       await updateTeamThreadRecord({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         updater: (mutableThread, now) => {
           const mutableAssignment = findAssignment(
@@ -986,7 +990,7 @@ export const runExecutingLaneCycle = async ({
 
     if (rebaseErrorSummary) {
       await updateTeamThreadRecord({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         updater: (mutableThread, mutableNow) => {
           const mutableAssignment = findAssignment(
@@ -1047,7 +1051,7 @@ export const runExecutingLaneCycle = async ({
       const pushErrorMessage = `GitHub push failed for ${lane.branchName}: ${pushErrorSummary}`;
 
       await updateTeamThreadRecord({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         updater: (mutableThread, mutableNow) => {
           const mutableAssignment = findAssignment(
@@ -1109,7 +1113,7 @@ export const runExecutingLaneCycle = async ({
       });
 
       await appendTeamCodexLogEvent({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         assignmentNumber,
         roleId: null,
@@ -1145,7 +1149,7 @@ export const runExecutingLaneCycle = async ({
       const pullRequestErrorMessage = `GitHub PR refresh failed for ${lane.branchName}: ${pullRequestErrorSummary}`;
 
       await updateTeamThreadRecord({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         updater: (mutableThread, mutableNow) => {
           const mutableAssignment = findAssignment(
@@ -1217,7 +1221,7 @@ export const runExecutingLaneCycle = async ({
       });
 
       await appendTeamCodexLogEvent({
-        threadFile,
+        threadFile: teamConfig.storage.threadFile,
         threadId,
         assignmentNumber,
         roleId: null,
@@ -1233,7 +1237,7 @@ export const runExecutingLaneCycle = async ({
     }
 
     await updateTeamThreadRecord({
-      threadFile,
+      threadFile: teamConfig.storage.threadFile,
       threadId,
       updater: (mutableThread, mutableNow) => {
         const mutableAssignment = findAssignment(

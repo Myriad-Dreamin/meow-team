@@ -1,9 +1,9 @@
+import { teamConfig } from "@/team.config";
 import { runCodexStructuredOutput } from "@/lib/agent/codex-cli";
 import {
   createQueuedTeamStructuredExecutor,
   type TeamStructuredExecutor,
 } from "@/lib/agent/executor";
-import { getTeamConfig } from "@/lib/config/team-loader";
 import { CoderAgent } from "@/lib/team/roles/coder";
 import { ExecutionReviewerAgent } from "@/lib/team/roles/execution-reviewer";
 import { ExecutorAgent } from "@/lib/team/roles/executor";
@@ -23,29 +23,10 @@ export type TeamRoleDependencies = {
   executionReviewerAgent: Pick<ExecutionReviewerAgent, "run">;
 };
 
-type DefaultQueuedExecutorCache = {
-  concurrency: number;
-  executor: TeamStructuredExecutor;
-};
-
-let defaultQueuedExecutorCache: DefaultQueuedExecutorCache | null = null;
-
-const getDefaultQueuedExecutor = (): TeamStructuredExecutor => {
-  const concurrency = getTeamConfig().dispatch.workerCount;
-  if (defaultQueuedExecutorCache?.concurrency === concurrency) {
-    return defaultQueuedExecutorCache.executor;
-  }
-
-  const executor = createQueuedTeamStructuredExecutor({
-    executor: runCodexStructuredOutput,
-    concurrency,
-  });
-  defaultQueuedExecutorCache = {
-    concurrency,
-    executor,
-  };
-  return executor;
-};
+const defaultQueuedExecutor = createQueuedTeamStructuredExecutor({
+  executor: runCodexStructuredOutput,
+  concurrency: teamConfig.dispatch.workerCount,
+});
 
 const createDefaultRoleAgents = (
   executor: TeamStructuredExecutor,
@@ -64,7 +45,7 @@ const createDefaultRoleAgents = (
 export const resolveTeamRoleDependencies = (
   overrides: Partial<TeamRoleDependencies> = {},
 ): TeamRoleDependencies => {
-  const executor = overrides.executor ?? getDefaultQueuedExecutor();
+  const executor = overrides.executor ?? defaultQueuedExecutor;
 
   return {
     executor,

@@ -4,7 +4,6 @@ import {
   createWorktree,
   parseManagedWorktreeSlotFromPath,
   resolveManagedWorktree,
-  resolvePersistedManagedWorktree,
 } from "@/lib/team/coding/worktree";
 
 describe("worktree helpers", () => {
@@ -47,20 +46,6 @@ describe("worktree helpers", () => {
     ).toEqual({
       path: "/tmp/current-worktrees/meow-4",
       rootPath: "/tmp/current-worktrees",
-      slot: 4,
-    });
-  });
-
-  it("preserves a persisted managed worktree path when the configured root changes", () => {
-    expect(
-      resolvePersistedManagedWorktree({
-        configuredRootPath: "/tmp/current-worktrees",
-        path: "/legacy/worktrees/meow-4",
-        slot: 4,
-      }),
-    ).toEqual({
-      path: "/legacy/worktrees/meow-4",
-      rootPath: "/legacy/worktrees",
       slot: 4,
     });
   });

@@ -70,25 +70,6 @@ TEAM_OWNER_NAME=Your Team
 `OPENAI_MODEL` falls back to `gpt-5.2-codex` when neither the Codex config nor
 the environment provides a model override.
 
-## Team Configuration
-
-Server-side team settings load from
-[`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts) in the
-current working directory by default.
-
-Set `REVIVAL_TEAM_CONFIG_PATH` to an absolute path or a path relative to the
-current working directory if you want the server to read a different team
-config file.
-
-The server checks the effective team-config file on each server-side read and
-reloads it when the file appears, disappears, or its mtime changes. Updates to
-repository roots, storage paths, notification targets, workflow metadata, and
-dispatch settings apply to the next page render or API request without
-restarting `pnpm dev` or `pnpm start`.
-
-Already-running Codex lanes keep the config they started with. New reads and
-new dispatch decisions use the updated file.
-
 ## Project Layout
 
 - [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts):
@@ -162,7 +143,7 @@ selection on every run.
 3. Run `pnpm meow-prompt:sync-types` so TypeScript picks up the generated prompt declaration.
 4. Add the role ID to the `workflow` array in
    [`team.config.ts`](/home/kamiyoru/work/ts/meow-team/team.config.ts).
-5. Refresh the app after saving. Server-side `team.config.ts` edits reload on the next request.
+5. Restart the dev server if you want the homepage metadata to refresh immediately.
 
 Each role module now reads the role title and summary directly from the
 colocated prompt frontmatter, with the Markdown body kept as the actual system

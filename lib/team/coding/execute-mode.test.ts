@@ -1,10 +1,5 @@
 import { rm } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defineTeamConfig } from "@/lib/config/team";
-import {
-  resetTeamConfigLoaderForTests,
-  setTeamConfigOverrideForTests,
-} from "@/lib/config/team-loader";
 
 const {
   commitWorktreeChangesMock,
@@ -26,6 +21,41 @@ const {
   pushLaneBranchMock: vi.fn(),
   synchronizePullRequestMock: vi.fn(),
   tryRebaseWorktreeBranchMock: vi.fn(),
+}));
+
+vi.mock("@/team.config", () => ({
+  teamConfig: {
+    id: "test-team",
+    name: "Test Team",
+    owner: {
+      name: "Owner",
+      objective: "Ship reliable GitHub delivery.",
+    },
+    model: {
+      provider: "openai",
+      model: "gpt-5",
+      reasoningEffort: "medium",
+      textVerbosity: "medium",
+      maxOutputTokens: 3200,
+    },
+    workflow: ["planner", "coder", "reviewer"],
+    storage: {
+      threadFile: "/tmp/execute-mode-lane-test.sqlite",
+    },
+    dispatch: {
+      workerCount: 1,
+      maxProposalCount: 6,
+      branchPrefix: "team-dispatch",
+      baseBranch: "main",
+      worktreeRoot: "/tmp/team-worktrees",
+    },
+    notifications: {
+      target: "browser",
+    },
+    repositories: {
+      roots: [],
+    },
+  },
 }));
 
 vi.mock("@/lib/git/ops", async (importOriginal) => {
@@ -58,6 +88,7 @@ vi.mock("@/lib/team/git", async () => {
   };
 });
 
+import { teamConfig } from "@/team.config";
 import { ensurePendingDispatchWork, waitForLaneRunCompletion } from "@/lib/team/coding/reviewing";
 import { createWorktree } from "@/lib/team/coding/worktree";
 import { getTeamThreadRecord, type TeamThreadRecord } from "@/lib/team/history";
@@ -69,49 +100,6 @@ import type { TeamRepositoryOption } from "@/lib/git/repository";
 import type { TeamRunEnv, TeamRunState } from "@/lib/team/coding/shared";
 import type { TeamRoleDependencies } from "@/lib/team/roles/dependencies";
 import type { TeamDispatchAssignment, TeamWorkerLaneRecord } from "@/lib/team/types";
-
-const createTestTeamConfig = () => {
-  return defineTeamConfig({
-    id: "test-team",
-    name: "Test Team",
-    owner: {
-      name: "Owner",
-      objective: "Ship reliable GitHub delivery.",
-    },
-    model: {
-      provider: "openai",
-      model: "gpt-5",
-      reasoningEffort: "medium",
-      textVerbosity: "medium",
-      maxOutputTokens: 3200,
-    },
-    workflow: ["planner", "coder", "reviewer"],
-    storage: {
-      threadFile: "/tmp/execute-mode-lane-test.sqlite",
-    },
-    dispatch: {
-      workerCount: 1,
-      maxProposalCount: 6,
-      branchPrefix: "team-dispatch",
-      baseBranch: "main",
-      worktreeRoot: "/tmp/team-worktrees",
-    },
-    notifications: {
-      target: "browser",
-    },
-    repositories: {
-      roots: [
-        {
-          id: "test-root",
-          label: "Test Root",
-          directory: "/tmp",
-        },
-      ],
-    },
-  });
-};
-
-let teamConfig = createTestTeamConfig();
 
 const FIXED_TIMESTAMP = "2026-04-19T08:00:00.000Z";
 
@@ -298,9 +286,6 @@ const createEnv = ({
 
 describe("execute-mode lane routing", () => {
   beforeEach(async () => {
-    resetTeamConfigLoaderForTests();
-    teamConfig = createTestTeamConfig();
-    setTeamConfigOverrideForTests(teamConfig);
     await resetTeamThreadStorageStateCacheForTests();
     getBranchHeadMock.mockReset();
     hasWorktreeChangesMock.mockReset();
@@ -334,7 +319,6 @@ describe("execute-mode lane routing", () => {
   });
 
   afterEach(async () => {
-    resetTeamConfigLoaderForTests();
     await resetTeamThreadStorageStateCacheForTests();
     await rm(teamConfig.storage.threadFile, { force: true });
     await rm(`${teamConfig.storage.threadFile}-shm`, { force: true });
