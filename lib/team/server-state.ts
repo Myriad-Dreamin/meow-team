@@ -1,6 +1,6 @@
 import "server-only";
 
-import { teamConfig } from "@/team.config";
+import { getTeamThreadFile } from "@/lib/config/team-loader";
 import {
   getTeamThreadStorageState,
   resetTeamThreadStorageStateCacheForTests,
@@ -32,7 +32,7 @@ const getTeamServerStateRegistry = (): TeamServerStateRegistry => {
 
 export const getTeamServerState = async (): Promise<TeamServerState> => {
   const registry = getTeamServerStateRegistry();
-  const threadFile = teamConfig.storage.threadFile;
+  const threadFile = getTeamThreadFile();
 
   if (!registry.statePromise || registry.threadFile !== threadFile) {
     registry.threadFile = threadFile;

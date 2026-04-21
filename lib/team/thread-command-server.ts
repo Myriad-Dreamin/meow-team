@@ -1,6 +1,6 @@
 import "server-only";
 
-import { teamConfig } from "@/team.config";
+import { getTeamThreadFile } from "@/lib/config/team-loader";
 import type { LaneApprovalTarget } from "@/lib/team/thread-actions";
 import {
   cancelThreadApprovalWait,
@@ -423,7 +423,7 @@ export const executeThreadCommand = async ({
   commandText: string;
   threadId: string;
 }): Promise<ThreadCommandResult> => {
-  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  const thread = await getTeamThreadRecord(getTeamThreadFile(), threadId);
   if (!thread) {
     throw new TeamThreadCommandError(`Thread ${threadId} was not found.`, 404);
   }

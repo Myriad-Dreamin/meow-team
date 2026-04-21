@@ -1,6 +1,6 @@
 import "server-only";
 
-import { teamConfig } from "@/team.config";
+import { getTeamConfig } from "@/lib/config/team-loader";
 import type { TeamRepositoryOption } from "@/lib/git/repository";
 import { buildCanonicalBranchName } from "@/lib/team/git";
 import type { TeamThreadRecord } from "@/lib/team/history";
@@ -496,6 +496,7 @@ export const createPullRequestRecord = ({
   machineReviewedAt?: string | null;
   url?: string | null;
 }): TeamPullRequestRecord => {
+  const teamConfig = getTeamConfig();
   return {
     id: `pr-${threadId.slice(0, 8)}-a${assignmentNumber}-lane-${lane.laneIndex}`,
     provider,

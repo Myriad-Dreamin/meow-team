@@ -1,7 +1,7 @@
 import "server-only";
 
+import { getTeamThreadFile } from "@/lib/config/team-loader";
 import { getTeamRuntimeConfig, missingOpenAiConfigMessage } from "@/lib/config/runtime";
-import { teamConfig } from "@/team.config";
 import {
   createInitialTeamRunState,
   createTeamRunEnv,
@@ -43,11 +43,10 @@ export const runLaneApproval = async ({
               return finalizationMode;
             }
 
-            const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+            const threadFile = getTeamThreadFile();
+            const thread = await getTeamThreadRecord(threadFile, threadId);
             if (!thread) {
-              throw new Error(
-                `Thread ${threadId} was not found in ${teamConfig.storage.threadFile}.`,
-              );
+              throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
             }
 
             const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);

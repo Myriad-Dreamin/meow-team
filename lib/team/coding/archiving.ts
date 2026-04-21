@@ -1,6 +1,6 @@
 import "server-only";
 
-import { teamConfig } from "@/team.config";
+import { getTeamThreadFile } from "@/lib/config/team-loader";
 import {
   getTeamThreadRecord,
   synchronizeDispatchAssignment,
@@ -39,9 +39,10 @@ export const approveLanePullRequest = async ({
   finalizationMode: TeamLaneFinalizationMode;
   worktree?: Worktree;
 }): Promise<void> => {
-  const thread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  const threadFile = getTeamThreadFile();
+  const thread = await getTeamThreadRecord(threadFile, threadId);
   if (!thread) {
-    throw new Error(`Thread ${threadId} was not found in ${teamConfig.storage.threadFile}.`);
+    throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
   }
 
   const assignment = findAssignment(thread.dispatchAssignments, assignmentNumber);
@@ -91,7 +92,7 @@ export const approveLanePullRequest = async ({
     summary: pullRequestSummary,
   }).title;
   await updateTeamThreadRecord({
-    threadFile: teamConfig.storage.threadFile,
+    threadFile,
     threadId,
     updater: (mutableThread, now) => {
       const mutableAssignment = findAssignment(mutableThread.dispatchAssignments, assignmentNumber);
@@ -188,9 +189,9 @@ export const approveLanePullRequest = async ({
 
   await waitForLaneRunCompletion(threadId, assignmentNumber, laneId);
 
-  const refreshedThread = await getTeamThreadRecord(teamConfig.storage.threadFile, threadId);
+  const refreshedThread = await getTeamThreadRecord(threadFile, threadId);
   if (!refreshedThread) {
-    throw new Error(`Thread ${threadId} was not found in ${teamConfig.storage.threadFile}.`);
+    throw new Error(`Thread ${threadId} was not found in ${threadFile}.`);
   }
 
   const refreshedLane = findLane(
@@ -207,10 +208,8 @@ export const runArchivingStage = async (
   env: TeamRunEnv,
   currentState: TeamRunArchivingStageState,
 ): Promise<TeamRunCompletedState> => {
-  const persistedThread = await getTeamThreadRecord(
-    teamConfig.storage.threadFile,
-    currentState.args.threadId,
-  );
+  const threadFile = getTeamThreadFile();
+  const persistedThread = await getTeamThreadRecord(threadFile, currentState.args.threadId);
   const persistedLane = findPersistedLane(
     persistedThread,
     currentState.args.assignmentNumber,

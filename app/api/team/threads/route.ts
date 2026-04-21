@@ -1,5 +1,6 @@
 // API docs: docs/api/team/threads/index.md
 import { NextResponse } from "next/server";
+import { getTeamConfig } from "@/lib/config/team-loader";
 import {
   getTeamRepositoryPickerModel,
   getTeamWorkspaceThreadSummaryLists,
@@ -13,7 +14,6 @@ import {
 } from "@/lib/team/coding";
 import { listConfiguredRepositories } from "@/lib/team/repositories";
 import { getTeamServerState } from "@/lib/team/server-state";
-import { teamConfig } from "@/team.config";
 
 export const runtime = "nodejs";
 
@@ -26,6 +26,7 @@ export async function GET() {
     await persistTeamRunState(env, initialState);
     await runTeam(env, initialState);
     const serverState = await getTeamServerState();
+    const teamConfig = getTeamConfig();
     const [threadSummaryLists, repositories] = await Promise.all([
       getTeamWorkspaceThreadSummaryLists(serverState.threadStorage),
       listConfiguredRepositories(teamConfig),

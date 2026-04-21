@@ -1,7 +1,7 @@
 // API docs: docs/api/team/run.md
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { teamConfig } from "@/team.config";
+import { getTeamConfig } from "@/lib/config/team-loader";
 import { ExistingBranchesRequireDeleteError } from "@/lib/team/git";
 import {
   countActiveDispatchThreads,
@@ -62,6 +62,7 @@ const runTeamSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = runTeamSchema.parse(await request.json());
+    const teamConfig = getTeamConfig();
     const serverState = await getTeamServerState();
 
     if (!getTeamRuntimeConfig().apiKey) {
