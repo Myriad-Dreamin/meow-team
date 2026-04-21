@@ -29,8 +29,11 @@ session.
    - Validators or documented validation commands are reproducible.
    - Summary artifacts record output paths, formats, or key results.
    - Raw data handling is clear when data is intentionally untracked.
-4. Run focused validation when practical. Use `pnpm` for repository scripts.
-5. If requesting changes, include one concrete follow-up artifact:
+4. For dataset work, use `$meow-dataset`: validation ensures the configured
+   dataset is correct, generation outputs are reproducible, logs are placed
+   under `dataset.tmp`, and TypeScript is preferred for maintainers.
+5. Run focused validation when practical. Use `pnpm` for repository scripts.
+6. If requesting changes, include one concrete follow-up artifact:
    - Prefer a failing Proof of Concept test or validator artifact.
    - If a test or validator is not practical, add a clear execution-review todo
      artifact near the affected code or in the project's shared todo tracker.
@@ -132,6 +135,8 @@ Shared expectations:
 
 - Use project-local skills when they fit, especially tracked-change or OpenSpec
   skills when the project has them.
+- Use `$meow-dataset` for dataset review. Meow validation must ensure that the
+  configured dataset is correct, not just that scripts exist.
 - Use `pnpm` for validation and package commands when the project is a
   TypeScript/pnpm workspace.
 - Keep final outputs concrete and structured for downstream review or
@@ -168,6 +173,7 @@ Return a concise execution-review decision:
 - `approved` when execution artifacts are reproducible and satisfy the request.
 - `needs_revision` when blocking reproducibility, artifact, or validation issues
   remain.
-- Findings ordered by severity, with file paths and concrete next steps.
+- Findings ordered by severity, with file paths, dataset paths, and concrete
+  next steps.
 - Validation commands run and results.
 - Suggested next command, usually `/meow-execute` with a fix suggestion.

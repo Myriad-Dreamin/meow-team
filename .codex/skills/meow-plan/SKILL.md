@@ -11,6 +11,7 @@ Run the planner role manually inside an interactive Codex session.
 - `content` is required and is the planning request.
 - The user communicates with the main agent. Do not start background lanes or
   assume the web harness will advance automatically.
+- If user says `/execute`, `/benchmark`, `/debug`, execute mode is implied, i.e. following skill will be `/meow-execute` instead of `/meow-code`.
 
 ## Steps
 

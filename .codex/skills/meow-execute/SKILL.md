@@ -23,15 +23,18 @@ Run the execution-mode coder role manually inside an interactive Codex session.
    this skill. If the current project ships an execution subtype guide, use it
    as the primary guide. Otherwise, fall back to the inline execution guidance
    and role rules below.
-3. Make concrete repository changes that perform the execution, script, data, or
+3. For dataset generation or maintenance work, use `$meow-dataset`: execution
+   should generate or update scripts that update the configured dataset path.
+   Prefer TypeScript for dataset scripts.
+4. Make concrete repository changes that perform the execution, script, data, or
    automation task.
-4. Satisfy the execution artifact contract:
+5. Satisfy the execution artifact contract:
    - Commit or leave staged-ready scripts or automation changes that perform
      the run.
    - Commit or document a reproducible validator or validation command.
    - Commit a summary artifact that records output paths, formats, or key
      results when raw data is not tracked.
-5. Use `pnpm` for scripts and validation.
+6. Use `pnpm` for scripts and validation.
 
 ## Inline Execution Sources
 
@@ -121,6 +124,9 @@ Shared expectations:
 
 - Use project-local skills when they fit, especially OpenSpec skills when the
   project has them.
+- Use `$meow-dataset` for dataset generation, update, and maintenance tasks.
+  Execution-mode dataset work should produce scripts that update the configured
+  dataset path, not one-off manual data edits.
 - Use `pnpm` for validation and package commands when the project is a
   TypeScript/pnpm workspace.
 - Keep final outputs concrete and structured for downstream review or
@@ -157,7 +163,9 @@ Reviewer handoff awareness:
 Return a concise execution handoff:
 
 - What was executed or automated.
-- Scripts, validators, and summary artifacts created or updated.
+- Scripts, validators, dataset package scripts, and summary artifacts created
+  or updated.
 - Reproducible commands and validation results.
-- Output locations and any intentionally untracked data.
+- Output locations, dataset config keys, log paths, and any intentionally
+  untracked data.
 - Suggested next command, usually `/meow-validate`.
