@@ -83,4 +83,4 @@ OpenSpec artifacts without encoding slash-delimited roadmap/topic scope into
   `fix(planner/openspec): limit planner materialization to tracked paths`
 - **AND** the slash-delimited roadmap/topic scope SHALL remain metadata instead
   of changing the proposal change path
-  `planner-ignore-paths-a1-p1-respect-ignored-planner-paths-during-openspec`
+  `planner-tracked-paths-a1-p1-validate-planner-materialization-with-tracke`

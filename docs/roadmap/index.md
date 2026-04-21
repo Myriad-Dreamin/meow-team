@@ -24,6 +24,7 @@ OpenSpec work can link back into the plan.
 
 - [Android App](/roadmap/android-app/)
 - [Owner Harness Team](/roadmap/owner-harness-team/)
+- [Planner](/roadmap/planner/)
 - [Run](/roadmap/run/)
 - [Team](/roadmap/team/)
 - [VS Code Extension](/roadmap/vscode-extension/)
