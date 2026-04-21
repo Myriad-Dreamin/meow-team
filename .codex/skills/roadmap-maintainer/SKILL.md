@@ -6,12 +6,11 @@ description: Update repository roadmap docs with alias-aware roadmap/topic looku
 Use this skill when the request touches `docs/roadmap`, roadmap/topic planning
 notes, or any workflow that maps conventional-title scope to roadmap docs.
 
-## Source Of Truth
-
-- Roadmap docs live under `docs/roadmap/`.
-- The repository entry point is `docs/roadmap/index.md`.
-- Each roadmap lives at `docs/roadmap/<roadmap>/index.md`.
-- Each topic lives at `docs/roadmap/<roadmap>/<topic>.md`.
+Use the current project's roadmap docs as the source files for this workflow.
+In this repository, roadmap docs live under `docs/roadmap/`, the entry point is
+`docs/roadmap/index.md`, each roadmap lives at
+`docs/roadmap/<roadmap>/index.md`, and each topic lives at
+`docs/roadmap/<roadmap>/<topic>.md`.
 
 ## Naming And Aliases
 
@@ -26,7 +25,9 @@ notes, or any workflow that maps conventional-title scope to roadmap docs.
 ## Authoring Rules
 
 1. Read `docs/roadmap/index.md` before editing a roadmap topic.
-2. User map request you to read and understand existing `openspec` to update roadmap docs, and also use `openspec` skills to create proposals according to maps.
+2. When the user maps a request to existing OpenSpec context, read that context
+   before updating roadmap docs and use OpenSpec skills to create matching
+   proposals when requested.
 3. Keep roadmap index files focused on:
    - one `#` title
    - a brief note describing the roadmap and how its topics relate

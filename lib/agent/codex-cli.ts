@@ -156,6 +156,31 @@ const writeTemporaryAuthFile = async ({
 
 export { writeTemporaryAuthFile };
 
+const writeTemporaryEnvFile = async ({
+  codexHome,
+  sourceEnvPath = path.join(path.dirname(codexUserConfigPaths.auth), ".env"),
+}: {
+  codexHome: string;
+  sourceEnvPath?: string;
+}): Promise<void> => {
+  const targetEnvPath = path.join(codexHome, ".env");
+
+  await fs.mkdir(codexHome, { recursive: true });
+
+  try {
+    await fs.copyFile(sourceEnvPath, targetEnvPath);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+};
+
+export { writeTemporaryEnvFile };
+
 const linkSkillEntries = async ({
   sourceRoot,
   targetRoot,
@@ -199,6 +224,9 @@ const linkSkillEntries = async ({
 const prepareCodexHome = async ({ codexHome }: { codexHome: string }): Promise<void> => {
   await fs.mkdir(codexHome, { recursive: true });
   await writeTemporaryAuthFile({
+    codexHome,
+  });
+  await writeTemporaryEnvFile({
     codexHome,
   });
 

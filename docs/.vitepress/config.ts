@@ -45,6 +45,10 @@ const docsConfig = {
         link: "/notification",
       },
       {
+        text: "Interactive Mode",
+        link: "/interactive-mode",
+      },
+      {
         text: "Roadmaps",
         link: "/roadmap/",
       },
@@ -65,6 +69,10 @@ const docsConfig = {
             {
               text: "Overview",
               link: "/",
+            },
+            {
+              text: "Interactive Mode",
+              link: "/interactive-mode",
             },
             {
               text: "Desktop Notifications",

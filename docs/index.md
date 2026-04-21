@@ -8,6 +8,9 @@ hero:
   tagline: Guides for current workspace behavior, roadmap topics, and reference pages for the owner harness team routes under `app/api/team`.
   actions:
     - theme: brand
+      text: Use interactive mode
+      link: /interactive-mode
+    - theme: alt
       text: Open attention notifications
       link: /notification
     - theme: alt
@@ -24,6 +27,8 @@ hero:
       link: /api/
 
 features:
+  - title: Interactive role commands
+    details: `/meow-plan`, `/meow-code`, `/meow-review`, `/meow-execute`, and `/meow-validate` let the main agent run role-specific skills in a direct conversation.
   - title: Notification trigger guide
     details: Browser, VS Code, and Android notification prerequisites, exact approval and failure triggers, and dedupe behavior are documented in one place.
   - title: Roadmap-aware planning
