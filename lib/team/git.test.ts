@@ -9,7 +9,9 @@ import {
   buildLaneBranchName,
   buildPlannerWorktreePath,
   parseManagedWorktreeSlot,
+  publishLaneBranchHead,
   pushLaneBranch,
+  resolvePushedCommitForHead,
 } from "@/lib/team/git";
 import {
   archiveOpenSpecChangeInWorktree,
@@ -285,6 +287,113 @@ describe("pushLaneBranch", () => {
       commitHash,
       pushedAt: "2026-04-11T10:00:00.000Z",
     });
+  });
+});
+
+describe("resolvePushedCommitForHead", () => {
+  it("returns null when the recorded pushed commit no longer matches the current head", () => {
+    expect(
+      resolvePushedCommitForHead({
+        commitHash: "commit-b",
+        pushedCommit: {
+          remoteName: "origin",
+          repositoryUrl: "https://github.com/example/meow-team",
+          branchUrl: "https://github.com/example/meow-team/tree/requests/example/a1-proposal-1",
+          commitUrl: "https://github.com/example/meow-team/commit/commit-a",
+          commitHash: "commit-a",
+          pushedAt: "2026-04-11T10:00:00.000Z",
+        },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("publishLaneBranchHead", () => {
+  it("reuses the recorded pushed commit when the current head is already remote-backed", async () => {
+    const pushedCommit = {
+      remoteName: "origin",
+      repositoryUrl: "https://github.com/example/meow-team",
+      branchUrl: "https://github.com/example/meow-team/tree/requests/example/a1-proposal-1",
+      commitUrl: "https://github.com/example/meow-team/commit/feature-commit",
+      commitHash: "feature-commit",
+      pushedAt: "2026-04-11T10:00:00.000Z",
+    };
+
+    await expect(
+      publishLaneBranchHead({
+        repositoryPath: "/tmp/repository",
+        branchName: "requests/example/a1-proposal-1",
+        commitHash: "feature-commit",
+        pushedCommit,
+      }),
+    ).resolves.toEqual({
+      published: false,
+      pushedCommit,
+    });
+  });
+
+  it("pushes the branch head when the recorded pushed commit is stale", async () => {
+    const repositoryPath = await createRepository();
+    const bareRemotePath = await createBareRepository();
+
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "README.md",
+      content: "base\n",
+    });
+    await commitAll(repositoryPath, "base");
+
+    await runGit(repositoryPath, [
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/meow-team.git",
+    ]);
+    await runGit(repositoryPath, ["remote", "set-url", "--push", "origin", bareRemotePath]);
+
+    await runGit(repositoryPath, ["checkout", "-b", "requests/example/a1-proposal-1"]);
+    await writeRepositoryFile({
+      repositoryPath,
+      relativePath: "feature.txt",
+      content: "feature work\n",
+    });
+    await commitAll(repositoryPath, "feature work");
+
+    const commitHash = await getBranchHead({
+      repositoryPath,
+      branchName: "requests/example/a1-proposal-1",
+    });
+
+    await expect(
+      publishLaneBranchHead({
+        repositoryPath,
+        branchName: "requests/example/a1-proposal-1",
+        commitHash,
+        pushedCommit: {
+          remoteName: "origin",
+          repositoryUrl: "https://github.com/example/meow-team",
+          branchUrl: "https://github.com/example/meow-team/tree/requests/example/a1-proposal-1",
+          commitUrl: "https://github.com/example/meow-team/commit/base-commit",
+          commitHash: "base-commit",
+          pushedAt: "2026-04-11T09:00:00.000Z",
+        },
+        pushedAt: "2026-04-11T10:00:00.000Z",
+      }),
+    ).resolves.toEqual({
+      published: true,
+      pushedCommit: {
+        remoteName: "origin",
+        repositoryUrl: "https://github.com/example/meow-team",
+        branchUrl: "https://github.com/example/meow-team/tree/requests/example/a1-proposal-1",
+        commitUrl: `https://github.com/example/meow-team/commit/${commitHash}`,
+        commitHash,
+        pushedAt: "2026-04-11T10:00:00.000Z",
+      },
+    });
+
+    expect(
+      await runGit(bareRemotePath, ["rev-parse", "refs/heads/requests/example/a1-proposal-1"]),
+    ).toBe(commitHash);
   });
 });
 

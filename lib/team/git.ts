@@ -266,3 +266,61 @@ export const pushLaneBranch = async ({
     pushedAt,
   });
 };
+
+export const resolvePushedCommitForHead = ({
+  commitHash,
+  pushedCommit,
+}: {
+  commitHash: string | null | undefined;
+  pushedCommit: TeamPushedCommitRecord | null | undefined;
+}): TeamPushedCommitRecord | null => {
+  if (!commitHash || !pushedCommit || pushedCommit.commitHash !== commitHash) {
+    return null;
+  }
+
+  return pushedCommit;
+};
+
+export type PublishLaneBranchHeadResult = {
+  published: boolean;
+  pushedCommit: TeamPushedCommitRecord;
+};
+
+export const publishLaneBranchHead = async ({
+  repositoryPath,
+  branchName,
+  commitHash,
+  pushedCommit,
+  remoteName,
+  pushedAt,
+}: {
+  repositoryPath: string;
+  branchName: string;
+  commitHash: string;
+  pushedCommit?: TeamPushedCommitRecord | null;
+  remoteName?: string;
+  pushedAt?: string;
+}): Promise<PublishLaneBranchHeadResult> => {
+  const matchingPushedCommit = resolvePushedCommitForHead({
+    commitHash,
+    pushedCommit,
+  });
+
+  if (matchingPushedCommit) {
+    return {
+      published: false,
+      pushedCommit: matchingPushedCommit,
+    };
+  }
+
+  return {
+    published: true,
+    pushedCommit: await pushLaneBranch({
+      repositoryPath,
+      branchName,
+      commitHash,
+      remoteName,
+      pushedAt,
+    }),
+  };
+};
