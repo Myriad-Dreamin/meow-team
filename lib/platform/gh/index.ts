@@ -3,6 +3,10 @@ import "server-only";
 import { z } from "zod";
 import { runGit } from "@/lib/cli-tools/git";
 import { runGh } from "@/lib/platform/gh/cli";
+import {
+  normalizeHostedRepositorySlug,
+  normalizeHostedRepositoryUrl,
+} from "@/lib/platform/repository-url";
 import type {
   GitPlatformAdapter,
   GitPlatformPublishedBranch,
@@ -15,55 +19,7 @@ import type {
 
 const DEFAULT_PUSH_REMOTE_NAME = "origin";
 
-const trimGitSuffix = (value: string): string => {
-  return value.replace(/\.git$/iu, "");
-};
-
-export const normalizeGitHubRepositoryUrl = (remoteUrl: string): string | null => {
-  const trimmedRemoteUrl = remoteUrl.trim();
-  if (!trimmedRemoteUrl) {
-    return null;
-  }
-
-  const sshRemoteMatch = /^git@([^:]+):(.+)$/u.exec(trimmedRemoteUrl);
-  if (sshRemoteMatch) {
-    const host = sshRemoteMatch[1];
-    const repositoryPath = trimGitSuffix(sshRemoteMatch[2] ?? "")
-      .replace(/^\/+/u, "")
-      .replace(/\/+$/u, "");
-    const pathSegments = repositoryPath.split("/").filter(Boolean);
-    if (pathSegments.length !== 2) {
-      return null;
-    }
-
-    return `https://${host}/${pathSegments.join("/")}`;
-  }
-
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(trimmedRemoteUrl);
-  } catch {
-    return null;
-  }
-
-  if (
-    parsedUrl.protocol !== "https:" &&
-    parsedUrl.protocol !== "http:" &&
-    parsedUrl.protocol !== "ssh:"
-  ) {
-    return null;
-  }
-
-  const repositoryPath = trimGitSuffix(parsedUrl.pathname)
-    .replace(/^\/+/u, "")
-    .replace(/\/+$/u, "");
-  const pathSegments = repositoryPath.split("/").filter(Boolean);
-  if (pathSegments.length !== 2) {
-    return null;
-  }
-
-  return `https://${parsedUrl.host}/${pathSegments.join("/")}`;
-};
+export const normalizeGitHubRepositoryUrl = normalizeHostedRepositoryUrl;
 
 export const resolveGitHubPushRemote = async ({
   repositoryPath,
@@ -131,16 +87,7 @@ export const publishGitHubBranch = async ({
 };
 
 const normalizeGitHubRepositorySlug = (repositoryUrl: string): string | null => {
-  const normalizedUrl = normalizeGitHubRepositoryUrl(repositoryUrl);
-  if (!normalizedUrl) {
-    return null;
-  }
-
-  try {
-    return new URL(normalizedUrl).pathname.replace(/^\/+/u, "");
-  } catch {
-    return null;
-  }
+  return normalizeHostedRepositorySlug(repositoryUrl);
 };
 
 const getGitHubRepositoryOwner = (repositorySlug: string): string | null => {

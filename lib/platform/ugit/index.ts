@@ -2,7 +2,12 @@ import "server-only";
 
 import path from "node:path";
 import { runGit } from "@/lib/cli-tools/git";
+import { resolveRepositoryUgitBrowserBaseUrl } from "@/lib/config/repository";
 import { listGitWorktrees } from "@/lib/git/ops";
+import {
+  joinBrowserRepositoryUrl,
+  normalizeHostedRepositorySlug,
+} from "@/lib/platform/repository-url";
 import { runUgit } from "@/lib/platform/ugit/cli";
 import type {
   GitPlatformAdapter,
@@ -15,6 +20,7 @@ import type {
 } from "@/lib/platform/types";
 
 const DEFAULT_PUSH_REMOTE_NAME = "origin";
+const DEFAULT_BROWSER_METADATA_REMOTE_NAME = "upstream";
 
 type UgitPullRequestSummary = {
   id: number;
@@ -66,13 +72,35 @@ export const resolveUgitPushRemote = async ({
     "--push",
     remoteName,
   ]);
-  const repositoryUrl = normalizeUgitRepositoryUrl(pushUrl) ?? normalizeUgitRepositoryUrl(fetchUrl);
-
-  if (!repositoryUrl) {
+  if (!normalizeUgitRepositoryUrl(pushUrl) && !normalizeUgitRepositoryUrl(fetchUrl)) {
     throw new Error(
       `Git remote ${remoteName} does not expose a ugit repository URL for branch publishing.`,
     );
   }
+
+  const upstreamFetchUrl = await readOptionalGitRemoteUrl({
+    repositoryPath,
+    remoteName: DEFAULT_BROWSER_METADATA_REMOTE_NAME,
+  });
+  const upstreamPushUrl = await readOptionalGitRemoteUrl({
+    repositoryPath,
+    remoteName: DEFAULT_BROWSER_METADATA_REMOTE_NAME,
+    push: true,
+  });
+  const repositorySlug =
+    normalizeHostedRepositorySlug(upstreamFetchUrl ?? "") ??
+    normalizeHostedRepositorySlug(upstreamPushUrl ?? "") ??
+    normalizeHostedRepositorySlug(fetchUrl) ??
+    normalizeHostedRepositorySlug(pushUrl);
+
+  if (!repositorySlug) {
+    throw new Error(
+      `Git remote ${remoteName} does not expose enough stable repository metadata to build ugit browser links. Configure an "${DEFAULT_BROWSER_METADATA_REMOTE_NAME}" remote with an owner/repository slug.`,
+    );
+  }
+
+  const { baseUrl } = await resolveRepositoryUgitBrowserBaseUrl(repositoryPath);
+  const repositoryUrl = joinBrowserRepositoryUrl(baseUrl, repositorySlug);
 
   return {
     remoteName,
@@ -80,6 +108,28 @@ export const resolveUgitPushRemote = async ({
     pushUrl,
     repositoryUrl,
   };
+};
+
+const readOptionalGitRemoteUrl = async ({
+  repositoryPath,
+  remoteName,
+  push = false,
+}: {
+  repositoryPath: string;
+  remoteName: string;
+  push?: boolean;
+}): Promise<string | null> => {
+  try {
+    const { stdout } = await runGit(repositoryPath, [
+      "remote",
+      "get-url",
+      ...(push ? ["--push"] : []),
+      remoteName,
+    ]);
+    return stdout || null;
+  } catch {
+    return null;
+  }
 };
 
 export const publishUgitBranch = async ({
@@ -177,7 +227,7 @@ const parseUgitPullRequestId = (stdout: string): number | null => {
 };
 
 const buildUgitPullRequestUrl = (repositoryUrl: string, pullRequestId: number): string => {
-  return appendRepositoryFragment(repositoryUrl, `pull-request=${pullRequestId}`);
+  return joinBrowserRepositoryUrl(repositoryUrl, "pull-requests", pullRequestId.toString());
 };
 
 const assertSupportedUgitPullRequestRemote = (remoteName: string): void => {
