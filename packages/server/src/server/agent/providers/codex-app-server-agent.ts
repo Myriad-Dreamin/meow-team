@@ -2588,19 +2588,27 @@ class CodexAppServerAgentSession implements AgentSession {
         cwd: [this.config.cwd],
       })) as { data?: Array<any> };
       const entries = Array.isArray(response?.data) ? response.data : [];
-      const skills: Array<{ name: string; description: string; path: string }> = [];
+      const skillsByName = new Map<
+        string,
+        { name: string; description: string; path: string }
+      >();
       for (const entry of entries) {
         const list = Array.isArray(entry.skills) ? entry.skills : [];
         for (const skill of list) {
           if (!skill?.name || !skill?.path) continue;
-          skills.push({
+          if (skillsByName.has(skill.name)) {
+            continue;
+          }
+          skillsByName.set(skill.name, {
             name: skill.name,
             description: skill.description ?? skill.shortDescription ?? "Skill",
             path: skill.path,
           });
         }
       }
-      this.cachedSkills = skills;
+      this.cachedSkills = Array.from(skillsByName.values()).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
     } catch (error) {
       this.logger.trace({ error }, "Failed to load skills list");
       this.cachedSkills = [];
@@ -3358,9 +3366,13 @@ class CodexAppServerAgentSession implements AgentSession {
       appServerSkills.length === 0
         ? await listCodexSkills(this.config.cwd, this.deps.workspaceGitService)
         : [];
-    return [...appServerSkills, ...fallbackSkills, ...prompts].sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    const commandsByName = new Map<string, AgentSlashCommand>();
+    for (const command of [...appServerSkills, ...fallbackSkills, ...prompts]) {
+      if (!commandsByName.has(command.name)) {
+        commandsByName.set(command.name, command);
+      }
+    }
+    return Array.from(commandsByName.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   private async ensureThread(): Promise<void> {
