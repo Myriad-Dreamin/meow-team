@@ -77,6 +77,7 @@ valknut-report.json/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 .plans/
+/data
 packages/server/src/server/fixtures/dictation/dictation-debug-largest.wav
 packages/server/src/server/fixtures/dictation/dictation-debug-largest.transcript.txt
 

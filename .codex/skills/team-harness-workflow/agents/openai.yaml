@@ -1,0 +1,7 @@
+interface:
+  display_name: "Team Harness Workflow"
+  short_description: "Planner and lane workflow guidance"
+  default_prompt: "Use $team-harness-workflow to run a planner, coder, or reviewer step inside this repository harness."
+
+policy:
+  allow_implicit_invocation: true

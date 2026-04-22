@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <color name="meow_team_launcher_background">#F4F7FB</color>
+  <color name="meow_team_launcher_foreground">#172033</color>
+  <color name="meow_team_launcher_monochrome">#0F172A</color>
+</resources>
