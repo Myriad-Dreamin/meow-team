@@ -17,4 +17,4 @@
 
 - [x] 4.1 Add a foundation test that verifies `npm run cli:meow-flow -- --version` succeeds and prints the package version
 - [x] 4.2 Add a foundation test that verifies `npm run cli:meow-flow -- --help` succeeds and prints help output
-- [ ] 4.3 Run targeted package validation, then run repository-wide `npm run typecheck` and `npm run format`
+- [x] 4.3 Run targeted package validation, then run repository-wide `npm run typecheck` and `npm run format`
