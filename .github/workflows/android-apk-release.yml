@@ -63,16 +63,11 @@ jobs:
           fi
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: ./.github/actions/setup-pnpm
         with:
           node-version: "22"
-          cache: "pnpm"
-          cache-dependency-path: pnpm-lock.yaml
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
-
-      - name: Enable pnpm
-        run: corepack enable
 
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
