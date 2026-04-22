@@ -1,15 +1,18 @@
 {
   lib,
   stdenv,
-  buildNpmPackage,
   nodejs_22,
+  pnpm_10,
   python3,
   makeWrapper,
   # node-pty needs libuv headers on Linux
   libuv,
 }:
 
-buildNpmPackage rec {
+let
+  pnpm = pnpm_10;
+in
+stdenv.mkDerivation rec {
   pname = "paseo";
   version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
 
@@ -39,17 +42,15 @@ buildNpmPackage rec {
   };
 
   nodejs = nodejs_22;
-
-  # To update: run `nix build` with lib.fakeHash, copy the `got:` hash.
-  # CI auto-updates this when package-lock.json changes (see .github/workflows/).
-  npmDepsHash = "sha256-20mGU+cFFjhyUr011d+hU0K+x/TvEXfK+HD6PQuOZ0M=";
-
-  # Prevent onnxruntime-node's install script from running during automatic
-  # npm rebuild (it tries to download from api.nuget.org, which fails in the sandbox).
-  # We manually rebuild only node-pty in buildPhase.
-  npmRebuildFlags = [ "--ignore-scripts" ];
+  pnpmDeps = pnpm.fetchDeps {
+    inherit pname src version;
+    fetcherVersion = 2;
+    hash = "sha256-SLUO1fAHoM8b5CYxBppsQs9iGL9SlUQEfSvPD0xss8c=";
+  };
 
   nativeBuildInputs = [
+    nodejs
+    pnpm.configHook
     python3 # for node-gyp (node-pty compilation)
     makeWrapper
   ];
@@ -58,8 +59,8 @@ buildNpmPackage rec {
     libuv
   ];
 
-  # Don't use the default npm build hook — we need a custom build sequence
-  dontNpmBuild = true;
+  dontConfigure = true;
+  dontInstall = true;
 
   buildPhase = ''
     runHook preBuild
@@ -68,10 +69,10 @@ buildNpmPackage rec {
     # Speech-related native modules (sherpa-onnx, onnxruntime-node) are
     # intentionally left unbuilt — they're lazily loaded and gracefully
     # degrade when unavailable.
-    npm rebuild node-pty
+    pnpm rebuild node-pty
 
     # Build all daemon packages in dependency order (defined in package.json)
-    npm run build:daemon
+    pnpm run build:daemon
 
     runHook postBuild
   '';

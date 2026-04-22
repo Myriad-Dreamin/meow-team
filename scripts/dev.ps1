@@ -47,9 +47,9 @@ Write-Host @"
 # the daemon binds to localhost and this script is never used for production.
 # Build dependencies required by the daemon (they only ship dist/)
 Write-Host "Building @getpaseo/highlight..."
-npm run build --workspace=@getpaseo/highlight
+pnpm --filter @getpaseo/highlight run build
 Write-Host "Building @getpaseo/relay..."
-npm run build --workspace=@getpaseo/relay
+pnpm --filter @getpaseo/relay run build
 
 $env:PASEO_CORS_ORIGINS = "*"
 
@@ -62,5 +62,5 @@ $env:BROWSER = "none"
 concurrently `
     --names "daemon,metro" `
     --prefix-colors "cyan,magenta" `
-    "npm run dev:server" `
+    "pnpm run dev:server" `
     "cd packages/app && npx expo start"

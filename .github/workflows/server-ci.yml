@@ -6,14 +6,14 @@ on:
     paths:
       - 'packages/server/**'
       - 'package.json'
-      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/server-ci.yml'
   pull_request:
     branches: [main]
     paths:
       - 'packages/server/**'
       - 'package.json'
-      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/server-ci.yml'
 
 jobs:
@@ -28,25 +28,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable pnpm
+        run: corepack enable
 
       - name: Fetch origin/main (worktree tests)
         run: git fetch --no-tags origin main:refs/remotes/origin/main
 
       - name: Install server dependencies
-        run: npm install --workspace=@getpaseo/server --include-workspace-root
+        run: pnpm install --frozen-lockfile
 
       - name: Build highlight dependency
-        run: npm run build --workspace=@getpaseo/highlight
+        run: pnpm --filter @getpaseo/highlight run build
 
       - name: Build relay dependency
-        run: npm run build --workspace=@getpaseo/relay
+        run: pnpm --filter @getpaseo/relay run build
 
       - name: Typecheck
-        run: npm run typecheck --workspace=@getpaseo/server
+        run: pnpm --filter @getpaseo/server run typecheck
 
       - name: Test
-        run: npm run test --workspace=@getpaseo/server
+        run: pnpm --filter @getpaseo/server run test
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
