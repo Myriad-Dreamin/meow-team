@@ -5,7 +5,7 @@
   "description": "Paseo desktop app (Electron wrapper)",
   "main": "dist/main.js",
   "scripts": {
-    "build": "npm --prefix ../.. run build:daemon && npm run build:main && electron-builder --config electron-builder.yml",
+    "build": "pnpm -C ../.. run build:daemon && pnpm run build:main && electron-builder --config electron-builder.yml",
     "build:main": "tsc -p tsconfig.json",
     "dev": "./scripts/dev.sh",
     "dev:win": "powershell ./scripts/dev.ps1",
@@ -13,8 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@getpaseo/cli": "0.1.61-beta.1",
-    "@getpaseo/server": "0.1.61-beta.1",
+    "@getpaseo/cli": "workspace:*",
+    "@getpaseo/server": "workspace:*",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.6.2",
     "ws": "^8.14.2"
