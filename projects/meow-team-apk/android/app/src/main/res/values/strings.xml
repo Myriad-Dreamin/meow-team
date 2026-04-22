@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Meow Team Android</string>
+  <string name="backend_url_label">Backend URL</string>
+  <string name="backend_url_hint">http://10.0.2.2:3000</string>
+  <string name="backend_url_help">The emulator default is http://10.0.2.2:3000. On a physical device, enter your computer\'s LAN IP and port instead.</string>
+  <string name="connect_button">Save and Load Workspace</string>
+  <string name="connection_status_idle">Configure a backend URL to load the workspace.</string>
+  <string name="connection_status_connecting_format">Connecting to %1$s...</string>
+  <string name="connection_status_connected_format">Connected to %1$s.</string>
+  <string name="connection_status_failed_format">Unable to reach %1$s. %2$s</string>
+  <string name="connection_status_failed_retrying_format">Unable to reach %1$s. %2$s Background monitoring will keep retrying in the background.</string>
+  <string name="connection_failed_unknown">Unknown backend error.</string>
+  <string name="notification_route_idle">Alert routing: configure a backend first</string>
+  <string name="notification_route_pending">Alert routing: checking backend...</string>
+  <string name="notification_route_unavailable">Alert routing: backend unavailable</string>
+  <string name="notification_route_format">Alert routing: %1$s</string>
+  <string name="notification_permission_denied">Android notifications are blocked. Approval and failure alerts stay silent until the permission is allowed.</string>
+  <string name="workspace_loaded_format">Workspace loaded from %1$s.</string>
+  <string name="workspace_failed_format">Workspace could not load. %1$s</string>
+  <string name="workspace_failed_unknown">Unknown WebView error.</string>
+  <string name="notification_channel_name">Meow Team attention</string>
+  <string name="notification_channel_description">Approval and failure alerts routed from the meow-team backend.</string>
+  <string name="monitoring_channel_name">Meow Team background monitoring</string>
+  <string name="monitoring_channel_description">Keeps polling the meow-team backend so Android alerts can arrive while the app is backgrounded or the device is locked.</string>
+  <string name="monitoring_notification_title">Background monitoring active</string>
+  <string name="monitoring_notification_starting">Starting Android background monitoring.</string>
+  <string name="monitoring_notification_active_format">Monitoring %1$s for approval and failure alerts while the app is backgrounded.</string>
+  <string name="monitoring_notification_stop_action">Stop monitoring</string>
+</resources>

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Meow Dataset"
+  short_description: "Dataset package workflow guidance"
+  default_prompt: "Use $meow-dataset to create, update, configure, or validate pnpm dataset packages and their generated data."
