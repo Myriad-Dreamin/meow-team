@@ -32,7 +32,7 @@
     "build:desktop": "pnpm run version:sync-internal && pnpm --filter @getpaseo/app run build:web && pnpm --filter @getpaseo/desktop run build",
     "db:query": "pnpm --filter @getpaseo/server run db:query --",
     "cli": "pnpm exec tsx packages/cli/src/index.js",
-    "cli:meow-flow": "pnpm --filter meow-flow exec node --import tsx src/index.ts",
+    "cli:meow-flow": "pnpm --filter meow-flow exec node --import tsx ../../scripts/run-meow-flow.mjs",
     "version": "pnpm run version:sync-internal && pnpm run release:prepare && git add -A",
     "version:sync-internal": "node scripts/sync-workspace-versions.mjs",
     "release:prepare": "pnpm install --frozen-lockfile",

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
@@ -8,6 +9,8 @@ const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(THIS_DIR, "..");
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, "..", "..");
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
+const BIN_PATH = path.join(PACKAGE_ROOT, "bin", "meow-flow");
+const testIfPosix = process.platform === "win32" ? test.skip : test;
 
 function readPackageVersion(): string {
   const packageJson = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as {
@@ -22,18 +25,32 @@ function readPackageVersion(): string {
 }
 
 function runCliAlias(args: string[]) {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "meow-flow-foundation-"));
+  const outputPath = path.join(tempDir, "cli-output.txt");
+  const outputFd = openSync(outputPath, "w");
+
   const result = spawnSync(NPM_COMMAND, ["run", "cli:meow-flow", "--", ...args], {
     cwd: REPO_ROOT,
-    encoding: "utf8",
+    stdio: ["ignore", outputFd, outputFd],
   });
+
+  closeSync(outputFd);
+  const output = readFileSync(outputPath, "utf8");
+  rmSync(tempDir, { recursive: true, force: true });
 
   return {
     status: result.status,
-    output: `${result.stdout}${result.stderr}`,
+    output,
   };
 }
 
 describe("meow-flow foundation", () => {
+  testIfPosix("bin/meow-flow is executable for direct invocation after build", () => {
+    const mode = statSync(BIN_PATH).mode & 0o777;
+
+    expect(mode & 0o111).not.toBe(0);
+  });
+
   test("npm run cli:meow-flow -- --version succeeds and prints the package version", () => {
     const expectedVersion = readPackageVersion();
     const result = runCliAlias(["--version"]);
