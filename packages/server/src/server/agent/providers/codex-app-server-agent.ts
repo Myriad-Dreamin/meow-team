@@ -2588,10 +2588,7 @@ class CodexAppServerAgentSession implements AgentSession {
         cwd: [this.config.cwd],
       })) as { data?: Array<any> };
       const entries = Array.isArray(response?.data) ? response.data : [];
-      const skillsByName = new Map<
-        string,
-        { name: string; description: string; path: string }
-      >();
+      const skillsByName = new Map<string, { name: string; description: string; path: string }>();
       for (const entry of entries) {
         const list = Array.isArray(entry.skills) ? entry.skills : [];
         for (const skill of list) {
