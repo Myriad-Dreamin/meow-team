@@ -1,0 +1,9 @@
+packages:
+  - "packages/expo-two-way-audio"
+  - "packages/highlight"
+  - "packages/server"
+  - "packages/app"
+  - "packages/relay"
+  - "packages/website"
+  - "packages/desktop"
+  - "packages/cli"

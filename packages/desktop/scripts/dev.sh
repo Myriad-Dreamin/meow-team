@@ -7,7 +7,7 @@ APP_DIR="$(cd "$DESKTOP_DIR/../app" && pwd)"
 ROOT_DIR="$(cd "$DESKTOP_DIR/../.." && pwd)"
 
 # Build the Electron main process
-npm run build:main
+pnpm run build:main
 
 # Prefer Metro's stable default port so dev browser storage keeps the same
 # localhost origin across restarts. Fall back only when earlier ports are busy.

@@ -6,7 +6,7 @@ $AppDir = (Resolve-Path "$DesktopDir\..\app").Path
 $RootDir = (Resolve-Path "$DesktopDir\..\..").Path
 
 # Build the Electron main process
-npm run build:main
+pnpm run build:main
 
 # Prefer Metro's stable default port so dev browser storage keeps the same
 # localhost origin across restarts. Fall back only when earlier ports are busy.

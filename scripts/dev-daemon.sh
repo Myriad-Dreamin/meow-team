@@ -22,4 +22,4 @@ echo "════════════════════════�
 export PASEO_CORS_ORIGINS="${PASEO_CORS_ORIGINS:-*}"
 export PASEO_NODE_INSPECT="${PASEO_NODE_INSPECT:---inspect=0}"
 
-exec npm run dev:server
+exec pnpm run dev:server
