@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'packages/server/**'
+      - '.github/actions/setup-pnpm/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/server-ci.yml'
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - 'packages/server/**'
+      - '.github/actions/setup-pnpm/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/server-ci.yml'
@@ -25,14 +27,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-pnpm
         with:
           node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Enable pnpm
-        run: corepack enable
 
       - name: Fetch origin/main (worktree tests)
         run: git fetch --no-tags origin main:refs/remotes/origin/main

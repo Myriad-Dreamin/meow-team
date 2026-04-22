@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'packages/relay/**'
+      - '.github/actions/setup-pnpm/**'
       - '.github/workflows/deploy-relay.yml'
   workflow_dispatch:
 
@@ -15,14 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-pnpm
         with:
           node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Enable pnpm
-        run: corepack enable
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
