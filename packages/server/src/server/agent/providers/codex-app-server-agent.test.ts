@@ -102,6 +102,66 @@ describe("Codex app-server provider", () => {
     }
   });
 
+  test("deduplicates app-server skills when listing commands", async () => {
+    const prevCodexHome = process.env.CODEX_HOME;
+    const codexHome = await mkdtemp(path.join(tmpdir(), "codex-home-"));
+    const session = createSession();
+    const request = vi.fn().mockResolvedValue({
+      data: [
+        {
+          skills: [
+            {
+              name: "shipper",
+              description: "Ship changes carefully.",
+              path: "/skills/shipper",
+            },
+            {
+              name: "reviewer",
+              description: "Review changes before landing.",
+              path: "/skills/reviewer",
+            },
+          ],
+        },
+        {
+          skills: [
+            {
+              name: "shipper",
+              description: "Duplicate shipper entry",
+              path: "/other/shipper",
+            },
+          ],
+        },
+      ],
+    });
+    session.client = { request } as never;
+    process.env.CODEX_HOME = codexHome;
+
+    try {
+      await expect(session.listCommands()).resolves.toEqual([
+        {
+          name: "reviewer",
+          description: "Review changes before landing.",
+          argumentHint: "",
+        },
+        {
+          name: "shipper",
+          description: "Ship changes carefully.",
+          argumentHint: "",
+        },
+      ]);
+      expect(request).toHaveBeenCalledWith("skills/list", {
+        cwd: ["/tmp/codex-question-test"],
+      });
+    } finally {
+      if (prevCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = prevCodexHome;
+      }
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
   const logger = createTestLogger();
 
   test("extracts context window usage from snake_case token payloads", () => {
