@@ -148,8 +148,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Expose tsx for Playwright global setup
-        run: echo "$GITHUB_WORKSPACE/packages/server/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install tsx globally for Playwright global setup
+        run: npm install -g tsx
 
       - name: Install Playwright browsers
         run: pnpm --filter @getpaseo/app exec playwright install --with-deps chromium
