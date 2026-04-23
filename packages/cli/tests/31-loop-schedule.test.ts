@@ -11,6 +11,7 @@ function sleep(ms: number): Promise<void> {
 console.log("=== Loop And Schedule Command Tests ===\n");
 
 const ctx = await createE2ETestContext({ timeout: 30000 });
+const LOOP_COMPLETION_TIMEOUT_MS = 30000;
 
 try {
   {
@@ -120,6 +121,10 @@ try {
         "loop",
         "run",
         "Return any response",
+        "--provider",
+        "codex",
+        "--model",
+        "gpt-5.4",
         "--name",
         "smoke-loop",
         "--verify-check",
@@ -142,18 +147,26 @@ try {
     );
 
     let status = "running";
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    let lastInspectStdout = "";
+    const deadline = Date.now() + LOOP_COMPLETION_TIMEOUT_MS;
+    while (Date.now() < deadline) {
       const inspect = await ctx.paseo(["loop", "inspect", runJson.id, "--json"]);
       assert.strictEqual(inspect.exitCode, 0, inspect.stderr);
       const inspectJson = JSON.parse(inspect.stdout);
       status = inspectJson.status;
+      lastInspectStdout = inspect.stdout;
       if (status !== "running") {
         assert.strictEqual(status, "succeeded", inspect.stdout);
         break;
       }
       await sleep(250);
     }
-    assert.strictEqual(status, "succeeded");
+    assert.notStrictEqual(
+      status,
+      "running",
+      `loop did not complete within ${LOOP_COMPLETION_TIMEOUT_MS}ms\n${lastInspectStdout}`,
+    );
+    assert.strictEqual(status, "succeeded", lastInspectStdout);
 
     const logs = await ctx.paseo(["loop", "logs", runJson.id], { timeout: 15000 });
     assert.strictEqual(logs.exitCode, 0, logs.stderr);

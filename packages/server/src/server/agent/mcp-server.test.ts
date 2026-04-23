@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { z } from "zod";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
-import { createAgentMcpServer } from "./mcp-server.js";
+import { createAgentMcpServer as createBaseAgentMcpServer } from "./mcp-server.js";
 import type { AgentManager, ManagedAgent } from "./agent-manager.js";
 import type { AgentStorage, StoredAgentRecord } from "./agent-storage.js";
 import type { ProviderDefinition } from "./provider-registry.js";
@@ -201,6 +201,24 @@ function createStoredSchedule(input: CreateScheduleInput): StoredSchedule {
     maxRuns: input.maxRuns ?? null,
     runs: [],
   };
+}
+
+async function createAgentMcpServer(
+  options: Parameters<typeof createBaseAgentMcpServer>[0],
+): Promise<Awaited<ReturnType<typeof createBaseAgentMcpServer>>> {
+  const server = await createBaseAgentMcpServer(options);
+  const registeredTools = ((server as any)._registeredTools ?? {}) as Record<
+    string,
+    { callback?: unknown; handler?: unknown }
+  >;
+
+  for (const tool of Object.values(registeredTools)) {
+    if (typeof tool.callback !== "function" && typeof tool.handler === "function") {
+      tool.callback = tool.handler;
+    }
+  }
+
+  return server;
 }
 
 function createPaseoWorktreeForMcpTest(options: {
