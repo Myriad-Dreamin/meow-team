@@ -1,9 +1,11 @@
 # thread-workspace-occupancy Specification
 
 ## Purpose
+
 Define how Meow Flow allocates, persists, lists, and releases running thread occupations across registered Paseo worktree slots.
 
 ## Requirements
+
 ### Requirement: `mfl run` allocates a thread id to an idle worktree
 
 The CLI SHALL provide `mfl run [--id <id>] [--stage <stage>] "request body"`

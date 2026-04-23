@@ -1,9 +1,11 @@
 # team-config-driven-dispatch Specification
 
 ## Purpose
+
 Define how Meow Flow loads, validates, and normalizes team configuration before deriving deterministic repository and worktree allocation plans.
 
 ## Requirements
+
 ### Requirement: `mfl plan` loads a team config module
 
 The `mfl plan` command SHALL load team configuration from an explicit `--config` path when provided, or else discover `team.config.ts` by searching from the current working directory toward the filesystem root.

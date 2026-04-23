@@ -235,11 +235,11 @@ export function WorkspaceDraftAgentTab({
 
   const isReadyForPendingAutoSubmit = Boolean(
     pendingAutoSubmit &&
-      draftInput.isHydrated &&
-      workspaceDirectory &&
-      client &&
-      !isSubmitting &&
-      !composerState.isModelLoading,
+    draftInput.isHydrated &&
+    workspaceDirectory &&
+    client &&
+    !isSubmitting &&
+    !composerState.isModelLoading,
   );
   const autoSubmitKeyRef = useRef<string | null>(null);
   useEffect(() => {

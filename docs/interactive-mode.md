@@ -15,18 +15,18 @@ layer. Thread state is stored in the shared SQLite database at
 
 ## Entry commands
 
-| Command | Purpose |
-| --- | --- |
-| `/meow-flow [content]` | Start or continue a MeowFlow thread. |
-| `/mfl [content]` | Alias for `/meow-flow [content]`. |
-| `/mfl plan [content]` | Launch a plan stage agent. |
-| `/mfl code [content]` | Launch a code stage agent. |
-| `/mfl review [content]` | Launch a review stage agent. |
-| `/mfl execute [content]` | Launch an execution stage agent. |
-| `/mfl validate [content]` | Launch a validation stage agent. |
-| `/mfl commit` | Commit current thread changes after reading new handoffs. |
-| `/mfl archive` | Archive the thread and OpenSpec proposal. |
-| `/mfl delete` | Delete the open proposal artifacts and archive the thread without reverting code. |
+| Command                   | Purpose                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `/meow-flow [content]`    | Start or continue a MeowFlow thread.                                              |
+| `/mfl [content]`          | Alias for `/meow-flow [content]`.                                                 |
+| `/mfl plan [content]`     | Launch a plan stage agent.                                                        |
+| `/mfl code [content]`     | Launch a code stage agent.                                                        |
+| `/mfl review [content]`   | Launch a review stage agent.                                                      |
+| `/mfl execute [content]`  | Launch an execution stage agent.                                                  |
+| `/mfl validate [content]` | Launch a validation stage agent.                                                  |
+| `/mfl commit`             | Commit current thread changes after reading new handoffs.                         |
+| `/mfl archive`            | Archive the thread and OpenSpec proposal.                                         |
+| `/mfl delete`             | Delete the open proposal artifacts and archive the thread without reverting code. |
 
 Legacy direct role commands still exist: `/meow-plan`, `/meow-code`,
 `/meow-review`, `/meow-execute`, and `/meow-validate`. They now use
