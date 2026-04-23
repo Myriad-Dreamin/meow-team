@@ -9,10 +9,12 @@
 
 import { $ } from "zx";
 import { readdir, writeFile } from "fs/promises";
-import { join, dirname } from "path";
+import { join, dirname, delimiter } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(__dirname, "..", "..", "..");
+const cliBinDir = join(__dirname, "..", "bin");
 const args = process.argv.slice(2);
 const testEnvDefaults = {
   PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
@@ -37,6 +39,10 @@ for (let i = 0; i < args.length; i++) {
 $.verbose = false;
 
 type Failure = { test: string; error: string };
+
+function workspaceRunCommand(filter: string, script: string): string {
+  return `pnpm -C ${JSON.stringify(repoRoot)} --filter ${filter} run ${script}`;
+}
 
 async function runCommand(label: string, command: string): Promise<void> {
   console.log(`\n${"─".repeat(50)}`);
@@ -70,7 +76,7 @@ async function writeJsonSummary({
     JSON.stringify(
       {
         suite: "cli-local",
-        command: "npm run test:local --workspace=@getpaseo/cli",
+        command: "pnpm --filter @getpaseo/cli run test",
         counts: {
           passed,
           failed,
@@ -111,9 +117,10 @@ let passed = 0;
 let failed = 0;
 const failures: Failure[] = [];
 
-await runCommand("Building relay", "npm run build --workspace=@getpaseo/relay");
-await runCommand("Building server", "npm run build --workspace=@getpaseo/server");
-await runCommand("Building CLI", "npm run build --workspace=@getpaseo/cli");
+await runCommand("Building relay", workspaceRunCommand("@getpaseo/relay", "build"));
+await runCommand("Building server", workspaceRunCommand("@getpaseo/server", "build"));
+await runCommand("Building CLI", workspaceRunCommand("@getpaseo/cli", "build"));
+process.env.PATH = [cliBinDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter);
 
 for (const testFile of testFiles) {
   const testPath = join(__dirname, testFile);

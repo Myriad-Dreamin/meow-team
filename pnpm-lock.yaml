@@ -334,6 +334,9 @@ importers:
       eslint-config-expo:
         specifier: ~10.0.0
         version: 10.0.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+      jsdom:
+        specifier: ^20.0.3
+        version: 20.0.3
       material-icon-theme:
         specifier: ^5.32.0
         version: 5.32.0

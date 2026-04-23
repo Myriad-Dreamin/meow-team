@@ -1799,6 +1799,138 @@ describe("DaemonClient", () => {
     });
   });
 
+  test("forwards loop run provider and model options", async () => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const promise = client.loopRun({
+      prompt: "Return any response",
+      cwd: "/tmp/project",
+      provider: "codex",
+      model: "gpt-5.4",
+      workerProvider: "codex",
+      workerModel: "gpt-5.4-mini",
+      verifierProvider: "opencode",
+      verifierModel: "openai/gpt-5-nano",
+      verifyPrompt: "Check the result",
+      verifyChecks: ["true"],
+      archive: true,
+      name: "smoke-loop",
+      sleepMs: 1000,
+      maxIterations: 2,
+      maxTimeMs: 5000,
+    });
+    expect(mock.sent).toHaveLength(1);
+
+    const request = JSON.parse(String(mock.sent[0])) as {
+      type: "session";
+      message: {
+        type: "loop/run";
+        requestId: string;
+        prompt: string;
+        cwd: string;
+        provider?: string;
+        model?: string;
+        workerProvider?: string;
+        workerModel?: string;
+        verifierProvider?: string;
+        verifierModel?: string;
+        verifyPrompt?: string;
+        verifyChecks?: string[];
+        archive?: boolean;
+        name?: string;
+        sleepMs?: number;
+        maxIterations?: number;
+        maxTimeMs?: number;
+      };
+    };
+    expect(request.message).toEqual(
+      expect.objectContaining({
+        type: "loop/run",
+        prompt: "Return any response",
+        cwd: "/tmp/project",
+        provider: "codex",
+        model: "gpt-5.4",
+        workerProvider: "codex",
+        workerModel: "gpt-5.4-mini",
+        verifierProvider: "opencode",
+        verifierModel: "openai/gpt-5-nano",
+        verifyPrompt: "Check the result",
+        verifyChecks: ["true"],
+        archive: true,
+        name: "smoke-loop",
+        sleepMs: 1000,
+        maxIterations: 2,
+        maxTimeMs: 5000,
+      }),
+    );
+
+    const timestamp = "2026-02-12T00:00:00.000Z";
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "loop/run/response",
+        payload: {
+          requestId: request.message.requestId,
+          loop: {
+            id: "loop-1",
+            name: "smoke-loop",
+            prompt: "Return any response",
+            cwd: "/tmp/project",
+            provider: "codex",
+            model: "gpt-5.4",
+            workerProvider: "codex",
+            workerModel: "gpt-5.4-mini",
+            verifierProvider: "opencode",
+            verifierModel: "openai/gpt-5-nano",
+            verifyPrompt: "Check the result",
+            verifyChecks: ["true"],
+            archive: true,
+            sleepMs: 1000,
+            maxIterations: 2,
+            maxTimeMs: 5000,
+            status: "running",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            startedAt: timestamp,
+            completedAt: null,
+            stopRequestedAt: null,
+            iterations: [],
+            logs: [],
+            nextLogSeq: 1,
+            activeIteration: null,
+            activeWorkerAgentId: null,
+            activeVerifierAgentId: null,
+          },
+          error: null,
+        },
+      }),
+    );
+
+    await expect(promise).resolves.toMatchObject({
+      loop: {
+        provider: "codex",
+        model: "gpt-5.4",
+        workerProvider: "codex",
+        workerModel: "gpt-5.4-mini",
+        verifierProvider: "opencode",
+        verifierModel: "openai/gpt-5-nano",
+      },
+    });
+  });
+
   test("lists commands with draft config via RPC", async () => {
     const logger = createMockLogger();
     const mock = createMockTransport();
