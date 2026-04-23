@@ -205,6 +205,11 @@ type OfferPayload = {
   relay: { endpoint: string };
 };
 
+type CliInvocation = {
+  cwd: string;
+  args: string[];
+};
+
 async function createFakeGhBin(): Promise<string> {
   const binDir = await mkdtemp(path.join(tmpdir(), "paseo-e2e-gh-bin-"));
   const ghPath = path.join(binDir, "gh");
@@ -284,19 +289,38 @@ function decodeOfferFromFragmentUrl(url: string): OfferPayload {
   return offer as OfferPayload;
 }
 
-function loadPairingOfferFromCli(repoRoot: string, paseoHomePath: string): OfferPayload {
-  const stdout = execFileSync(
-    process.execPath,
-    ["--import", "tsx", "packages/cli/src/index.ts", "daemon", "pair", "--json"],
-    {
+function resolveCliPairInvocation(repoRoot: string): CliInvocation {
+  const cliRoot = path.join(repoRoot, "packages", "cli");
+  const cliDistEntry = path.join(cliRoot, "dist", "index.js");
+  if (existsSync(cliDistEntry)) {
+    return {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        PASEO_HOME: paseoHomePath,
-      },
-      encoding: "utf8",
+      args: [cliDistEntry, "daemon", "pair", "--json"],
+    };
+  }
+
+  const cliSourceEntry = path.join(cliRoot, "src", "index.ts");
+  if (existsSync(cliSourceEntry)) {
+    return {
+      // Resolve the tsx loader from the CLI package, where it is declared.
+      cwd: cliRoot,
+      args: ["--import", "tsx", cliSourceEntry, "daemon", "pair", "--json"],
+    };
+  }
+
+  throw new Error(`Unable to find CLI entrypoint under ${cliRoot}`);
+}
+
+function loadPairingOfferFromCli(repoRoot: string, paseoHomePath: string): OfferPayload {
+  const invocation = resolveCliPairInvocation(repoRoot);
+  const stdout = execFileSync(process.execPath, invocation.args, {
+    cwd: invocation.cwd,
+    env: {
+      ...process.env,
+      PASEO_HOME: paseoHomePath,
     },
-  );
+    encoding: "utf8",
+  });
   const payload = JSON.parse(stdout) as { relayEnabled?: boolean; url?: string | null };
   if (payload.relayEnabled !== true || typeof payload.url !== "string") {
     throw new Error(`Unexpected daemon pair response: ${stdout}`);
