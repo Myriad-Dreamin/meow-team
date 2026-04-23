@@ -4,13 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'CHANGELOG.md'
-      - 'packages/website/**'
-      - '.github/actions/setup-pnpm/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'patches/**'
-      - '.github/workflows/deploy-website.yml'
+      - "CHANGELOG.md"
+      - "packages/website/**"
+      - ".github/actions/setup-pnpm/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "patches/**"
+      - ".github/workflows/deploy-website.yml"
   release:
     types: [published]
   workflow_dispatch:
@@ -25,7 +25,7 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
