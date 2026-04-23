@@ -9,11 +9,12 @@
 
 import { $ } from "zx";
 import { readdir, writeFile } from "fs/promises";
-import { join, dirname } from "path";
+import { join, dirname, delimiter } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..", "..");
+const cliBinDir = join(__dirname, "..", "bin");
 const args = process.argv.slice(2);
 const testEnvDefaults = {
   PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
@@ -119,6 +120,7 @@ const failures: Failure[] = [];
 await runCommand("Building relay", workspaceRunCommand("@getpaseo/relay", "build"));
 await runCommand("Building server", workspaceRunCommand("@getpaseo/server", "build"));
 await runCommand("Building CLI", workspaceRunCommand("@getpaseo/cli", "build"));
+process.env.PATH = [cliBinDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter);
 
 for (const testFile of testFiles) {
   const testPath = join(__dirname, testFile);
