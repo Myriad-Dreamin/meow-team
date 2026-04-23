@@ -112,15 +112,17 @@ stdenv.mkDerivation rec {
       ln -s "../../packages/$name" "$out/lib/paseo/node_modules/@getpaseo/$name"
     done
 
-    # Prune leftover pnpm workspace links for packages we do not ship in the
-    # daemon build. Keeping these broken links fails Nix's noBrokenSymlinks
-    # check during fixup.
-    if [ -d "$out/lib/paseo/node_modules/.pnpm/node_modules/@getpaseo" ]; then
-      for link in "$out/lib/paseo/node_modules/.pnpm/node_modules/@getpaseo"/*; do
-        if [ -L "$link" ] && [ ! -e "$link" ]; then
-          rm -f "$link"
-        fi
-      done
+    # Prune leftover pnpm hoist links for workspace packages we do not ship in
+    # the daemon build. Keeping these broken links fails Nix's
+    # noBrokenSymlinks check during fixup.
+    if [ -d "$out/lib/paseo/node_modules/.pnpm/node_modules" ]; then
+      find "$out/lib/paseo/node_modules/.pnpm/node_modules" -type l -exec bash -c '
+        for link do
+          if [ ! -e "$link" ]; then
+            rm -f "$link"
+          fi
+        done
+      ' bash {} +
     fi
 
     # Copy CLI bin entry
