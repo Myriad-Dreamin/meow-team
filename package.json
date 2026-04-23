@@ -38,6 +38,7 @@
     "format:check": "oxfmt --check .",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
+    "knip": "knip",
     "start": "pnpm --filter @getpaseo/server run start",
     "android": "pnpm --filter @getpaseo/app run android",
     "android:development": "pnpm --filter @getpaseo/app run android:development",
