@@ -75,8 +75,20 @@ describe("meow-flow foundation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: meow-flow");
+    expect(result.output).toContain("config");
     expect(result.output).toContain("plan");
     expect(result.output).toContain("Options:");
     expect(result.output).toContain("--version");
+  });
+
+  test("run cli:meow-flow config install --help succeeds and prints install help", () => {
+    const result = runCliAlias(["config", "install", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: meow-flow config install");
+    expect(result.output).toContain("<path>");
+    expect(result.output).toContain(".js");
+    expect(result.output).toContain(".ts");
+    expect(result.output).toContain("~/.local/shared/meow-flow/config.js");
   });
 });
