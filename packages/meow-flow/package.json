@@ -13,15 +13,16 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",
     "prepack": "pnpm run build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "commander": "^12.0.0"
+    "@myriaddreamin/meow-flow-core": "workspace:*",
+    "commander": "^12.0.0",
+    "tsx": "^4.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
-    "tsx": "^4.6.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

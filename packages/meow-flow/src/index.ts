@@ -1,7 +1,11 @@
 import { createCli } from "./cli.js";
 
-export function run(argv = process.argv): void {
-  createCli().parse(argv, { from: "node" });
+export async function run(argv = process.argv): Promise<void> {
+  await createCli().parseAsync(argv, { from: "node" });
 }
 
-run();
+void run().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${message}\n`);
+  process.exitCode = 1;
+});

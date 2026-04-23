@@ -75,6 +75,7 @@ describe("meow-flow foundation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: meow-flow");
+    expect(result.output).toContain("plan");
     expect(result.output).toContain("Options:");
     expect(result.output).toContain("--version");
   });
