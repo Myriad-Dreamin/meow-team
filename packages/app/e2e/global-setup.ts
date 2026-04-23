@@ -6,6 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import { Buffer } from "node:buffer";
 import dotenv from "dotenv";
+import { resolvePlaywrightSpeechEnabled } from "../src/utils/e2e-speech";
 import { forkPaseoHomeMetadata, resolvePaseoHomePath } from "./helpers/paseo-home-fork";
 
 type WaitForServerOptions = {
@@ -204,6 +205,11 @@ type OfferPayload = {
   relay: { endpoint: string };
 };
 
+type CliInvocation = {
+  cwd: string;
+  args: string[];
+};
+
 async function createFakeGhBin(): Promise<string> {
   const binDir = await mkdtemp(path.join(tmpdir(), "paseo-e2e-gh-bin-"));
   const ghPath = path.join(binDir, "gh");
@@ -283,19 +289,38 @@ function decodeOfferFromFragmentUrl(url: string): OfferPayload {
   return offer as OfferPayload;
 }
 
-function loadPairingOfferFromCli(repoRoot: string, paseoHomePath: string): OfferPayload {
-  const stdout = execFileSync(
-    process.execPath,
-    ["--import", "tsx", "packages/cli/src/index.ts", "daemon", "pair", "--json"],
-    {
+function resolveCliPairInvocation(repoRoot: string): CliInvocation {
+  const cliRoot = path.join(repoRoot, "packages", "cli");
+  const cliDistEntry = path.join(cliRoot, "dist", "index.js");
+  if (existsSync(cliDistEntry)) {
+    return {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        PASEO_HOME: paseoHomePath,
-      },
-      encoding: "utf8",
+      args: [cliDistEntry, "daemon", "pair", "--json"],
+    };
+  }
+
+  const cliSourceEntry = path.join(cliRoot, "src", "index.ts");
+  if (existsSync(cliSourceEntry)) {
+    return {
+      // Resolve the tsx loader from the CLI package, where it is declared.
+      cwd: cliRoot,
+      args: ["--import", "tsx", cliSourceEntry, "daemon", "pair", "--json"],
+    };
+  }
+
+  throw new Error(`Unable to find CLI entrypoint under ${cliRoot}`);
+}
+
+function loadPairingOfferFromCli(repoRoot: string, paseoHomePath: string): OfferPayload {
+  const invocation = resolveCliPairInvocation(repoRoot);
+  const stdout = execFileSync(process.execPath, invocation.args, {
+    cwd: invocation.cwd,
+    env: {
+      ...process.env,
+      PASEO_HOME: paseoHomePath,
     },
-  );
+    encoding: "utf8",
+  });
   const payload = JSON.parse(stdout) as { relayEnabled?: boolean; url?: string | null };
   if (payload.relayEnabled !== true || typeof payload.url !== "string") {
     throw new Error(`Unexpected daemon pair response: ${stdout}`);
@@ -390,28 +415,40 @@ export default async function globalSetup() {
     }
   };
 
-  const openAiUsable = await isOpenAiApiKeyUsable(process.env.OPENAI_API_KEY);
-  const defaultLocalModelsDir = path.join(
-    process.env.HOME ?? "",
-    ".paseo",
-    "models",
-    "local-speech",
-  );
-  const hasDefaultLocalModelsDir =
-    defaultLocalModelsDir.trim().length > 0 && existsSync(defaultLocalModelsDir);
-  const dictationProvider = openAiUsable ? "openai" : "local";
+  const speechEnabled = resolvePlaywrightSpeechEnabled(process.env);
+  let openAiUsable = false;
+  let localModelsDir: string | null = null;
 
-  if (dictationProvider === "local" && !hasDefaultLocalModelsDir) {
-    throw new Error(
-      "OpenAI key is not usable and local speech models are unavailable at ~/.paseo/models/local-speech. " +
-        "Either provide a valid OPENAI_API_KEY or install local speech models before running app e2e tests.",
+  if (speechEnabled) {
+    openAiUsable = await isOpenAiApiKeyUsable(process.env.OPENAI_API_KEY);
+    const defaultLocalModelsDir = path.join(
+      process.env.HOME ?? "",
+      ".paseo",
+      "models",
+      "local-speech",
+    );
+    const hasDefaultLocalModelsDir =
+      defaultLocalModelsDir.trim().length > 0 && existsSync(defaultLocalModelsDir);
+    const dictationProvider = openAiUsable ? "openai" : "local";
+
+    if (dictationProvider === "local" && !hasDefaultLocalModelsDir) {
+      throw new Error(
+        "Speech-enabled app e2e tests require either a usable OPENAI_API_KEY or local speech models " +
+          "at ~/.paseo/models/local-speech.",
+      );
+    }
+
+    localModelsDir = dictationProvider === "local" ? defaultLocalModelsDir : null;
+    console.log(
+      `[e2e] Speech features enabled. Dictation STT provider: ${dictationProvider}${
+        openAiUsable ? "" : " (OpenAI probe failed)"
+      }`,
+    );
+  } else {
+    console.log(
+      "[e2e] Speech features disabled for Playwright run. Set E2E_ENABLE_SPEECH=1 to enable dictation and voice mode.",
     );
   }
-
-  const localModelsDir = dictationProvider === "local" ? defaultLocalModelsDir : null;
-  console.log(
-    `[e2e] Dictation STT provider: ${dictationProvider}${openAiUsable ? "" : " (OpenAI probe failed)"}`,
-  );
 
   try {
     const relayDir = path.resolve(__dirname, "..", "..", "relay");
@@ -578,8 +615,8 @@ export default async function globalSetup() {
         PASEO_LISTEN: `0.0.0.0:${port}`,
         PASEO_RELAY_ENDPOINT: `127.0.0.1:${relayPort}`,
         PASEO_CORS_ORIGINS: `http://localhost:${metroPort}`,
-        PASEO_DICTATION_ENABLED: openAiUsable ? "1" : "0",
-        PASEO_VOICE_MODE_ENABLED: openAiUsable ? "1" : "0",
+        PASEO_DICTATION_ENABLED: speechEnabled ? "1" : "0",
+        PASEO_VOICE_MODE_ENABLED: speechEnabled ? "1" : "0",
         ...(openAiUsable
           ? {
               PASEO_DICTATION_STT_PROVIDER: "openai",
