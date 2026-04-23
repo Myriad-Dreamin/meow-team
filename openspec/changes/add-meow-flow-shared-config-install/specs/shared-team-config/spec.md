@@ -37,9 +37,9 @@ The installed shared config SHALL preserve the same planning inputs that the sou
 - **THEN** the installed shared config produces the same resolved repository candidate directories as the source config
 - **AND** later `meow-flow` commands do not need the shared file to live next to the original source config
 
-### Requirement: `meow-flow plan` prefers explicit config, then shared install
+### Requirement: `meow-flow plan` uses only explicit or shared config
 
-`meow-flow plan` SHALL resolve config from an explicit `--config` path when provided, otherwise from `~/.local/shared/meow-flow/config.js` when present, and otherwise from the nearest local `team.config.ts` or `team.config.js`.
+`meow-flow plan` SHALL resolve config from an explicit `--config` path when provided, otherwise from `~/.local/shared/meow-flow/config.js` when present, and otherwise fail without falling back to local config discovery.
 
 #### Scenario: Explicit config path wins over the shared install
 
@@ -54,9 +54,10 @@ The installed shared config SHALL preserve the same planning inputs that the sou
 - **THEN** the CLI loads the shared installed config
 - **AND** the plan output reports `~/.local/shared/meow-flow/config.js` as the resolved config path
 
-#### Scenario: Local discovery remains available when no shared install exists
+#### Scenario: Missing shared config fails without local discovery
 
 - **WHEN** a user runs `meow-flow plan` without `--config`
 - **AND** `~/.local/shared/meow-flow/config.js` does not exist
-- **AND** the current directory tree contains `team.config.ts` or `team.config.js`
-- **THEN** the CLI loads the nearest discovered local config
+- **THEN** the command exits with an error
+- **AND** the error tells the user to install a shared config with `meow-flow config install <path>`
+- **AND** the CLI does not search for or load `team.config.ts` or `team.config.js` from the current directory tree

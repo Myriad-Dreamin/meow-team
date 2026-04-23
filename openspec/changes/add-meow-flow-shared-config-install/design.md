@@ -10,7 +10,7 @@
 - Add `meow-flow config install <path>` with support for `.js` and `.ts` source files.
 - Ensure a TypeScript-authored source becomes a JavaScript artifact before it is written to the shared location.
 - Keep installed config loadable without relying on the original source file location.
-- Preserve an explicit `--config` override and avoid an abrupt break for existing repo-local workflows.
+- Preserve an explicit `--config` override while making default config loading shared-only.
 
 **Non-Goals:**
 
@@ -39,15 +39,14 @@ The install command should reuse the same source-module evaluation path that `pl
 
 This minimizes new behavior surfaces and keeps `plan` plus `config install` consistent about what a valid team config means.
 
-### 4. Prefer shared config by default, but keep a compatibility fallback
+### 4. Use shared config by default without local fallback
 
 Commands that load config should resolve in this order:
 
 1. `--config <path>`
 2. `~/.local/shared/meow-flow/config.js`
-3. nearest local `team.config.ts` or `team.config.js`
 
-Preferring the shared install satisfies the new requirement, while the fallback avoids turning the change into an immediate workflow break for existing repos and tests. If the team wants shared-only behavior later, that can be a follow-up tightening once installation is established.
+The CLI should not fall back to local `team.config.ts` or `team.config.js` discovery. If the shared config is missing and the user did not pass `--config`, the command should fail with a diagnostic that points to `meow-flow config install <path>`. This makes the shared install the real source of truth instead of a preferred-but-optional cache.
 
 ### 5. Restrict accepted source types to `.js` and `.ts`
 
@@ -58,18 +57,17 @@ This matches the requested support matrix and avoids ambiguous runtime behavior 
 ## Risks / Trade-offs
 
 - [Installed config bakes in absolute repository paths] -> Reinstall after moving a repository tree; document this explicitly in CLI help and README.
-- [Shared-preferred resolution may surprise users who still expect local discovery] -> Keep `--config` explicit override and retain local fallback for now.
+- [Removing local discovery may surprise users who still expect repo-local defaults] -> Keep `--config` explicit override and make the missing-install diagnostic point directly to `meow-flow config install <path>`.
 - [Portable install output loses source comments and helper structure] -> Treat the shared file as generated runtime state, not an authoring surface.
 - [Install and plan could drift if they use different validation paths] -> Route both through the same module evaluation and normalization helpers.
 
 ## Migration Plan
 
 - Add the install command and shared-config path helpers.
-- Update `plan` loading precedence to prefer the shared artifact while preserving explicit override and legacy fallback.
+- Update `plan` loading precedence to use explicit override first, then the shared artifact, and fail when neither is available.
 - Add tests for `.ts` install, `.js` install, unsupported extensions, and config loading precedence.
 - Update package docs to explain that the shared file is generated output and should be refreshed via `meow-flow config install`.
 
 ## Open Questions
 
-- Should the compatibility fallback to local discovery stay indefinitely, or should it become a deprecation path once the install flow is stable?
 - Should `config install` print a short notice when it overwrites an existing shared config from another repository?
