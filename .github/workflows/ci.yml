@@ -128,7 +128,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --filter @getpaseo/app exec playwright install --with-deps chromium
 
       - name: Build highlight dependency
         run: pnpm --filter @getpaseo/highlight run build
@@ -149,7 +149,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --filter @getpaseo/app exec playwright install --with-deps chromium
 
       - name: Build highlight dependency
         run: pnpm --filter @getpaseo/highlight run build
