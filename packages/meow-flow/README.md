@@ -1,19 +1,46 @@
 # meow-flow
 
-`meow-flow` loads a project-local `team.config.ts` file and turns it into a
-deterministic repository/worktree planning result.
+`meow-flow` installs a team config into a shared local artifact and turns that
+config into a deterministic repository/worktree planning result.
 
-## `team.config.ts` discovery
+## Shared config install
+
+Install a JavaScript or TypeScript team config before running planning commands:
+
+```bash
+pnpm run cli:meow-flow -- config install ./team.config.ts
+pnpm run cli:meow-flow -- config install ./team.config.js
+```
+
+The install command accepts only `.ts` and `.js` source files. It evaluates the
+source config in the source project context, normalizes repository paths, and
+writes a generated JavaScript artifact to:
+
+```text
+~/.local/shared/meow-flow/config.js
+```
+
+Treat the shared file as generated runtime state. Do not edit it by hand. Re-run
+`meow-flow config install <path>` whenever the source config changes, and also
+after moving the source repository because the installed artifact contains
+absolute repository paths.
+
+## Config resolution
 
 `meow-flow plan` resolves config in this order:
 
 1. `--config <path>` when provided
-2. The nearest `team.config.ts` found by searching from the current working
-   directory toward the filesystem root
+2. The installed shared artifact at `~/.local/shared/meow-flow/config.js`
+
+`meow-flow plan` does not search for a local `team.config.ts` or
+`team.config.js` by default. If no shared config has been installed, it fails and
+prints the `meow-flow config install <path>` command to run.
 
 When the config uses TypeScript path aliases such as `@/...`, `meow-flow`
 looks for the nearest ancestor `tsconfig.json` next to that config and uses it
-as the loader context.
+as the loader context while installing or when loading an explicit `--config`
+path. The generated shared JavaScript artifact does not need the original
+TypeScript context at plan time.
 
 ## Supported config shape
 
@@ -56,6 +83,7 @@ Notes:
 Run:
 
 ```bash
+pnpm run cli:meow-flow -- config install ./team.config.ts
 pnpm run cli:meow-flow -- plan
 pnpm run cli:meow-flow -- plan --json
 ```

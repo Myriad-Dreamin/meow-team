@@ -12,11 +12,11 @@ type PlanCommandJsonOutput = ReturnType<typeof buildPlanCommandJsonOutput>;
 export function createPlanCommand(): Command {
   return new Command("plan")
     .description(
-      "Load team.config.ts and print the resolved repository candidates plus worktree allocation plan",
+      "Load explicit or installed shared team config and print the resolved repository candidates plus worktree allocation plan",
     )
     .option(
       "-c, --config <path>",
-      "load an explicit config path instead of discovering team.config.ts from the current directory",
+      "load an explicit config path instead of the installed shared config",
     )
     .option("--json", "print machine-readable planning output")
     .action((options: PlanCommandOptions) => {
