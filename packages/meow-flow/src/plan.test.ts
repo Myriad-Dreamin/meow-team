@@ -26,6 +26,28 @@ type CliRunResult = {
   readonly output: string;
 };
 
+type PlanJsonOutput = {
+  readonly configPath: string;
+  readonly tsconfigPath: string | null;
+  readonly notifications: { readonly target: string };
+  readonly dispatch: { readonly maxConcurrentWorkers: number | null };
+  readonly repositoryCandidates: Array<{
+    readonly id: string;
+    readonly label: string;
+    readonly directory: string;
+    readonly priority: number;
+  }>;
+  readonly worktreeAllocations: Array<{
+    readonly repositoryId: string;
+    readonly repositoryLabel: string;
+    readonly repositoryDirectory: string;
+    readonly worktreeParentDirectory: string;
+    readonly worktreeTheme: string;
+    readonly worktreeNameTemplate: string;
+    readonly priority: number;
+  }>;
+};
+
 afterEach(() => {
   while (tempDirectories.length > 0) {
     const nextDirectory = tempDirectories.pop();
@@ -46,7 +68,11 @@ function writeFile(filePath: string, content: string): void {
   writeFileSync(filePath, content);
 }
 
-function runCli(args: readonly string[], cwd: string): CliRunResult {
+function runCli(
+  args: readonly string[],
+  cwd: string,
+  options: { readonly env?: NodeJS.ProcessEnv } = {},
+): CliRunResult {
   const outputDirectory = createTempDirectory("meow-flow-plan-output-");
   const stdoutPath = path.join(outputDirectory, "stdout.txt");
   const stderrPath = path.join(outputDirectory, "stderr.txt");
@@ -58,6 +84,10 @@ function runCli(args: readonly string[], cwd: string): CliRunResult {
     ["--import", TSX_LOADER_PATH, CLI_ENTRY_PATH, ...args],
     {
       cwd,
+      env: {
+        ...process.env,
+        ...options.env,
+      },
       stdio: ["ignore", stdoutFd, stderrFd],
     },
   );
@@ -76,22 +106,31 @@ function runCli(args: readonly string[], cwd: string): CliRunResult {
   };
 }
 
-describe("meow-flow plan", () => {
-  test("fails clearly when team.config.ts cannot be discovered", () => {
-    const workingDirectory = createTempDirectory("meow-flow-plan-missing-");
-    const result = runCli(["plan"], workingDirectory);
+function testHomeEnv(homeDirectory: string): NodeJS.ProcessEnv {
+  return {
+    HOME: homeDirectory,
+    USERPROFILE: homeDirectory,
+  };
+}
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("team.config.ts");
-    expect(result.output).toContain("--config <path>");
-  });
+function sharedConfigPath(homeDirectory: string): string {
+  return path.join(homeDirectory, ".local", "shared", "meow-flow", "config.js");
+}
 
-  test("discovers the nearest config, supports tsconfig path aliases, and emits stable JSON output", () => {
-    const projectDirectory = createTempDirectory("meow-flow-plan-discovered-");
+function parsePlanJson(result: CliRunResult): PlanJsonOutput {
+  return JSON.parse(result.stdout) as PlanJsonOutput;
+}
+
+describe("meow-flow config install and plan", () => {
+  test("installs a TypeScript config as portable shared JavaScript and uses it by default", () => {
+    const homeDirectory = createTempDirectory("meow-flow-home-ts-install-");
+    const env = testHomeEnv(homeDirectory);
+    const projectDirectory = createTempDirectory("meow-flow-plan-installed-ts-");
     const nestedDirectory = path.join(projectDirectory, "apps", "mobile");
     const backendDirectory = path.join(projectDirectory, "repos", "backend");
     const websiteDirectory = path.join(projectDirectory, "repos", "website");
 
+    writeFile(path.join(homeDirectory, "package.json"), '{\n  "type": "module"\n}\n');
     mkdirSync(nestedDirectory, { recursive: true });
     mkdirSync(backendDirectory, { recursive: true });
     mkdirSync(websiteDirectory, { recursive: true });
@@ -130,8 +169,10 @@ export const repositories = [
       `.trimStart(),
     );
 
+    const sourceConfigPath = path.join(projectDirectory, "team.config.ts");
+
     writeFile(
-      path.join(projectDirectory, "team.config.ts"),
+      sourceConfigPath,
       `
 import { notificationTarget, repositories } from "@/team-data";
 
@@ -147,37 +188,38 @@ export default {
       `.trimStart(),
     );
 
-    const firstRun = runCli(["plan", "--json"], nestedDirectory);
-    const secondRun = runCli(["plan", "--json"], nestedDirectory);
+    const installResult = runCli(["config", "install", sourceConfigPath], projectDirectory, {
+      env,
+    });
+
+    expect(installResult.status).toBe(0);
+    expect(installResult.output).toContain("Installed shared Meow Flow config");
+    expect(installResult.output).toContain(path.join(projectDirectory, "tsconfig.json"));
+
+    const installedConfigPath = sharedConfigPath(homeDirectory);
+    const installedConfig = readFileSync(installedConfigPath, "utf8");
+
+    expect(installedConfig).toContain("module.exports =");
+    expect(installedConfig).toContain(backendDirectory);
+    expect(installedConfig).toContain(websiteDirectory);
+    expect(installedConfig).not.toContain("@/team-data");
+
+    rmSync(sourceConfigPath, { force: true });
+    rmSync(path.join(projectDirectory, "src"), { recursive: true, force: true });
+
+    const firstRun = runCli(["plan", "--json"], nestedDirectory, { env });
+    const secondRun = runCli(["plan", "--json"], createTempDirectory("meow-flow-other-cwd-"), {
+      env,
+    });
 
     expect(firstRun.status).toBe(0);
     expect(secondRun.status).toBe(0);
     expect(firstRun.stdout).toBe(secondRun.stdout);
 
-    const payload = JSON.parse(firstRun.stdout) as {
-      configPath: string;
-      tsconfigPath: string | null;
-      notifications: { target: string };
-      dispatch: { maxConcurrentWorkers: number | null };
-      repositoryCandidates: Array<{
-        id: string;
-        label: string;
-        directory: string;
-        priority: number;
-      }>;
-      worktreeAllocations: Array<{
-        repositoryId: string;
-        repositoryLabel: string;
-        repositoryDirectory: string;
-        worktreeParentDirectory: string;
-        worktreeTheme: string;
-        worktreeNameTemplate: string;
-        priority: number;
-      }>;
-    };
+    const payload = parsePlanJson(firstRun);
 
-    expect(payload.configPath).toBe(path.join(projectDirectory, "team.config.ts"));
-    expect(payload.tsconfigPath).toBe(path.join(projectDirectory, "tsconfig.json"));
+    expect(payload.configPath).toBe(installedConfigPath);
+    expect(payload.tsconfigPath).toBeNull();
     expect(payload.notifications.target).toBe("vscode");
     expect(payload.dispatch.maxConcurrentWorkers).toBe(3);
     expect(payload.repositoryCandidates).toEqual([
@@ -216,24 +258,32 @@ export default {
     ]);
   });
 
-  test("prefers an explicit --config path over discovery", () => {
-    const workspaceDirectory = createTempDirectory("meow-flow-plan-explicit-");
-    const outerConfigDirectory = path.join(workspaceDirectory, "outer");
-    const innerConfigDirectory = path.join(workspaceDirectory, "inner");
-    const nestedDirectory = path.join(innerConfigDirectory, "nested");
+  test("installs JavaScript configs and overwrites the shared artifact", () => {
+    const homeDirectory = createTempDirectory("meow-flow-home-js-install-");
+    const env = testHomeEnv(homeDirectory);
+    const workspaceDirectory = createTempDirectory("meow-flow-js-install-");
+    const firstProjectDirectory = path.join(workspaceDirectory, "first");
+    const secondProjectDirectory = path.join(workspaceDirectory, "second");
+    const firstRepositoryDirectory = path.join(firstProjectDirectory, "repos", "first");
+    const secondRepositoryDirectory = path.join(secondProjectDirectory, "repos", "second");
 
-    mkdirSync(path.join(outerConfigDirectory, "repos", "outer"), { recursive: true });
-    mkdirSync(path.join(innerConfigDirectory, "repos", "inner"), { recursive: true });
-    mkdirSync(nestedDirectory, { recursive: true });
+    mkdirSync(firstRepositoryDirectory, { recursive: true });
+    mkdirSync(secondRepositoryDirectory, { recursive: true });
+
+    const firstConfigPath = path.join(firstProjectDirectory, "team.config.js");
+    const secondConfigPath = path.join(secondProjectDirectory, "team.config.js");
 
     writeFile(
-      path.join(outerConfigDirectory, "team.config.ts"),
+      firstConfigPath,
       `
-export default {
+module.exports = {
+  notifications: {
+    target: "browser",
+  },
   repositories: [
     {
-      id: "outer",
-      directory: "./repos/outer",
+      id: "first",
+      directory: "./repos/first",
     },
   ],
 };
@@ -241,39 +291,161 @@ export default {
     );
 
     writeFile(
-      path.join(innerConfigDirectory, "team.config.ts"),
+      secondConfigPath,
       `
-export default {
+module.exports = {
+  notifications: {
+    target: "android",
+  },
   repositories: [
     {
-      id: "inner",
-      directory: "./repos/inner",
+      id: "second",
+      directory: "./repos/second",
     },
   ],
 };
       `.trimStart(),
     );
 
-    const result = runCli(
-      ["plan", "--config", path.join(outerConfigDirectory, "team.config.ts"), "--json"],
-      nestedDirectory,
-    );
+    const firstInstall = runCli(["config", "install", firstConfigPath], firstProjectDirectory, {
+      env,
+    });
+    const secondInstall = runCli(["config", "install", secondConfigPath], secondProjectDirectory, {
+      env,
+    });
 
-    expect(result.status).toBe(0);
-    const payload = JSON.parse(result.stdout) as {
-      configPath: string;
-      repositoryCandidates: Array<{ id: string }>;
-    };
+    expect(firstInstall.status).toBe(0);
+    expect(secondInstall.status).toBe(0);
+    expect(secondInstall.output).toContain("Overwrote existing shared config.");
 
-    expect(payload.configPath).toBe(path.join(outerConfigDirectory, "team.config.ts"));
-    expect(payload.repositoryCandidates.map((repository) => repository.id)).toEqual(["outer"]);
+    const installedConfig = readFileSync(sharedConfigPath(homeDirectory), "utf8");
+
+    expect(installedConfig).toContain(secondRepositoryDirectory);
+    expect(installedConfig).not.toContain(firstRepositoryDirectory);
+
+    const planResult = runCli(["plan", "--json"], workspaceDirectory, { env });
+
+    expect(planResult.status).toBe(0);
+    expect(parsePlanJson(planResult).repositoryCandidates).toEqual([
+      {
+        id: "second",
+        label: "second",
+        directory: secondRepositoryDirectory,
+        priority: 0,
+      },
+    ]);
   });
 
-  test("reports field-specific validation errors for invalid config", () => {
-    const workingDirectory = createTempDirectory("meow-flow-plan-invalid-");
+  test("rejects unsupported config extensions without overwriting the shared artifact", () => {
+    const homeDirectory = createTempDirectory("meow-flow-home-unsupported-");
+    const env = testHomeEnv(homeDirectory);
+    const projectDirectory = createTempDirectory("meow-flow-unsupported-config-");
+    const unsupportedConfigPath = path.join(projectDirectory, "team.config.mjs");
+    const installedConfigPath = sharedConfigPath(homeDirectory);
+    const existingConfig =
+      'module.exports = { repositories: [{ id: "existing", directory: "/tmp/existing" }] };\n';
+
+    writeFile(installedConfigPath, existingConfig);
+    writeFile(
+      unsupportedConfigPath,
+      `
+export default {
+  repositories: [
+    {
+      id: "unsupported",
+      directory: ".",
+    },
+  ],
+};
+      `.trimStart(),
+    );
+
+    const result = runCli(["config", "install", unsupportedConfigPath], projectDirectory, {
+      env,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(".js");
+    expect(result.output).toContain(".ts");
+    expect(readFileSync(installedConfigPath, "utf8")).toBe(existingConfig);
+  });
+
+  test("prefers an explicit --config path over the shared config", () => {
+    const homeDirectory = createTempDirectory("meow-flow-home-explicit-");
+    const env = testHomeEnv(homeDirectory);
+    const workspaceDirectory = createTempDirectory("meow-flow-plan-explicit-");
+    const explicitConfigDirectory = path.join(workspaceDirectory, "explicit");
+    const nestedDirectory = path.join(explicitConfigDirectory, "nested");
+    const explicitRepositoryDirectory = path.join(explicitConfigDirectory, "repos", "explicit");
+
+    mkdirSync(nestedDirectory, { recursive: true });
+    mkdirSync(explicitRepositoryDirectory, { recursive: true });
+    writeFile(
+      sharedConfigPath(homeDirectory),
+      "throw new Error('shared config should not load');\n",
+    );
+
+    const explicitConfigPath = path.join(explicitConfigDirectory, "team.config.ts");
+
+    writeFile(
+      explicitConfigPath,
+      `
+export default {
+  repositories: [
+    {
+      id: "explicit",
+      directory: "./repos/explicit",
+    },
+  ],
+};
+      `.trimStart(),
+    );
+
+    const result = runCli(["plan", "--config", explicitConfigPath, "--json"], nestedDirectory, {
+      env,
+    });
+
+    expect(result.status).toBe(0);
+    const payload = parsePlanJson(result);
+
+    expect(payload.configPath).toBe(explicitConfigPath);
+    expect(payload.repositoryCandidates.map((repository) => repository.id)).toEqual(["explicit"]);
+  });
+
+  test("fails without local discovery when the shared config is missing", () => {
+    const homeDirectory = createTempDirectory("meow-flow-home-missing-");
+    const env = testHomeEnv(homeDirectory);
+    const workingDirectory = createTempDirectory("meow-flow-plan-missing-");
 
     writeFile(
       path.join(workingDirectory, "team.config.ts"),
+      `
+export default {
+  repositories: [
+    {
+      id: "local",
+      directory: ".",
+    },
+  ],
+};
+      `.trimStart(),
+    );
+
+    const result = runCli(["plan"], workingDirectory, { env });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(sharedConfigPath(homeDirectory));
+    expect(result.output).toContain("meow-flow config install <path>");
+  });
+
+  test("reports field-specific validation errors for invalid explicit config", () => {
+    const homeDirectory = createTempDirectory("meow-flow-home-invalid-");
+    const env = testHomeEnv(homeDirectory);
+    const workingDirectory = createTempDirectory("meow-flow-plan-invalid-");
+    const configPath = path.join(workingDirectory, "team.config.ts");
+
+    writeFile(
+      configPath,
       `
 export default {
   notifications: {
@@ -288,7 +460,7 @@ export default {
       `.trimStart(),
     );
 
-    const result = runCli(["plan"], workingDirectory);
+    const result = runCli(["plan", "--config", configPath], workingDirectory, { env });
 
     expect(result.status).toBe(1);
     expect(result.output).toContain("notifications.target");

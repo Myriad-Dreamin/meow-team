@@ -8,9 +8,9 @@ import {
   normalizeMeowFlowTeamConfig,
   type NormalizedMeowFlowTeamConfig,
 } from "@myriaddreamin/meow-flow-core";
+import { getSharedMeowFlowConfigPath, SharedTeamConfigNotFoundError } from "./shared-config.js";
 
 const require = createRequire(import.meta.url);
-const DEFAULT_CONFIG_FILE_NAME = "team.config.ts";
 const DEFAULT_TSCONFIG_FILE_NAME = "tsconfig.json";
 const SOURCE_FILE_PATH = fileURLToPath(import.meta.url);
 const SOURCE_DIRECTORY = path.dirname(SOURCE_FILE_PATH);
@@ -23,15 +23,6 @@ export type LoadedMeowFlowTeamConfig = {
   readonly tsconfigPath: string | null;
   readonly config: NormalizedMeowFlowTeamConfig;
 };
-
-export class TeamConfigNotFoundError extends Error {
-  constructor(cwd: string) {
-    super(
-      `Unable to find ${DEFAULT_CONFIG_FILE_NAME} from ${cwd}. Create ${DEFAULT_CONFIG_FILE_NAME} or pass --config <path>.`,
-    );
-    this.name = "TeamConfigNotFoundError";
-  }
-}
 
 export class TeamConfigLoadError extends Error {
   readonly configPath: string;
@@ -81,12 +72,12 @@ function resolveTeamConfigPath(cwd: string, explicitConfigPath: string | undefin
     return resolvedPath;
   }
 
-  const discoveredPath = discoverAncestorFile(cwd, DEFAULT_CONFIG_FILE_NAME);
-  if (discoveredPath === null) {
-    throw new TeamConfigNotFoundError(cwd);
+  const sharedConfigPath = getSharedMeowFlowConfigPath();
+  if (!existsSync(sharedConfigPath)) {
+    throw new SharedTeamConfigNotFoundError(sharedConfigPath);
   }
 
-  return discoveredPath;
+  return sharedConfigPath;
 }
 
 function discoverAncestorFile(startDirectory: string, fileName: string): string | null {
@@ -117,16 +108,20 @@ function evaluateTeamConfigModule(input: {
   const stderrPath = path.join(outputDirectory, "stderr.txt");
   const stdoutFd = openSync(stdoutPath, "w");
   const stderrFd = openSync(stderrPath, "w");
+  const env = { ...process.env };
+
+  if (input.tsconfigPath === null) {
+    delete env.TSX_TSCONFIG_PATH;
+  } else {
+    env.TSX_TSCONFIG_PATH = input.tsconfigPath;
+  }
 
   const result = spawnSync(
     process.execPath,
     ["--import", TSX_LOADER_PATH, EVALUATOR_ENTRY_PATH, input.configPath],
     {
       cwd: input.cwd,
-      env: {
-        ...process.env,
-        ...(input.tsconfigPath === null ? {} : { TSX_TSCONFIG_PATH: input.tsconfigPath }),
-      },
+      env,
       stdio: ["ignore", stdoutFd, stderrFd],
     },
   );
