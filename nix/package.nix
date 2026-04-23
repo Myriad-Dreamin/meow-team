@@ -48,6 +48,11 @@ stdenv.mkDerivation rec {
     hash = "sha256-SLUO1fAHoM8b5CYxBppsQs9iGL9SlUQEfSvPD0xss8c=";
   };
 
+  # nixpkgs may provide a newer pnpm 10.x than the repo's pinned packageManager.
+  # Without this, pnpm tries to install the pinned version into ~/.local/share
+  # during sandboxed builds and fails with EACCES under /homeless-shelter.
+  npm_config_manage_package_manager_versions = "false";
+
   nativeBuildInputs = [
     nodejs
     pnpm.configHook
@@ -59,9 +64,6 @@ stdenv.mkDerivation rec {
     libuv
   ];
 
-  dontConfigure = true;
-  dontInstall = true;
-
   buildPhase = ''
     runHook preBuild
 
@@ -69,10 +71,18 @@ stdenv.mkDerivation rec {
     # Speech-related native modules (sherpa-onnx, onnxruntime-node) are
     # intentionally left unbuilt — they're lazily loaded and gracefully
     # degrade when unavailable.
-    pnpm rebuild node-pty
+    pnpm --config.manage-package-manager-versions=false rebuild node-pty
 
-    # Build all daemon packages in dependency order (defined in package.json)
-    pnpm run build:daemon
+    # Build daemon packages without routing back through root scripts that
+    # invoke pnpm again. Nested pnpm calls re-trigger the packageManager check
+    # and try to install the pinned CLI version inside the Nix sandbox.
+    pnpm --config.manage-package-manager-versions=false --filter @getpaseo/highlight run build
+    pnpm --config.manage-package-manager-versions=false --filter @getpaseo/relay run build
+    pnpm --config.manage-package-manager-versions=false --filter @getpaseo/server exec \
+      node -e "require('node:fs').rmSync('dist',{ recursive: true, force: true })"
+    pnpm --config.manage-package-manager-versions=false --filter @getpaseo/server run build:lib
+    pnpm --config.manage-package-manager-versions=false --filter @getpaseo/server run build:scripts
+    pnpm --config.manage-package-manager-versions=false --filter @getpaseo/cli run build
 
     runHook postBuild
   '';
@@ -88,21 +98,30 @@ stdenv.mkDerivation rec {
     # Copy node_modules (preserving workspace symlinks)
     cp -a node_modules $out/lib/paseo/
 
-    # Auto-detect which @getpaseo/* packages were built by build:daemon
-    # (they'll have a dist/ directory). Copy those and remove the rest.
-    for link in $out/lib/paseo/node_modules/@getpaseo/*; do
-      name=$(basename "$link")
-      if [ -d "packages/$name/dist" ]; then
-        mkdir -p "$out/lib/paseo/packages/$name"
-        cp "packages/$name/package.json" "$out/lib/paseo/packages/$name/"
-        cp -a "packages/$name/dist" "$out/lib/paseo/packages/$name/"
-        if [ -d "packages/$name/node_modules" ]; then
-          cp -a "packages/$name/node_modules" "$out/lib/paseo/packages/$name/"
-        fi
-      else
-        rm -f "$link"
+    # Copy the daemon workspace packages we built and recreate the workspace
+    # symlinks that runtime resolution expects under node_modules/@getpaseo.
+    mkdir -p "$out/lib/paseo/node_modules/@getpaseo"
+    for name in highlight relay server cli; do
+      mkdir -p "$out/lib/paseo/packages/$name"
+      cp "packages/$name/package.json" "$out/lib/paseo/packages/$name/"
+      cp -a "packages/$name/dist" "$out/lib/paseo/packages/$name/"
+      if [ -d "packages/$name/node_modules" ]; then
+        cp -a "packages/$name/node_modules" "$out/lib/paseo/packages/$name/"
       fi
+      rm -f "$out/lib/paseo/node_modules/@getpaseo/$name"
+      ln -s "../../packages/$name" "$out/lib/paseo/node_modules/@getpaseo/$name"
     done
+
+    # Prune leftover pnpm workspace links for packages we do not ship in the
+    # daemon build. Keeping these broken links fails Nix's noBrokenSymlinks
+    # check during fixup.
+    if [ -d "$out/lib/paseo/node_modules/.pnpm/node_modules/@getpaseo" ]; then
+      for link in "$out/lib/paseo/node_modules/.pnpm/node_modules/@getpaseo"/*; do
+        if [ -L "$link" ] && [ ! -e "$link" ]; then
+          rm -f "$link"
+        fi
+      done
+    fi
 
     # Copy CLI bin entry
     mkdir -p $out/lib/paseo/packages/cli/bin
