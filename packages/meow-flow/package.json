@@ -17,11 +17,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "commander": "^12.0.0"
+    "@myriaddreamin/meow-flow-core": "workspace:*",
+    "commander": "^12.0.0",
+    "tsx": "^4.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
-    "tsx": "^4.6.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }
