@@ -3713,7 +3713,12 @@ export class Session {
       const snapshot = await this.workspaceGitService.getSnapshot(cwd);
       return snapshot.git.isDirty === true;
     } catch (error) {
-      throw new Error(`Unable to inspect git status for ${cwd}: ${(error as Error).message}`);
+      throw Object.assign(
+        new Error(`Unable to inspect git status for ${cwd}: ${(error as Error).message}`),
+        {
+          cause: error,
+        },
+      );
     }
   }
 
@@ -7500,7 +7505,9 @@ export class Session {
 
       const final = await this.getAgentPayloadById(agentId);
       if (!final) {
-        throw new Error(`Agent ${agentId} disappeared while waiting`);
+        throw Object.assign(new Error(`Agent ${agentId} disappeared while waiting`), {
+          cause: error,
+        });
       }
       this.emit({
         type: "wait_for_finish_response",
@@ -8769,11 +8776,12 @@ export class Session {
 
     this.emitTerminalsChangedSnapshot({
       cwd: event.cwd,
-      terminals: this.filterStandaloneTerminals(event.terminals).map((terminal) => ({
-        id: terminal.id,
-        name: terminal.name,
-        ...(terminal.title ? { title: terminal.title } : {}),
-      })),
+      terminals: this.filterStandaloneTerminals(event.terminals).map((terminal) =>
+        Object.assign(
+          { id: terminal.id, name: terminal.name },
+          terminal.title ? { title: terminal.title } : {},
+        ),
+      ),
     });
   }
 
