@@ -6,6 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import { Buffer } from "node:buffer";
 import dotenv from "dotenv";
+import { resolvePlaywrightSpeechEnabled } from "../src/utils/e2e-speech";
 import { forkPaseoHomeMetadata, resolvePaseoHomePath } from "./helpers/paseo-home-fork";
 
 type WaitForServerOptions = {
@@ -390,28 +391,40 @@ export default async function globalSetup() {
     }
   };
 
-  const openAiUsable = await isOpenAiApiKeyUsable(process.env.OPENAI_API_KEY);
-  const defaultLocalModelsDir = path.join(
-    process.env.HOME ?? "",
-    ".paseo",
-    "models",
-    "local-speech",
-  );
-  const hasDefaultLocalModelsDir =
-    defaultLocalModelsDir.trim().length > 0 && existsSync(defaultLocalModelsDir);
-  const dictationProvider = openAiUsable ? "openai" : "local";
+  const speechEnabled = resolvePlaywrightSpeechEnabled(process.env);
+  let openAiUsable = false;
+  let localModelsDir: string | null = null;
 
-  if (dictationProvider === "local" && !hasDefaultLocalModelsDir) {
-    throw new Error(
-      "OpenAI key is not usable and local speech models are unavailable at ~/.paseo/models/local-speech. " +
-        "Either provide a valid OPENAI_API_KEY or install local speech models before running app e2e tests.",
+  if (speechEnabled) {
+    openAiUsable = await isOpenAiApiKeyUsable(process.env.OPENAI_API_KEY);
+    const defaultLocalModelsDir = path.join(
+      process.env.HOME ?? "",
+      ".paseo",
+      "models",
+      "local-speech",
+    );
+    const hasDefaultLocalModelsDir =
+      defaultLocalModelsDir.trim().length > 0 && existsSync(defaultLocalModelsDir);
+    const dictationProvider = openAiUsable ? "openai" : "local";
+
+    if (dictationProvider === "local" && !hasDefaultLocalModelsDir) {
+      throw new Error(
+        "Speech-enabled app e2e tests require either a usable OPENAI_API_KEY or local speech models " +
+          "at ~/.paseo/models/local-speech.",
+      );
+    }
+
+    localModelsDir = dictationProvider === "local" ? defaultLocalModelsDir : null;
+    console.log(
+      `[e2e] Speech features enabled. Dictation STT provider: ${dictationProvider}${
+        openAiUsable ? "" : " (OpenAI probe failed)"
+      }`,
+    );
+  } else {
+    console.log(
+      "[e2e] Speech features disabled for Playwright run. Set E2E_ENABLE_SPEECH=1 to enable dictation and voice mode.",
     );
   }
-
-  const localModelsDir = dictationProvider === "local" ? defaultLocalModelsDir : null;
-  console.log(
-    `[e2e] Dictation STT provider: ${dictationProvider}${openAiUsable ? "" : " (OpenAI probe failed)"}`,
-  );
 
   try {
     const relayDir = path.resolve(__dirname, "..", "..", "relay");
@@ -578,8 +591,8 @@ export default async function globalSetup() {
         PASEO_LISTEN: `0.0.0.0:${port}`,
         PASEO_RELAY_ENDPOINT: `127.0.0.1:${relayPort}`,
         PASEO_CORS_ORIGINS: `http://localhost:${metroPort}`,
-        PASEO_DICTATION_ENABLED: openAiUsable ? "1" : "0",
-        PASEO_VOICE_MODE_ENABLED: openAiUsable ? "1" : "0",
+        PASEO_DICTATION_ENABLED: speechEnabled ? "1" : "0",
+        PASEO_VOICE_MODE_ENABLED: speechEnabled ? "1" : "0",
         ...(openAiUsable
           ? {
               PASEO_DICTATION_STT_PROVIDER: "openai",
