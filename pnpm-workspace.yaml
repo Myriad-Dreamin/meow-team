@@ -1,6 +1,8 @@
 packages:
   - "packages/expo-two-way-audio"
   - "packages/highlight"
+  - "packages/meow-flow-core"
+  - "packages/meow-flow"
   - "packages/server"
   - "packages/app"
   - "packages/relay"
