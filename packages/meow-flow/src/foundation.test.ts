@@ -8,9 +8,16 @@ import { describe, expect, test } from "vitest";
 const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(THIS_DIR, "..");
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, "..", "..");
-const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
+const NPM_COMMAND =
+  process.env.NPM_COMMAND?.trim() || (process.platform === "win32" ? "pnpm.cmd" : "pnpm");
 const BIN_PATH = path.join(PACKAGE_ROOT, "bin", "meow-flow");
 const testIfPosix = process.platform === "win32" ? test.skip : test;
+
+function needsRunArgSeparator(command: string): boolean {
+  const commandName = command.split(/[/\\]/).at(-1)?.toLowerCase() ?? command.toLowerCase();
+
+  return commandName === "npm" || commandName === "npm.cmd";
+}
 
 function readPackageVersion(): string {
   const packageJson = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as {
@@ -29,10 +36,14 @@ function runCliAlias(args: string[]) {
   const outputPath = path.join(tempDir, "cli-output.txt");
   const outputFd = openSync(outputPath, "w");
 
-  const result = spawnSync(NPM_COMMAND, ["run", "cli:meow-flow", "--", ...args], {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", outputFd, outputFd],
-  });
+  const result = spawnSync(
+    NPM_COMMAND,
+    ["run", "cli:meow-flow", ...(needsRunArgSeparator(NPM_COMMAND) ? ["--"] : []), ...args],
+    {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", outputFd, outputFd],
+    },
+  );
 
   closeSync(outputFd);
   const output = readFileSync(outputPath, "utf8");
@@ -51,7 +62,7 @@ describe("meow-flow foundation", () => {
     expect(mode & 0o111).not.toBe(0);
   });
 
-  test("npm run cli:meow-flow -- --version succeeds and prints the package version", () => {
+  test("run cli:meow-flow --version succeeds and prints the package version", () => {
     const expectedVersion = readPackageVersion();
     const result = runCliAlias(["--version"]);
 
@@ -59,7 +70,7 @@ describe("meow-flow foundation", () => {
     expect(result.output).toContain(expectedVersion);
   });
 
-  test("npm run cli:meow-flow -- --help succeeds and prints help output", () => {
+  test("run cli:meow-flow --help succeeds and prints help output", () => {
     const result = runCliAlias(["--help"]);
 
     expect(result.status).toBe(0);
