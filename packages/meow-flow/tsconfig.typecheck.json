@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "baseUrl": ".",
+    "paths": {
+      "@myriaddreamin/meow-flow-core": ["../meow-flow-core/src/index.ts"]
+    }
+  }
+}
