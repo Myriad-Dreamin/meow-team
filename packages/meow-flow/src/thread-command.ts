@@ -29,6 +29,7 @@ function createThreadListCommand(): Command {
     )
     .action((options: ThreadListCommandOptions, command: Command) => {
       try {
+        const repositoryRoot = resolveCanonicalGitRoot(process.cwd());
         const loadedConfig = loadMeowFlowTeamConfig({
           cwd: process.cwd(),
           configPath: options.config,
@@ -39,7 +40,6 @@ function createThreadListCommand(): Command {
           throw new MissingThreadSlotCountError(loadedConfig.configPath);
         }
 
-        const repositoryRoot = resolveCanonicalGitRoot(process.cwd());
         const registeredWorktrees = listRegisteredGitWorktrees(repositoryRoot);
         const rows = createThreadWorkspaceRows({
           repositoryRoot,

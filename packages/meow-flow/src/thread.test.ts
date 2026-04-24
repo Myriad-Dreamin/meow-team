@@ -243,4 +243,17 @@ describe("meow-flow thread ls", () => {
     expect(result.status).toBe(1);
     expect(result.output).toContain("must be run inside a git repository");
   });
+
+  test("fails with the git repository diagnostic outside git before requiring shared config", () => {
+    const homeDirectory = createTempDirectory("meow-flow-thread-home-no-shared-config-");
+    const workingDirectory = createTempDirectory("meow-flow-thread-outside-git-no-config-");
+
+    const result = runCli(["thread", "ls"], workingDirectory, {
+      env: testHomeEnv(homeDirectory),
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("must be run inside a git repository");
+    expect(result.output).not.toContain("No shared Meow Flow config is installed");
+  });
 });
