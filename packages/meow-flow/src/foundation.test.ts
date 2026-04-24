@@ -77,6 +77,7 @@ describe("meow-flow foundation", () => {
     expect(result.output).toContain("Usage: meow-flow");
     expect(result.output).toContain("config");
     expect(result.output).toContain("plan");
+    expect(result.output).toContain("thread");
     expect(result.output).toContain("Options:");
     expect(result.output).toContain("--version");
   });
@@ -90,5 +91,13 @@ describe("meow-flow foundation", () => {
     expect(result.output).toContain(".js");
     expect(result.output).toContain(".ts");
     expect(result.output).toContain("~/.local/shared/meow-flow/config.js");
+  });
+
+  test("run cli:meow-flow thread --help succeeds and prints thread subcommands", () => {
+    const result = runCliAlias(["thread", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: meow-flow thread");
+    expect(result.output).toContain("ls");
   });
 });
