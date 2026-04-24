@@ -25,17 +25,19 @@ import {
   stageToSkill,
   type MeowFlowStateDatabase,
   type MeowFlowStage,
+  type MutableMeowFlowState,
+  type ThreadOccupationRecord,
   type ThreadRecord,
   updateMeowFlowState,
   upsertAgentRecord,
   withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
-type RunCommandOptions = {
+interface RunCommandOptions {
   readonly id?: string;
   readonly provider?: string;
   readonly stage?: string;
-};
+}
 
 type PaseoRunResult =
   | {
@@ -49,14 +51,22 @@ type PaseoRunResult =
       readonly malformedOutput?: boolean;
     };
 
-type ResolvedRunTarget = {
+interface ResolvedRunTarget {
   readonly threadId: string;
   readonly worktreePath: string;
   readonly stage: MeowFlowStage;
   readonly requestBody: string;
   readonly title: string;
   readonly freshAllocation: boolean;
-};
+}
+
+interface ResolveRunTargetInput {
+  readonly context: GitWorktreeContext;
+  readonly database: MeowFlowStateDatabase;
+  readonly explicitThreadId: string | undefined;
+  readonly explicitStage: string | undefined;
+  readonly requestBody: string;
+}
 
 const WORD_TITLE_TOKEN_LIMIT = 5;
 const HAN_TITLE_TOKEN_LIMIT = 10;
@@ -154,13 +164,7 @@ function resolveThreadId(explicitThreadId: string | undefined): string {
   return trimmedThreadId;
 }
 
-function resolveRunTarget(input: {
-  readonly context: GitWorktreeContext;
-  readonly database: MeowFlowStateDatabase;
-  readonly explicitThreadId: string | undefined;
-  readonly explicitStage: string | undefined;
-  readonly requestBody: string;
-}): ResolvedRunTarget {
+function resolveRunTarget(input: ResolveRunTargetInput): ResolvedRunTarget {
   const requestedStage = parseStage(input.explicitStage);
   const threadId = resolveThreadId(input.explicitThreadId);
   const state = readMeowFlowState(input.context.repositoryRoot, {
@@ -171,54 +175,85 @@ function resolveRunTarget(input: {
     state,
     input.context.currentWorktreeRoot,
   );
-  const trimmedRequestBody = input.requestBody.trim();
 
   if (currentOccupation) {
-    if (
-      input.explicitThreadId !== undefined &&
-      input.explicitThreadId.trim() !== currentOccupation.threadId
-    ) {
-      throw new Error(
-        `Current worktree is occupied by thread ${currentOccupation.threadId}; cannot launch thread ${input.explicitThreadId.trim()}.`,
-      );
-    }
-
-    const thread = getThread(state, currentOccupation.threadId);
-    if (thread && isThreadArchived(thread)) {
-      throw new Error(
-        `Archived threads cannot launch new stage agents: ${currentOccupation.threadId}`,
-      );
-    }
-
-    const existingAgentCount = thread?.agents.length ?? 0;
-    if (existingAgentCount > 0 && requestedStage === null) {
-      throw new Error("--stage is required after a thread already has agents.");
-    }
-
-    const stage = requestedStage ?? "plan";
-
-    return {
-      threadId: currentOccupation.threadId,
-      worktreePath: currentOccupation.worktreePath,
-      stage,
-      requestBody: input.requestBody,
-      title: formatStageAgentTitle({
-        stage,
-        threadName: thread?.name ?? null,
-        threadRequestBody: thread?.requestBody ?? null,
-        requestBody: input.requestBody,
-        threadId: currentOccupation.threadId,
-        agentSequence: existingAgentCount + 1,
-      }),
-      freshAllocation: false,
-    };
+    return resolveOccupiedRunTarget({
+      input,
+      state,
+      currentOccupation,
+      requestedStage,
+    });
   }
 
+  return resolveFreshRunTarget({
+    input,
+    state,
+    threadId,
+    requestedStage,
+  });
+}
+
+function resolveOccupiedRunTarget(input: {
+  readonly input: ResolveRunTargetInput;
+  readonly state: MutableMeowFlowState;
+  readonly currentOccupation: ThreadOccupationRecord;
+  readonly requestedStage: MeowFlowStage | null;
+}): ResolvedRunTarget {
+  const { currentOccupation, requestedStage, state } = input;
+  const launchInput = input.input;
+  if (
+    launchInput.explicitThreadId !== undefined &&
+    launchInput.explicitThreadId.trim() !== currentOccupation.threadId
+  ) {
+    throw new Error(
+      `Current worktree is occupied by thread ${currentOccupation.threadId}; cannot launch thread ${launchInput.explicitThreadId.trim()}.`,
+    );
+  }
+
+  const thread = getThread(state, currentOccupation.threadId);
+  if (thread && isThreadArchived(thread)) {
+    throw new Error(
+      `Archived threads cannot launch new stage agents: ${currentOccupation.threadId}`,
+    );
+  }
+
+  const existingAgentCount = thread?.agents.length ?? 0;
+  if (existingAgentCount > 0 && requestedStage === null) {
+    throw new Error("--stage is required after a thread already has agents.");
+  }
+
+  const stage = requestedStage ?? "plan";
+
+  return {
+    threadId: currentOccupation.threadId,
+    worktreePath: currentOccupation.worktreePath,
+    stage,
+    requestBody: launchInput.requestBody,
+    title: formatStageAgentTitle({
+      stage,
+      threadName: thread?.name ?? null,
+      threadRequestBody: thread?.requestBody ?? null,
+      requestBody: launchInput.requestBody,
+      threadId: currentOccupation.threadId,
+      agentSequence: existingAgentCount + 1,
+    }),
+    freshAllocation: false,
+  };
+}
+
+function resolveFreshRunTarget(input: {
+  readonly input: ResolveRunTargetInput;
+  readonly state: MutableMeowFlowState;
+  readonly threadId: string;
+  readonly requestedStage: MeowFlowStage | null;
+}): ResolvedRunTarget {
+  const { requestedStage, state, threadId } = input;
+  const launchInput = input.input;
   const activeForThread = getActiveOccupationForThread(state, threadId);
   if (activeForThread) {
     throw new Error(
       `Thread ${threadId} is already running in worktree ${formatWorktreePath(
-        input.context.repositoryRoot,
+        launchInput.context.repositoryRoot,
         activeForThread.worktreePath,
       )}.`,
     );
@@ -232,21 +267,21 @@ function resolveRunTarget(input: {
     throw new Error("--stage is required after a thread already has agents.");
   }
 
-  if (!existingThread && trimmedRequestBody.length === 0) {
+  if (!existingThread && launchInput.requestBody.trim().length === 0) {
     throw new Error("Request body is required for a new MeowFlow thread.");
   }
 
-  const worktree = selectWorktreeForNewThread(input.context, state);
+  const worktree = selectWorktreeForNewThread(launchInput.context, state);
   const stage = requestedStage ?? deriveDefaultStage(existingThread);
   const agentSequence = (existingThread?.agents.length ?? 0) + 1;
   const now = new Date().toISOString();
 
   updateMeowFlowState(
-    input.context.repositoryRoot,
+    launchInput.context.repositoryRoot,
     (mutableState) => {
       ensureThread(mutableState, {
         threadId,
-        requestBody: existingThread?.requestBody ?? input.requestBody,
+        requestBody: existingThread?.requestBody ?? launchInput.requestBody,
       });
       recordOccupation(mutableState, {
         threadId,
@@ -255,7 +290,7 @@ function resolveRunTarget(input: {
       });
     },
     {
-      database: input.database,
+      database: launchInput.database,
       threadIds: [threadId],
       includeOccupationThreads: false,
     },
@@ -265,12 +300,12 @@ function resolveRunTarget(input: {
     threadId,
     worktreePath: worktree.path,
     stage,
-    requestBody: input.requestBody,
+    requestBody: launchInput.requestBody,
     title: formatStageAgentTitle({
       stage,
       threadName: existingThread?.name ?? null,
       threadRequestBody: existingThread?.requestBody ?? null,
-      requestBody: input.requestBody,
+      requestBody: launchInput.requestBody,
       threadId,
       agentSequence,
     }),

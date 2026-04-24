@@ -13,9 +13,9 @@ import {
   withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
-type ThreadStatusOptions = {
+interface ThreadStatusOptions {
   readonly color?: boolean;
-};
+}
 
 const THREAD_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 

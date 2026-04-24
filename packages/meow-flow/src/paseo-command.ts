@@ -1,7 +1,7 @@
-export type PaseoCommandInvocation = {
+export interface PaseoCommandInvocation {
   readonly command: string;
   readonly argsPrefix: readonly string[];
-};
+}
 
 export function resolvePaseoCommandInvocation(): PaseoCommandInvocation {
   const overrideCommand = process.env.MFL_PASEO_BIN?.trim();

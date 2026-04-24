@@ -21,22 +21,22 @@ const TSX_LOADER_PATH = path.join(PACKAGE_ROOT, "node_modules", "tsx", "dist", "
 const CLI_ENTRY_PATH = path.join(PACKAGE_ROOT, "src", "index.ts");
 const tempDirectories: string[] = [];
 
-type CliRunResult = {
+interface CliRunResult {
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
   readonly output: string;
-};
+}
 
-type FakePaseo = {
+interface FakePaseo {
   readonly invocationLogPath: string;
   readonly env: NodeJS.ProcessEnv;
-};
+}
 
-type PaseoInvocation = {
+interface PaseoInvocation {
   readonly argv: readonly string[];
   readonly cwd: string;
-};
+}
 
 function expectedStagePrompt(stage: string, skill: string, requestBody: string): string {
   const lines = [

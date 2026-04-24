@@ -19,6 +19,35 @@ import {
 } from "./codex-app-server-agent.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 
+interface CollaborationModeRecord {
+  name: string;
+  mode?: string | null;
+  model?: string | null;
+  reasoning_effort?: string | null;
+  developer_instructions?: string | null;
+}
+
+interface CodexSessionTestAccess {
+  handleToolApprovalRequest(params: unknown): Promise<unknown>;
+  handleNotification(method: string, params: unknown): void;
+  refreshResolvedCollaborationMode(): void;
+  serviceTier: "fast" | null;
+  planModeEnabled: boolean;
+  collaborationModes: CollaborationModeRecord[];
+  config: AgentSessionConfig;
+}
+
+interface CodexClientLike {
+  request: (method: string, ...rest: unknown[]) => Promise<unknown>;
+}
+
+type CodexTestSession = AgentSession & {
+  connected: boolean;
+  currentThreadId: string | null;
+  activeForegroundTurnId: string | null;
+  client: CodexClientLike | null;
+};
+
 const ONE_BY_ONE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X1r0AAAAASUVORK5CYII=";
 const CODEX_PROVIDER = "codex";
@@ -33,7 +62,7 @@ function createConfig(overrides: Partial<AgentSessionConfig> = {}): AgentSession
   };
 }
 
-function createSession(configOverrides: Partial<AgentSessionConfig> = {}) {
+function createSession(configOverrides: Partial<AgentSessionConfig> = {}): CodexTestSession {
   const session = new __codexAppServerInternals.CodexAppServerAgentSession(
     createConfig(configOverrides),
     null,
@@ -41,11 +70,15 @@ function createSession(configOverrides: Partial<AgentSessionConfig> = {}) {
     () => {
       throw new Error("Test session cannot spawn Codex app-server");
     },
-  ) as unknown as AgentSession & { [key: string]: unknown };
+  ) as unknown as CodexTestSession;
   session.connected = true;
   session.currentThreadId = "test-thread";
   session.activeForegroundTurnId = "test-turn";
   return session;
+}
+
+function asInternals(session: CodexTestSession): CodexSessionTestAccess {
+  return session as unknown as CodexSessionTestAccess;
 }
 
 describe("Codex app-server provider", () => {
@@ -315,7 +348,7 @@ describe("Codex app-server provider", () => {
     });
 
     session.activeForegroundTurnId = null;
-    session.client = { request } as any;
+    session.client = { request } as unknown as CodexClientLike;
 
     await session.startTurn("Return JSON", {
       outputSchema: {
@@ -496,7 +529,7 @@ describe("Codex app-server provider", () => {
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
-    void (session as any).handleToolApprovalRequest({
+    void asInternals(session).handleToolApprovalRequest({
       itemId: "call-question-1",
       threadId: "thread-1",
       turnId: "turn-1",
@@ -586,7 +619,7 @@ describe("Codex app-server provider", () => {
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
-    const pendingResponse = (session as any).handleToolApprovalRequest({
+    const pendingResponse = asInternals(session).handleToolApprovalRequest({
       itemId: "call-question-2",
       threadId: "thread-1",
       turnId: "turn-1",
@@ -667,16 +700,16 @@ describe("Codex app-server provider", () => {
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
-    (session as any).handleNotification("turn/started", {
+    asInternals(session).handleNotification("turn/started", {
       turn: { id: "turn-plan-1" },
     });
-    (session as any).handleNotification("turn/plan/updated", {
+    asInternals(session).handleNotification("turn/plan/updated", {
       plan: [
         { step: "Inspect the existing auth flow", status: "completed" },
         { step: "Implement the button behavior", status: "pending" },
       ],
     });
-    (session as any).handleNotification("turn/completed", {
+    asInternals(session).handleNotification("turn/completed", {
       turn: { status: "completed", error: null },
     });
 
@@ -719,7 +752,7 @@ describe("Codex app-server provider", () => {
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
-    (session as any).handleNotification("thread/tokenUsage/updated", {
+    asInternals(session).handleNotification("thread/tokenUsage/updated", {
       tokenUsage: {
         model_context_window: 200000,
         last: {
@@ -730,7 +763,7 @@ describe("Codex app-server provider", () => {
         },
       },
     });
-    (session as any).handleNotification("turn/completed", {
+    asInternals(session).handleNotification("turn/completed", {
       turn: { status: "completed", error: null },
     });
 
@@ -767,13 +800,13 @@ describe("Codex app-server provider", () => {
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
-    (session as any).handleNotification("turn/started", {
+    asInternals(session).handleNotification("turn/started", {
       turn: { id: "turn-plan-2" },
     });
-    (session as any).handleNotification("turn/plan/updated", {
+    asInternals(session).handleNotification("turn/plan/updated", {
       plan: [{ step: "Implement the new flow", status: "pending" }],
     });
-    (session as any).handleNotification("turn/completed", {
+    asInternals(session).handleNotification("turn/completed", {
       turn: { status: "completed", error: null },
     });
 
@@ -791,9 +824,9 @@ describe("Codex app-server provider", () => {
       selectedActionId: "implement",
     });
 
-    expect((session as any).serviceTier).toBe("fast");
-    expect((session as any).planModeEnabled).toBe(false);
-    expect((session as any).config.featureValues).toEqual({
+    expect(asInternals(session).serviceTier).toBe("fast");
+    expect(asInternals(session).planModeEnabled).toBe(false);
+    expect(asInternals(session).config.featureValues).toEqual({
       plan_mode: false,
       fast_mode: true,
     });
@@ -821,13 +854,13 @@ describe("Codex app-server provider", () => {
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
-    (session as any).handleNotification("turn/started", {
+    asInternals(session).handleNotification("turn/started", {
       turn: { id: "turn-plan-3" },
     });
-    (session as any).handleNotification("turn/plan/updated", {
+    asInternals(session).handleNotification("turn/plan/updated", {
       plan: [{ step: "Implement the safe flow", status: "pending" }],
     });
-    (session as any).handleNotification("turn/completed", {
+    asInternals(session).handleNotification("turn/completed", {
       turn: { status: "completed", error: null },
     });
 
@@ -845,9 +878,9 @@ describe("Codex app-server provider", () => {
       selectedActionId: "implement",
     });
 
-    expect((session as any).serviceTier).toBeNull();
-    expect((session as any).planModeEnabled).toBe(false);
-    expect((session as any).config.featureValues).toEqual({
+    expect(asInternals(session).serviceTier).toBeNull();
+    expect(asInternals(session).planModeEnabled).toBe(false);
+    expect(asInternals(session).config.featureValues).toEqual({
       plan_mode: false,
       fast_mode: false,
     });
@@ -860,7 +893,7 @@ describe("Codex app-server provider", () => {
     const session = createSession({
       featureValues: { plan_mode: true, fast_mode: true },
     });
-    (session as any).collaborationModes = [
+    asInternals(session).collaborationModes = [
       {
         name: "Code",
         mode: "code",
@@ -872,7 +905,7 @@ describe("Codex app-server provider", () => {
         developer_instructions: "Built-in plan mode",
       },
     ];
-    (session as any).refreshResolvedCollaborationMode();
+    asInternals(session).refreshResolvedCollaborationMode();
     const request = vi.fn(async (method: string) => {
       if (method === "thread/loaded/list") {
         return { data: ["test-thread"] };
@@ -884,18 +917,18 @@ describe("Codex app-server provider", () => {
     });
 
     session.activeForegroundTurnId = null;
-    session.client = { request } as any;
+    session.client = { request } as unknown as CodexClientLike;
 
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
-    (session as any).handleNotification("turn/started", {
+    asInternals(session).handleNotification("turn/started", {
       turn: { id: "turn-plan-4" },
     });
-    (session as any).handleNotification("turn/plan/updated", {
+    asInternals(session).handleNotification("turn/plan/updated", {
       plan: [{ step: "Implement the fast flow", status: "pending" }],
     });
-    (session as any).handleNotification("turn/completed", {
+    asInternals(session).handleNotification("turn/completed", {
       turn: { status: "completed", error: null },
     });
 

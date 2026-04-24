@@ -146,21 +146,26 @@ try {
       listed.stdout,
     );
 
-    let status = "running";
-    let lastInspectStdout = "";
-    const deadline = Date.now() + LOOP_COMPLETION_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    async function pollStatus(
+      deadline: number,
+      lastInspectStdout = "",
+    ): Promise<{ status: string; lastInspectStdout: string }> {
+      if (Date.now() >= deadline) {
+        return { status: "running", lastInspectStdout };
+      }
       const inspect = await ctx.paseo(["loop", "inspect", runJson.id, "--json"]);
       assert.strictEqual(inspect.exitCode, 0, inspect.stderr);
       const inspectJson = JSON.parse(inspect.stdout);
-      status = inspectJson.status;
-      lastInspectStdout = inspect.stdout;
-      if (status !== "running") {
-        assert.strictEqual(status, "succeeded", inspect.stdout);
-        break;
+      const current = inspectJson.status;
+      if (current !== "running") {
+        assert.strictEqual(current, "succeeded", inspect.stdout);
+        return { status: current, lastInspectStdout: inspect.stdout };
       }
       await sleep(250);
+      return pollStatus(deadline, inspect.stdout);
     }
+
+    const { status, lastInspectStdout } = await pollStatus(Date.now() + LOOP_COMPLETION_TIMEOUT_MS);
     assert.notStrictEqual(
       status,
       "running",

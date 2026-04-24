@@ -5,18 +5,18 @@ import path from "node:path";
 const DEFAULT_WORKTREE_DIRECTORY_NAME = ".paseo-workspaces";
 const DEFAULT_WORKTREE_BASENAME_PATTERN = /^paseo-(\d+)$/;
 
-export type GitWorktree = {
+export interface GitWorktree {
   readonly path: string;
   readonly branch: string | null;
   readonly head: string | null;
   readonly isPrimary: boolean;
-};
+}
 
-export type GitWorktreeContext = {
+export interface GitWorktreeContext {
   readonly repositoryRoot: string;
   readonly currentWorktreeRoot: string;
   readonly worktrees: readonly GitWorktree[];
-};
+}
 
 export class GitRepositoryRequiredError extends Error {
   constructor(commandName: string) {

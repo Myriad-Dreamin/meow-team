@@ -14,6 +14,13 @@ const INLINE_PATH_LINE_COLUMN_SUFFIX = /^(.+):([0-9]+):([0-9]+)$/;
 const INLINE_PATH_LINE_RANGE_SUFFIX = /^(.+):([0-9]+)-([0-9]+)$/;
 const INLINE_PATH_LINE_SUFFIX = /^(.+):([0-9]+)$/;
 
+type PathLocationSuffixKind = "column" | "range" | "line";
+
+interface PathLocationSuffixMatch {
+  kind: PathLocationSuffixKind;
+  match: RegExpMatchArray;
+}
+
 export interface AssistantHrefParseOptions {
   workspaceRoot?: string;
 }
@@ -57,18 +64,35 @@ function parseLineFragment(value: string): Pick<InlinePathTarget, "lineStart" | 
   return { lineStart, lineEnd };
 }
 
+function matchPathLocationSuffix(value: string): PathLocationSuffixMatch | null {
+  const columnMatch = value.match(INLINE_PATH_LINE_COLUMN_SUFFIX);
+  if (columnMatch) {
+    return { kind: "column", match: columnMatch };
+  }
+
+  const rangeMatch = value.match(INLINE_PATH_LINE_RANGE_SUFFIX);
+  if (rangeMatch) {
+    return { kind: "range", match: rangeMatch };
+  }
+
+  const lineMatch = value.match(INLINE_PATH_LINE_SUFFIX);
+  return lineMatch ? { kind: "line", match: lineMatch } : null;
+}
+
+function parsePositiveLocationPart(value: string | undefined): number | null {
+  const parsed = parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function parsePathLocationSuffix(
   value: string,
 ): Pick<InlinePathTarget, "path" | "lineStart" | "lineEnd" | "columnStart"> | null {
-  const columnMatch = value.match(INLINE_PATH_LINE_COLUMN_SUFFIX);
-  const rangeMatch = columnMatch ? null : value.match(INLINE_PATH_LINE_RANGE_SUFFIX);
-  const lineMatch = columnMatch || rangeMatch ? null : value.match(INLINE_PATH_LINE_SUFFIX);
-  const match = columnMatch ?? rangeMatch ?? lineMatch;
-  if (!match) {
+  const suffixMatch = matchPathLocationSuffix(value);
+  if (!suffixMatch) {
     return null;
   }
 
-  const basePathRaw = match[1]?.trim();
+  const basePathRaw = suffixMatch.match[1]?.trim();
   if (!basePathRaw) {
     return null;
   }
@@ -78,20 +102,20 @@ function parsePathLocationSuffix(
     return null;
   }
 
-  const lineStart = parseInt(match[2] ?? "", 10);
-  if (!Number.isFinite(lineStart) || lineStart <= 0) {
+  const lineStart = parsePositiveLocationPart(suffixMatch.match[2]);
+  if (lineStart === null) {
     return null;
   }
 
-  const lineEnd = rangeMatch?.[3] ? parseInt(rangeMatch[3], 10) : undefined;
-  if (lineEnd !== undefined) {
-    if (!Number.isFinite(lineEnd) || lineEnd <= 0 || lineEnd < lineStart) {
-      return null;
-    }
+  const lineEnd =
+    suffixMatch.kind === "range" ? parsePositiveLocationPart(suffixMatch.match[3]) : undefined;
+  if (lineEnd === null || (lineEnd !== undefined && lineEnd < lineStart)) {
+    return null;
   }
 
-  const columnStart = columnMatch?.[3] ? parseInt(columnMatch[3], 10) : undefined;
-  if (columnStart !== undefined && (!Number.isFinite(columnStart) || columnStart <= 0)) {
+  const columnStart =
+    suffixMatch.kind === "column" ? parsePositiveLocationPart(suffixMatch.match[3]) : undefined;
+  if (columnStart === null) {
     return null;
   }
 

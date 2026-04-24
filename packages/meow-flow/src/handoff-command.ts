@@ -10,14 +10,14 @@ import {
   withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
-type HandoffAppendOptions = {
+interface HandoffAppendOptions {
   readonly stage?: string;
-};
+}
 
-type HandoffGetOptions = {
+interface HandoffGetOptions {
   readonly count?: string;
   readonly since?: string;
-};
+}
 
 export function createHandoffCommand(): Command {
   return new Command("handoff")

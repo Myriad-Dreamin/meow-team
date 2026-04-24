@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  Text,
+  View,
+  type PressableStateCallbackType,
+} from "react-native";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -72,6 +78,40 @@ function OpenTargetIcon({ targetId, color }: { targetId: EditorTargetId; color: 
   return <EditorAppIcon editorId={targetId} size={16} color={color} />;
 }
 
+interface OpenTargetMenuItemProps {
+  target: WorkspaceOpenTarget;
+  isPreferred: boolean;
+  onOpenTarget: (target: WorkspaceOpenTarget) => void;
+  foregroundMuted: string;
+}
+
+function OpenTargetMenuItem({
+  target,
+  isPreferred,
+  onOpenTarget,
+  foregroundMuted,
+}: OpenTargetMenuItemProps) {
+  const handleSelect = useCallback(() => onOpenTarget(target), [onOpenTarget, target]);
+  const leading = useMemo(
+    () => <OpenTargetIcon targetId={target.id} color={foregroundMuted} />,
+    [target.id, foregroundMuted],
+  );
+  const trailing = useMemo(
+    () => (isPreferred ? <Check size={16} color={foregroundMuted} /> : undefined),
+    [isPreferred, foregroundMuted],
+  );
+  return (
+    <DropdownMenuItem
+      testID={`workspace-open-in-editor-item-${target.id}`}
+      leading={leading}
+      trailing={trailing}
+      onSelect={handleSelect}
+    >
+      {target.label}
+    </DropdownMenuItem>
+  );
+}
+
 export function WorkspaceOpenInEditorButton({
   serverId,
   cwd,
@@ -104,7 +144,8 @@ export function WorkspaceOpenInEditorButton({
     },
   });
 
-  const availableEditors = availableEditorsQuery.data ?? [];
+  const availableEditorsRaw = availableEditorsQuery.data;
+  const availableEditors = useMemo(() => availableEditorsRaw ?? [], [availableEditorsRaw]);
   const { status: checkoutStatus } = useCheckoutStatusQuery({
     serverId,
     cwd: shouldLoadTargets ? cwd : "",
@@ -135,8 +176,10 @@ export function WorkspaceOpenInEditorButton({
     () => resolvePreferredEditorId(availableTargetIds, preferredEditorId),
     [availableTargetIds, preferredEditorId],
   );
-  const primaryOption =
-    availableTargets.find((target) => target.id === effectivePreferredEditorId) ?? null;
+  const primaryOption = useMemo(
+    () => availableTargets.find((target) => target.id === effectivePreferredEditorId) ?? null,
+    [availableTargets, effectivePreferredEditorId],
+  );
 
   useEffect(() => {
     if (!effectivePreferredEditorId || effectivePreferredEditorId === preferredEditorId) {
@@ -173,6 +216,29 @@ export function WorkspaceOpenInEditorButton({
     [openMutation, updatePreferredEditor],
   );
 
+  const primaryPressableStyle = useCallback(
+    ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.splitButtonPrimary,
+      (Boolean(hovered) || pressed) && styles.splitButtonPrimaryHovered,
+      openMutation.isPending && styles.splitButtonPrimaryDisabled,
+    ],
+    [openMutation.isPending],
+  );
+
+  const caretTriggerStyle = useCallback(
+    ({ hovered, pressed, open }: { hovered: boolean; pressed: boolean; open: boolean }) => [
+      styles.splitButtonCaret,
+      (hovered || pressed || open) && styles.splitButtonCaretHovered,
+    ],
+    [],
+  );
+
+  const handlePrimaryPress = useCallback(() => {
+    if (primaryOption) {
+      handleOpenTarget(primaryOption);
+    }
+  }, [handleOpenTarget, primaryOption]);
+
   if (!shouldLoadTargets || !primaryOption || availableTargets.length === 0) {
     return null;
   }
@@ -182,12 +248,8 @@ export function WorkspaceOpenInEditorButton({
       <View style={styles.splitButton}>
         <Pressable
           testID="workspace-open-in-editor-primary"
-          style={({ hovered, pressed }) => [
-            styles.splitButtonPrimary,
-            (hovered || pressed) && styles.splitButtonPrimaryHovered,
-            openMutation.isPending && styles.splitButtonPrimaryDisabled,
-          ]}
-          onPress={() => handleOpenTarget(primaryOption)}
+          style={primaryPressableStyle}
+          onPress={handlePrimaryPress}
           disabled={openMutation.isPending}
           accessibilityRole="button"
           accessibilityLabel={`Open workspace in ${primaryOption.label}`}
@@ -209,10 +271,7 @@ export function WorkspaceOpenInEditorButton({
           <DropdownMenu>
             <DropdownMenuTrigger
               testID="workspace-open-in-editor-caret"
-              style={({ hovered, pressed, open }) => [
-                styles.splitButtonCaret,
-                (hovered || pressed || open) && styles.splitButtonCaretHovered,
-              ]}
+              style={caretTriggerStyle}
               accessibilityRole="button"
               accessibilityLabel="Choose editor"
             >
@@ -225,21 +284,13 @@ export function WorkspaceOpenInEditorButton({
               testID="workspace-open-in-editor-menu"
             >
               {availableTargets.map((target) => (
-                <DropdownMenuItem
+                <OpenTargetMenuItem
                   key={target.id}
-                  testID={`workspace-open-in-editor-item-${target.id}`}
-                  leading={
-                    <OpenTargetIcon targetId={target.id} color={theme.colors.foregroundMuted} />
-                  }
-                  trailing={
-                    target.id === effectivePreferredEditorId ? (
-                      <Check size={16} color={theme.colors.foregroundMuted} />
-                    ) : undefined
-                  }
-                  onSelect={() => handleOpenTarget(target)}
-                >
-                  {target.label}
-                </DropdownMenuItem>
+                  target={target}
+                  isPreferred={target.id === effectivePreferredEditorId}
+                  onOpenTarget={handleOpenTarget}
+                  foregroundMuted={theme.colors.foregroundMuted}
+                />
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
