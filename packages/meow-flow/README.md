@@ -27,12 +27,12 @@ absolute repository paths.
 
 ## Config resolution
 
-`meow-flow plan` resolves config in this order:
+`meow-flow plan` and `meow-flow thread ls` resolve config in this order:
 
 1. `--config <path>` when provided
 2. The installed shared artifact at `~/.local/shared/meow-flow/config.js`
 
-`meow-flow plan` does not search for a local `team.config.ts` or
+`meow-flow` does not search for a local `team.config.ts` or
 `team.config.js` by default. If no shared config has been installed, it fails and
 prints the `meow-flow config install <path>` command to run.
 
@@ -97,3 +97,27 @@ The `--json` form is stable and includes:
 - the `tsconfig.json` path used for alias-aware loading, when one was found
 - normalized repository candidates in config order
 - deterministic worktree allocation descriptors for each repository
+
+## Thread workspace listing
+
+Run:
+
+```bash
+pnpm run cli:meow-flow -- thread ls
+pnpm run cli:meow-flow -- thread ls --config ./team.config.ts
+```
+
+`thread ls` must run inside a git repository. It resolves the canonical checkout
+root, including from inside linked `.paseo-worktrees/paseo-N` worktrees, then
+uses `dispatch.maxConcurrentWorkers` as the configured slot range. Each line
+shows a slot path relative to the canonical root and whether that slot is a
+registered Git worktree:
+
+```text
+.paseo-worktrees/paseo-1 idle
+.paseo-worktrees/paseo-2 not-created (folder is not allocated)
+```
+
+The status domain includes `idle`, `occupied`, and `not-created`, but this
+initial command only reports `idle` or `not-created`. Occupation detection is
+reserved for a later change.

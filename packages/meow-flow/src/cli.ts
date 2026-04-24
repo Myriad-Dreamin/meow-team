@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { createConfigCommand } from "./config-command.js";
 import { createPlanCommand } from "./plan-command.js";
+import { createThreadCommand } from "./thread-command.js";
 import { resolveCliVersion } from "./version.js";
 
 export function createCli(): Command {
@@ -11,5 +12,6 @@ export function createCli(): Command {
     .showHelpAfterError()
     .version(resolveCliVersion(), "-v, --version", "output the version number")
     .addCommand(createConfigCommand())
-    .addCommand(createPlanCommand());
+    .addCommand(createPlanCommand())
+    .addCommand(createThreadCommand());
 }
