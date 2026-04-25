@@ -4,11 +4,13 @@
 
 ## What Changes
 
-- Add `meow-flow run <thread>` as the first thread allocation and agent-launch command.
+- Add `meow-flow run [--id <id>] "request body"` as the first thread allocation and agent-launch command.
+- Generate a random UUID thread id when `--id` is omitted, and use the resolved id for storage, listing, and labels.
 - Persist thread-to-workspace occupations in `~/.local/shared/meow-flow/meow-flow.sqlite` using `better-sqlite3`.
-- Enforce one-to-one allocation: a thread can occupy only one workspace, and a workspace can be occupied by only one thread.
-- Launch a Paseo agent for the allocated workspace by invoking `paseo run` with `--label x-meow-flow-id=<thread>` and the allocated workspace as its cwd.
-- Keep the initial agent request intentionally minimal by sending a fixed placeholder request to echo `"hello world"`.
+- Enforce one-to-one running allocation: a thread can run in only one workspace, and a workspace can run only one thread.
+- Launch a Paseo agent for the allocated workspace by invoking `paseo run` with `--label x-meow-flow-id=<thread-id>` and the allocated workspace as its cwd.
+- Pass the request body through to `paseo run` unchanged; initial usage can be as simple as asking the agent to echo `"hello world"`.
+- Fail instead of launching when the selected workspace already has a running Meow Flow thread.
 - Extend `meow-flow thread ls` to read the SQLite allocation store and emit `idle`, `occupied`, or `not-created` for configured `.paseo-worktrees/paseo-N` slots.
 - Add `meow-flow ls` as a top-level alias for `meow-flow thread ls`.
 - Keep slot discovery rooted in the current git-managed folder, with `dispatch.maxConcurrentWorkers` defining the maximum `N`.
@@ -18,7 +20,7 @@
 
 ### New Capabilities
 
-- `thread-workspace-occupancy`: Allocate fixed Paseo worktree slots to named Meow Flow threads, launch a labeled Paseo agent, and persist those occupations locally.
+- `thread-workspace-occupancy`: Allocate fixed Paseo worktree slots to Meow Flow thread ids, launch a labeled Paseo agent for a request body, and persist running occupations locally.
 
 ### Modified Capabilities
 

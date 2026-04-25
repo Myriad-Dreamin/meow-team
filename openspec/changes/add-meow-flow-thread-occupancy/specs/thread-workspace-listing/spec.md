@@ -18,7 +18,7 @@ The CLI SHALL provide `meow-flow ls` as an alias for `meow-flow thread ls`.
 
 ### Requirement: Thread list command reports current slot allocation status
 
-The CLI SHALL report one line per configured slot with the relative `.paseo-worktrees/paseo-N` path and a workspace status. The workspace status domain SHALL include `idle`, `occupied`, and `not-created`. Occupied rows SHALL print the occupying thread name in the status position.
+The CLI SHALL report one line per configured slot with the relative `.paseo-worktrees/paseo-N` path and a workspace status. The workspace status domain SHALL include `idle`, `occupied`, and `not-created`. Occupied rows SHALL print the occupying thread id in the status position.
 
 #### Scenario: Slot worktree exists and is idle
 
@@ -29,7 +29,7 @@ The CLI SHALL report one line per configured slot with the relative `.paseo-work
 #### Scenario: Slot worktree is occupied
 
 - **WHEN** `.paseo-worktrees/paseo-2` is registered as a Git worktree
-- **AND** the shared occupation database records thread `fix-test-ci` for `.paseo-worktrees/paseo-2`
+- **AND** the shared occupation database records thread id `fix-test-ci` for `.paseo-worktrees/paseo-2`
 - **THEN** `meow-flow thread ls` prints `.paseo-worktrees/paseo-2 fix-test-ci`
 
 #### Scenario: Slot worktree is not allocated
@@ -42,4 +42,4 @@ The CLI SHALL report one line per configured slot with the relative `.paseo-work
 - **WHEN** `.paseo-worktrees/paseo-3` is not registered as a Git worktree
 - **AND** the shared occupation database contains a stale occupation for `.paseo-worktrees/paseo-3`
 - **THEN** `meow-flow thread ls` prints `.paseo-worktrees/paseo-3 not-created (folder is not allocated)`
-- **AND** the command does not report the stale thread as occupying a usable workspace
+- **AND** the command does not report the stale thread id as occupying a usable workspace
