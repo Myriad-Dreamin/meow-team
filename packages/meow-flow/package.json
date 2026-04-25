@@ -1,7 +1,7 @@
 {
   "name": "meow-flow",
   "version": "0.1.61-beta.1",
-  "description": "Meow Flow CLI bootstrap package",
+  "description": "MeowFlow CLI bootstrap package",
   "type": "module",
   "files": [
     "bin",
@@ -17,13 +17,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@myriaddreamin/meow-flow-core": "workspace:*",
-    "better-sqlite3": "^12.9.0",
     "commander": "^12.0.0",
     "tsx": "^4.6.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.9.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
