@@ -92,6 +92,7 @@ interface SplitContainerProps {
   onCloseOtherTabs: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCreateDraftTab: (input: { paneId?: string }) => void;
   onCreateTerminalTab: (input: { paneId?: string }) => void;
+  onCreateTestTerminalTab: (input: { paneId?: string }) => void;
   buildPaneContentModel: (input: {
     paneId: string;
     tab: WorkspaceTabDescriptor;
@@ -261,6 +262,7 @@ export function SplitContainer({
   onCloseOtherTabs,
   onCreateDraftTab,
   onCreateTerminalTab,
+  onCreateTestTerminalTab,
   buildPaneContentModel,
   onFocusPane,
   onSplitPane,
@@ -531,6 +533,7 @@ export function SplitContainer({
         onCloseOtherTabs={onCloseOtherTabs}
         onCreateDraftTab={onCreateDraftTab}
         onCreateTerminalTab={onCreateTerminalTab}
+        onCreateTestTerminalTab={onCreateTestTerminalTab}
         buildPaneContentModel={buildPaneContentModel}
         onFocusPane={onFocusPane}
         onSplitPane={onSplitPane}
@@ -654,6 +657,7 @@ function SplitNodeView({
   onCloseOtherTabs,
   onCreateDraftTab,
   onCreateTerminalTab,
+  onCreateTestTerminalTab,
   buildPaneContentModel,
   onFocusPane,
   onSplitPane,
@@ -690,6 +694,7 @@ function SplitNodeView({
         onCloseOtherTabs={onCloseOtherTabs}
         onCreateDraftTab={onCreateDraftTab}
         onCreateTerminalTab={onCreateTerminalTab}
+        onCreateTestTerminalTab={onCreateTestTerminalTab}
         buildPaneContentModel={buildPaneContentModel}
         onFocusPane={onFocusPane}
         onSplitPane={onSplitPane}
@@ -741,6 +746,7 @@ function SplitNodeView({
               onCloseOtherTabs={onCloseOtherTabs}
               onCreateDraftTab={onCreateDraftTab}
               onCreateTerminalTab={onCreateTerminalTab}
+              onCreateTestTerminalTab={onCreateTestTerminalTab}
               buildPaneContentModel={buildPaneContentModel}
               onFocusPane={onFocusPane}
               onSplitPane={onSplitPane}
@@ -791,6 +797,7 @@ function SplitPaneView({
   onCloseOtherTabs,
   onCreateDraftTab,
   onCreateTerminalTab,
+  onCreateTestTerminalTab,
   buildPaneContentModel,
   onFocusPane,
   onSplitPane,
@@ -897,6 +904,7 @@ function SplitPaneView({
           onCloseOtherTabs={(tabId) => onCloseOtherTabs(tabId, paneTabs)}
           onCreateDraftTab={onCreateDraftTab}
           onCreateTerminalTab={onCreateTerminalTab}
+          onCreateTestTerminalTab={onCreateTestTerminalTab}
           onReorderTabs={(nextTabs) => {
             onReorderTabsInPane(
               pane.id,

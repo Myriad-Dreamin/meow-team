@@ -18,6 +18,10 @@ export function normalizeWorkspaceTabTarget(
     const terminalId = trimNonEmpty(value.terminalId);
     return terminalId ? { kind: "terminal", terminalId } : null;
   }
+  if (value.kind === "testTerminal") {
+    const testTerminalId = trimNonEmpty(value.testTerminalId);
+    return testTerminalId ? { kind: "testTerminal", testTerminalId } : null;
+  }
   if (value.kind === "file") {
     const path = trimNonEmpty(value.path);
     return path ? { kind: "file", path: path.replace(/\\/g, "/") } : null;
@@ -45,6 +49,9 @@ export function workspaceTabTargetsEqual(
   if (left.kind === "terminal" && right.kind === "terminal") {
     return left.terminalId === right.terminalId;
   }
+  if (left.kind === "testTerminal" && right.kind === "testTerminal") {
+    return left.testTerminalId === right.testTerminalId;
+  }
   if (left.kind === "file" && right.kind === "file") {
     return left.path === right.path;
   }
@@ -64,10 +71,17 @@ export function buildDeterministicWorkspaceTabId(target: WorkspaceTabTarget): st
   if (target.kind === "terminal") {
     return `terminal_${target.terminalId}`;
   }
+  if (target.kind === "testTerminal") {
+    return `test_terminal_${target.testTerminalId}`;
+  }
   if (target.kind === "setup") {
     return `setup_${target.workspaceId}`;
   }
   return `file_${target.path}`;
+}
+
+export function isEphemeralWorkspaceTabTarget(target: WorkspaceTabTarget): boolean {
+  return target.kind === "testTerminal";
 }
 
 function trimNonEmpty(value: string | null | undefined): string | null {
