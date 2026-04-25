@@ -99,6 +99,12 @@ describe("workspace route parsing", () => {
       kind: "file",
       path: "src/index.ts",
     });
+    expect(parseWorkspaceOpenIntent("file:c3JjL2luZGV4LnRz:12:4")).toEqual({
+      kind: "file",
+      path: "src/index.ts",
+      lineStart: 12,
+      columnStart: 4,
+    });
     expect(parseWorkspaceOpenIntent("setup:L3RtcC9yZXBv")).toEqual({
       kind: "setup",
       workspaceId: "/tmp/repo",

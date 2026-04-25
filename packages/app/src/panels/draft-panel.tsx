@@ -29,8 +29,8 @@ function DraftPanel() {
       tabId={tabId}
       draftId={target.draftId}
       isPaneFocused={isInteractive}
-      onOpenWorkspaceFile={({ filePath }) => {
-        openFileInWorkspace(filePath);
+      onOpenWorkspaceFile={(input) => {
+        openFileInWorkspace(input);
       }}
       onCreated={(agentSnapshot) => {
         const normalized = normalizeAgentSnapshot(agentSnapshot, serverId);

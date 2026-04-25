@@ -2,6 +2,12 @@ import React, { createContext, useContext, type ReactNode } from "react";
 import invariant from "tiny-invariant";
 import type { WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
 
+export interface OpenWorkspaceFileInput {
+  filePath: string;
+  lineStart?: number;
+  columnStart?: number;
+}
+
 export interface PaneContextValue {
   serverId: string;
   workspaceId: string;
@@ -10,7 +16,7 @@ export interface PaneContextValue {
   openTab(target: WorkspaceTabTarget): void;
   closeCurrentTab(): void;
   retargetCurrentTab(target: WorkspaceTabTarget): void;
-  openFileInWorkspace(filePath: string): void;
+  openFileInWorkspace(input: OpenWorkspaceFileInput): void;
 }
 
 export interface PaneFocusContextValue {

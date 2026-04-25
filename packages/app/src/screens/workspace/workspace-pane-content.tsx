@@ -5,6 +5,7 @@ import {
   PaneFocusProvider,
   PaneProvider,
   type PaneContextValue,
+  type OpenWorkspaceFileInput,
 } from "@/panels/pane-context";
 import { getPanelRegistration } from "@/panels/panel-registry";
 import { ensurePanelsRegistered } from "@/panels/register-panels";
@@ -23,7 +24,7 @@ export interface BuildWorkspacePaneContentModelInput {
   onOpenTab: (target: WorkspaceTabDescriptor["target"]) => void;
   onCloseCurrentTab: () => void;
   onRetargetCurrentTab: (target: WorkspaceTabDescriptor["target"]) => void;
-  onOpenWorkspaceFile: (filePath: string) => void;
+  onOpenWorkspaceFile: (input: OpenWorkspaceFileInput) => void;
 }
 
 export function buildWorkspacePaneContentModel({

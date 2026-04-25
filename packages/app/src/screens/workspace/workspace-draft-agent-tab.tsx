@@ -38,7 +38,11 @@ type WorkspaceDraftAgentTabProps = {
   draftId: string;
   isPaneFocused: boolean;
   onCreated: (snapshot: AgentSnapshotPayload) => void;
-  onOpenWorkspaceFile: (input: { filePath: string }) => void;
+  onOpenWorkspaceFile: (input: {
+    filePath: string;
+    lineStart?: number;
+    columnStart?: number;
+  }) => void;
 };
 
 export function WorkspaceDraftAgentTab({
