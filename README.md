@@ -18,28 +18,35 @@ You need at least one agent CLI installed and configured with your credentials:
 - [Codex](https://github.com/openai/codex)
 - [OpenCode](https://github.com/anomalyco/opencode)
 
-### Desktop app (recommended)
+### Source checkout
 
-Download it from the [GitHub releases page](https://github.com/getpaseo/paseo/releases). The `paseo.sh/download` page is currently unavailable and will be restored in the future. Open the app and the daemon starts automatically. Nothing else to install.
-
-To connect from your phone, scan the QR code shown in Settings.
-
-### CLI / headless
-
-Install the Paseo CLI and start Paseo:
+MeowFlow currently uses the modified Paseo source in this repository. Build the
+local Paseo packages before running `mfl` so the local CLI imports fresh
+`dist/*` output:
 
 ```bash
-npm install -g @getpaseo/cli
-paseo
+pnpm install --frozen-lockfile
+pnpm run build:daemon
 ```
 
-This shows a QR code in the terminal. Connect from any client. This path is useful for servers and remote machines.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the local CLI and build sync
+notes. In particular, use `pnpm run cli -- ...` for Paseo commands from this
+checkout instead of a globally installed `paseo`.
 
-Install the MeowFlow CLI:
+Start the dev daemon and app:
 
 ```bash
-npm install -g meow-flow
+pnpm run dev
 ```
+
+The dev script starts the daemon and Expo app together. It automatically derives
+isolated `PASEO_HOME` state for worktrees.
+
+### Desktop app
+
+Prebuilt Paseo desktop releases do not include the MeowFlow-specific Paseo
+changes yet. Use the source checkout path above until the modified Paseo package
+is published.
 
 For full Paseo setup, see:
 
@@ -48,11 +55,17 @@ For full Paseo setup, see:
 ## Get Started
 
 ```text
-mfl run "Create a echo hello script."
+pnpm run cli:mfl -- worktree new
+pnpm run cli:mfl -- run "Create a echo hello script."
 // You'll see the agent started in the paseo's webapp
 ```
 
-`mfl run` launches a Paseo agent from the current working directory and passes the request through unchanged.
+Once the package is installed on `PATH`, the run command is:
+`mfl run "Create a echo hello script."`.
+
+`mfl run` launches a Paseo agent in a linked git worktree and passes the request
+through unchanged. When no linked worktree is available, it tells you to run
+`mfl worktree new`.
 
 ## Philosophy
 
@@ -79,19 +92,33 @@ Execute mode is a variant of the Plan-Code-Review workflow with an additional `m
 Start a MeowFlow agent with `mfl run`:
 
 ```bash
+mfl worktree new
 mfl run "implement user authentication"
 mfl run --id auth-flow "implement user authentication and add tests"
+```
+
+MeowFlow discovers workspaces with `git worktree list --porcelain`. You can
+create worktrees with MeowFlow or with plain `git worktree add`; either way,
+`mfl run` can use them.
+
+Worktree helpers:
+
+```bash
+mfl worktree new                    # creates .paseo-workspaces/paseo-{N+1}
+mfl worktree new --branch auth-flow # use a specific branch name
+mfl worktree ls                     # alias: mfl worktree list
+mfl worktree rm paseo-1             # alias: mfl worktree remove paseo-1
 ```
 
 Paseo's CLI remains available for direct agent management:
 
 ```bash
-paseo ls                           # list running agents
-paseo attach abc123                # stream live output
-paseo send abc123 "also add tests" # follow-up task
+pnpm run cli -- ls                           # list running agents
+pnpm run cli -- attach abc123                # stream live output
+pnpm run cli -- send abc123 "also add tests" # follow-up task
 
 # run on a remote daemon
-paseo --host workstation.local:6767 run "run the full test suite"
+pnpm run cli -- --host workstation.local:6767 run "run the full test suite"
 ```
 
 See the [full CLI reference](https://paseo.sh/docs/cli) for more.

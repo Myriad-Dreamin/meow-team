@@ -138,6 +138,7 @@ if (exitCode !== 0) {
     invocationLogPath,
     env: {
       PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
+      MFL_PASEO_BIN: "paseo",
       PASEO_INVOCATION_LOG: invocationLogPath,
     },
   };
@@ -157,34 +158,88 @@ function readPaseoInvocations(invocationLogPath: string): readonly PaseoInvocati
   return content.split(/\r?\n/).map((line) => JSON.parse(line) as PaseoInvocation);
 }
 
+function createGitRepository(prefix: string): string {
+  const repositoryRoot = createTempDirectory(prefix);
+
+  runGit(["init"], repositoryRoot);
+  runGit(["config", "user.email", "test@example.com"], repositoryRoot);
+  runGit(["config", "user.name", "Test User"], repositoryRoot);
+  writeFile(path.join(repositoryRoot, "README.md"), "# Test repository\n");
+  runGit(["add", "README.md"], repositoryRoot);
+  runGit(["commit", "-m", "init"], repositoryRoot);
+
+  return repositoryRoot;
+}
+
+function createManualWorktree(repositoryRoot: string): string {
+  const worktreePath = path.join(repositoryRoot, "manual-worktrees", "custom");
+
+  runGit(["worktree", "add", "-b", "manual-worktree", worktreePath, "HEAD"], repositoryRoot);
+
+  return worktreePath;
+}
+
+function runGit(args: readonly string[], cwd: string): void {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed`);
+  }
+}
+
 describe("mfl run", () => {
-  test("launches paseo in the current directory without loading config", () => {
-    const workingDirectory = createTempDirectory("meow-flow-run-cwd-");
+  test("launches paseo in a git-discovered linked worktree without loading config", () => {
+    const repositoryRoot = createGitRepository("meow-flow-run-repo-");
+    const worktreePath = createManualWorktree(repositoryRoot);
     const fakePaseo = createFakePaseo();
     const requestBody = "Create a echo hello script.";
 
-    const result = runCli(["run", "--id", "fix-test-ci", requestBody], workingDirectory, {
+    const result = runCli(["run", "--id", "fix-test-ci", requestBody], repositoryRoot, {
       env: fakePaseo.env,
     });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Thread: fix-test-ci");
+    expect(result.stdout).toContain("Workspace: manual-worktrees/custom");
 
     const invocations = readPaseoInvocations(fakePaseo.invocationLogPath);
 
     expect(invocations).toEqual([
       {
-        argv: ["run", "--label", "x-meow-flow-id=fix-test-ci", requestBody],
-        cwd: workingDirectory,
+        argv: ["run", "--cwd", worktreePath, "--label", "x-meow-flow-id=fix-test-ci", requestBody],
+        cwd: repositoryRoot,
       },
     ]);
   });
 
-  test("reports paseo run failures", () => {
-    const workingDirectory = createTempDirectory("meow-flow-run-failure-");
+  test("fails with a worktree creation hint when no linked worktree is available", () => {
+    const repositoryRoot = createGitRepository("meow-flow-run-no-worktree-");
     const fakePaseo = createFakePaseo();
 
-    const result = runCli(["run", "--id", "fix-test-ci", "will fail"], workingDirectory, {
+    const result = runCli(["run", "--id", "fix-test-ci", "will wait"], repositoryRoot, {
+      env: fakePaseo.env,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("No git worktree is available");
+    expect(result.output).toContain("mfl worktree new");
+    expect(readPaseoInvocations(fakePaseo.invocationLogPath)).toHaveLength(0);
+  });
+
+  test("reports paseo run failures", () => {
+    const repositoryRoot = createGitRepository("meow-flow-run-failure-");
+    createManualWorktree(repositoryRoot);
+    const fakePaseo = createFakePaseo();
+
+    const result = runCli(["run", "--id", "fix-test-ci", "will fail"], repositoryRoot, {
       env: {
         ...fakePaseo.env,
         PASEO_EXIT_CODE: "7",

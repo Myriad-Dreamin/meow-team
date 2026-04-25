@@ -76,6 +76,7 @@ describe("mfl foundation", () => {
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: mfl");
     expect(result.output).toContain("run");
+    expect(result.output).toContain("worktree");
     expect(result.output).not.toContain("config");
     expect(result.output).not.toContain("plan");
     expect(result.output).not.toContain("thread");
@@ -92,5 +93,17 @@ describe("mfl foundation", () => {
     expect(result.output).toContain("<request-body>");
     expect(result.output).toContain("--id");
     expect(result.output).not.toContain("--config");
+  });
+
+  test("run cli:mfl worktree --help succeeds and prints worktree subcommands", () => {
+    const result = runCliAlias(["worktree", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: mfl worktree");
+    expect(result.output).toContain("new");
+    expect(result.output).toContain("ls");
+    expect(result.output).toContain("list");
+    expect(result.output).toContain("rm");
+    expect(result.output).toContain("remove");
   });
 });
