@@ -2,7 +2,7 @@
 
 `MeowTeam` is a workflow for automated coding rather than vibe coding.
 
-This project is based on Paseo and OpenSpec. Paseo provides the agent runtime, interfaces, and orchestration surface. OpenSpec provides the roadmap, specification, and task-driven structure that guides the workflow.
+This project is based on [Paseo][paseo] and [OpenSpec][openspec]. Paseo provides the agent runtime, interfaces, and orchestration surface. OpenSpec provides the roadmap, specification, and task-driven structure that guides the workflow.
 
 ## Philosophy
 
@@ -84,4 +84,7 @@ For the current `meow-team` workflow and usage guidance, see [issue #93](https:/
 
 ## Acknowledgement
 
-`MeowTeam` builds on Paseo and OpenSpec. Paseo provides the agent runtime and orchestration surface, while OpenSpec provides the roadmap, spec, and task-oriented structure that this workflow relies on.
+`MeowTeam` builds on [Paseo][paseo] and [OpenSpec][openspec]. Paseo provides the agent runtime and orchestration surface, while OpenSpec provides the roadmap, spec, and task-oriented structure that this workflow relies on.
+
+[paseo]: https://paseo.sh
+[openspec]: https://openspec.dev

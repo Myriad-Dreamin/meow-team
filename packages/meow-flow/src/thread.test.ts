@@ -74,7 +74,7 @@ function runCli(
 
   const result = spawnSync(
     process.execPath,
-    ["--import", TSX_LOADER_PATH, CLI_ENTRY_PATH, ...args],
+    ["--conditions=source", "--import", TSX_LOADER_PATH, CLI_ENTRY_PATH, ...args],
     {
       cwd,
       env: {
@@ -238,7 +238,7 @@ function runGit(args: readonly string[], cwd: string): void {
   }
 }
 
-describe("meow-flow thread ls", () => {
+describe("mfl thread ls", () => {
   test("lists configured slots from inside the primary checkout", () => {
     const repositoryRoot = createGitRepository("meow-flow-thread-primary-");
     const configPath = path.join(repositoryRoot, "team.config.js");
@@ -306,7 +306,7 @@ describe("meow-flow thread ls", () => {
 
     expect(result.status).toBe(1);
     expect(result.output).toContain("dispatch.maxConcurrentWorkers");
-    expect(result.output).toContain("meow-flow thread ls");
+    expect(result.output).toContain("mfl thread ls");
   });
 
   test("fails clearly outside a git repository", () => {

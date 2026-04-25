@@ -36,7 +36,7 @@ export function createRunCommand(): Command {
         const context = resolveThreadWorkspaceContext({
           cwd: process.cwd(),
           configPath: options.config,
-          commandName: "meow-flow run",
+          commandName: "mfl run",
         });
         const allocation = allocateThreadWorkspace({
           store,

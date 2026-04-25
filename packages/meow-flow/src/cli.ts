@@ -8,7 +8,7 @@ import { resolveCliVersion } from "./version.js";
 
 export function createCli(): Command {
   return new Command()
-    .name("meow-flow")
+    .name("mfl")
     .description("CLI for loading Meow Flow team config and planning repository dispatch")
     .showSuggestionAfterError()
     .showHelpAfterError()
@@ -16,7 +16,7 @@ export function createCli(): Command {
     .addCommand(createConfigCommand())
     .addCommand(createPlanCommand())
     .addCommand(createThreadCommand())
-    .addCommand(createThreadListCommand({ commandName: "meow-flow ls" }))
+    .addCommand(createThreadListCommand({ commandName: "mfl ls" }))
     .addCommand(createRunCommand())
     .addCommand(createDeleteCommand());
 }
