@@ -26,7 +26,7 @@ import {
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
 import { useStableEvent } from "@/hooks/use-stable-event";
-import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
+import { type OpenWorkspaceFileInput, usePaneContext, usePaneFocus } from "@/panels/pane-context";
 import type { PanelDescriptor, PanelRegistration } from "@/panels/panel-registry";
 import {
   type HostRuntimeConnectionStatus,
@@ -167,8 +167,8 @@ function AgentPanel() {
   const { isInteractive } = usePaneFocus();
   invariant(target.kind === "agent", "AgentPanel requires agent target");
 
-  function openWorkspaceFile(input: { filePath: string }) {
-    openFileInWorkspace(input.filePath);
+  function openWorkspaceFile(input: OpenWorkspaceFileInput) {
+    openFileInWorkspace(input);
   }
 
   const handleOpenWorkspaceFile = useStableEvent(openWorkspaceFile);
@@ -246,7 +246,7 @@ function AgentPanelContent({
   serverId: string;
   agentId: string;
   isPaneFocused: boolean;
-  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  onOpenWorkspaceFile?: (input: OpenWorkspaceFileInput) => void;
 }) {
   const resolvedAgentId = agentId.trim() || undefined;
   const resolvedServerId = serverId.trim() || undefined;
@@ -308,7 +308,7 @@ function AgentPanelBody({
   client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
   isConnected: boolean;
   connectionStatus: HostRuntimeConnectionStatus;
-  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  onOpenWorkspaceFile?: (input: OpenWorkspaceFileInput) => void;
 }) {
   const { theme } = useUnistyles();
   const { isArchivingAgent } = useArchiveAgent();
@@ -475,7 +475,7 @@ function ChatAgentContent({
   client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
   isConnected: boolean;
   connectionStatus: HostRuntimeConnectionStatus;
-  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  onOpenWorkspaceFile?: (input: OpenWorkspaceFileInput) => void;
 }) {
   const { theme } = useUnistyles();
   const panelToast = useToastHost();
@@ -975,7 +975,7 @@ function AgentStreamSection({
   canFinalizePendingCreate: boolean;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
-  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  onOpenWorkspaceFile?: (input: OpenWorkspaceFileInput) => void;
 }) {
   const streamItemsRaw = useSessionStore((state) =>
     agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,

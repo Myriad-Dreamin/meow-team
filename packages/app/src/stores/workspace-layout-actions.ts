@@ -132,6 +132,38 @@ interface ConvertDraftToAgentInLayoutResult {
   tabId: string;
 }
 
+function shouldReplaceExistingTabTarget(
+  currentTarget: WorkspaceTabTarget,
+  nextTarget: WorkspaceTabTarget,
+): boolean {
+  if (currentTarget.kind !== "file" || nextTarget.kind !== "file") {
+    return false;
+  }
+  if (currentTarget.path !== nextTarget.path) {
+    return false;
+  }
+  return (
+    (currentTarget.lineStart ?? null) !== (nextTarget.lineStart ?? null) ||
+    (currentTarget.columnStart ?? null) !== (nextTarget.columnStart ?? null)
+  );
+}
+
+function replaceExistingTabTarget(
+  layout: WorkspaceLayout,
+  tabId: string,
+  target: WorkspaceTabTarget,
+): WorkspaceLayout {
+  const internalLayout = asInternalLayout(layout);
+  return {
+    root: replaceTabInTree(internalLayout.root, {
+      tabId,
+      nextTabId: tabId,
+      target,
+    }),
+    focusedPaneId: internalLayout.focusedPaneId,
+  };
+}
+
 interface ReorderFocusedPaneTabsInLayoutInput {
   layout: WorkspaceLayout;
   tabIds: string[];
@@ -1057,13 +1089,17 @@ export function openTabInLayoutFocused(input: OpenTabInLayoutInput): OpenTabInLa
     workspaceTabTargetsEqual(tab.target, input.target),
   );
   if (existingTab) {
+    const focusedLayout =
+      focusTabInLayout({
+        layout,
+        tabId: existingTab.tabId,
+      }) ?? input.layout;
+    const nextLayout = shouldReplaceExistingTabTarget(existingTab.target, input.target)
+      ? replaceExistingTabTarget(focusedLayout, existingTab.tabId, input.target)
+      : focusedLayout;
     return {
       tabId: existingTab.tabId,
-      layout:
-        focusTabInLayout({
-          layout,
-          tabId: existingTab.tabId,
-        }) ?? input.layout,
+      layout: nextLayout,
     };
   }
 
@@ -1076,7 +1112,12 @@ export function openTabInLayoutBackground(input: OpenTabInLayoutInput): OpenTabI
     workspaceTabTargetsEqual(tab.target, input.target),
   );
   if (existingTab) {
-    return { tabId: existingTab.tabId, layout: input.layout };
+    return {
+      tabId: existingTab.tabId,
+      layout: shouldReplaceExistingTabTarget(existingTab.target, input.target)
+        ? replaceExistingTabTarget(input.layout, existingTab.tabId, input.target)
+        : input.layout,
+    };
   }
 
   return insertNewTabIntoFocusedPane({ ...input, focus: false });
