@@ -27,7 +27,8 @@ absolute repository paths.
 
 ## Config resolution
 
-`meow-flow plan` and `meow-flow thread ls` resolve config in this order:
+`meow-flow plan`, `meow-flow run`, `meow-flow thread ls`, and `meow-flow ls`
+resolve config in this order:
 
 1. `--config <path>` when provided
 2. The installed shared artifact at `~/.local/shared/meow-flow/config.js`
@@ -105,19 +106,58 @@ Run:
 ```bash
 pnpm run cli:meow-flow -- thread ls
 pnpm run cli:meow-flow -- thread ls --config ./team.config.ts
+pnpm run cli:meow-flow -- ls
 ```
 
-`thread ls` must run inside a git repository. It resolves the canonical checkout
-root, including from inside linked `.paseo-worktrees/paseo-N` worktrees, then
-uses `dispatch.maxConcurrentWorkers` as the configured slot range. Each line
-shows a slot path relative to the canonical root and whether that slot is a
-registered Git worktree:
+`thread ls` and the top-level `ls` alias must run inside a git repository. They
+resolve the canonical checkout root, including from inside linked
+`.paseo-worktrees/paseo-N` worktrees, then use
+`dispatch.maxConcurrentWorkers` as the configured slot range. Each line shows a
+slot path relative to the canonical root and whether that slot is idle,
+occupied, or not created:
 
 ```text
 .paseo-worktrees/paseo-1 idle
-.paseo-worktrees/paseo-2 not-created (folder is not allocated)
+.paseo-worktrees/paseo-2 fix-test-ci
+.paseo-worktrees/paseo-3 not-created (folder is not allocated)
 ```
 
-The status domain includes `idle`, `occupied`, and `not-created`, but this
-initial command only reports `idle` or `not-created`. Occupation detection is
-reserved for a later change.
+Occupied rows print the occupying thread id in the status position.
+
+## Thread workspace occupancy
+
+Run:
+
+```bash
+pnpm run cli:meow-flow -- run --id fix-test-ci 'echo "hello world"'
+pnpm run cli:meow-flow -- run 'echo "hello world"'
+pnpm run cli:meow-flow -- delete fix-test-ci
+```
+
+`run` must run inside a git repository. It resolves the canonical checkout root,
+loads the explicit or shared config, selects the lowest idle registered
+`.paseo-worktrees/paseo-N` slot, persists the occupation, and launches Paseo:
+
+```text
+paseo run --cwd <absolute-workspace-path> --label x-meow-flow-id=<thread-id> '<request body>'
+```
+
+When `--id` is omitted, `run` generates a random UUID and prints it after the
+Paseo launch succeeds. The request body is passed to `paseo run` unchanged.
+
+Running occupations are stored in:
+
+```text
+~/.local/shared/meow-flow/meow-flow.sqlite
+```
+
+The store enforces one running workspace per thread id and one running thread
+per workspace. If `paseo run` fails after a workspace is reserved, `meow-flow`
+releases the fresh occupation before returning the failure.
+
+`delete <id1> <id2> ...` releases persisted Meow Flow occupations by thread id
+from the shared SQLite database. It does not need to run inside a git
+repository. Batch deletes validate every requested id before deleting any rows,
+then print each released thread id and workspace path. This command does not
+remove the `.paseo-worktrees/paseo-N` folder and does not stop or delete a Paseo
+agent.

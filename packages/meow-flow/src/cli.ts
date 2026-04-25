@@ -1,7 +1,9 @@
 import { Command } from "commander";
 import { createConfigCommand } from "./config-command.js";
+import { createDeleteCommand } from "./delete-command.js";
 import { createPlanCommand } from "./plan-command.js";
-import { createThreadCommand } from "./thread-command.js";
+import { createRunCommand } from "./run-command.js";
+import { createThreadCommand, createThreadListCommand } from "./thread-command.js";
 import { resolveCliVersion } from "./version.js";
 
 export function createCli(): Command {
@@ -13,5 +15,8 @@ export function createCli(): Command {
     .version(resolveCliVersion(), "-v, --version", "output the version number")
     .addCommand(createConfigCommand())
     .addCommand(createPlanCommand())
-    .addCommand(createThreadCommand());
+    .addCommand(createThreadCommand())
+    .addCommand(createThreadListCommand({ commandName: "meow-flow ls" }))
+    .addCommand(createRunCommand())
+    .addCommand(createDeleteCommand());
 }

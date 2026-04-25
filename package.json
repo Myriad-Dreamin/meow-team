@@ -101,6 +101,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@biomejs/biome",
+      "better-sqlite3",
       "dtrace-provider",
       "electron",
       "electron-winstaller",
