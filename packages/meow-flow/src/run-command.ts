@@ -1,12 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
-import { allocateThreadWorkspace } from "./thread-allocation.js";
-import { openThreadOccupationStore } from "./thread-occupation-store.js";
-import { resolveThreadWorkspaceContext } from "./thread-workspaces.js";
 
 type RunCommandOptions = {
-  readonly config?: string;
   readonly id?: string;
 };
 
@@ -21,50 +17,24 @@ type PaseoRunResult =
 
 export function createRunCommand(): Command {
   return new Command("run")
-    .description("Allocate an idle Meow Flow thread workspace and launch a labeled Paseo agent")
-    .option(
-      "-c, --config <path>",
-      "load an explicit config path instead of the installed shared config",
-    )
-    .option("--id <id>", "use an explicit Meow Flow thread id instead of generating a UUID")
+    .description("Launch a labeled Paseo agent for the current working directory")
+    .option("--id <id>", "use an explicit MeowFlow thread id instead of generating a UUID")
     .argument("<request-body>", "request body to pass through to paseo run")
     .action((requestBody: string, options: RunCommandOptions, command: Command) => {
-      const store = openThreadOccupationStore();
-
       try {
         const threadId = resolveThreadId(options.id);
-        const context = resolveThreadWorkspaceContext({
-          cwd: process.cwd(),
-          configPath: options.config,
-          commandName: "mfl run",
-        });
-        const allocation = allocateThreadWorkspace({
-          store,
-          repositoryRoot: context.repositoryRoot,
-          registeredWorktrees: context.registeredWorktrees,
-          maxConcurrentWorkers: context.maxConcurrentWorkers,
-          threadId,
-          requestBody,
-        });
         const paseoRunResult = invokePaseoRun({
-          workspacePath: allocation.workspaceAbsolutePath,
           threadId,
           requestBody,
         });
 
         if (!paseoRunResult.ok) {
-          store.releaseThreadOccupation(threadId);
           throw new Error(paseoRunResult.message);
         }
 
-        process.stdout.write(
-          [`Thread: ${threadId}`, `Workspace: ${allocation.workspaceRelativePath}`].join("\n"),
-        );
-        process.stdout.write("\n");
+        process.stdout.write(`Thread: ${threadId}\n`);
       } catch (error) {
         command.error(error instanceof Error ? error.message : String(error));
-      } finally {
-        store.close();
       }
     });
 }
@@ -84,20 +54,12 @@ function resolveThreadId(explicitThreadId: string | undefined): string {
 }
 
 function invokePaseoRun(input: {
-  readonly workspacePath: string;
   readonly threadId: string;
   readonly requestBody: string;
 }): PaseoRunResult {
   const result = spawnSync(
     "paseo",
-    [
-      "run",
-      "--cwd",
-      input.workspacePath,
-      "--label",
-      `x-meow-flow-id=${input.threadId}`,
-      input.requestBody,
-    ],
+    ["run", "--label", `x-meow-flow-id=${input.threadId}`, input.requestBody],
     {
       cwd: process.cwd(),
       encoding: "utf8",

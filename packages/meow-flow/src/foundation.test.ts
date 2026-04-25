@@ -75,66 +75,22 @@ describe("mfl foundation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: mfl");
-    expect(result.output).toContain("config");
-    expect(result.output).toContain("plan");
-    expect(result.output).toContain("thread");
-    expect(result.output).toContain("ls");
     expect(result.output).toContain("run");
-    expect(result.output).toContain("delete");
+    expect(result.output).not.toContain("config");
+    expect(result.output).not.toContain("plan");
+    expect(result.output).not.toContain("thread");
+    expect(result.output).not.toContain("delete");
     expect(result.output).toContain("Options:");
     expect(result.output).toContain("--version");
   });
 
-  test("run cli:mfl config install --help succeeds and prints install help", () => {
-    const result = runCliAlias(["config", "install", "--help"]);
-
-    expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: mfl config install");
-    expect(result.output).toContain("<path>");
-    expect(result.output).toContain(".js");
-    expect(result.output).toContain(".ts");
-    expect(result.output).toContain("~/.local/shared/meow-flow/config.js");
-  });
-
-  test("run cli:mfl thread --help succeeds and prints thread subcommands", () => {
-    const result = runCliAlias(["thread", "--help"]);
-
-    expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: mfl thread");
-    expect(result.output).toContain("ls");
-  });
-
-  test("run cli:mfl thread ls --help succeeds and prints list options", () => {
-    const result = runCliAlias(["thread", "ls", "--help"]);
-
-    expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: mfl thread ls");
-    expect(result.output).toContain("--config");
-  });
-
-  test("run cli:mfl ls --help succeeds and prints alias options", () => {
-    const result = runCliAlias(["ls", "--help"]);
-
-    expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: mfl ls");
-    expect(result.output).toContain("--config");
-  });
-
-  test("run cli:mfl run --help succeeds and prints allocation options", () => {
+  test("run cli:mfl run --help succeeds and prints launch options", () => {
     const result = runCliAlias(["run", "--help"]);
 
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: mfl run");
     expect(result.output).toContain("<request-body>");
     expect(result.output).toContain("--id");
-    expect(result.output).toContain("--config");
-  });
-
-  test("run cli:mfl delete --help succeeds and prints release arguments", () => {
-    const result = runCliAlias(["delete", "--help"]);
-
-    expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: mfl delete");
-    expect(result.output).toContain("<ids...>");
+    expect(result.output).not.toContain("--config");
   });
 });
