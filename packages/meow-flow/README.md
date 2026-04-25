@@ -5,8 +5,21 @@ without a MeowFlow config file.
 
 ## Installation
 
-Install or build from the repository root, then use `mfl` once the package is on
-`PATH`.
+Install `mfl` with one of these options:
+
+1. From npm:
+
+   ```bash
+   npm install -g meow-flow
+   ```
+
+2. From this checkout with `pnpm link`:
+
+   ```bash
+   pnpm --filter meow-flow run build
+   cd packages/meow-flow
+   pnpm link --global
+   ```
 
 MeowFlow currently targets modified Paseo source that is not included in
 prebuilt Paseo releases. See
@@ -21,12 +34,8 @@ mfl run "Create a echo hello script."
 // You'll see the agent started in the paseo's webapp
 ```
 
-Once the package is installed on `PATH`, the run command is:
-`mfl run "Create a echo hello script."`.
-
-`mfl run` passes the request body through to Paseo unchanged and launches the
-agent in a linked git worktree. When no linked worktree is available, it tells
-you to run `mfl worktree new`.
+`mfl run` launches a Paseo agent in a linked git worktree and passes the request
+through unchanged.
 
 ## Worktrees
 
