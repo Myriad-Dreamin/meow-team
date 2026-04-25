@@ -524,12 +524,6 @@ importers:
 
   packages/meow-flow:
     dependencies:
-      '@myriaddreamin/meow-flow-core':
-        specifier: workspace:*
-        version: link:../meow-flow-core
-      better-sqlite3:
-        specifier: ^12.9.0
-        version: 12.9.0
       commander:
         specifier: ^12.0.0
         version: 12.1.0
@@ -537,9 +531,6 @@ importers:
         specifier: ^4.6.0
         version: 4.21.0
     devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
       '@types/node':
         specifier: ^20.9.0
         version: 20.19.37
