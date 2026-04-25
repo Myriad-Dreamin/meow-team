@@ -5,24 +5,13 @@ without a MeowFlow config file.
 
 ## Installation
 
-MeowFlow currently targets the modified Paseo source in this repository. From
-the repository root, build the local Paseo packages before running `mfl`:
+Install or build from the repository root, then use `mfl` once the package is on
+`PATH`.
 
-```bash
-pnpm install --frozen-lockfile
-pnpm run build:daemon
-```
-
-See `docs/DEVELOPMENT.md` for the source CLI and build sync notes. In this
-checkout, use the workspace scripts:
-
-```bash
-pnpm run cli -- ls
-pnpm run cli:mfl -- worktree ls
-```
-
-The published package will use the modified Paseo package once that is published
-separately.
+MeowFlow currently targets modified Paseo source that is not included in
+prebuilt Paseo releases. See
+[Paseo installation](../../docs/PASEO-INSTALLATION.md) for the source checkout
+steps and upstream citation.
 
 ## Get Started
 

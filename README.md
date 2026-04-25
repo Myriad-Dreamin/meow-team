@@ -6,51 +6,17 @@ This project is based on [Paseo][paseo] and [OpenSpec][openspec]. Paseo provides
 
 ## Installation
 
-Today, `MeowFlow` uses the Paseo daemon and clients for runtime.
-
-Paseo runs a local server called the daemon that manages your coding agents. Clients like the desktop app, mobile app, web app, and CLI connect to it.
-
-### Prerequisites
-
-You need at least one agent CLI installed and configured with your credentials:
+MeowFlow runs on Paseo's daemon, app clients, and CLI runtime. Paseo manages
+existing agent CLIs, so install and authenticate at least one supported agent
+first:
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Codex](https://github.com/openai/codex)
 - [OpenCode](https://github.com/anomalyco/opencode)
 
-### Source checkout
-
-MeowFlow currently uses the modified Paseo source in this repository. Build the
-local Paseo packages before running `mfl` so the local CLI imports fresh
-`dist/*` output:
-
-```bash
-pnpm install --frozen-lockfile
-pnpm run build:daemon
-```
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the local CLI and build sync
-notes. In particular, use `pnpm run cli -- ...` for Paseo commands from this
-checkout instead of a globally installed `paseo`.
-
-Start the dev daemon and app:
-
-```bash
-pnpm run dev
-```
-
-The dev script starts the daemon and Expo app together. It automatically derives
-isolated `PASEO_HOME` state for worktrees.
-
-### Desktop app
-
-Prebuilt Paseo desktop releases do not include the MeowFlow-specific Paseo
-changes yet. Use the source checkout path above until the modified Paseo package
-is published.
-
-For full Paseo setup, see:
-
-- [Docs](https://paseo.sh/docs)
+MeowFlow currently targets modified Paseo source that is not included in
+prebuilt Paseo releases. See [Paseo installation](docs/PASEO-INSTALLATION.md)
+for the source checkout steps and upstream citation.
 
 ## Get Started
 
