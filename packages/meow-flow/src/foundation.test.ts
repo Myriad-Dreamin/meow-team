@@ -78,6 +78,9 @@ describe("meow-flow foundation", () => {
     expect(result.output).toContain("config");
     expect(result.output).toContain("plan");
     expect(result.output).toContain("thread");
+    expect(result.output).toContain("ls");
+    expect(result.output).toContain("run");
+    expect(result.output).toContain("delete");
     expect(result.output).toContain("Options:");
     expect(result.output).toContain("--version");
   });
@@ -99,5 +102,39 @@ describe("meow-flow foundation", () => {
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: meow-flow thread");
     expect(result.output).toContain("ls");
+  });
+
+  test("run cli:meow-flow thread ls --help succeeds and prints list options", () => {
+    const result = runCliAlias(["thread", "ls", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: meow-flow thread ls");
+    expect(result.output).toContain("--config");
+  });
+
+  test("run cli:meow-flow ls --help succeeds and prints alias options", () => {
+    const result = runCliAlias(["ls", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: meow-flow ls");
+    expect(result.output).toContain("--config");
+  });
+
+  test("run cli:meow-flow run --help succeeds and prints allocation options", () => {
+    const result = runCliAlias(["run", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: meow-flow run");
+    expect(result.output).toContain("<request-body>");
+    expect(result.output).toContain("--id");
+    expect(result.output).toContain("--config");
+  });
+
+  test("run cli:meow-flow delete --help succeeds and prints release arguments", () => {
+    const result = runCliAlias(["delete", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: meow-flow delete");
+    expect(result.output).toContain("<ids...>");
   });
 });
