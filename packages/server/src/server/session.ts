@@ -177,6 +177,8 @@ import {
   pullCurrentBranch,
   pushCurrentBranch,
   createPullRequest,
+  getTitleGenerationPromptContext,
+  type TitleGenerationPromptContext,
 } from "../utils/checkout-git.js";
 import { getProjectIcon } from "../utils/project-icon.js";
 import { expandTilde } from "../utils/path.js";
@@ -3523,11 +3525,51 @@ export class Session {
     return resolvedCandidate.startsWith(resolvedRoot + sep);
   }
 
+  private formatTitleGenerationPromptContext(
+    context: TitleGenerationPromptContext | null | undefined,
+    target: "commit title" | "pull request title",
+  ): string | null {
+    if (!context) {
+      return null;
+    }
+
+    const label = target === "commit title" ? "Commit title" : "Pull request title";
+    if (context.source === "config") {
+      const instruction = context.instruction.trim();
+      const normalizedInstruction = instruction.toLowerCase();
+      if (normalizedInstruction === "conventional-commit") {
+        return [
+          `${label} style guidance:`,
+          "- Source: git config --local paseo.prompt.title",
+          "- Follow the Conventional Commits standard, for example: type(scope): summary.",
+          `- Apply that format to the ${target} while still describing the diff below accurately.`,
+        ].join("\n");
+      }
+
+      return [
+        `${label} style guidance:`,
+        "- Source: git config --local paseo.prompt.title",
+        `- Instruction: ${instruction}`,
+        `- Apply this instruction to the ${target} while still describing the diff below accurately.`,
+      ].join("\n");
+    }
+
+    return [
+      `${label} style examples from recent commits on ${context.ref}:`,
+      "Use these examples for style, tone, casing, and prefix patterns only; base the content on the diff below.",
+      ...context.titles.map((title, index) => `${index + 1}. ${title}`),
+    ].join("\n");
+  }
+
   private async generateCommitMessage(cwd: string): Promise<string> {
     const diff = await this.workspaceGitService.getCheckoutDiff(cwd, {
       mode: "uncommitted",
       includeStructured: true,
     });
+    const titlePromptContext = this.formatTitleGenerationPromptContext(
+      await getTitleGenerationPromptContext(cwd),
+      "commit title",
+    );
     const schema = z.object({
       message: z
         .string()
@@ -3555,6 +3597,7 @@ export class Session {
       "Write a concise git commit message for the changes below.",
       "Return JSON only with a single field 'message'.",
       "",
+      ...(titlePromptContext ? [titlePromptContext, ""] : []),
       fileList,
       "",
       patch.length > 0 ? patch : "(No diff available)",
@@ -3597,6 +3640,10 @@ export class Session {
       baseRef,
       includeStructured: true,
     });
+    const titlePromptContext = this.formatTitleGenerationPromptContext(
+      await getTitleGenerationPromptContext(cwd, { baseRef }),
+      "pull request title",
+    );
     const schema = z.object({
       title: z.string().min(1).max(72),
       body: z.string().min(1),
@@ -3621,6 +3668,7 @@ export class Session {
       "Write a pull request title and body for the changes below.",
       "Return JSON only with fields 'title' and 'body'.",
       "",
+      ...(titlePromptContext ? [titlePromptContext, ""] : []),
       fileList,
       "",
       patch.length > 0 ? patch : "(No diff available)",
