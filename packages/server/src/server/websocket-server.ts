@@ -49,12 +49,6 @@ import {
   findLatestPermissionRequest,
 } from "../shared/agent-attention-notification.js";
 import { createGitHubService, type GitHubService } from "../services/github-service.js";
-import {
-  isDaemonWebSocketPath,
-  isTestTerminalWebSocketPath,
-  TestTerminalWebSocketBridge,
-  type SpawnTestTerminalPty,
-} from "./test-terminal-websocket.js";
 
 export type ExternalSocketMetadata = {
   transport: "relay";
@@ -359,7 +353,6 @@ export class VoiceAssistantWebSocketServer {
   private readonly outboundBinaryFrameCounts = new Map<string, number>();
   private readonly bufferedAmountSamples: number[] = [];
   private readonly requestLatencies = new Map<string, number[]>();
-  private readonly testTerminalBridge: TestTerminalWebSocketBridge;
   private runtimeMetricsInterval: ReturnType<typeof setInterval> | null = null;
   private unsubscribeSpeechReadiness: (() => void) | null = null;
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
@@ -403,13 +396,8 @@ export class VoiceAssistantWebSocketServer {
     resolveScriptHealth?: (hostname: string) => ScriptHealthState | null,
     workspaceGitService?: WorkspaceGitServiceImpl,
     github?: GitHubService,
-    testTerminalSpawnPty?: SpawnTestTerminalPty,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
-    this.testTerminalBridge = new TestTerminalWebSocketBridge({
-      logger: this.logger,
-      ...(testTerminalSpawnPty ? { spawnPty: testTerminalSpawnPty } : {}),
-    });
     this.serverId = serverId;
     if (typeof daemonVersion !== "string" || daemonVersion.trim().length === 0) {
       throw new MissingDaemonVersionError();
@@ -487,6 +475,7 @@ export class VoiceAssistantWebSocketServer {
     const { allowedOrigins, hostnames } = wsConfig;
     this.wss = new WebSocketServer({
       server,
+      path: "/ws",
       verifyClient: ({ req }, callback) => {
         const requestMetadata = extractSocketRequestMetadata(req);
         const origin = requestMetadata.origin;
@@ -514,13 +503,8 @@ export class VoiceAssistantWebSocketServer {
         }
       },
     });
-    this.wss.shouldHandle = (req) => isDaemonWebSocketPath(req.url);
 
     this.wss.on("connection", (ws, request) => {
-      if (isTestTerminalWebSocketPath(request.url)) {
-        this.testTerminalBridge.handleConnection(ws, request);
-        return;
-      }
       void this.attachSocket(ws, request);
     });
 
@@ -530,7 +514,7 @@ export class VoiceAssistantWebSocketServer {
     this.runtimeMetricsInterval = runtimeMetricsInterval;
     (runtimeMetricsInterval as unknown as { unref?: () => void }).unref?.();
 
-    this.logger.info("WebSocket server initialized on /ws and /api/test/terminal");
+    this.logger.info("WebSocket server initialized on /ws");
   }
 
   public broadcast(message: WSOutboundMessage): void {
@@ -636,7 +620,6 @@ export class VoiceAssistantWebSocketServer {
         }),
       );
     }
-    cleanupPromises.push(this.testTerminalBridge.close());
 
     await Promise.all(cleanupPromises);
     this.providerSnapshotManager.destroy();

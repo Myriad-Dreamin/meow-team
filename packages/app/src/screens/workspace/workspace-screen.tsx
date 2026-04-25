@@ -13,7 +13,6 @@ import {
   Copy,
   Ellipsis,
   EllipsisVertical,
-  FlaskConical,
   PanelRight,
   RotateCw,
   Settings,
@@ -157,14 +156,6 @@ function decodeSegment(value: string): string {
   }
 }
 
-function generateTestTerminalId(): string {
-  const randomId =
-    typeof globalThis.crypto?.randomUUID === "function"
-      ? globalThis.crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return `test-${randomId}`;
-}
-
 function getFallbackTabOptionLabel(tab: WorkspaceTabDescriptor): string {
   if (tab.target.kind === "draft") {
     return "New Agent";
@@ -174,9 +165,6 @@ function getFallbackTabOptionLabel(tab: WorkspaceTabDescriptor): string {
   }
   if (tab.target.kind === "terminal") {
     return "Terminal";
-  }
-  if (tab.target.kind === "testTerminal") {
-    return "Test terminal";
   }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").filter(Boolean).pop() ?? tab.target.path;
@@ -196,9 +184,6 @@ function getFallbackTabOptionDescription(tab: WorkspaceTabDescriptor): string {
   }
   if (tab.target.kind === "terminal") {
     return "Terminal";
-  }
-  if (tab.target.kind === "testTerminal") {
-    return "Direct terminal";
   }
   return tab.target.path;
 }
@@ -1450,22 +1435,6 @@ function WorkspaceScreenContent({
     toast.show("Preparing workspace, opening terminal when ready...");
   });
 
-  const handleCreateTestTerminal = useStableEvent((input?: { paneId?: string }) => {
-    if (!persistenceKey) {
-      return;
-    }
-    if (input?.paneId) {
-      focusWorkspacePane(persistenceKey, input.paneId);
-    }
-    const tabId = openWorkspaceTabFocused(persistenceKey, {
-      kind: "testTerminal",
-      testTerminalId: generateTestTerminalId(),
-    });
-    if (tabId) {
-      navigateToTabId(tabId);
-    }
-  });
-
   const handleSelectSwitcherTab = useCallback(
     (key: string) => {
       navigateToTabId(key);
@@ -2342,13 +2311,6 @@ function WorkspaceScreenContent({
                           New terminal
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          testID="workspace-header-test-terminal"
-                          leading={<FlaskConical size={16} color={theme.colors.foregroundMuted} />}
-                          onSelect={handleCreateTestTerminal}
-                        >
-                          Test terminal
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
                           testID="workspace-header-copy-path"
                           leading={<Copy size={16} color={theme.colors.foregroundMuted} />}
                           disabled={!isAbsolutePath(normalizedWorkspaceId)}
@@ -2556,7 +2518,6 @@ function WorkspaceScreenContent({
               onCloseOtherTabs={handleCloseOtherTabs}
               onCreateDraftTab={handleCreateDraftTab}
               onCreateTerminalTab={handleCreateTerminal}
-              onCreateTestTerminalTab={handleCreateTestTerminal}
               disableCreateTerminal={createTerminalMutation.isPending}
               isWaitingOnTerminalReadiness={pendingTerminalCreateInput !== null}
               onReorderTabs={handleReorderTabsInFocusedPane}
@@ -2596,7 +2557,6 @@ function WorkspaceScreenContent({
                     onCloseOtherTabs={handleCloseOtherTabsInPane}
                     onCreateDraftTab={handleCreateDraftTab}
                     onCreateTerminalTab={handleCreateTerminal}
-                    onCreateTestTerminalTab={handleCreateTestTerminal}
                     buildPaneContentModel={buildDesktopPaneContentModel}
                     onFocusPane={handleFocusPane}
                     onSplitPane={handleSplitPane}

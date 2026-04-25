@@ -39,10 +39,7 @@ import {
   type WorkspaceTabSnapshot,
   type WorkspaceLayout,
 } from "@/stores/workspace-layout-actions";
-import {
-  isEphemeralWorkspaceTabTarget,
-  normalizeWorkspaceTabTarget,
-} from "@/utils/workspace-tab-identity";
+import { normalizeWorkspaceTabTarget } from "@/utils/workspace-tab-identity";
 
 export { buildWorkspaceTabPersistenceKey };
 export {
@@ -163,21 +160,6 @@ function getWorkspaceLayout(
   workspaceKey: string,
 ): WorkspaceLayout {
   return normalizeLayout(state[workspaceKey] ?? createDefaultLayout());
-}
-
-function omitEphemeralTabsFromLayout(layout: WorkspaceLayout): WorkspaceLayout {
-  let nextLayout = normalizeLayout(layout);
-  for (const tab of collectAllTabs(nextLayout.root)) {
-    if (!isEphemeralWorkspaceTabTarget(tab.target)) {
-      continue;
-    }
-    nextLayout =
-      closeTabInLayout({
-        layout: nextLayout,
-        tabId: tab.tabId,
-      }) ?? nextLayout;
-  }
-  return nextLayout;
 }
 
 export const useWorkspaceLayoutStore = create<WorkspaceLayoutStore>()(
@@ -728,7 +710,7 @@ export const useWorkspaceLayoutStore = create<WorkspaceLayoutStore>()(
       partialize: (state) => {
         const layoutByWorkspace: Record<string, WorkspaceLayout> = {};
         for (const key in state.layoutByWorkspace) {
-          layoutByWorkspace[key] = omitEphemeralTabsFromLayout(state.layoutByWorkspace[key]);
+          layoutByWorkspace[key] = normalizeLayout(state.layoutByWorkspace[key]);
         }
         return {
           layoutByWorkspace,
