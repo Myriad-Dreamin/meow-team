@@ -10,7 +10,7 @@ const PACKAGE_ROOT = path.resolve(THIS_DIR, "..");
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, "..", "..");
 const NPM_COMMAND =
   process.env.NPM_COMMAND?.trim() || (process.platform === "win32" ? "pnpm.cmd" : "pnpm");
-const BIN_PATH = path.join(PACKAGE_ROOT, "bin", "meow-flow");
+const BIN_PATH = path.join(PACKAGE_ROOT, "bin", "mfl");
 const testIfPosix = process.platform === "win32" ? test.skip : test;
 
 function needsRunArgSeparator(command: string): boolean {
@@ -38,7 +38,7 @@ function runCliAlias(args: string[]) {
 
   const result = spawnSync(
     NPM_COMMAND,
-    ["run", "cli:meow-flow", ...(needsRunArgSeparator(NPM_COMMAND) ? ["--"] : []), ...args],
+    ["run", "cli:mfl", ...(needsRunArgSeparator(NPM_COMMAND) ? ["--"] : []), ...args],
     {
       cwd: REPO_ROOT,
       stdio: ["ignore", outputFd, outputFd],
@@ -55,14 +55,14 @@ function runCliAlias(args: string[]) {
   };
 }
 
-describe("meow-flow foundation", () => {
-  testIfPosix("bin/meow-flow is executable for direct invocation after build", () => {
+describe("mfl foundation", () => {
+  testIfPosix("bin/mfl is executable for direct invocation after build", () => {
     const mode = statSync(BIN_PATH).mode & 0o777;
 
     expect(mode & 0o111).not.toBe(0);
   });
 
-  test("run cli:meow-flow --version succeeds and prints the package version", () => {
+  test("run cli:mfl --version succeeds and prints the package version", () => {
     const expectedVersion = readPackageVersion();
     const result = runCliAlias(["--version"]);
 
@@ -70,11 +70,11 @@ describe("meow-flow foundation", () => {
     expect(result.output).toContain(expectedVersion);
   });
 
-  test("run cli:meow-flow --help succeeds and prints help output", () => {
+  test("run cli:mfl --help succeeds and prints help output", () => {
     const result = runCliAlias(["--help"]);
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: meow-flow");
+    expect(result.output).toContain("Usage: mfl");
     expect(result.output).toContain("config");
     expect(result.output).toContain("plan");
     expect(result.output).toContain("thread");
@@ -85,56 +85,56 @@ describe("meow-flow foundation", () => {
     expect(result.output).toContain("--version");
   });
 
-  test("run cli:meow-flow config install --help succeeds and prints install help", () => {
+  test("run cli:mfl config install --help succeeds and prints install help", () => {
     const result = runCliAlias(["config", "install", "--help"]);
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: meow-flow config install");
+    expect(result.output).toContain("Usage: mfl config install");
     expect(result.output).toContain("<path>");
     expect(result.output).toContain(".js");
     expect(result.output).toContain(".ts");
     expect(result.output).toContain("~/.local/shared/meow-flow/config.js");
   });
 
-  test("run cli:meow-flow thread --help succeeds and prints thread subcommands", () => {
+  test("run cli:mfl thread --help succeeds and prints thread subcommands", () => {
     const result = runCliAlias(["thread", "--help"]);
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: meow-flow thread");
+    expect(result.output).toContain("Usage: mfl thread");
     expect(result.output).toContain("ls");
   });
 
-  test("run cli:meow-flow thread ls --help succeeds and prints list options", () => {
+  test("run cli:mfl thread ls --help succeeds and prints list options", () => {
     const result = runCliAlias(["thread", "ls", "--help"]);
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: meow-flow thread ls");
+    expect(result.output).toContain("Usage: mfl thread ls");
     expect(result.output).toContain("--config");
   });
 
-  test("run cli:meow-flow ls --help succeeds and prints alias options", () => {
+  test("run cli:mfl ls --help succeeds and prints alias options", () => {
     const result = runCliAlias(["ls", "--help"]);
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: meow-flow ls");
+    expect(result.output).toContain("Usage: mfl ls");
     expect(result.output).toContain("--config");
   });
 
-  test("run cli:meow-flow run --help succeeds and prints allocation options", () => {
+  test("run cli:mfl run --help succeeds and prints allocation options", () => {
     const result = runCliAlias(["run", "--help"]);
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: meow-flow run");
+    expect(result.output).toContain("Usage: mfl run");
     expect(result.output).toContain("<request-body>");
     expect(result.output).toContain("--id");
     expect(result.output).toContain("--config");
   });
 
-  test("run cli:meow-flow delete --help succeeds and prints release arguments", () => {
+  test("run cli:mfl delete --help succeeds and prints release arguments", () => {
     const result = runCliAlias(["delete", "--help"]);
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain("Usage: meow-flow delete");
+    expect(result.output).toContain("Usage: mfl delete");
     expect(result.output).toContain("<ids...>");
   });
 });

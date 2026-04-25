@@ -81,7 +81,7 @@ function runCli(
 
   const result = spawnSync(
     process.execPath,
-    ["--import", TSX_LOADER_PATH, CLI_ENTRY_PATH, ...args],
+    ["--conditions=source", "--import", TSX_LOADER_PATH, CLI_ENTRY_PATH, ...args],
     {
       cwd,
       env: {
@@ -121,7 +121,7 @@ function parsePlanJson(result: CliRunResult): PlanJsonOutput {
   return JSON.parse(result.stdout) as PlanJsonOutput;
 }
 
-describe("meow-flow config install and plan", () => {
+describe("mfl config install and plan", () => {
   test("installs a TypeScript config as portable shared JavaScript and uses it by default", () => {
     const homeDirectory = createTempDirectory("meow-flow-home-ts-install-");
     const env = testHomeEnv(homeDirectory);
@@ -435,7 +435,7 @@ export default {
 
     expect(result.status).toBe(1);
     expect(result.output).toContain(sharedConfigPath(homeDirectory));
-    expect(result.output).toContain("meow-flow config install <path>");
+    expect(result.output).toContain("mfl config install <path>");
   });
 
   test("reports field-specific validation errors for invalid explicit config", () => {

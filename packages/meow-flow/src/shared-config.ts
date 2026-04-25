@@ -16,7 +16,7 @@ const SUPPORTED_EXTENSION_SET = new Set<string>(SUPPORTED_TEAM_CONFIG_SOURCE_EXT
 export class SharedTeamConfigNotFoundError extends Error {
   constructor(sharedConfigPath = getSharedMeowFlowConfigPath()) {
     super(
-      `No shared Meow Flow config is installed at ${sharedConfigPath}. Run meow-flow config install <path> or pass --config <path>.`,
+      `No shared Meow Flow config is installed at ${sharedConfigPath}. Run mfl config install <path> or pass --config <path>.`,
     );
     this.name = "SharedTeamConfigNotFoundError";
   }

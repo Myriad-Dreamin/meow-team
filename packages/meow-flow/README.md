@@ -1,15 +1,16 @@
-# meow-flow
+# Meow Flow
 
-`meow-flow` installs a team config into a shared local artifact and turns that
-config into a deterministic repository/worktree planning result.
+`mfl` is the Meow Flow CLI shortcut. It installs a team config into a shared
+local artifact and turns that config into a deterministic repository/worktree
+planning result.
 
 ## Shared config install
 
 Install a JavaScript or TypeScript team config before running planning commands:
 
 ```bash
-pnpm run cli:meow-flow -- config install ./team.config.ts
-pnpm run cli:meow-flow -- config install ./team.config.js
+pnpm run cli:mfl -- config install ./team.config.ts
+pnpm run cli:mfl -- config install ./team.config.js
 ```
 
 The install command accepts only `.ts` and `.js` source files. It evaluates the
@@ -21,27 +22,27 @@ writes a generated JavaScript artifact to:
 ```
 
 Treat the shared file as generated runtime state. Do not edit it by hand. Re-run
-`meow-flow config install <path>` whenever the source config changes, and also
+`mfl config install <path>` whenever the source config changes, and also
 after moving the source repository because the installed artifact contains
 absolute repository paths.
 
 ## Config resolution
 
-`meow-flow plan`, `meow-flow run`, `meow-flow thread ls`, and `meow-flow ls`
-resolve config in this order:
+`mfl plan`, `mfl run`, `mfl thread ls`, and `mfl ls` resolve config in this
+order:
 
 1. `--config <path>` when provided
 2. The installed shared artifact at `~/.local/shared/meow-flow/config.js`
 
-`meow-flow` does not search for a local `team.config.ts` or
-`team.config.js` by default. If no shared config has been installed, it fails and
-prints the `meow-flow config install <path>` command to run.
+`mfl` does not search for a local `team.config.ts` or `team.config.js` by
+default. If no shared config has been installed, it fails and prints the
+`mfl config install <path>` command to run.
 
-When the config uses TypeScript path aliases such as `@/...`, `meow-flow`
-looks for the nearest ancestor `tsconfig.json` next to that config and uses it
-as the loader context while installing or when loading an explicit `--config`
-path. The generated shared JavaScript artifact does not need the original
-TypeScript context at plan time.
+When the config uses TypeScript path aliases such as `@/...`, `mfl` looks for
+the nearest ancestor `tsconfig.json` next to that config and uses it as the
+loader context while installing or when loading an explicit `--config` path. The
+generated shared JavaScript artifact does not need the original TypeScript
+context at plan time.
 
 ## Supported config shape
 
@@ -84,9 +85,9 @@ Notes:
 Run:
 
 ```bash
-pnpm run cli:meow-flow -- config install ./team.config.ts
-pnpm run cli:meow-flow -- plan
-pnpm run cli:meow-flow -- plan --json
+pnpm run cli:mfl -- config install ./team.config.ts
+pnpm run cli:mfl -- plan
+pnpm run cli:mfl -- plan --json
 ```
 
 The human-readable output shows the resolved config path, repository candidate
@@ -104,9 +105,9 @@ The `--json` form is stable and includes:
 Run:
 
 ```bash
-pnpm run cli:meow-flow -- thread ls
-pnpm run cli:meow-flow -- thread ls --config ./team.config.ts
-pnpm run cli:meow-flow -- ls
+pnpm run cli:mfl -- thread ls
+pnpm run cli:mfl -- thread ls --config ./team.config.ts
+pnpm run cli:mfl -- ls
 ```
 
 `thread ls` and the top-level `ls` alias must run inside a git repository. They
@@ -129,9 +130,9 @@ Occupied rows print the occupying thread id in the status position.
 Run:
 
 ```bash
-pnpm run cli:meow-flow -- run --id fix-test-ci 'echo "hello world"'
-pnpm run cli:meow-flow -- run 'echo "hello world"'
-pnpm run cli:meow-flow -- delete fix-test-ci
+pnpm run cli:mfl -- run --id fix-test-ci 'echo "hello world"'
+pnpm run cli:mfl -- run 'echo "hello world"'
+pnpm run cli:mfl -- delete fix-test-ci
 ```
 
 `run` must run inside a git repository. It resolves the canonical checkout root,
@@ -152,7 +153,7 @@ Running occupations are stored in:
 ```
 
 The store enforces one running workspace per thread id and one running thread
-per workspace. If `paseo run` fails after a workspace is reserved, `meow-flow`
+per workspace. If `paseo run` fails after a workspace is reserved, `mfl`
 releases the fresh occupation before returning the failure.
 
 `delete <id1> <id2> ...` releases persisted Meow Flow occupations by thread id
