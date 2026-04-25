@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
 import pino from "pino";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { CheckoutPrStatusSchema } from "../shared/messages.js";
 import { normalizeCheckoutPrStatusPayload, Session } from "./session.js";
@@ -23,6 +23,7 @@ const checkoutGitMocks = vi.hoisted(() => ({
   createPullRequest: vi.fn(),
   getCachedCheckoutShortstat: vi.fn(),
   getCheckoutStatus: vi.fn(),
+  getTitleGenerationPromptContext: vi.fn(),
   listBranchSuggestions: vi.fn(),
   mergeFromBase: vi.fn(),
   mergeToBase: vi.fn(),
@@ -79,6 +80,7 @@ vi.mock("../utils/checkout-git.js", async (importOriginal) => {
     createPullRequest: checkoutGitMocks.createPullRequest,
     getCachedCheckoutShortstat: checkoutGitMocks.getCachedCheckoutShortstat,
     getCheckoutStatus: checkoutGitMocks.getCheckoutStatus,
+    getTitleGenerationPromptContext: checkoutGitMocks.getTitleGenerationPromptContext,
     listBranchSuggestions: checkoutGitMocks.listBranchSuggestions,
     mergeFromBase: checkoutGitMocks.mergeFromBase,
     mergeToBase: checkoutGitMocks.mergeToBase,
@@ -255,6 +257,10 @@ function createProviderSnapshotManagerStub(): ProviderSnapshotManager {
   stub.off.mockImplementation(() => stub);
   return stub as unknown as ProviderSnapshotManager;
 }
+
+beforeEach(() => {
+  checkoutGitMocks.getTitleGenerationPromptContext.mockResolvedValue(null);
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -676,6 +682,58 @@ describe("session checkout commit handling", () => {
     });
   });
 
+  test("adds configured title guidance when generating commit messages", async () => {
+    const messages: unknown[] = [];
+    const workspaceGitService = {
+      getCheckoutDiff: vi.fn().mockResolvedValue({
+        diff: "diff --git a/file.txt b/file.txt\n+hello\n",
+        structured: [
+          {
+            path: "file.txt",
+            additions: 1,
+            deletions: 0,
+            isNew: false,
+            isDeleted: false,
+            hunks: [],
+            status: "ok",
+          },
+        ],
+      }),
+      getSnapshot: vi.fn().mockResolvedValue({}),
+    };
+    checkoutGitMocks.getTitleGenerationPromptContext.mockResolvedValue({
+      source: "config",
+      instruction: "conventional-commit",
+    });
+    agentResponseMocks.generateStructuredAgentResponseWithFallback.mockResolvedValue({
+      message: "feat: update file",
+    });
+    checkoutGitMocks.commitChanges.mockResolvedValue(undefined);
+    const session = createSessionForTest({ workspaceGitService, messages });
+
+    await (session as any).handleCheckoutCommitRequest({
+      type: "checkout_commit_request",
+      cwd: "/tmp/request-worktree",
+      message: "",
+      addAll: true,
+      requestId: "request-generated-commit",
+    });
+
+    expect(checkoutGitMocks.getTitleGenerationPromptContext).toHaveBeenCalledWith(
+      "/tmp/request-worktree",
+    );
+    const prompt =
+      agentResponseMocks.generateStructuredAgentResponseWithFallback.mock.calls[0]?.[0]?.prompt;
+    expect(prompt).toContain("Commit title style guidance:");
+    expect(prompt).toContain("git config --local paseo.prompt.title");
+    expect(prompt).toContain("Conventional Commits");
+    expect(prompt).toContain("type(scope): summary");
+    expect(checkoutGitMocks.commitChanges).toHaveBeenCalledWith("/tmp/request-worktree", {
+      message: "feat: update file",
+      addAll: true,
+    });
+  });
+
   test("does not force a workspace git snapshot refresh when commit fails", async () => {
     const messages: unknown[] = [];
     const workspaceGitService = { getSnapshot: vi.fn().mockResolvedValue({}) };
@@ -772,6 +830,72 @@ describe("session checkout pull request creation", () => {
         requestId: "request-generated-pr",
       },
     });
+  });
+
+  test("adds recent commit title examples when generating PR text", async () => {
+    const messages: unknown[] = [];
+    const workspaceGitService = {
+      getCheckoutDiff: vi.fn().mockResolvedValue({
+        diff: "diff --git a/file.txt b/file.txt\n+hello\n",
+        structured: [
+          {
+            path: "file.txt",
+            additions: 1,
+            deletions: 0,
+            isNew: false,
+            isDeleted: false,
+            hunks: [],
+            status: "ok",
+          },
+        ],
+      }),
+    };
+    checkoutGitMocks.getTitleGenerationPromptContext.mockResolvedValue({
+      source: "history",
+      ref: "main",
+      titles: ["Add project picker", "Fix git sync labels"],
+    });
+    agentResponseMocks.generateStructuredAgentResponseWithFallback.mockResolvedValue({
+      title: "Add checkout title guidance",
+      body: "Adds title guidance.",
+    });
+    checkoutGitMocks.createPullRequest.mockResolvedValue({
+      url: "https://github.com/getpaseo/paseo/pull/3",
+      number: 3,
+    });
+    const session = createSessionForTest({ workspaceGitService, messages });
+
+    await (session as any).handleCheckoutPrCreateRequest({
+      type: "checkout_pr_create_request",
+      cwd: "/tmp/request-worktree",
+      baseRef: "main",
+      title: "",
+      body: "",
+      requestId: "request-generated-pr",
+    });
+
+    expect(checkoutGitMocks.getTitleGenerationPromptContext).toHaveBeenCalledWith(
+      "/tmp/request-worktree",
+      { baseRef: "main" },
+    );
+    const prompt =
+      agentResponseMocks.generateStructuredAgentResponseWithFallback.mock.calls[0]?.[0]?.prompt;
+    expect(prompt).toContain("Pull request title style examples from recent commits on main:");
+    expect(prompt).toContain("1. Add project picker");
+    expect(prompt).toContain("2. Fix git sync labels");
+    expect(prompt).toContain("Use these examples for style");
+    expect(checkoutGitMocks.createPullRequest).toHaveBeenCalledWith(
+      "/tmp/request-worktree",
+      {
+        title: "Add checkout title guidance",
+        body: "Adds title guidance.",
+        base: "main",
+      },
+      expect.anything(),
+      expect.objectContaining({
+        getCheckoutDiff: workspaceGitService.getCheckoutDiff,
+      }),
+    );
   });
 
   test("forces workspace git and GitHub refresh after creating a pull request", async () => {

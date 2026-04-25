@@ -14,6 +14,7 @@ import {
   getCheckoutShortstat,
   getPullRequestStatus,
   getCheckoutStatus,
+  getTitleGenerationPromptContext,
   checkoutResolvedBranch,
   listBranchSuggestions,
   mergeToBase,
@@ -231,6 +232,50 @@ describe("checkout git utilities", () => {
     expect(cleanStatus.isDirty).toBe(false);
     const message = execSync("git log -1 --pretty=%B", { cwd: repoDir }).toString().trim();
     expect(message).toBe("update file");
+  });
+
+  it("uses local paseo title prompt config before sampling history", async () => {
+    commitFile(repoDir, "history.txt", "history\n", "Add history sample");
+    execSync("git config --local paseo.prompt.title conventional-commit", { cwd: repoDir });
+
+    const context = await getTitleGenerationPromptContext(repoDir);
+
+    expect(context).toEqual({
+      source: "config",
+      instruction: "conventional-commit",
+    });
+  });
+
+  it("samples recent commit titles from the main branch when title config is unset", async () => {
+    commitFile(repoDir, "main-style.txt", "main\n", "Add main style");
+    execSync("git checkout -b feature/title-sampling", { cwd: repoDir });
+    commitFile(repoDir, "feature-only.txt", "feature\n", "feature-only style");
+
+    const context = await getTitleGenerationPromptContext(repoDir);
+
+    expect(context?.source).toBe("history");
+    if (context?.source !== "history") {
+      throw new Error("Expected history title prompt context");
+    }
+    expect(context.ref).toBe("main");
+    expect(context.titles).toContain("Add main style");
+    expect(context.titles).not.toContain("feature-only style");
+  });
+
+  it("limits title history samples to the recent 15 commit titles", async () => {
+    for (let i = 1; i <= 16; i += 1) {
+      commitFile(repoDir, `sample-${i}.txt`, `${i}\n`, `Add sample ${i}`);
+    }
+
+    const context = await getTitleGenerationPromptContext(repoDir);
+
+    expect(context?.source).toBe("history");
+    if (context?.source !== "history") {
+      throw new Error("Expected history title prompt context");
+    }
+    expect(context.titles).toHaveLength(15);
+    expect(context.titles[0]).toBe("Add sample 16");
+    expect(context.titles).not.toContain("initial");
   });
 
   it("hides whitespace-only changes when requested", async () => {

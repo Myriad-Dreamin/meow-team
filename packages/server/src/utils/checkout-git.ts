@@ -25,6 +25,8 @@ const DEFAULT_PULL_REQUEST_STATUS_CACHE_TTL_MS = 30_000;
 const PULL_REQUEST_STATUS_CACHE_MAX = 1_000;
 const DEFAULT_SHORTSTAT_CACHE_TTL_MS = 15_000;
 const SHORTSTAT_CACHE_MAX = 1_000;
+const TITLE_PROMPT_CONFIG_KEY = "paseo.prompt.title";
+const TITLE_PROMPT_SAMPLE_LIMIT = 15;
 
 let pullRequestStatusCacheTtlMs = DEFAULT_PULL_REQUEST_STATUS_CACHE_TTL_MS;
 let pullRequestStatusCache = createPullRequestStatusCache(pullRequestStatusCacheTtlMs);
@@ -679,6 +681,10 @@ export type CheckoutContext = {
   paseoHome?: string;
 };
 
+export type TitleGenerationPromptContext =
+  | { source: "config"; instruction: string }
+  | { source: "history"; ref: string; titles: string[] };
+
 function isGitError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -1010,6 +1016,134 @@ function normalizeLocalBranchRefName(input: string): string {
     return input.slice("origin/".length);
   }
   return input;
+}
+
+async function readConfiguredTitlePrompt(cwd: string): Promise<string | null> {
+  try {
+    const { stdout, exitCode } = await runGitCommand(
+      ["config", "--local", "--get", TITLE_PROMPT_CONFIG_KEY],
+      {
+        cwd,
+        env: READ_ONLY_GIT_ENV,
+        acceptExitCodes: [0, 1],
+        maxOutputBytes: 4096,
+      },
+    );
+    if (exitCode !== 0) {
+      return null;
+    }
+    const instruction = stdout.trim();
+    return instruction.length > 0 ? instruction : null;
+  } catch {
+    return null;
+  }
+}
+
+function addTitlePromptRefCandidate(
+  candidates: string[],
+  seen: Set<string>,
+  input?: string | null,
+) {
+  const ref = input?.trim();
+  if (!ref || seen.has(ref)) {
+    return;
+  }
+  seen.add(ref);
+  candidates.push(ref);
+}
+
+function buildTitlePromptRefCandidates(
+  baseRef?: string | null,
+  defaultRef?: string | null,
+): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  for (const ref of [baseRef, defaultRef, "main", "origin/main", "master", "origin/master"]) {
+    const trimmed = ref?.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const localName = normalizeLocalBranchRefName(trimmed);
+    addTitlePromptRefCandidate(candidates, seen, trimmed);
+    addTitlePromptRefCandidate(candidates, seen, localName);
+    if (!localName.startsWith("origin/")) {
+      addTitlePromptRefCandidate(candidates, seen, `origin/${localName}`);
+    }
+  }
+
+  return candidates;
+}
+
+async function resolveTitlePromptSampleRef(cwd: string, baseRef?: string): Promise<string | null> {
+  let defaultRef: string | null = null;
+  try {
+    defaultRef = await resolveRepositoryDefaultBranch(cwd);
+  } catch {
+    defaultRef = null;
+  }
+
+  for (const candidate of buildTitlePromptRefCandidates(baseRef, defaultRef)) {
+    try {
+      const result = await runGitCommand(
+        ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`],
+        {
+          cwd,
+          env: READ_ONLY_GIT_ENV,
+          acceptExitCodes: [0, 1],
+        },
+      );
+      if (result.exitCode === 0) {
+        return candidate;
+      }
+    } catch {
+      // Ignore invalid or unavailable refs and try the next candidate.
+    }
+  }
+
+  return null;
+}
+
+async function sampleRecentCommitTitles(cwd: string, ref: string): Promise<string[]> {
+  try {
+    const { stdout } = await runGitCommand(
+      ["log", `--max-count=${TITLE_PROMPT_SAMPLE_LIMIT}`, "--format=%s", ref, "--"],
+      {
+        cwd,
+        env: READ_ONLY_GIT_ENV,
+        maxOutputBytes: 16 * 1024,
+      },
+    );
+    return stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(0, TITLE_PROMPT_SAMPLE_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+export async function getTitleGenerationPromptContext(
+  cwd: string,
+  options?: { baseRef?: string },
+): Promise<TitleGenerationPromptContext | null> {
+  const configuredPrompt = await readConfiguredTitlePrompt(cwd);
+  if (configuredPrompt) {
+    return { source: "config", instruction: configuredPrompt };
+  }
+
+  const sampleRef = await resolveTitlePromptSampleRef(cwd, options?.baseRef);
+  if (!sampleRef) {
+    return null;
+  }
+
+  const titles = await sampleRecentCommitTitles(cwd, sampleRef);
+  if (titles.length === 0) {
+    return null;
+  }
+
+  return { source: "history", ref: sampleRef, titles };
 }
 
 interface ComparisonBaseRefName {
