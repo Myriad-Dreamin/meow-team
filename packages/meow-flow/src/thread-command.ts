@@ -17,7 +17,7 @@ export function createThreadCommand(): Command {
 }
 
 export function createThreadListCommand(input: { readonly commandName?: string } = {}): Command {
-  const commandName = input.commandName ?? "meow-flow thread ls";
+  const commandName = input.commandName ?? "mfl thread ls";
 
   return new Command("ls")
     .description("List configured Paseo worktree slots for the current git repository")

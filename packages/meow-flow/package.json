@@ -8,7 +8,7 @@
     "dist"
   ],
   "bin": {
-    "meow-flow": "bin/meow-flow"
+    "mfl": "bin/mfl"
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",
