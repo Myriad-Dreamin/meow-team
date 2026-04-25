@@ -2,7 +2,7 @@
 
 - [ ] 1.1 Add an additive daemon HTTP upgrade route for `GET /api/test/terminal`.
 - [ ] 1.2 Ensure the route is separate from the production daemon session WebSocket protocol and does not add or change existing session message schemas.
-- [ ] 1.3 Decide and implement the route availability guard for the spike (development/test flag, debug config, or documented always-on test route).
+- [ ] 1.3 Keep the route on the existing daemon HTTP surface without adding a separate startup flag or separate debug port.
 - [ ] 1.4 Track active test terminal sockets so daemon shutdown can close them cleanly.
 
 ## 2. Direct PTY bridge

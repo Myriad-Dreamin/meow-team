@@ -108,7 +108,7 @@ The test terminal should be visibly identifiable as a test/debug terminal and sh
 
 `/api/test/terminal` exposes a default shell in `HOME`, so it must remain a debug/test capability. The endpoint should be reachable only through the daemon access paths intended for this spike and should not be advertised as a production terminal API.
 
-This change should not add relay-specific behavior or external public exposure. If the implementation discovers that the existing daemon HTTP surface would expose this route more broadly than intended, gate the route behind an explicit development/test flag before implementation proceeds.
+This change should not add a separate startup flag, separate port, relay-specific behavior, or external public exposure. If implementation discovers that the existing daemon HTTP surface would expose this route more broadly than intended, that security issue must be resolved without changing the core decision that the test terminal connects to the daemon route at `/api/test/terminal`.
 
 ### 7. Add focused smoke tests rather than broad app e2e
 
@@ -142,5 +142,4 @@ Full app e2e is optional; focused server and runtime tests are enough for the sp
 
 ## Open Questions
 
-- Should `/api/test/terminal` be enabled unconditionally in development builds, hidden behind a feature flag, or guarded by a debug setting?
 - Should the first implementation include simple browser-side latency counters, or should measurement remain external through Playwright/manual checks?
