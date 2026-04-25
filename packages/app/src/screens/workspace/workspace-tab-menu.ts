@@ -78,6 +78,9 @@ function getCloseButtonTestId(tab: WorkspaceTabDescriptor): string {
   if (tab.target.kind === "terminal") {
     return `workspace-terminal-close-${tab.target.terminalId}`;
   }
+  if (tab.target.kind === "testTerminal") {
+    return `workspace-test-terminal-close-${tab.target.testTerminalId}`;
+  }
   if (tab.target.kind === "draft") {
     return `workspace-draft-close-${tab.target.draftId}`;
   }
