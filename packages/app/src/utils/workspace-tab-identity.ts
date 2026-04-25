@@ -1,5 +1,12 @@
 import type { WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
 
+function normalizePositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.floor(value);
+}
+
 export function normalizeWorkspaceTabTarget(
   value: WorkspaceTabTarget | null | undefined,
 ): WorkspaceTabTarget | null {
@@ -20,7 +27,17 @@ export function normalizeWorkspaceTabTarget(
   }
   if (value.kind === "file") {
     const path = trimNonEmpty(value.path);
-    return path ? { kind: "file", path: path.replace(/\\/g, "/") } : null;
+    if (!path) {
+      return null;
+    }
+    const lineStart = normalizePositiveInteger(value.lineStart);
+    const columnStart = normalizePositiveInteger(value.columnStart);
+    return {
+      kind: "file",
+      path: path.replace(/\\/g, "/"),
+      ...(lineStart ? { lineStart } : {}),
+      ...(columnStart ? { columnStart } : {}),
+    };
   }
   if (value.kind === "setup") {
     const workspaceId = trimNonEmpty(value.workspaceId);

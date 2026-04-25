@@ -103,9 +103,38 @@ function isLegacyPathLikeWorkspaceValue(value: string): boolean {
 export type WorkspaceOpenIntent =
   | { kind: "agent"; agentId: string }
   | { kind: "terminal"; terminalId: string }
-  | { kind: "file"; path: string }
+  | { kind: "file"; path: string; lineStart?: number; columnStart?: number }
   | { kind: "draft"; draftId: string }
   | { kind: "setup"; workspaceId: string };
+
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseFileOpenIntentPayload(
+  payload: string,
+): Extract<WorkspaceOpenIntent, { kind: "file" }> | null {
+  const match = payload.match(/^([^:]+)(?::([0-9]+)(?::([0-9]+))?)?$/);
+  if (!match) {
+    return null;
+  }
+  const decodedPath = decodeFilePathFromPathSegment(match[1] ?? "");
+  if (!decodedPath) {
+    return null;
+  }
+  const lineStart = parsePositiveInteger(match[2]);
+  const columnStart = parsePositiveInteger(match[3]);
+  return {
+    kind: "file",
+    path: decodedPath,
+    ...(lineStart ? { lineStart } : {}),
+    ...(columnStart ? { columnStart } : {}),
+  };
+}
 
 export function parseWorkspaceOpenIntent(
   value: string | null | undefined,
@@ -136,11 +165,7 @@ export function parseWorkspaceOpenIntent(
     return { kind: "draft", draftId: payload };
   }
   if (kind === "file") {
-    const decodedPath = decodeFilePathFromPathSegment(payload);
-    if (!decodedPath) {
-      return null;
-    }
-    return { kind: "file", path: decodedPath };
+    return parseFileOpenIntentPayload(payload);
   }
   if (kind === "setup") {
     const workspaceId = decodeWorkspaceIdFromPathSegment(payload);
