@@ -12,6 +12,7 @@ This change makes occupancy real. The CLI needs a local, durable store outside a
 - Generate a random UUID thread id when `--id` is omitted.
 - Launch a Paseo agent for the allocated workspace from the same command using the existing `paseo run` CLI.
 - Persist running occupations in the shared SQLite database and enforce one-to-one thread/workspace ownership.
+- Add `meow-flow delete <id1> <id2> ...` to release running occupations by thread id.
 - Extend `meow-flow thread ls` to show persisted occupations while preserving existing root, slot-count, and `not-created` behavior.
 - Add `meow-flow ls` as a top-level alias for `meow-flow thread ls`.
 - Update pnpm metadata so `better-sqlite3` installs and builds correctly in the workspace.
@@ -20,6 +21,7 @@ This change makes occupancy real. The CLI needs a local, durable store outside a
 
 - No creation, deletion, repair, or pruning of `.paseo-worktrees/paseo-N` folders.
 - No design for prompt composition, planner handoff, provider/model selection, or worker instructions beyond passing the request body through unchanged.
+- No Paseo agent stop/delete orchestration in the `delete` command; this slice only releases Meow Flow's occupation state.
 - No direct daemon API integration beyond invoking the existing `paseo run` command.
 - No WebSocket, mobile app, or Paseo daemon schema changes.
 - No release of a multi-user lock service; this is local CLI state.
@@ -43,7 +45,7 @@ CREATE TABLE IF NOT EXISTS thread_occupations (
 );
 ```
 
-The primary key enforces one workspace per thread id. The unique `(repository_root, slot_number)` constraint enforces one running thread per workspace. `repository_root` should be the canonical Git root already used by `thread ls`, and `workspace_relative_path` should remain `.paseo-worktrees/paseo-N` for stable output. For this slice, an occupation row is the running-thread signal; completion/release mechanics can be added by a later command.
+The primary key enforces one workspace per thread id. The unique `(repository_root, slot_number)` constraint enforces one running thread per workspace. `repository_root` should be the canonical Git root already used by `thread ls`, and `workspace_relative_path` should remain `.paseo-worktrees/paseo-N` for stable output. For this slice, an occupation row is the running-thread signal until `meow-flow delete` removes it.
 
 Alternative considered: a JSON file under the same shared directory. SQLite gives atomic writes, unique constraints, and a direct path to future allocation queries without inventing file locking.
 
@@ -95,7 +97,17 @@ Extract the current list action into a shared command builder or handler and reg
 
 Alternative considered: make `ls` shell out to the nested command. Reusing the handler is easier to test and avoids inconsistent error formatting.
 
-### 7. Add `better-sqlite3` to the package and pnpm build allowlist
+### 7. Add `delete` as a repository-independent occupation release command
+
+`meow-flow delete <id1> <id2> ...` should delete running occupation rows by thread id from the shared SQLite database. Because thread ids are globally unique in this store, the command does not need to run inside a Git repository and does not need Meow Flow config.
+
+The command should validate all requested ids before deleting any rows. If one or more ids do not exist, it should fail with the missing ids and leave existing occupations unchanged. If all ids exist, delete them in a single transaction and print the released thread id plus workspace path for each deleted row. A later `meow-flow thread ls` from the affected repository should show those registered workspaces as `idle`.
+
+`delete` should not remove `.paseo-worktrees/paseo-N` directories and should not delete the Paseo agent in this slice. The label added during `run` leaves a path for later agent lifecycle integration without coupling this first storage command to Paseo daemon state.
+
+Alternative considered: make missing ids idempotent successes. That is convenient for cleanup scripts but can hide typos and accidentally leave a workspace occupied.
+
+### 8. Add `better-sqlite3` to the package and pnpm build allowlist
 
 Add `better-sqlite3` as a runtime dependency of `packages/meow-flow` and add `@types/better-sqlite3` if TypeScript needs declarations. Because `better-sqlite3` has native install/build scripts and pnpm blocks unapproved build scripts in this repo, update the root `pnpm.onlyBuiltDependencies` list to include `better-sqlite3`, then refresh `pnpm-lock.yaml` with `pnpm install`.
 
@@ -110,6 +122,8 @@ Alternative considered: use `node:sqlite`. That would avoid a native dependency,
 - [Generated UUID needs to be user-visible] -> Print the resolved thread id in `meow-flow run` output so users can correlate it with `meow-flow thread ls`.
 - [Agent launch succeeds after allocation but output parsing changes] -> Do not depend on parsing rich `paseo run` output in this slice; rely on the stable label and cwd arguments.
 - [Agent launch fails after reserving a slot] -> Release the newly inserted occupation before returning the failure.
+- [Delete could free a workspace while its Paseo agent is still running] -> Document this scope explicitly; future agent lifecycle integration should use `x-meow-flow-id` to coordinate cleanup.
+- [Batch delete with a typo could partially release occupations] -> Validate every id before deletion and perform successful deletes in one transaction.
 - [Future process execution needs more metadata] -> Keep the schema narrow but migration-ready; additional columns can be added later without changing current output.
 
 ## Migration Plan

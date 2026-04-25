@@ -11,6 +11,7 @@
 - Launch a Paseo agent for the allocated workspace by invoking `paseo run` with `--label x-meow-flow-id=<thread-id>` and the allocated workspace as its cwd.
 - Pass the request body through to `paseo run` unchanged; initial usage can be as simple as asking the agent to echo `"hello world"`.
 - Fail instead of launching when the selected workspace already has a running Meow Flow thread.
+- Add `meow-flow delete <id1> <id2> ...` to release persisted running occupations by thread id.
 - Extend `meow-flow thread ls` to read the SQLite allocation store and emit `idle`, `occupied`, or `not-created` for configured `.paseo-worktrees/paseo-N` slots.
 - Add `meow-flow ls` as a top-level alias for `meow-flow thread ls`.
 - Keep slot discovery rooted in the current git-managed folder, with `dispatch.maxConcurrentWorkers` defining the maximum `N`.
@@ -20,7 +21,7 @@
 
 ### New Capabilities
 
-- `thread-workspace-occupancy`: Allocate fixed Paseo worktree slots to Meow Flow thread ids, launch a labeled Paseo agent for a request body, and persist running occupations locally.
+- `thread-workspace-occupancy`: Allocate fixed Paseo worktree slots to Meow Flow thread ids, launch a labeled Paseo agent for a request body, persist running occupations locally, and release them by id.
 
 ### Modified Capabilities
 
@@ -28,6 +29,6 @@
 
 ## Impact
 
-- `packages/meow-flow` command tree, thread listing/allocation/agent-launch logic, SQLite storage module, README, and CLI tests.
+- `packages/meow-flow` command tree, thread listing/allocation/agent-launch/delete logic, SQLite storage module, README, and CLI tests.
 - `packages/meow-flow/package.json`, root `package.json` pnpm build-dependency allowlist, and `pnpm-lock.yaml` for `better-sqlite3`.
 - Uses the existing `paseo run` CLI surface; no Paseo daemon, WebSocket, mobile-app, or message-schema changes.
