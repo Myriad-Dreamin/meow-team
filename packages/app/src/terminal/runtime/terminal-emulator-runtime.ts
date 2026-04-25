@@ -58,9 +58,8 @@ type TerminalEmulatorRuntimeDisposables = {
 };
 
 type TerminalOutputOperation = {
-  type: "write" | "writeBytes" | "clear" | "snapshot";
-  text?: string;
-  bytes?: Uint8Array;
+  type: "write" | "clear" | "snapshot";
+  text: string;
   rows?: number;
   cols?: number;
   suppressInput?: boolean;
@@ -495,24 +494,6 @@ export class TerminalEmulatorRuntime {
     this.processOutputQueue();
   }
 
-  writeBytes(input: {
-    bytes: Uint8Array;
-    suppressInput?: boolean;
-    onCommitted?: () => void;
-  }): void {
-    if (input.bytes.byteLength === 0) {
-      input.onCommitted?.();
-      return;
-    }
-    this.outputOperations.push({
-      type: "writeBytes",
-      bytes: input.bytes,
-      suppressInput: input.suppressInput ?? false,
-      ...(input.onCommitted ? { onCommitted: input.onCommitted } : {}),
-    });
-    this.processOutputQueue();
-  }
-
   clear(input?: { onCommitted?: () => void }): void {
     this.outputOperations.push({
       type: "clear",
@@ -652,17 +633,13 @@ export class TerminalEmulatorRuntime {
       }
     }
 
-    const data = operation.type === "writeBytes" ? operation.bytes : operation.text;
-    if (!data) {
-      finalizeOperation(operation);
-      return;
-    }
+    const text = operation.text;
     this.inFlightOutputOperationTimeout = setTimeout(() => {
       finalizeOperation(operation);
     }, OUTPUT_OPERATION_TIMEOUT_MS);
 
     try {
-      terminal.write(data, () => {
+      terminal.write(text, () => {
         finalizeOperation(operation);
       });
     } catch {
