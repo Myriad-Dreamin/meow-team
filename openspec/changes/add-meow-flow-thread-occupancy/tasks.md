@@ -11,17 +11,21 @@
 - [ ] 2.2 Implement storage helpers to read occupations by repository, read an occupation by thread, and insert an allocation atomically.
 - [ ] 2.3 Implement allocation logic that returns an existing same-repository thread allocation, rejects another-repository thread allocations, and selects the lowest idle registered slot.
 - [ ] 2.4 Ensure stale occupations for unregistered worktrees do not make a slot appear usable or occupied in list output.
+- [ ] 2.5 Release a newly inserted occupation when the subsequent Paseo agent launch fails.
 
 ## 3. CLI Commands and Output
 
 - [ ] 3.1 Add `meow-flow run <thread>` with explicit/shared config loading, canonical root detection, allocation persistence, and clear no-idle-workspace diagnostics.
-- [ ] 3.2 Extend `meow-flow thread ls` to include persisted occupations and print occupied rows as `<relative-path> <thread>`.
-- [ ] 3.3 Add `meow-flow ls` as a top-level alias that reuses the same handler and options as `meow-flow thread ls`.
-- [ ] 3.4 Update `packages/meow-flow/README.md` and CLI help expectations for `run`, `thread ls`, and the `ls` alias.
+- [ ] 3.2 Invoke `paseo run --cwd <allocated-workspace> --label x-meow-flow-id=<thread>` from `meow-flow run` with a fixed placeholder request to echo `"hello world"`.
+- [ ] 3.3 Ensure rerunning an already allocated thread returns the existing workspace without launching a duplicate Paseo agent.
+- [ ] 3.4 Extend `meow-flow thread ls` to include persisted occupations and print occupied rows as `<relative-path> <thread>`.
+- [ ] 3.5 Add `meow-flow ls` as a top-level alias that reuses the same handler and options as `meow-flow thread ls`.
+- [ ] 3.6 Update `packages/meow-flow/README.md` and CLI help expectations for `run`, `thread ls`, and the `ls` alias.
 
 ## 4. Verification
 
 - [ ] 4.1 Add targeted CLI tests for allocation, idempotent re-run, another-repository rejection, no-idle failure, and persisted list output.
-- [ ] 4.2 Add targeted CLI tests for `meow-flow ls` alias behavior and stale occupation handling.
-- [ ] 4.3 Run the changed `meow-flow` test file(s) only with `npx vitest run <file> --bail=1`.
-- [ ] 4.4 Run `npm run format` and `npm run typecheck` after implementation.
+- [ ] 4.2 Add targeted CLI tests for `paseo run` invocation arguments, duplicate-launch prevention, and failed-launch occupation rollback.
+- [ ] 4.3 Add targeted CLI tests for `meow-flow ls` alias behavior and stale occupation handling.
+- [ ] 4.4 Run the changed `meow-flow` test file(s) only with `npx vitest run <file> --bail=1`.
+- [ ] 4.5 Run `npm run format` and `npm run typecheck` after implementation.

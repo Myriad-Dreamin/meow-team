@@ -2,7 +2,7 @@
 
 ### Requirement: `meow-flow run` allocates a thread to an idle workspace
 
-The CLI SHALL provide `meow-flow run <thread>` for use from inside a git-managed folder and SHALL allocate the named thread to an existing registered `.paseo-worktrees/paseo-N` workspace for the canonical repository root.
+The CLI SHALL provide `meow-flow run <thread>` for use from inside a git-managed folder and SHALL allocate the named thread to an existing registered `.paseo-worktrees/paseo-N` workspace for the canonical repository root before launching a Paseo agent for that workspace.
 
 #### Scenario: First idle registered slot is allocated
 
@@ -27,6 +27,32 @@ The CLI SHALL provide `meow-flow run <thread>` for use from inside a git-managed
 - **AND** every configured registered `.paseo-worktrees/paseo-N` workspace is occupied or not-created
 - **THEN** the command exits with an error explaining that no idle thread workspace is available
 - **AND** the command does not mutate existing occupations
+
+### Requirement: `meow-flow run` launches a labeled Paseo agent
+
+After allocating a workspace, `meow-flow run <thread>` SHALL invoke `paseo run` with the allocated workspace as cwd, a label `x-meow-flow-id=<thread>`, and an initial placeholder request to echo `"hello world"`.
+
+#### Scenario: Fresh allocation launches Paseo run
+
+- **WHEN** a user runs `meow-flow run fix-test-ci`
+- **AND** `.paseo-worktrees/paseo-2` is selected as the idle registered workspace
+- **THEN** the CLI invokes `paseo run` with cwd set to the absolute `.paseo-worktrees/paseo-2` path
+- **AND** the `paseo run` invocation includes `--label x-meow-flow-id=fix-test-ci`
+- **AND** the initial request asks the agent to echo `"hello world"`
+
+#### Scenario: Failed Paseo run releases a fresh allocation
+
+- **WHEN** `meow-flow run fix-test-ci` reserves `.paseo-worktrees/paseo-2`
+- **AND** the subsequent `paseo run` invocation fails before creating a usable agent
+- **THEN** the command exits with an error that includes the `paseo run` failure
+- **AND** the CLI removes the fresh `fix-test-ci` occupation from the shared database
+
+#### Scenario: Existing allocation is not launched twice
+
+- **WHEN** thread `fix-test-ci` already occupies `.paseo-worktrees/paseo-2` in the current repository
+- **AND** a user runs `meow-flow run fix-test-ci` again from the same repository
+- **THEN** the CLI returns the existing `.paseo-worktrees/paseo-2` allocation
+- **AND** the CLI does not invoke `paseo run` again for `fix-test-ci`
 
 ### Requirement: Thread occupations are persisted in shared SQLite storage
 

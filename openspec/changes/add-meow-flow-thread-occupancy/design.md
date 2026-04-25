@@ -9,6 +9,7 @@ This change makes occupancy real. The CLI needs a local, durable store outside a
 **Goals:**
 
 - Add `meow-flow run <thread>` to allocate a named thread to an existing idle `.paseo-worktrees/paseo-N` workspace.
+- Launch a Paseo agent for the allocated workspace from the same command using the existing `paseo run` CLI.
 - Persist occupations in the shared SQLite database and enforce one-to-one thread/workspace ownership.
 - Extend `meow-flow thread ls` to show persisted occupations while preserving existing root, slot-count, and `not-created` behavior.
 - Add `meow-flow ls` as a top-level alias for `meow-flow thread ls`.
@@ -17,7 +18,8 @@ This change makes occupancy real. The CLI needs a local, durable store outside a
 **Non-Goals:**
 
 - No creation, deletion, repair, or pruning of `.paseo-worktrees/paseo-N` folders.
-- No agent process spawning, command execution inside the allocated workspace, or daemon integration.
+- No design for real task prompt selection, planner handoff, provider/model selection, or worker instructions beyond the fixed placeholder request.
+- No direct daemon API integration beyond invoking the existing `paseo run` command.
 - No WebSocket, mobile app, or Paseo daemon schema changes.
 - No release of a multi-user lock service; this is local CLI state.
 
@@ -69,13 +71,27 @@ The second row is semantically `occupied`; the printed token is the occupying th
 
 Alternative considered: print `.paseo-worktrees/paseo-2 occupied fix-test-ci`. That is more explicit but does not match the requested sample output.
 
-### 5. Reuse one list implementation for `thread ls` and top-level `ls`
+### 5. Launch a labeled Paseo agent after reserving a workspace
+
+After `run` reserves a workspace, it should invoke the existing Paseo CLI with the allocated workspace as cwd and a Meow Flow label:
+
+```text
+paseo run --cwd <absolute-workspace-path> --label x-meow-flow-id=<thread> 'echo "hello world"'
+```
+
+The fixed request is intentional. This change proves the allocation-to-agent wiring without designing the final request language, prompt composition, provider/model selection, or worker instructions. The label key `x-meow-flow-id` gives Paseo and later Meow Flow commands a stable way to find the agent associated with a thread.
+
+If the `paseo run` invocation fails, the command should release the newly reserved occupation so a failed launch does not leave an idle workspace permanently marked occupied. If the thread already has a same-repository allocation, `run` should return that existing allocation and not launch a duplicate agent for the same thread.
+
+Alternative considered: store the intended task request in Meow Flow config now. That is premature because the request format and worker handoff are not part of this slice.
+
+### 6. Reuse one list implementation for `thread ls` and top-level `ls`
 
 Extract the current list action into a shared command builder or handler and register it as both `meow-flow thread ls` and `meow-flow ls`. Options, diagnostics, config resolution, and output must remain identical.
 
 Alternative considered: make `ls` shell out to the nested command. Reusing the handler is easier to test and avoids inconsistent error formatting.
 
-### 6. Add `better-sqlite3` to the package and pnpm build allowlist
+### 7. Add `better-sqlite3` to the package and pnpm build allowlist
 
 Add `better-sqlite3` as a runtime dependency of `packages/meow-flow` and add `@types/better-sqlite3` if TypeScript needs declarations. Because `better-sqlite3` has native install/build scripts and pnpm blocks unapproved build scripts in this repo, update the root `pnpm.onlyBuiltDependencies` list to include `better-sqlite3`, then refresh `pnpm-lock.yaml` with `pnpm install`.
 
@@ -87,6 +103,8 @@ Alternative considered: use `node:sqlite`. That would avoid a native dependency,
 - [Stale occupation row references a removed worktree] -> `thread ls` should prefer Git worktree registration for `not-created`; stale occupied rows for missing slots should not make an unusable folder appear occupied.
 - [Native dependency install friction] -> Update pnpm workspace metadata and verify install/typecheck as part of implementation.
 - [Thread names collide across repositories] -> Treat thread identifiers as globally unique in the shared database; fail clearly if a thread is already allocated elsewhere.
+- [Agent launch succeeds after allocation but output parsing changes] -> Do not depend on parsing rich `paseo run` output in this slice; rely on the stable label and cwd arguments.
+- [Agent launch fails after reserving a slot] -> Release the newly inserted occupation before returning the failure.
 - [Future process execution needs more metadata] -> Keep the schema narrow but migration-ready; additional columns can be added later without changing current output.
 
 ## Migration Plan
