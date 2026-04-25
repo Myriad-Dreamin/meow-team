@@ -15,6 +15,7 @@ type TerminalSize = { rows: number; cols: number };
 type BrowserTerminal = TerminalSize & {
   refresh: (start: number, end: number) => void;
   reset: () => void;
+  write: (data: string | Uint8Array, callback?: () => void) => void;
 };
 
 type MountedTerminal = {
@@ -189,5 +190,33 @@ describe("terminal emulator runtime in a real browser", () => {
     await nextFrame();
 
     expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("writes byte output to xterm without decoding it to a string first", async () => {
+    await page.viewport(900, 600);
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+
+    const terminal = getBrowserTerminal();
+    const writeInputs: Array<string | Uint8Array> = [];
+    const originalWrite = terminal.write.bind(terminal);
+    terminal.write = (data, callback) => {
+      writeInputs.push(data);
+      originalWrite(data, callback);
+    };
+
+    const committed = { done: false };
+    mounted.runtime.writeBytes({
+      bytes: new Uint8Array([0x6f, 0x6b, 0x0d, 0x0a]),
+      onCommitted: () => {
+        committed.done = true;
+      },
+    });
+
+    await waitFor({ predicate: () => committed.done });
+    expect(writeInputs).toHaveLength(1);
+    expect(writeInputs[0]).toBeInstanceOf(Uint8Array);
+    expect(Array.from(writeInputs[0] as Uint8Array)).toEqual([0x6f, 0x6b, 0x0d, 0x0a]);
   });
 });

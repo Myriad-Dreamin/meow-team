@@ -21,6 +21,7 @@ import {
   ArrowRightToLine,
   Columns2,
   Copy,
+  FlaskConical,
   RotateCw,
   Rows2,
   SquarePen,
@@ -81,6 +82,7 @@ type WorkspaceDesktopTabsRowProps = {
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
   onCreateDraftTab: (input: { paneId?: string }) => void;
   onCreateTerminalTab: (input: { paneId?: string }) => void;
+  onCreateTestTerminalTab: (input: { paneId?: string }) => void;
   disableCreateTerminal?: boolean;
   isWaitingOnTerminalReadiness?: boolean;
   onReorderTabs: (nextTabs: WorkspaceTabDescriptor[]) => void;
@@ -101,6 +103,9 @@ function getFallbackTabLabel(tab: WorkspaceTabDescriptor): string {
   }
   if (tab.target.kind === "terminal") {
     return "Terminal";
+  }
+  if (tab.target.kind === "testTerminal") {
+    return "Test terminal";
   }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").filter(Boolean).pop() ?? tab.target.path;
@@ -387,6 +392,7 @@ export function WorkspaceDesktopTabsRow({
   onCloseOtherTabs,
   onCreateDraftTab,
   onCreateTerminalTab,
+  onCreateTestTerminalTab,
   disableCreateTerminal = false,
   isWaitingOnTerminalReadiness = false,
   onReorderTabs,
@@ -573,6 +579,25 @@ export function WorkspaceDesktopTabsRow({
               {newTerminalKeys ? (
                 <Shortcut chord={newTerminalKeys} style={styles.newTabTooltipShortcut} />
               ) : null}
+            </View>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+          <TooltipTrigger
+            testID="workspace-test-terminal"
+            onPress={() => onCreateTestTerminalTab({ paneId })}
+            accessibilityRole="button"
+            accessibilityLabel="Test terminal"
+            style={({ hovered, pressed }) => [
+              styles.newTabActionButton,
+              (hovered || pressed) && styles.newTabActionButtonHovered,
+            ]}
+          >
+            <FlaskConical size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="center" offset={8}>
+            <View style={styles.newTabTooltipRow}>
+              <Text style={styles.newTabTooltipText}>Test terminal</Text>
             </View>
           </TooltipContent>
         </Tooltip>

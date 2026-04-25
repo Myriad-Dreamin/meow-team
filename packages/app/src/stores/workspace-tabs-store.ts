@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   buildDeterministicWorkspaceTabId,
+  isEphemeralWorkspaceTabTarget,
   normalizeWorkspaceTabTarget,
   workspaceTabTargetsEqual,
 } from "@/utils/workspace-tab-identity";
@@ -11,6 +12,7 @@ export type WorkspaceTabTarget =
   | { kind: "draft"; draftId: string }
   | { kind: "agent"; agentId: string }
   | { kind: "terminal"; terminalId: string }
+  | { kind: "testTerminal"; testTerminalId: string }
   | { kind: "file"; path: string }
   | { kind: "setup"; workspaceId: string };
 
@@ -359,12 +361,16 @@ export const useWorkspaceTabsStore = create<WorkspaceTabsState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => {
         const nextUiTabsByWorkspace: Record<string, WorkspaceTab[]> = {};
+        const persistedTabIdsByWorkspace = new Map<string, Set<string>>();
         for (const key in state.uiTabsByWorkspace) {
           const tabs = (state.uiTabsByWorkspace[key] ?? [])
             .map((tab) => {
               const normalizedTarget = normalizeWorkspaceTabTarget(tab.target);
               const normalizedTabId = trimNonEmpty(tab.tabId);
               if (!normalizedTarget || !normalizedTabId) {
+                return null;
+              }
+              if (isEphemeralWorkspaceTabTarget(normalizedTarget)) {
                 return null;
               }
               return {
@@ -376,12 +382,16 @@ export const useWorkspaceTabsStore = create<WorkspaceTabsState>()(
             .filter((tab): tab is WorkspaceTab => tab !== null);
           if (tabs.length > 0) {
             nextUiTabsByWorkspace[key] = tabs;
+            persistedTabIdsByWorkspace.set(key, new Set(tabs.map((tab) => tab.tabId)));
           }
         }
 
         const nextTabOrderByWorkspace: Record<string, string[]> = {};
         for (const key in state.tabOrderByWorkspace) {
-          const order = normalizeTabOrder(state.tabOrderByWorkspace[key]);
+          const persistedTabIds = persistedTabIdsByWorkspace.get(key) ?? new Set<string>();
+          const order = normalizeTabOrder(state.tabOrderByWorkspace[key]).filter((tabId) =>
+            persistedTabIds.has(tabId),
+          );
           if (order.length > 0) {
             nextTabOrderByWorkspace[key] = order;
           }
@@ -390,7 +400,8 @@ export const useWorkspaceTabsStore = create<WorkspaceTabsState>()(
         const nextFocusedTabIdByWorkspace: Record<string, string> = {};
         for (const key in state.focusedTabIdByWorkspace) {
           const focusedTabId = trimNonEmpty(state.focusedTabIdByWorkspace[key]);
-          if (focusedTabId) {
+          const persistedTabIds = persistedTabIdsByWorkspace.get(key) ?? new Set<string>();
+          if (focusedTabId && persistedTabIds.has(focusedTabId)) {
             nextFocusedTabIdByWorkspace[key] = focusedTabId;
           }
         }
