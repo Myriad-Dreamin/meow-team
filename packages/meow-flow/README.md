@@ -27,8 +27,8 @@ separately.
 ## Get Started
 
 ```text
-pnpm run cli:mfl -- worktree new
-pnpm run cli:mfl -- run "Create a echo hello script."
+mfl worktree new
+mfl run "Create a echo hello script."
 // You'll see the agent started in the paseo's webapp
 ```
 
