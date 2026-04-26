@@ -29,6 +29,7 @@ Install `mfl` with one of these options:
 2. From this checkout with `pnpm link`:
 
    ```bash
+   pnpm i
    pnpm --filter meow-flow run build
    cd packages/meow-flow
    pnpm link --global
