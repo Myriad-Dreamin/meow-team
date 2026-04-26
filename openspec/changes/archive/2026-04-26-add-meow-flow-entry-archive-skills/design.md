@@ -68,8 +68,12 @@ commands that map directly to `mfl`, so a `meow-flow` skill is clearer.
 
 ### Thread Metadata Model
 
-Extend the shared MeowFlow store with thread details that can be rendered as
-YAML by `mfl thread status <id> --no-color`:
+Extend the existing shared MeowFlow SQLite store at
+`~/.local/shared/meow-flow/meow-flow.sqlite` with thread details that can be
+rendered as YAML by `mfl thread status <id> --no-color`. The existing
+`thread_occupations` rows remain the running-occupation source of truth; this
+change adds metadata, agent, and handoff tables alongside them rather than
+introducing any repository-local JSON state.
 
 ```yaml
 name: install-meow-flow-skills
@@ -104,7 +108,8 @@ the producing stage and can be read independently from the producing agent.
 Alternative considered: store the selected stage on every agent row. That is
 simpler to query, but it creates two sources of truth once `mfl agent
 update-self` infers the actual skill from the running agent. Deriving stage
-from skill keeps the stored model closer to what Paseo and agent logs provide.
+from skill keeps the stored model closer to what Paseo labels and agent
+environment metadata provide.
 
 ### Run Behavior
 
@@ -260,7 +265,8 @@ flowchart LR
   `meow-flow`; role skills should reference it for common rules.
 - [Deriving stage from skill loses explicit CLI intent if inference fails] ->
   `mfl agent update-self` must report a clear diagnostic when it cannot infer a
-  supported `meow-*` skill from the current agent metadata or logs.
+  supported `meow-*` skill from environment variables or bounded Paseo label
+  metadata.
 - [Archive delete can remove proposal artifacts users expected to keep] ->
   Require the explicit `delete` variant and document that code changes are not
   reverted.

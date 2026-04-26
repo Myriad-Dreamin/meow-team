@@ -1,5 +1,10 @@
-## ADDED Requirements
+# thread-workflow-coordination Specification
 
+## Purpose
+Define how MeowFlow reports thread state, persists thread metadata, records
+stage agents and handoffs, and archives completed thread occupations.
+
+## Requirements
 ### Requirement: `mfl status` reports the current MeowFlow thread context
 
 The CLI SHALL provide `mfl status` to report whether the current directory is
@@ -49,6 +54,9 @@ removing linked Git worktrees used by MeowFlow threads.
 The CLI SHALL provide `mfl thread status <id> --no-color` and SHALL render the
 thread name, agents, request body, and handoffs in a deterministic
 YAML-compatible shape.
+Thread metadata, agent records, and handoffs SHALL be persisted in the shared
+SQLite database at `~/.local/shared/meow-flow/meow-flow.sqlite` alongside the
+existing `thread_occupations` table, not in repository-local JSON files.
 
 #### Scenario: Thread status prints the sample fields
 
@@ -93,14 +101,15 @@ thread's readable name.
 ### Requirement: `mfl agent update-self` records current agent metadata
 
 The CLI SHALL provide `mfl agent update-self` to detect the current Paseo agent,
-infer the active `meow-*` skill from agent metadata or logs, call
-`paseo agent update` with MeowFlow metadata, and persist the agent record in
-the current thread info.
+infer the active `meow-*` skill from explicit environment variables or bounded
+Paseo label metadata, call `paseo agent update` with MeowFlow metadata, and
+persist the agent record in the current thread info.
 
 #### Scenario: Agent self update records a plan agent
 
 - **WHEN** the current chat is Paseo agent `123456`
-- **AND** the agent logs show that `meow-plan` is active
+- **AND** the agent has `x-meow-flow-stage=plan` or
+  `x-meow-flow-skill=meow-plan` metadata
 - **AND** the current worktree belongs to thread `fix-test-ci`
 - **THEN** `mfl agent update-self` calls `paseo agent update` for agent
   `123456` with MeowFlow thread metadata
@@ -110,8 +119,8 @@ the current thread info.
 #### Scenario: Unsupported skill inference fails clearly
 
 - **WHEN** the current chat is Paseo agent `123456`
-- **AND** the CLI cannot infer a supported `meow-*` skill from metadata or
-  logs
+- **AND** the CLI cannot infer a supported `meow-*` skill from environment
+  variables or bounded label metadata
 - **THEN** `mfl agent update-self` exits with a diagnostic explaining that the
   agent skill could not be detected
 - **AND** it does not write an ambiguous agent record

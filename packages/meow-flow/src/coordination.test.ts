@@ -159,6 +159,18 @@ function readOption(name) {
   return index === -1 ? null : argv[index + 1] ?? null;
 }
 
+if (argv[0] === "agent" && argv[1] === "ls") {
+  const label = readOption("--label");
+  const matchingLabel = process.env.PASEO_FAKE_MATCH_LABEL;
+  const agentId = process.env.PASEO_AGENT_ID ?? "self-agent-1";
+  const title = process.env.PASEO_FAKE_AGENT_TITLE ?? "labelled agent";
+  const entries =
+    matchingLabel && label === matchingLabel
+      ? [{ id: agentId, shortId: agentId.slice(0, 7), name: title }]
+      : [];
+  fs.writeSync(1, JSON.stringify(entries) + "\\n");
+}
+
 if (argv[0] === "run") {
   fs.writeSync(
     1,
@@ -190,6 +202,7 @@ if (argv[0] === "agent" && argv[1] === "update") {
     env: {
       PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
       MFL_PASEO_BIN: "paseo",
+      MFL_STATE_DB_PATH: path.join(binDirectory, "meow-flow.sqlite"),
       PASEO_INVOCATION_LOG: invocationLogPath,
     },
   };
@@ -215,12 +228,12 @@ describe("mfl coordination commands", () => {
     const worktreePath = createManualWorktree(repositoryRoot);
     const fakePaseo = createFakePaseo();
 
-    const rootStatus = runCli(["status"], repositoryRoot);
-    const idleStatus = runCli(["status"], worktreePath);
+    const rootStatus = runCli(["status"], repositoryRoot, { env: fakePaseo.env });
+    const idleStatus = runCli(["status"], worktreePath, { env: fakePaseo.env });
     const runResult = runCli(["run", "--id", "fix-test-ci", "initial request"], repositoryRoot, {
       env: fakePaseo.env,
     });
-    const occupiedStatus = runCli(["status"], worktreePath);
+    const occupiedStatus = runCli(["status"], worktreePath, { env: fakePaseo.env });
 
     expect(rootStatus.status).toBe(0);
     expect(rootStatus.stdout).toContain("status: repository-root");
@@ -246,16 +259,27 @@ describe("mfl coordination commands", () => {
         env: fakePaseo.env,
       },
     );
-    const setName = runCli(["thread", "set", "name", "install-meow-flow-skills"], worktreePath);
-    const append = runCli(["handoff", "append", "--stage", "code", "code diff"], worktreePath);
-    const getLast = runCli(["handoff", "get", "-n", "1"], worktreePath);
-    const getSince = runCli(["handoff", "get", "--since", "1"], worktreePath);
-    const status = runCli(["thread", "status", "fix-test-ci", "--no-color"], repositoryRoot);
-    const archive = runCli(["thread", "archive"], worktreePath);
-    const idleStatus = runCli(["status"], worktreePath);
+    const setName = runCli(["thread", "set", "name", "install-meow-flow-skills"], worktreePath, {
+      env: fakePaseo.env,
+    });
+    const append = runCli(["handoff", "append", "--stage", "code", "code diff"], worktreePath, {
+      env: fakePaseo.env,
+    });
+    const getLast = runCli(["handoff", "get", "-n", "1"], worktreePath, {
+      env: fakePaseo.env,
+    });
+    const getSince = runCli(["handoff", "get", "--since", "1"], worktreePath, {
+      env: fakePaseo.env,
+    });
+    const status = runCli(["thread", "status", "fix-test-ci", "--no-color"], repositoryRoot, {
+      env: fakePaseo.env,
+    });
+    const archive = runCli(["thread", "archive"], worktreePath, { env: fakePaseo.env });
+    const idleStatus = runCli(["status"], worktreePath, { env: fakePaseo.env });
     const archivedStatus = runCli(
       ["thread", "status", "fix-test-ci", "--no-color"],
       repositoryRoot,
+      { env: fakePaseo.env },
     );
 
     expect(runResult.status).toBe(0);
@@ -291,7 +315,9 @@ describe("mfl coordination commands", () => {
         MFL_AGENT_TITLE: "plan agent",
       },
     });
-    const status = runCli(["thread", "status", "fix-test-ci", "--no-color"], repositoryRoot);
+    const status = runCli(["thread", "status", "fix-test-ci", "--no-color"], repositoryRoot, {
+      env: fakePaseo.env,
+    });
 
     expect(runResult.status).toBe(0);
     expect(updateSelf.status).toBe(0);
@@ -311,5 +337,39 @@ describe("mfl coordination commands", () => {
       "x-meow-flow-skill=meow-plan",
       "--json",
     ]);
+  });
+
+  test("agent update-self infers skill from bounded labels without inspect or logs", () => {
+    const repositoryRoot = createGitRepository("meow-flow-agent-label-");
+    const worktreePath = createManualWorktree(repositoryRoot);
+    const fakePaseo = createFakePaseo();
+
+    const runResult = runCli(["run", "--id", "fix-test-ci", "initial request"], repositoryRoot, {
+      env: fakePaseo.env,
+    });
+    const updateSelf = runCli(["agent", "update-self"], worktreePath, {
+      env: {
+        ...fakePaseo.env,
+        PASEO_AGENT_ID: "self-agent-1",
+        PASEO_FAKE_MATCH_LABEL: "x-meow-flow-stage=plan",
+        PASEO_FAKE_AGENT_TITLE: "label plan agent",
+      },
+    });
+    const status = runCli(["thread", "status", "fix-test-ci", "--no-color"], repositoryRoot, {
+      env: fakePaseo.env,
+    });
+
+    expect(runResult.status).toBe(0);
+    expect(updateSelf.status).toBe(0);
+    expect(updateSelf.stdout).toContain("skill: meow-plan");
+    expect(status.stdout).toContain("id: self-agent-1");
+    expect(status.stdout).toContain('title: "label plan agent"');
+
+    const invocations = readPaseoInvocations(fakePaseo.invocationLogPath);
+    expect(invocations.some((invocation) => invocation.argv.includes("inspect"))).toBe(false);
+    expect(invocations.some((invocation) => invocation.argv[0] === "logs")).toBe(false);
+    expect(
+      invocations.some((invocation) => invocation.argv.includes("x-meow-flow-stage=plan")),
+    ).toBe(true);
   });
 });

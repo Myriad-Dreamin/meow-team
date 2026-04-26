@@ -10,7 +10,8 @@ metadata, and compact handoffs between agents.
 
 These commands are repo-local skills under `.codex/skills`. They are a
 conversation convention for agent chats; `mfl` is the persisted coordination
-layer.
+layer. Thread state is stored in the shared SQLite database at
+`~/.local/shared/meow-flow/meow-flow.sqlite`.
 
 ## Entry commands
 

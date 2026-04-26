@@ -101,10 +101,13 @@ MeowFlow discovers worktrees with `git worktree list --porcelain`. You can
 create worktrees with MeowFlow or with plain `git worktree add`; either way,
 `mfl run` can use them.
 
+Thread occupations, agents, request bodies, and handoffs are stored in the
+shared SQLite database at `~/.local/shared/meow-flow/meow-flow.sqlite`.
+
 Worktree helpers:
 
 ```bash
-mfl worktree new                    # creates .paseo-worktrees/paseo-{N+1}
+mfl worktree new                    # creates .paseo-workspaces/paseo-{N+1}
 mfl worktree new --branch auth-flow # use a specific branch name
 mfl worktree ls                     # alias: mfl worktree list
 mfl worktree rm paseo-1             # alias: mfl worktree remove paseo-1

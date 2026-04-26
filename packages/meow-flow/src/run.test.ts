@@ -186,6 +186,7 @@ if (argv[0] === "agent" && argv[1] === "update") {
     env: {
       PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
       MFL_PASEO_BIN: "paseo",
+      MFL_STATE_DB_PATH: path.join(binDirectory, "meow-flow.sqlite"),
       PASEO_COUNTER_PATH: counterPath,
       PASEO_INVOCATION_LOG: invocationLogPath,
     },

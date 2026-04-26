@@ -5,6 +5,8 @@ import { resolveCurrentThread } from "./thread-command.js";
 import {
   isSupportedSkill,
   type MeowFlowSkill,
+  stageToSkill,
+  SUPPORTED_STAGES,
   upsertAgentRecord,
   updateMeowFlowState,
 } from "./thread-state.js";
@@ -14,6 +16,24 @@ type PaseoInvocationResult = {
   readonly stdout: string;
   readonly stderr: string;
 };
+
+type AgentListEntry = {
+  readonly id: string | null;
+  readonly shortId: string | null;
+  readonly title: string | null;
+};
+
+const SUPPORTED_SKILLS: readonly MeowFlowSkill[] = [
+  "meow-plan",
+  "meow-code",
+  "meow-review",
+  "meow-execute",
+  "meow-validate",
+  "meow-archive",
+];
+
+const SKILL_LABEL_KEYS = ["x-meow-flow-skill", "meow-flow.skill"] as const;
+const STAGE_LABEL_KEYS = ["x-meow-flow-stage", "meow-flow.stage"] as const;
 
 export function createAgentCommand(): Command {
   return new Command("agent")
@@ -91,24 +111,56 @@ function inferCurrentAgentSkill(agentId: string): {
     };
   }
 
-  const inspect = invokePaseo(["agent", "inspect", agentId, "--json"]);
-  const inspectText = `${inspect.stdout}\n${inspect.stderr}`;
-  const inspectSkill = findSupportedSkill(inspectText);
-  const inspectTitle = parseInspectTitle(inspect.stdout);
-  if (inspectSkill) {
-    return {
-      skill: inspectSkill,
-      title: inspectTitle,
-    };
+  const labelSkill = inferAgentSkillFromLabels(agentId);
+  if (labelSkill) {
+    return labelSkill;
   }
 
-  const logs = invokePaseo(["logs", agentId, "--tail", "200"]);
-  const logSkill = findSupportedSkill(`${logs.stdout}\n${logs.stderr}`);
-
   return {
-    skill: logSkill,
-    title: inspectTitle,
+    skill: null,
+    title: null,
   };
+}
+
+function inferAgentSkillFromLabels(agentId: string): {
+  readonly skill: MeowFlowSkill;
+  readonly title: string | null;
+} | null {
+  for (const labelKey of SKILL_LABEL_KEYS) {
+    for (const skill of SUPPORTED_SKILLS) {
+      const entry = findAgentByLabel(agentId, `${labelKey}=${skill}`);
+      if (entry) {
+        return {
+          skill,
+          title: entry.title,
+        };
+      }
+    }
+  }
+
+  for (const labelKey of STAGE_LABEL_KEYS) {
+    for (const stage of SUPPORTED_STAGES) {
+      const entry = findAgentByLabel(agentId, `${labelKey}=${stage}`);
+      if (entry) {
+        return {
+          skill: stageToSkill(stage),
+          title: entry.title,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function findAgentByLabel(agentId: string, label: string): AgentListEntry | null {
+  const result = invokePaseo(["agent", "ls", "-a", "--label", label, "--json"]);
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  return parseAgentList(result.stdout).find((entry) => matchesAgentId(entry, agentId)) ?? null;
 }
 
 function invokePaseoAgentUpdate(input: {
@@ -156,28 +208,66 @@ function invokePaseo(args: readonly string[]): PaseoInvocationResult {
   };
 }
 
-function findSupportedSkill(text: string): MeowFlowSkill | null {
-  const match = /\bmeow-(?:plan|code|review|execute|validate|archive)\b/.exec(text);
-  const skill = match?.[0];
-
-  return skill && isSupportedSkill(skill) ? skill : null;
-}
-
-function parseInspectTitle(stdout: string): string | null {
+function parseAgentList(stdout: string): readonly AgentListEntry[] {
   try {
     const parsed = JSON.parse(stdout) as unknown;
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "Name" in parsed &&
-      typeof parsed.Name === "string" &&
-      parsed.Name !== "-"
-    ) {
-      return parsed.Name;
-    }
+    const entries = Array.isArray(parsed)
+      ? parsed
+      : isRecord(parsed) && Array.isArray(parsed.data)
+        ? parsed.data
+        : isRecord(parsed)
+          ? [parsed]
+          : [];
+
+    return entries.map(normalizeAgentListEntry).filter(isNotNull);
   } catch {
+    return [];
+  }
+}
+
+function normalizeAgentListEntry(value: unknown): AgentListEntry | null {
+  if (!isRecord(value)) {
     return null;
   }
 
-  return null;
+  const id = readString(value.id) ?? readString(value.Id);
+  const shortId = readString(value.shortId) ?? readString(value.ShortId);
+
+  if (!id && !shortId) {
+    return null;
+  }
+
+  return {
+    id,
+    shortId,
+    title:
+      normalizeTitle(readString(value.name)) ??
+      normalizeTitle(readString(value.title)) ??
+      normalizeTitle(readString(value.Name)),
+  };
+}
+
+function matchesAgentId(entry: AgentListEntry, agentId: string): boolean {
+  return (
+    entry.id === agentId ||
+    entry.shortId === agentId ||
+    (entry.shortId !== null && agentId.startsWith(entry.shortId))
+  );
+}
+
+function normalizeTitle(value: string | null): string | null {
+  const title = value?.trim();
+  return title && title !== "-" ? title : null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNotNull<T>(value: T | null): value is T {
+  return value !== null;
 }

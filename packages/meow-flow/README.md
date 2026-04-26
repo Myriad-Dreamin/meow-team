@@ -39,6 +39,10 @@ mfl worktree new
 initial plan stage when the current worktree is idle, and coordinate later
 stages through thread status and handoffs.
 
+Thread state is persisted in the shared SQLite database at
+`~/.local/shared/meow-flow/meow-flow.sqlite`, so all linked worktrees for the
+same machine see the same occupations, agents, and handoffs.
+
 ## Worktrees
 
 ```bash
@@ -51,7 +55,7 @@ mfl worktree remove paseo-1
 ```
 
 `mfl worktree new` creates a linked Git worktree at
-`.paseo-worktrees/paseo-{N+1}`, where `N` is the largest existing `paseo-N`
+`.paseo-workspaces/paseo-{N+1}`, where `N` is the largest existing `paseo-N`
 worktree discovered from `git worktree list --porcelain`. If `--branch` is not
 provided, MeowFlow creates a random branch name.
 

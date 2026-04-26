@@ -1,5 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
+import type { Database as DatabaseConnection } from "better-sqlite3";
 
 export const SUPPORTED_STAGES = ["plan", "code", "review", "execute", "validate"] as const;
 
@@ -38,6 +41,7 @@ export type ThreadRecord = {
 
 export type ThreadOccupationRecord = {
   readonly threadId: string;
+  readonly repositoryRoot?: string;
   readonly worktreePath: string;
   readonly createdAt: string;
   readonly releasedAt: string | null;
@@ -57,8 +61,42 @@ export type MutableMeowFlowState = {
 
 type UnknownRecord = Record<string, unknown>;
 
-const STATE_DIRECTORY_NAME = "meow-flow";
-const STATE_FILE_NAME = "state.json";
+const STATE_DATABASE_ENV_NAME = "MFL_STATE_DB_PATH";
+const STATE_DIRECTORY_PATH = [".local", "shared", "meow-flow"] as const;
+const STATE_DATABASE_FILE_NAME = "meow-flow.sqlite";
+const DEFAULT_WORKTREE_DIRECTORY_NAME = ".paseo-workspaces";
+
+type OccupationRow = {
+  readonly thread_id: string;
+  readonly repository_root: string;
+  readonly slot_number: number;
+  readonly workspace_relative_path: string;
+  readonly request_body: string;
+  readonly created_at: string;
+};
+
+type ThreadMetadataRow = {
+  readonly thread_id: string;
+  readonly name: string | null;
+  readonly request_body: string | null;
+  readonly archived_at: string | null;
+};
+
+type ThreadAgentRow = {
+  readonly thread_id: string;
+  readonly agent_id: string;
+  readonly title: string | null;
+  readonly skill: string;
+  readonly created_at: string;
+};
+
+type ThreadHandoffRow = {
+  readonly thread_id: string;
+  readonly seq: number;
+  readonly stage: string;
+  readonly content: string;
+  readonly created_at: string;
+};
 
 export function createEmptyState(): MutableMeowFlowState {
   return {
@@ -68,39 +106,461 @@ export function createEmptyState(): MutableMeowFlowState {
   };
 }
 
-export function getStateFilePath(repositoryRoot: string): string {
-  return path.join(repositoryRoot, ".git", STATE_DIRECTORY_NAME, STATE_FILE_NAME);
+export function getStateFilePath(_repositoryRoot?: string): string {
+  return getStateDatabasePath();
 }
 
 export function readMeowFlowState(repositoryRoot: string): MutableMeowFlowState {
-  const statePath = getStateFilePath(repositoryRoot);
-
-  if (!existsSync(statePath)) {
-    return createEmptyState();
+  const database = openStateDatabase();
+  try {
+    return readStateFromDatabase(database, repositoryRoot);
+  } finally {
+    database.close();
   }
-
-  const parsed = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
-  return normalizeState(parsed);
 }
 
 export function writeMeowFlowState(repositoryRoot: string, state: MeowFlowState): void {
-  const statePath = getStateFilePath(repositoryRoot);
-  const stateDirectory = path.dirname(statePath);
-  mkdirSync(stateDirectory, { recursive: true });
-
-  const temporaryPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  renameSync(temporaryPath, statePath);
+  const database = openStateDatabase();
+  try {
+    const write = database.transaction((resolvedRepositoryRoot: string) => {
+      writeStateToDatabase(database, resolvedRepositoryRoot, state);
+    });
+    write.immediate(path.resolve(repositoryRoot));
+  } finally {
+    database.close();
+  }
 }
 
 export function updateMeowFlowState(
   repositoryRoot: string,
   updater: (state: MutableMeowFlowState) => void,
 ): MutableMeowFlowState {
-  const state = readMeowFlowState(repositoryRoot);
-  updater(state);
-  writeMeowFlowState(repositoryRoot, state);
-  return state;
+  const database = openStateDatabase();
+  try {
+    const update = database.transaction((resolvedRepositoryRoot: string) => {
+      const state = readStateFromDatabase(database, resolvedRepositoryRoot);
+      updater(state);
+      writeStateToDatabase(database, resolvedRepositoryRoot, state);
+      return state;
+    });
+
+    return update.immediate(path.resolve(repositoryRoot));
+  } finally {
+    database.close();
+  }
+}
+
+export function getStateDatabasePath(): string {
+  const override = process.env[STATE_DATABASE_ENV_NAME]?.trim();
+
+  if (override) {
+    return path.resolve(override);
+  }
+
+  return path.join(resolveHomeDirectory(), ...STATE_DIRECTORY_PATH, STATE_DATABASE_FILE_NAME);
+}
+
+function openStateDatabase(): DatabaseConnection {
+  const databasePath = getStateDatabasePath();
+  mkdirSync(path.dirname(databasePath), { recursive: true });
+
+  const database = new Database(databasePath);
+  database.pragma("foreign_keys = ON");
+  migrateDatabase(database);
+  return database;
+}
+
+function migrateDatabase(database: DatabaseConnection): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS thread_occupations (
+      thread_id TEXT PRIMARY KEY,
+      repository_root TEXT NOT NULL,
+      slot_number INTEGER NOT NULL,
+      workspace_relative_path TEXT NOT NULL,
+      request_body TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(repository_root, slot_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS thread_metadata (
+      thread_id TEXT PRIMARY KEY,
+      name TEXT,
+      request_body TEXT,
+      archived_at TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS thread_agents (
+      thread_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      title TEXT,
+      skill TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(thread_id, agent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS thread_handoffs (
+      thread_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      stage TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(thread_id, seq)
+    );
+  `);
+}
+
+function readStateFromDatabase(
+  database: DatabaseConnection,
+  repositoryRoot: string,
+): MutableMeowFlowState {
+  const resolvedRepositoryRoot = path.resolve(repositoryRoot);
+  const occupationRows = database
+    .prepare<[], OccupationRow>(
+      `
+        SELECT
+          thread_id,
+          repository_root,
+          slot_number,
+          workspace_relative_path,
+          request_body,
+          created_at
+        FROM thread_occupations
+        ORDER BY repository_root, slot_number, thread_id
+      `,
+    )
+    .all();
+  const metadataRows = database
+    .prepare<[], ThreadMetadataRow>(
+      `
+        SELECT thread_id, name, request_body, archived_at
+        FROM thread_metadata
+        ORDER BY thread_id
+      `,
+    )
+    .all();
+  const agentRows = database
+    .prepare<[], ThreadAgentRow>(
+      `
+        SELECT thread_id, agent_id, title, skill, created_at
+        FROM thread_agents
+        ORDER BY thread_id, created_at, agent_id
+      `,
+    )
+    .all();
+  const handoffRows = database
+    .prepare<[], ThreadHandoffRow>(
+      `
+        SELECT thread_id, seq, stage, content, created_at
+        FROM thread_handoffs
+        ORDER BY thread_id, seq
+      `,
+    )
+    .all();
+
+  const occupations = occupationRows.map((row): ThreadOccupationRecord => {
+    const rowRepositoryRoot = path.resolve(row.repository_root);
+    return {
+      threadId: row.thread_id,
+      repositoryRoot: rowRepositoryRoot,
+      worktreePath: path.resolve(rowRepositoryRoot, row.workspace_relative_path),
+      createdAt: row.created_at,
+      releasedAt: null,
+    };
+  });
+  const threadIds = new Set<string>();
+  for (const row of occupationRows) {
+    threadIds.add(row.thread_id);
+  }
+  for (const row of metadataRows) {
+    threadIds.add(row.thread_id);
+  }
+  for (const row of agentRows) {
+    threadIds.add(row.thread_id);
+  }
+  for (const row of handoffRows) {
+    threadIds.add(row.thread_id);
+  }
+
+  const metadataByThreadId = new Map(metadataRows.map((row) => [row.thread_id, row]));
+  const occupationRequestBodies = new Map(
+    occupationRows
+      .filter((row) => path.resolve(row.repository_root) === resolvedRepositoryRoot)
+      .map((row) => [row.thread_id, row.request_body]),
+  );
+
+  const threads = [...threadIds].sort().map((threadId): ThreadRecord => {
+    const metadata = metadataByThreadId.get(threadId);
+    const agents = agentRows
+      .filter((row) => row.thread_id === threadId)
+      .map(normalizeAgentRow)
+      .filter(isNotNull);
+    const handoffs = handoffRows
+      .filter((row) => row.thread_id === threadId)
+      .map(normalizeHandoffRow)
+      .filter(isNotNull);
+
+    return {
+      id: threadId,
+      name: metadata?.name ?? null,
+      requestBody:
+        metadata?.request_body ?? normalizeOptionalText(occupationRequestBodies.get(threadId)),
+      archivedAt: metadata?.archived_at ?? null,
+      agents,
+      handoffs,
+    };
+  });
+
+  return normalizeState({
+    version: 1,
+    occupations,
+    threads,
+  });
+}
+
+function writeStateToDatabase(
+  database: DatabaseConnection,
+  repositoryRoot: string,
+  state: MeowFlowState,
+): void {
+  const resolvedRepositoryRoot = path.resolve(repositoryRoot);
+  const normalized = normalizeState(state);
+  const now = new Date().toISOString();
+
+  database
+    .prepare<[string]>("DELETE FROM thread_occupations WHERE repository_root = ?")
+    .run(resolvedRepositoryRoot);
+
+  const insertOccupation = database.prepare<{
+    readonly threadId: string;
+    readonly repositoryRoot: string;
+    readonly slotNumber: number;
+    readonly workspaceRelativePath: string;
+    readonly requestBody: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+  }>(`
+    INSERT INTO thread_occupations (
+      thread_id,
+      repository_root,
+      slot_number,
+      workspace_relative_path,
+      request_body,
+      created_at,
+      updated_at
+    ) VALUES (
+      @threadId,
+      @repositoryRoot,
+      @slotNumber,
+      @workspaceRelativePath,
+      @requestBody,
+      @createdAt,
+      @updatedAt
+    )
+  `);
+  for (const occupation of normalized.occupations) {
+    const occupationRepositoryRoot = path.resolve(
+      occupation.repositoryRoot ?? resolvedRepositoryRoot,
+    );
+    if (occupation.releasedAt !== null || occupationRepositoryRoot !== resolvedRepositoryRoot) {
+      continue;
+    }
+
+    const thread = getThread(normalized, occupation.threadId);
+    insertOccupation.run({
+      threadId: occupation.threadId,
+      repositoryRoot: resolvedRepositoryRoot,
+      slotNumber: deriveSlotNumber(resolvedRepositoryRoot, occupation.worktreePath),
+      workspaceRelativePath: toWorkspaceRelativePath(
+        resolvedRepositoryRoot,
+        occupation.worktreePath,
+      ),
+      requestBody: thread?.requestBody ?? "",
+      createdAt: occupation.createdAt,
+      updatedAt: now,
+    });
+  }
+
+  const upsertThread = database.prepare<{
+    readonly threadId: string;
+    readonly name: string | null;
+    readonly requestBody: string | null;
+    readonly archivedAt: string | null;
+    readonly updatedAt: string;
+  }>(`
+    INSERT INTO thread_metadata (
+      thread_id,
+      name,
+      request_body,
+      archived_at,
+      updated_at
+    ) VALUES (
+      @threadId,
+      @name,
+      @requestBody,
+      @archivedAt,
+      @updatedAt
+    )
+    ON CONFLICT(thread_id) DO UPDATE SET
+      name = excluded.name,
+      request_body = excluded.request_body,
+      archived_at = excluded.archived_at,
+      updated_at = excluded.updated_at
+  `);
+  const deleteAgents = database.prepare<[string]>("DELETE FROM thread_agents WHERE thread_id = ?");
+  const insertAgent = database.prepare<{
+    readonly threadId: string;
+    readonly agentId: string;
+    readonly title: string | null;
+    readonly skill: MeowFlowSkill;
+    readonly createdAt: string;
+  }>(`
+    INSERT INTO thread_agents (
+      thread_id,
+      agent_id,
+      title,
+      skill,
+      created_at
+    ) VALUES (
+      @threadId,
+      @agentId,
+      @title,
+      @skill,
+      @createdAt
+    )
+  `);
+  const deleteHandoffs = database.prepare<[string]>(
+    "DELETE FROM thread_handoffs WHERE thread_id = ?",
+  );
+  const insertHandoff = database.prepare<{
+    readonly threadId: string;
+    readonly seq: number;
+    readonly stage: MeowFlowStage;
+    readonly content: string;
+    readonly createdAt: string;
+  }>(`
+    INSERT INTO thread_handoffs (
+      thread_id,
+      seq,
+      stage,
+      content,
+      created_at
+    ) VALUES (
+      @threadId,
+      @seq,
+      @stage,
+      @content,
+      @createdAt
+    )
+  `);
+
+  for (const thread of normalized.threads) {
+    upsertThread.run({
+      threadId: thread.id,
+      name: thread.name,
+      requestBody: thread.requestBody,
+      archivedAt: thread.archivedAt,
+      updatedAt: now,
+    });
+
+    deleteAgents.run(thread.id);
+    for (const agent of thread.agents) {
+      insertAgent.run({
+        threadId: thread.id,
+        agentId: agent.id,
+        title: agent.title,
+        skill: agent.skill,
+        createdAt: agent.createdAt,
+      });
+    }
+
+    deleteHandoffs.run(thread.id);
+    for (const handoff of thread.handoffs) {
+      insertHandoff.run({
+        threadId: thread.id,
+        seq: handoff.seq,
+        stage: handoff.stage,
+        content: handoff.content,
+        createdAt: handoff.createdAt,
+      });
+    }
+  }
+}
+
+function resolveHomeDirectory(): string {
+  const envHome = process.env.HOME?.trim() || process.env.USERPROFILE?.trim();
+  return envHome || homedir();
+}
+
+function normalizeAgentRow(row: ThreadAgentRow): ThreadAgentRecord | null {
+  if (!isSupportedSkill(row.skill)) {
+    return null;
+  }
+
+  return {
+    id: row.agent_id,
+    title: row.title,
+    skill: row.skill,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeHandoffRow(row: ThreadHandoffRow): ThreadHandoffRecord | null {
+  if (!isSupportedStage(row.stage)) {
+    return null;
+  }
+
+  return {
+    seq: row.seq,
+    stage: row.stage,
+    content: row.content,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function toWorkspaceRelativePath(repositoryRoot: string, worktreePath: string): string {
+  const resolvedWorktreePath = path.resolve(worktreePath);
+  const relativePath = path.relative(repositoryRoot, resolvedWorktreePath);
+
+  if (relativePath.length > 0 && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)) {
+    return relativePath;
+  }
+
+  return resolvedWorktreePath;
+}
+
+function deriveSlotNumber(repositoryRoot: string, worktreePath: string): number {
+  const relativePath = path.relative(repositoryRoot, path.resolve(worktreePath));
+  const pathSegments = relativePath.split(path.sep);
+  const match =
+    pathSegments.length === 2 && pathSegments[0] === DEFAULT_WORKTREE_DIRECTORY_NAME
+      ? /^paseo-(\d+)$/.exec(pathSegments[1] ?? "")
+      : null;
+
+  if (match?.[1]) {
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return 1_000_000 + hashPath(relativePath || path.resolve(worktreePath));
+}
+
+function hashPath(value: string): number {
+  let hash = 2_166_136_261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+
+  return hash >>> 0;
 }
 
 export function isSupportedStage(value: string): value is MeowFlowStage {
@@ -459,6 +919,7 @@ function normalizeOccupation(value: unknown): ThreadOccupationRecord | null {
 
   return {
     threadId,
+    repositoryRoot: readString(value.repositoryRoot) ?? undefined,
     worktreePath: path.resolve(worktreePath),
     createdAt,
     releasedAt: readString(value.releasedAt),
