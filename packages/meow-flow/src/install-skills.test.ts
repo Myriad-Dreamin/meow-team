@@ -88,13 +88,16 @@ describe("mfl install-skills", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain(`Installed 6 skills for codex at ${codexHome}/skills`);
-    expect(result.stdout).toContain(`Installed 6 skills for claude at ${claudeConfigDir}/skills`);
+    expect(result.stdout).toContain(`Installed 8 skills for codex at ${codexHome}/skills`);
+    expect(result.stdout).toContain(`Installed 8 skills for claude at ${claudeConfigDir}/skills`);
     expect(result.stdout).toContain(
-      `Installed 6 skills for opencode at ${opencodeConfigDir}/skills`,
+      `Installed 8 skills for opencode at ${opencodeConfigDir}/skills`,
     );
+    expect(result.stdout).toContain("  meow-archive\n");
     expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-flow\n");
     expect(result.stdout).toContain("  meow-validate\n");
+    expect(result.stdout).not.toContain("  team-harness-workflow\n");
     expect(result.stdout).not.toContain("  paseo\n");
 
     expect(readFileSync(path.join(codexHome, "skills", "meow-code", "SKILL.md"), "utf8")).toContain(
@@ -103,12 +106,21 @@ describe("mfl install-skills", () => {
     expect(
       readFileSync(path.join(claudeConfigDir, "skills", "meow-plan", "SKILL.md"), "utf8"),
     ).toContain("name: meow-plan");
+    expect(readFileSync(path.join(codexHome, "skills", "meow-flow", "SKILL.md"), "utf8")).toContain(
+      "name: meow-flow",
+    );
+    expect(
+      readFileSync(path.join(codexHome, "skills", "meow-archive", "SKILL.md"), "utf8"),
+    ).toContain("name: meow-archive");
     expect(
       readFileSync(path.join(opencodeConfigDir, "skills", "meow-execute", "SKILL.md"), "utf8"),
     ).toContain("name: meow-execute");
     expect(
       readFileSync(path.join(codexHome, "skills", "meow-dataset", "agents", "openai.yaml"), "utf8"),
     ).toContain("Meow Dataset");
+    expect(existsSync(path.join(codexHome, "skills", "team-harness-workflow", "SKILL.md"))).toBe(
+      false,
+    );
     expect(existsSync(path.join(codexHome, "skills", "paseo", "SKILL.md"))).toBe(false);
   });
 
@@ -123,8 +135,11 @@ describe("mfl install-skills", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Embedded MeowFlow skills:");
+    expect(result.stdout).toContain("  meow-archive\n");
     expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-flow\n");
     expect(result.stdout).toContain("  meow-validate\n");
+    expect(result.stdout).not.toContain("  team-harness-workflow\n");
     expect(result.stdout).not.toContain("  paseo\n");
     expect(result.stdout).toContain("Install with: mfl install-skills <provider...>");
     expect(result.stdout).toContain("Supported providers: claude, codex, opencode, agents");
@@ -142,8 +157,11 @@ describe("mfl install-skills", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Embedded MeowFlow skills:");
+    expect(result.stdout).toContain("  meow-archive\n");
     expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-flow\n");
     expect(result.stdout).toContain("  meow-validate\n");
+    expect(result.stdout).not.toContain("  team-harness-workflow\n");
     expect(result.stdout).not.toContain("  paseo\n");
     expect(existsSync(path.join(homeDirectory, ".codex", "skills"))).toBe(false);
   });

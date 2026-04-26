@@ -76,12 +76,16 @@ describe("mfl foundation", () => {
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: mfl");
     expect(result.output).toContain("install-skills");
+    expect(result.output).toContain("status");
     expect(result.output).toContain("run");
     expect(result.output).toContain("worktree");
+    expect(result.output).toContain("thread");
+    expect(result.output).toContain("agent");
+    expect(result.output).toContain("handoff");
     expect(result.output).not.toContain("config");
     expect(result.output).not.toContain("plan");
-    expect(result.output).not.toContain("thread");
     expect(result.output).not.toContain("delete");
+    expect(result.output).not.toContain("workspace");
     expect(result.output).toContain("Options:");
     expect(result.output).toContain("--version");
   });
@@ -91,8 +95,9 @@ describe("mfl foundation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: mfl run");
-    expect(result.output).toContain("<request-body>");
+    expect(result.output).toContain("[request-body]");
     expect(result.output).toContain("--id");
+    expect(result.output).toContain("--stage");
     expect(result.output).not.toContain("--config");
   });
 

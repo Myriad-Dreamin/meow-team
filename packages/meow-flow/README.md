@@ -1,7 +1,8 @@
 # MeowFlow
 
-`mfl` is the MeowFlow CLI shortcut. It starts Paseo agents in git worktrees
-without a MeowFlow config file.
+`mfl` is the MeowFlow CLI shortcut. It installs MeowFlow skills, manages linked
+Git worktrees, launches staged Paseo agents, and stores thread metadata and
+handoffs.
 
 ## Installation
 
@@ -32,11 +33,22 @@ steps and upstream citation.
 mfl install-skills codex claude
 mfl worktree new
 mfl run "Create a echo hello script."
-// You'll see the agent started in the paseo's webapp
 ```
 
-`mfl run` launches a Paseo agent in a linked git worktree and passes the request
-through unchanged.
+`mfl run` starts the initial plan stage and the new agent appears in the Paseo
+web app. You can also invoke the entry skill directly from any worktree that is
+not occupied by a MeowFlow thread:
+
+```text
+/meow-flow Create a echo hello script.
+```
+
+`/meow-flow` and `/mfl` run `mfl status` and coordinate later stages through
+thread status and handoffs.
+
+Thread state is persisted in the shared SQLite database at
+`~/.local/share/meow-flow/meow-flow.sqlite`, so all linked worktrees for the
+same machine see the same occupations, agents, and handoffs.
 
 ## Worktrees
 
@@ -49,7 +61,7 @@ mfl worktree rm paseo-1
 mfl worktree remove paseo-1
 ```
 
-`mfl worktree new` creates a linked git worktree at
+`mfl worktree new` creates a linked Git worktree at
 `.paseo-workspaces/paseo-{N+1}`, where `N` is the largest existing `paseo-N`
 worktree discovered from `git worktree list --porcelain`. If `--branch` is not
 provided, MeowFlow creates a random branch name.
@@ -60,18 +72,63 @@ MeowFlow and can be used by `mfl run`.
 ## Run
 
 ```bash
-mfl run "implement user authentication"
-mfl run --id auth-flow "implement user authentication and add tests"
+mfl run --stage plan "implement user authentication"
+mfl run --id auth-flow --stage plan "implement user authentication and add tests"
+mfl run --stage code "implement the approved plan"
+mfl run --stage review
 ```
 
-When `--id` is omitted, `mfl` generates a UUID and uses it as the MeowFlow
-thread id. The resolved id is sent to Paseo as a label:
+For a new thread with no agents, `plan` is the default stage. After a thread
+has agents, pass `--stage plan|code|review|execute|validate`.
+
+The resolved thread id is sent to Paseo as a label:
 
 ```text
 x-meow-flow-id=<thread-id>
 ```
 
-The command does not install, read, or require a MeowFlow config file.
+`mfl run` prints:
+
+```text
+thread-id: <thread-id>
+worktree: <path>
+agent-id: <id>
+next-seq: <seq>
+```
+
+Use `next-seq` to read only handoffs created after the new stage agent was
+launched.
+
+## Status, Thread, Agent, And Handoff Commands
+
+```bash
+mfl status
+mfl thread status <id> --no-color
+mfl thread set name install-auth-flow
+mfl agent update-self
+mfl handoff append --stage code "implemented auth form; tests passed"
+mfl handoff get -n 5
+mfl handoff get --since 3
+mfl thread archive
+```
+
+Thread names must be kebab-case matching `^[a-z0-9]+(-[a-z0-9]+)*$`.
+`mfl thread archive` marks the current thread archived and releases the linked
+worktree occupation. It does not delete the worktree folder and does not revert
+code changes.
+
+## Archive And Delete Skills
+
+```text
+/meow-archive
+/meow-archive delete
+/mfl archive
+/mfl delete
+```
+
+Normal archive archives the OpenSpec proposal when present and then runs
+`mfl thread archive`. Delete removes the open proposal artifacts without
+reverting code changes, then archives the thread.
 
 ## Skills
 

@@ -6,7 +6,7 @@ Define how Meow Flow lists configured Paseo thread worktree slots for the curren
 ## Requirements
 ### Requirement: Thread list command resolves the current repository root
 
-The CLI SHALL provide `mfl thread ls` for use from inside a git-managed folder and SHALL resolve the canonical repository root that owns the `.paseo-worktrees` directory.
+The CLI SHALL provide `mfl thread ls` for use from inside a git-managed folder and SHALL resolve the canonical repository root that owns the `.paseo-workspaces` directory.
 
 #### Scenario: Command runs inside the primary checkout
 
@@ -15,8 +15,8 @@ The CLI SHALL provide `mfl thread ls` for use from inside a git-managed folder a
 
 #### Scenario: Command runs inside a linked Paseo worktree
 
-- **WHEN** a user runs `mfl thread ls` from inside `.paseo-worktrees/paseo-1`
-- **THEN** the command resolves the primary checkout root that owns `.paseo-worktrees`
+- **WHEN** a user runs `mfl thread ls` from inside `.paseo-workspaces/paseo-1`
+- **THEN** the command resolves the primary checkout root that owns `.paseo-workspaces`
 
 #### Scenario: Command runs outside git
 
@@ -39,30 +39,30 @@ The CLI SHALL load Meow Flow config using the same explicit-or-shared config res
 
 ### Requirement: Thread list command reports current slot allocation status
 
-The CLI SHALL report one line per configured slot with the relative `.paseo-worktrees/paseo-N` path and a workspace status. The workspace status domain SHALL include `idle`, `occupied`, and `not-created`. Occupied rows SHALL print the occupying thread id in the status position.
+The CLI SHALL report one line per configured slot with the relative `.paseo-workspaces/paseo-N` path and a workspace status. The workspace status domain SHALL include `idle`, `occupied`, and `not-created`. Occupied rows SHALL print the occupying thread id in the status position.
 
 #### Scenario: Slot worktree exists and is idle
 
-- **WHEN** `.paseo-worktrees/paseo-1` is registered as a Git worktree
-- **AND** no persisted occupation exists for `.paseo-worktrees/paseo-1`
-- **THEN** `mfl thread ls` prints `.paseo-worktrees/paseo-1 idle`
+- **WHEN** `.paseo-workspaces/paseo-1` is registered as a Git worktree
+- **AND** no persisted occupation exists for `.paseo-workspaces/paseo-1`
+- **THEN** `mfl thread ls` prints `.paseo-workspaces/paseo-1 idle`
 
 #### Scenario: Slot worktree is occupied
 
-- **WHEN** `.paseo-worktrees/paseo-2` is registered as a Git worktree
-- **AND** the shared occupation database records thread id `fix-test-ci` for `.paseo-worktrees/paseo-2`
-- **THEN** `mfl thread ls` prints `.paseo-worktrees/paseo-2 fix-test-ci`
+- **WHEN** `.paseo-workspaces/paseo-2` is registered as a Git worktree
+- **AND** the shared occupation database records thread id `fix-test-ci` for `.paseo-workspaces/paseo-2`
+- **THEN** `mfl thread ls` prints `.paseo-workspaces/paseo-2 fix-test-ci`
 
 #### Scenario: Slot worktree is not allocated
 
-- **WHEN** `.paseo-worktrees/paseo-3` is not registered as a Git worktree
-- **THEN** `mfl thread ls` prints `.paseo-worktrees/paseo-3 not-created (folder is not allocated)`
+- **WHEN** `.paseo-workspaces/paseo-3` is not registered as a Git worktree
+- **THEN** `mfl thread ls` prints `.paseo-workspaces/paseo-3 not-created (folder is not allocated)`
 
 #### Scenario: Stale occupation for missing worktree is not-created
 
-- **WHEN** `.paseo-worktrees/paseo-3` is not registered as a Git worktree
-- **AND** the shared occupation database contains a stale occupation for `.paseo-worktrees/paseo-3`
-- **THEN** `mfl thread ls` prints `.paseo-worktrees/paseo-3 not-created (folder is not allocated)`
+- **WHEN** `.paseo-workspaces/paseo-3` is not registered as a Git worktree
+- **AND** the shared occupation database contains a stale occupation for `.paseo-workspaces/paseo-3`
+- **THEN** `mfl thread ls` prints `.paseo-workspaces/paseo-3 not-created (folder is not allocated)`
 - **AND** the command does not report the stale thread id as occupying a usable workspace
 
 ### Requirement: Top-level list command aliases thread list

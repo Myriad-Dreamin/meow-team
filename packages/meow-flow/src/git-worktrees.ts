@@ -14,6 +14,7 @@ export type GitWorktree = {
 
 export type GitWorktreeContext = {
   readonly repositoryRoot: string;
+  readonly currentWorktreeRoot: string;
   readonly worktrees: readonly GitWorktree[];
 };
 
@@ -36,10 +37,12 @@ export function resolveGitWorktreeContext(input: {
   readonly commandName: string;
 }): GitWorktreeContext {
   const repositoryRoot = resolveCanonicalGitRoot(input.cwd, input.commandName);
+  const currentWorktreeRoot = resolveCurrentWorktreeRoot(input.cwd);
   const worktrees = listGitWorktrees(repositoryRoot, repositoryRoot);
 
   return {
     repositoryRoot,
+    currentWorktreeRoot,
     worktrees,
   };
 }
@@ -193,6 +196,10 @@ function resolveCanonicalGitRoot(cwd: string, commandName: string): string {
   const absoluteCommonDir = path.isAbsolute(commonDir) ? commonDir : path.resolve(cwd, commonDir);
 
   return path.dirname(absoluteCommonDir);
+}
+
+function resolveCurrentWorktreeRoot(cwd: string): string {
+  return path.resolve(runRequiredGit(["rev-parse", "--show-toplevel"], cwd).trim());
 }
 
 function listGitWorktrees(cwd: string, repositoryRoot: string): readonly GitWorktree[] {
