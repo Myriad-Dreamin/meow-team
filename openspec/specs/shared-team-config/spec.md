@@ -7,19 +7,19 @@ Define how Meow Flow installs and resolves a shared team configuration artifact 
 
 ### Requirement: `mfl config install` writes a shared config artifact
 
-The CLI SHALL provide an `mfl config install <path>` command that installs the requested config module to `~/.local/shared/meow-flow/config.js`.
+The CLI SHALL provide an `mfl config install <path>` command that installs the requested config module to `~/.local/share/meow-flow/config.js`.
 
 #### Scenario: Installing a JavaScript config
 
 - **WHEN** a user runs `mfl config install /repo/team.config.js`
-- **THEN** the CLI writes `~/.local/shared/meow-flow/config.js`
+- **THEN** the CLI writes `~/.local/share/meow-flow/config.js`
 - **AND** the installed file is a JavaScript module that `mfl` can load later without reading `/repo/team.config.js` directly
 
 #### Scenario: Installing a TypeScript config
 
 - **WHEN** a user runs `mfl config install /repo/team.config.ts`
 - **THEN** the CLI evaluates the source config using the source project's TypeScript context
-- **AND** the installed output at `~/.local/shared/meow-flow/config.js` is JavaScript
+- **AND** the installed output at `~/.local/share/meow-flow/config.js` is JavaScript
 
 ### Requirement: Shared config install accepts only supported source types
 
@@ -30,7 +30,7 @@ The install command SHALL accept only `.js` and `.ts` source config paths.
 - **WHEN** a user runs `mfl config install /repo/team.config.mjs`
 - **THEN** the command exits with an error
 - **AND** the error identifies `.js` and `.ts` as the supported config file types
-- **AND** the command does not mutate `~/.local/shared/meow-flow/config.js`
+- **AND** the command does not mutate `~/.local/share/meow-flow/config.js`
 
 ### Requirement: Installed shared config preserves planning behavior after relocation
 
@@ -44,25 +44,25 @@ The installed shared config SHALL preserve the same planning inputs that the sou
 
 ### Requirement: `mfl plan` uses only explicit or shared config
 
-`mfl plan` SHALL resolve config from an explicit `--config` path when provided, otherwise from `~/.local/shared/meow-flow/config.js` when present, and otherwise fail without falling back to local config discovery.
+`mfl plan` SHALL resolve config from an explicit `--config` path when provided, otherwise from `~/.local/share/meow-flow/config.js` when present, and otherwise fail without falling back to local config discovery.
 
 #### Scenario: Explicit config path wins over the shared install
 
 - **WHEN** a user runs `mfl plan --config /repo/team.config.ts`
 - **THEN** the CLI loads `/repo/team.config.ts`
-- **AND** the CLI does not read `~/.local/shared/meow-flow/config.js` for that invocation
+- **AND** the CLI does not read `~/.local/share/meow-flow/config.js` for that invocation
 
 #### Scenario: Shared config is used by default
 
 - **WHEN** a user runs `mfl plan` without `--config`
-- **AND** `~/.local/shared/meow-flow/config.js` exists
+- **AND** `~/.local/share/meow-flow/config.js` exists
 - **THEN** the CLI loads the shared installed config
-- **AND** the plan output reports `~/.local/shared/meow-flow/config.js` as the resolved config path
+- **AND** the plan output reports `~/.local/share/meow-flow/config.js` as the resolved config path
 
 #### Scenario: Missing shared config fails without local discovery
 
 - **WHEN** a user runs `mfl plan` without `--config`
-- **AND** `~/.local/shared/meow-flow/config.js` does not exist
+- **AND** `~/.local/share/meow-flow/config.js` does not exist
 - **THEN** the command exits with an error
 - **AND** the error tells the user to install a shared config with `mfl config install <path>`
 - **AND** the CLI does not search for or load `team.config.ts` or `team.config.js` from the current directory tree

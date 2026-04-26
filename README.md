@@ -37,13 +37,34 @@ Install `mfl` with one of these options:
 ## Get Started
 
 ```text
+mfl install-skills codex
 mfl worktree new
 mfl run "Create a echo hello script."
-// You'll see the agent started in the paseo's webapp
 ```
 
-`mfl run` launches a Paseo agent in a linked git worktree and passes the request
-through unchanged.
+`mfl run` starts the first plan agent in a linked Git worktree, and the agent
+appears in the Paseo web app. You can also invoke the entry skill directly from
+any worktree that is not occupied by a MeowFlow thread:
+
+```text
+/meow-flow Create a echo hello script.
+```
+
+`/meow-flow` and `/mfl` inspect `mfl status` and coordinate later stages through
+persisted thread state and handoffs.
+
+For a small human-verified change, the minimal path can be:
+
+```text
+/meow-flow add a focused CLI help example
+/mfl code
+/mfl delete
+```
+
+That path plans, implements, and then deletes the temporary open proposal
+artifacts while keeping the code changes. Review remains available with
+`/mfl review`, but it is not mandatory for simple changes the human verifies
+directly.
 
 ## Philosophy
 
@@ -67,17 +88,28 @@ Execute mode is a variant of the Plan-Code-Review workflow with an additional `m
 
 ## Usage
 
-Start a MeowFlow agent with `mfl run`:
+Start from an installed skill:
 
-```bash
-mfl worktree new
-mfl run "implement user authentication"
-mfl run --id auth-flow "implement user authentication and add tests"
+```text
+/meow-flow implement user authentication
+/mfl code add tests too
+/mfl review focus on auth edge cases
 ```
 
-MeowFlow discovers workspaces with `git worktree list --porcelain`. You can
+The underlying CLI can also launch staged agents directly:
+
+```bash
+mfl run --stage plan "implement user authentication"
+mfl run --stage code "implement the approved plan"
+mfl run --stage review
+```
+
+MeowFlow discovers worktrees with `git worktree list --porcelain`. You can
 create worktrees with MeowFlow or with plain `git worktree add`; either way,
 `mfl run` can use them.
+
+Thread occupations, agents, request bodies, and handoffs are stored in the
+shared SQLite database at `~/.local/share/meow-flow/meow-flow.sqlite`.
 
 Worktree helpers:
 
@@ -86,6 +118,54 @@ mfl worktree new                    # creates .paseo-workspaces/paseo-{N+1}
 mfl worktree new --branch auth-flow # use a specific branch name
 mfl worktree ls                     # alias: mfl worktree list
 mfl worktree rm paseo-1             # alias: mfl worktree remove paseo-1
+```
+
+Thread coordination commands:
+
+```bash
+mfl status
+mfl thread status <id> --no-color
+mfl thread set name install-auth-flow
+mfl handoff append --stage code "implemented auth form; tests passed"
+mfl handoff get -n 5
+mfl thread archive
+```
+
+Thread names must be kebab-case matching `^[a-z0-9]+(-[a-z0-9]+)*$`.
+
+Plan, code, review transitions:
+## Plan, code, review
+
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Code[code agent]
+  Code --> Plan
+  Code --> Review[review agent]
+  Code --> Final[final]
+  Review --> Plan
+  Review --> Code
+  Review --> Final
+  Review --> Execute
+  Code --> Execute[execute agent]
+  Final --> Archive[archive agent]
+  Final --> Commit[commit action]
+  Final --> Delete[delete action]
+```
+
+Plan, execute, validate transitions:
+
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Execute[execute agent]
+  Execute --> Plan
+  Execute --> Validate[review agent]
+  Execute --> Final[final]
+  Validate --> Plan
+  Validate --> Execute
+  Validate --> Final
+  Final --> Archive[archive agent]
+  Final --> Commit[commit action]
+  Final --> Delete[delete action]
 ```
 
 Paseo's CLI remains available for direct agent management:

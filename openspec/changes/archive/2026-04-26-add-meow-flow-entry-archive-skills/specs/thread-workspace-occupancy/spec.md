@@ -1,9 +1,5 @@
-# thread-workspace-occupancy Specification
+## MODIFIED Requirements
 
-## Purpose
-Define how Meow Flow allocates, persists, lists, and releases running thread occupations across registered Paseo worktree slots.
-
-## Requirements
 ### Requirement: `mfl run` allocates a thread id to an idle worktree
 
 The CLI SHALL provide `mfl run [--id <id>] [--stage <stage>] "request body"`
@@ -94,8 +90,10 @@ agent id, persist the agent metadata when available, and print `agent-id:
 #### Scenario: Generated id is used as the Paseo label
 
 - **WHEN** a user runs `mfl run "echo \"hello world\""`
-- **AND** the generated thread id is `11111111-1111-4111-8111-111111111111`
-- **THEN** the `paseo run` invocation includes `--label x-meow-flow-id=11111111-1111-4111-8111-111111111111`
+- **AND** the generated thread id is
+  `11111111-1111-4111-8111-111111111111`
+- **THEN** the `paseo run` invocation includes
+  `--label x-meow-flow-id=11111111-1111-4111-8111-111111111111`
 
 #### Scenario: Run output includes agent id and next handoff sequence
 
@@ -110,9 +108,12 @@ agent id, persist the agent metadata when available, and print `agent-id:
 
 - **WHEN** `mfl run --id fix-test-ci "echo \"hello world\""` reserves a
   linked worktree
-- **AND** the subsequent `paseo run` invocation fails before creating a usable agent
-- **THEN** the command exits with an error that includes the `paseo run` failure
-- **AND** the CLI removes the fresh `fix-test-ci` occupation from the shared database
+- **AND** the subsequent `paseo run` invocation fails before creating a usable
+  agent
+- **THEN** the command exits with an error that includes the `paseo run`
+  failure
+- **AND** the CLI removes the fresh `fix-test-ci` occupation from the shared
+  database
 
 #### Scenario: Malformed Paseo output fails before recording an agent
 
@@ -175,90 +176,3 @@ the same current thread and the thread is not archived.
 - **THEN** the command exits with an error explaining that archived threads
   cannot launch new stage agents
 - **AND** the command does not invoke `paseo run`
-
-### Requirement: Thread occupations are persisted in shared SQLite storage
-
-The CLI SHALL store running thread occupation state in `~/.local/share/meow-flow/meow-flow.sqlite` using the `better-sqlite3` package.
-
-#### Scenario: First allocation creates the shared database
-
-- **WHEN** a user runs `mfl run --id fix-test-ci "echo \"hello world\""`
-- **AND** `~/.local/share/meow-flow/meow-flow.sqlite` does not exist
-- **THEN** the CLI creates the parent directory if needed
-- **AND** the CLI creates the SQLite database and thread occupation schema
-- **AND** the running occupation is persisted in that database
-
-#### Scenario: Later list command reads the persisted allocation
-
-- **WHEN** `mfl run --id fix-test-ci "echo \"hello world\""` has allocated `.paseo-workspaces/paseo-2`
-- **AND** a later CLI process runs `mfl thread ls` in the same repository
-- **THEN** the later process reads the allocation from `~/.local/share/meow-flow/meow-flow.sqlite`
-- **AND** the output reports `.paseo-workspaces/paseo-2 fix-test-ci`
-
-### Requirement: Thread and workspace occupations are one-to-one
-
-The occupation store SHALL prevent a thread id from running in more than one workspace and SHALL prevent a workspace from running more than one thread.
-
-#### Scenario: Existing thread id fails clearly
-
-- **WHEN** thread id `fix-test-ci` already occupies `.paseo-workspaces/paseo-2` in the current repository
-- **AND** a user runs `mfl run --id fix-test-ci "echo \"hello world\""` from the same repository
-- **THEN** the command exits with an error identifying the existing `.paseo-workspaces/paseo-2` allocation
-- **AND** the CLI does not allocate any other workspace for `fix-test-ci`
-- **AND** the CLI does not invoke `paseo run`
-
-#### Scenario: Occupied workspace is skipped for a different thread id
-
-- **WHEN** `.paseo-workspaces/paseo-1` is occupied by thread id `fix-test-ci`
-- **AND** `.paseo-workspaces/paseo-2` is registered as a Git worktree and idle
-- **AND** a user runs `mfl run --id add-feature "echo \"hello world\""`
-- **THEN** the CLI allocates `.paseo-workspaces/paseo-2`
-- **AND** the existing `fix-test-ci` occupation remains unchanged
-
-#### Scenario: Thread id already allocated in another repository fails clearly
-
-- **WHEN** thread id `fix-test-ci` already occupies a workspace for repository `/repo-a`
-- **AND** a user runs `mfl run --id fix-test-ci "echo \"hello world\""` from repository `/repo-b`
-- **THEN** the command exits with an error identifying the existing `/repo-a` allocation
-- **AND** the command does not allocate a workspace in `/repo-b`
-
-### Requirement: `mfl delete` releases running occupations by id
-
-The CLI SHALL provide `mfl delete <id1> <id2> ...` to remove persisted running occupations for one or more thread ids from the shared SQLite database.
-
-#### Scenario: Delete releases a single occupation
-
-- **WHEN** thread id `fix-test-ci` occupies `.paseo-workspaces/paseo-2`
-- **AND** a user runs `mfl delete fix-test-ci`
-- **THEN** the CLI removes the `fix-test-ci` occupation from `~/.local/share/meow-flow/meow-flow.sqlite`
-- **AND** the command output identifies `fix-test-ci` and `.paseo-workspaces/paseo-2` as released
-
-#### Scenario: Released workspace appears idle when listed
-
-- **WHEN** thread id `fix-test-ci` occupied registered Git worktree `.paseo-workspaces/paseo-2`
-- **AND** a user runs `mfl delete fix-test-ci`
-- **AND** a later CLI process runs `mfl thread ls` in the same repository
-- **THEN** the output reports `.paseo-workspaces/paseo-2 idle`
-
-#### Scenario: Delete releases multiple occupations atomically
-
-- **WHEN** thread id `fix-test-ci` occupies `.paseo-workspaces/paseo-1`
-- **AND** thread id `add-feature` occupies `.paseo-workspaces/paseo-2`
-- **AND** a user runs `mfl delete fix-test-ci add-feature`
-- **THEN** the CLI removes both running occupations in one transaction
-- **AND** the command output identifies both released thread ids
-
-#### Scenario: Missing id prevents batch deletion
-
-- **WHEN** thread id `fix-test-ci` occupies `.paseo-workspaces/paseo-1`
-- **AND** no occupation exists for thread id `missing-thread`
-- **AND** a user runs `mfl delete fix-test-ci missing-thread`
-- **THEN** the command exits with an error identifying `missing-thread` as not found
-- **AND** the `fix-test-ci` occupation remains in the shared database
-
-#### Scenario: Delete does not remove the workspace folder
-
-- **WHEN** thread id `fix-test-ci` occupies registered Git worktree `.paseo-workspaces/paseo-2`
-- **AND** a user runs `mfl delete fix-test-ci`
-- **THEN** `.paseo-workspaces/paseo-2` remains a registered Git worktree
-- **AND** only the Meow Flow running occupation is removed

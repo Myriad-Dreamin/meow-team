@@ -4,118 +4,121 @@ title: Interactive Mode
 
 # Interactive mode
 
-Interactive mode is a lightweight way to run the harness roles while talking to
-the main Codex agent directly. Instead of starting the web harness queue and
-waiting for background lanes, you choose the role behavior with a slash-prefixed
-skill command and the main agent performs that role in the current conversation.
+Interactive mode starts with the `meow-flow` entry skill. The entry skill uses
+`mfl` CLI state to coordinate linked Git worktrees, staged Paseo agents, thread
+metadata, and compact handoffs between agents.
 
-These commands are repo-local Codex skills under `.codex/skills`. They are a
-conversation convention for the main agent, not the thread approval commands
-served by `POST /api/team/threads/:threadId/command`.
+These commands are repo-local skills under `.codex/skills`. They are a
+conversation convention for agent chats; `mfl` is the persisted coordination
+layer. Thread state is stored in the shared SQLite database at
+`~/.local/share/meow-flow/meow-flow.sqlite`.
 
-## Commands
+## Entry commands
 
-| Command | Purpose | Input |
-| --- | --- | --- |
-| `/meow-plan content` | Use the current planner workflow to turn a request into an approval-ready plan. | Required planning content. |
-| `/meow-code [optional-suggestion]` | Use the current coder workflow to implement the latest plan or visible task. | Optional implementation focus. |
-| `/meow-review [optional-suggestion]` | Use the current reviewer workflow to review the current changes. | Optional review focus. |
-| `/meow-execute content` | Use the current code workflow in execution mode for script, data, automation, or run-oriented work. | Required execution objective. |
-| `/meow-validate [optional-suggestion]` | Use the current review workflow in execution mode to validate reproducibility and artifacts. | Optional validation focus. |
+| Command | Purpose |
+| --- | --- |
+| `/meow-flow [content]` | Start or continue a MeowFlow thread. |
+| `/mfl [content]` | Alias for `/meow-flow [content]`. |
+| `/mfl plan [content]` | Launch a plan stage agent. |
+| `/mfl code [content]` | Launch a code stage agent. |
+| `/mfl review [content]` | Launch a review stage agent. |
+| `/mfl execute [content]` | Launch an execution stage agent. |
+| `/mfl validate [content]` | Launch a validation stage agent. |
+| `/mfl commit` | Commit current thread changes after reading new handoffs. |
+| `/mfl archive` | Archive the thread and OpenSpec proposal. |
+| `/mfl delete` | Delete the open proposal artifacts and archive the thread without reverting code. |
 
-## Recommended flow
+Legacy direct role commands still exist: `/meow-plan`, `/meow-code`,
+`/meow-review`, `/meow-execute`, and `/meow-validate`. They now use
+`meow-flow` for shared thread, worktree, stage, and handoff rules.
 
-1. Start with `/meow-plan content` when the task needs scoping before edits.
-2. Continue with `/meow-code` after the plan is clear and approved in the
-   conversation.
-3. Use `/meow-review` to get a review decision on the current workspace changes.
-4. Use `/meow-execute content` instead of `/meow-code` when the work is about
-   reproducible execution, scripts, benchmark-like runs, generated data, or
-   automation artifacts.
-5. Use `/meow-validate` after `/meow-execute` to check scripts, validators,
-   summary artifacts, and reproducibility.
+## Startup behavior
 
-## How it differs from the web harness
+1. The skill runs `mfl agent update-self` when it is inside a Paseo agent chat.
+2. It runs `mfl status`.
+3. If the current checkout is the repository root and no worktree is selected,
+   it tells the user to create one:
 
-- The main agent executes the selected role behavior in the current checkout.
-- No planner, coder, or reviewer lane starts automatically after a command.
-- No background approval queue is created unless you separately use the web
-  harness.
-- The conversation is the handoff state, so keep approvals and requested
-  suggestions explicit.
-- Repository rules still apply: read `INSTRUCTIONS.md`, follow applicable
-  `AGENTS.md`, keep project text in English, and use `pnpm` for scripts.
+   ```bash
+   mfl worktree new
+   ```
 
-## Command details
+4. If the current checkout is an idle linked worktree and the user provided a
+   request, it launches the initial plan stage:
 
-### `/meow-plan content`
+   ```bash
+   mfl run --stage plan "implement user authentication"
+   ```
 
-Use this when you want planning without implementation. The planner should
-produce one preferred implementation proposal by default and multiple proposals
-only when separate options or workstreams improve safety or approval clarity.
+5. If the current checkout is occupied, it reports the thread id or name and
+   latest agent id, then asks how to proceed with that thread.
 
-Example:
+`mfl run` prints `thread-id: <id>`, `worktree: <path>`, `agent-id: <id>`, and
+`next-seq: <seq>`. Continue in the new agent chat and use `next-seq` when
+reading only handoffs created after launch.
+Planner agents must choose thread names in kebab-case matching
+`^[a-z0-9]+(-[a-z0-9]+)*$`.
 
-```text
-/meow-plan add interactive role skills and document how to use them
+## Handoffs
+
+Stage agents read thread context with:
+
+```bash
+mfl thread status <id> --no-color
+mfl handoff get -n 5
+mfl handoff get --since <seq>
 ```
 
-### `/meow-code [optional-suggestion]`
+Agents that produce implementation, review, execution, or validation results
+append a concise handoff before finishing:
 
-Use this when a plan already exists or the current task is obvious enough to
-implement directly. The optional suggestion should be a short refinement, such
-as a preferred scope, a specific file area, or a reviewer-requested fix.
-
-Example:
-
-```text
-/meow-code keep the implementation limited to repo-local skills and docs
+```bash
+mfl handoff append --stage code "implemented auth form; vitest auth.test.ts passed"
+mfl handoff append --stage review "needs revision; token refresh test missing"
+mfl handoff append --stage execute "generated fixture refresh script; output in tmp/data"
+mfl handoff append --stage validate "approved; reproduced refresh with pnpm refresh"
 ```
 
-### `/meow-review [optional-suggestion]`
+## Archive and delete
 
-Use this after implementation. The reviewer checks the diff against the request,
-looks for regressions and missing validation, and returns either `approved` or
-`needs_revision`. If the reviewer requests changes, the feedback should include
-a concrete follow-up artifact such as a failing test or reviewer todo.
+Use `/mfl archive` or `/meow-archive` for the normal archive path: archive the
+OpenSpec proposal through the repository workflow, then run `mfl thread
+archive` to release the worktree.
 
-Example:
+Use `/mfl delete` or `/meow-archive delete` for temporary proposal cleanup:
+delete the open OpenSpec proposal directory, do not revert code changes, then
+run `mfl thread archive`.
 
-```text
-/meow-review focus on command trigger clarity and docs discoverability
+## Plan, code, review
+
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Code[code agent]
+  Code --> Plan
+  Code --> Review[review agent]
+  Code --> Final[final]
+  Review --> Plan
+  Review --> Code
+  Review --> Final
+  Review --> Execute
+  Code --> Execute[execute agent]
+  Final --> Archive[archive agent]
+  Final --> Commit[commit action]
+  Final --> Delete[delete action]
 ```
 
-### `/meow-execute content`
+## Plan, execute, validate
 
-Use this for execution-mode work. The executor should leave reproducible
-execution artifacts: scripts or automation, a validator or documented
-validation command, and a summary artifact that records outputs or key results
-when raw data is intentionally untracked.
-
-Example:
-
-```text
-/meow-execute generate a reproducible fixture refresh script and summarize output paths
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Execute[execute agent]
+  Execute --> Plan
+  Execute --> Validate[review agent]
+  Execute --> Final[final]
+  Validate --> Plan
+  Validate --> Execute
+  Validate --> Final
+  Final --> Archive[archive agent]
+  Final --> Commit[commit action]
+  Final --> Delete[delete action]
 ```
-
-### `/meow-validate [optional-suggestion]`
-
-Use this after execution-mode work. The validator reviews reproducibility,
-artifact coverage, validation commands, and summary output instead of treating
-the work as a code-style-only review.
-
-Example:
-
-```text
-/meow-validate confirm the execution summary can be reproduced from committed scripts
-```
-
-## Tips
-
-- Keep command content concise and action-oriented.
-- Use `/meow-plan` again when the target changes significantly.
-- Use `/meow-code` again when `/meow-review` returns `needs_revision`.
-- Use `/meow-execute` again when `/meow-validate` finds missing execution
-  artifacts.
-- Prefer the web harness when you want persisted background lane state,
-  approval queues, or multiple concurrent proposals.
