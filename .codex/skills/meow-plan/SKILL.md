@@ -20,8 +20,12 @@ When running inside a stage agent:
 ## Planning Duties
 
 1. Strip the `/meow-plan` prefix. Treat remaining text as the planning request.
-2. Choose a readable unused thread name such as `install-meow-flow-skills`
-   unless the user explicitly requested an existing branch or name.
+2. Choose a readable unused kebab-case thread name such as
+   `install-meow-flow-skills`, unless the user explicitly requested an
+   existing branch or name. Thread names must match
+   `^[a-z0-9]+(-[a-z0-9]+)*$`: lowercase ASCII letters and digits separated by
+   single hyphens, with no underscores, spaces, leading hyphen, or trailing
+   hyphen.
 3. Persist the name:
 
    ```bash

@@ -13,6 +13,8 @@ Coordinate MeowFlow staged agent work through the `mfl` CLI.
   `/mfl delete`.
 - The current thread state, worktree occupation, agents, request body, and
   handoffs come from `mfl`, not from chat history alone.
+- Thread names set with `mfl thread set name` must be kebab-case matching
+  `^[a-z0-9]+(-[a-z0-9]+)*$`.
 
 ## Startup
 
@@ -31,7 +33,8 @@ Coordinate MeowFlow staged agent work through the `mfl` CLI.
    then ask how the user wants to proceed with that existing thread.
 
 When `mfl run` returns `agent-id: <id>` and `next-seq: <seq>`, include both in
-your response and direct the user to continue in the new agent chat.
+your response. Also include `thread-id` and `worktree` when `mfl run` prints
+them, then direct the user to continue in the new agent chat.
 
 ## Stage Dispatch
 
@@ -84,6 +87,8 @@ Keep handoffs short and concrete. They are coordination state for later agents.
 For launches, report:
 
 - the stage launched
+- `thread-id`
+- `worktree`
 - `agent-id`
 - `next-seq`
 - the next chat or command the user should use

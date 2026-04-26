@@ -256,8 +256,8 @@ describe("mfl run", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Thread: fix-test-ci");
-    expect(result.stdout).toContain("Worktree: manual-worktrees/custom");
+    expect(result.stdout).toContain("thread-id: fix-test-ci");
+    expect(result.stdout).toContain("worktree: manual-worktrees/custom");
     expect(result.stdout).toContain("stage: plan");
     expect(result.stdout).toContain("agent-id: 123456");
     expect(result.stdout).toContain("next-seq: 1");

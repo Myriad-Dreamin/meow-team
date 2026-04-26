@@ -83,6 +83,8 @@ x-meow-flow-id=<thread-id>
 `mfl run` prints:
 
 ```text
+thread-id: <thread-id>
+worktree: <path>
 agent-id: <id>
 next-seq: <seq>
 ```
@@ -103,6 +105,7 @@ mfl handoff get --since 3
 mfl thread archive
 ```
 
+Thread names must be kebab-case matching `^[a-z0-9]+(-[a-z0-9]+)*$`.
 `mfl thread archive` marks the current thread archived and releases the linked
 worktree occupation. It does not delete the worktree folder and does not revert
 code changes.

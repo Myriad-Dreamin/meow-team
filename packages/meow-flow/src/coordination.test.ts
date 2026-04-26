@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import Database from "better-sqlite3";
 import {
   chmodSync,
   closeSync,
@@ -262,6 +263,9 @@ describe("mfl coordination commands", () => {
     const setName = runCli(["thread", "set", "name", "install-meow-flow-skills"], worktreePath, {
       env: fakePaseo.env,
     });
+    const setInvalidName = runCli(["thread", "set", "name", "Install_Meow"], worktreePath, {
+      env: fakePaseo.env,
+    });
     const append = runCli(["handoff", "append", "--stage", "code", "code diff"], worktreePath, {
       env: fakePaseo.env,
     });
@@ -285,6 +289,8 @@ describe("mfl coordination commands", () => {
     expect(runResult.status).toBe(0);
     expect(setName.status).toBe(0);
     expect(setName.stdout).toContain("name: install-meow-flow-skills");
+    expect(setInvalidName.status).toBe(1);
+    expect(setInvalidName.output).toContain("Thread name must be kebab-case");
     expect(append.status).toBe(0);
     expect(append.stdout).toContain("seq: 1");
     expect(getLast.stdout).toContain("seq: 1");
@@ -297,6 +303,37 @@ describe("mfl coordination commands", () => {
     expect(archive.status).toBe(0);
     expect(idleStatus.stdout).toContain("status: idle");
     expect(archivedStatus.stdout).toContain("archived: true");
+  });
+
+  test("rejects archiving a thread that already has an archive timestamp", () => {
+    const repositoryRoot = createGitRepository("meow-flow-thread-archive-twice-");
+    const worktreePath = createManualWorktree(repositoryRoot);
+    const fakePaseo = createFakePaseo();
+
+    const runResult = runCli(
+      ["run", "--id", "fix-test-ci", "the content of request"],
+      repositoryRoot,
+      {
+        env: fakePaseo.env,
+      },
+    );
+    const databasePath = fakePaseo.env.MFL_STATE_DB_PATH;
+    if (!databasePath) {
+      throw new Error("Expected fake Paseo env to include MFL_STATE_DB_PATH.");
+    }
+    const database = new Database(databasePath);
+    database
+      .prepare("UPDATE thread_metadata SET archived_at = ? WHERE thread_id = ?")
+      .run("2026-04-26T00:03:00.000Z", "fix-test-ci");
+    database.close();
+
+    const archive = runCli(["thread", "archive"], worktreePath, { env: fakePaseo.env });
+    const status = runCli(["status"], worktreePath, { env: fakePaseo.env });
+
+    expect(runResult.status).toBe(0);
+    expect(archive.status).toBe(1);
+    expect(archive.output).toContain("Thread is already archived: fix-test-ci");
+    expect(status.stdout).toContain("status: occupied");
   });
 
   test("agent update-self persists current agent metadata and updates paseo labels", () => {

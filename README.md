@@ -124,6 +124,8 @@ mfl handoff get -n 5
 mfl thread archive
 ```
 
+Thread names must be kebab-case matching `^[a-z0-9]+(-[a-z0-9]+)*$`.
+
 Plan, code, review transitions:
 ## Plan, code, review
 

@@ -164,9 +164,10 @@ agent id to the thread before the command reads or mutates state.
 `meow-plan` gains MeowFlow-specific planning duties when launched by
 `mfl run --stage plan`:
 
-- Determine a readable unused thread name such as
+- Determine a readable unused kebab-case thread name such as
   `install-meow-flow-skills`, unless the user explicitly asked to keep the
-  current branch or name.
+  current branch or name. The name must match
+  `^[a-z0-9]+(-[a-z0-9]+)*$`.
 - Persist it with `mfl thread set name '<name>'`.
 - Create an OpenSpec proposal using that name when the repository uses
   OpenSpec.

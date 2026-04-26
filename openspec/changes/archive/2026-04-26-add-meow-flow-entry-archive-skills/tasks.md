@@ -10,11 +10,11 @@
 - [x] 2.1 Implement `mfl status` for occupied worktree, idle worktree, repository-root, and outside-git diagnostics.
 - [x] 2.2 Keep `mfl worktree` as the worktree-management command group and avoid adding a `mfl workspace` alias.
 - [x] 2.3 Implement `mfl thread status <id> --no-color` and missing-thread diagnostics.
-- [x] 2.4 Implement `mfl thread set name <name>` for the current thread with empty-name validation.
+- [x] 2.4 Implement `mfl thread set name <name>` for the current thread with empty-name and kebab-case validation.
 - [x] 2.5 Implement `mfl agent update-self`, including current-agent detection, supported `meow-*` skill inference, `paseo agent update` metadata updates, and persisted agent records.
 - [x] 2.6 Implement `mfl handoff append --stage <stage> <content>` with monotonic sequence assignment.
 - [x] 2.7 Implement `mfl handoff get -n <count>` and `mfl handoff get --since <seq>` for the current thread.
-- [x] 2.8 Implement `mfl thread archive` to mark the current thread archived and release the worktree without deleting the worktree folder or reverting code changes.
+- [x] 2.8 Implement `mfl thread archive` to mark the current thread archived, reject already archived threads, and release the worktree without deleting the worktree folder or reverting code changes.
 
 ## 3. Stage-Aware Run Flow
 

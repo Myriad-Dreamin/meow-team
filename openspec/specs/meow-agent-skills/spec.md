@@ -138,8 +138,10 @@ implementation, review, execution, or validation.
 
 When `meow-plan` is launched by `mfl run --stage plan`, it SHALL choose a
 readable unused thread name unless the user requested an existing branch or
-name, persist that name, create an OpenSpec proposal with the same name when
-OpenSpec is present, and commit the proposal.
+name. The generated thread name SHALL be kebab-case and SHALL match
+`^[a-z0-9]+(-[a-z0-9]+)*$`. The skill SHALL persist that name, create an
+OpenSpec proposal with the same name when OpenSpec is present, and commit the
+proposal.
 
 #### Scenario: Plan agent creates an OpenSpec proposal with the thread name
 

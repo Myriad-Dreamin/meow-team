@@ -101,8 +101,8 @@ export function createRunCommand(): Command {
 
         process.stdout.write(
           [
-            `Thread: ${target.threadId}`,
-            `Worktree: ${formatWorktreePath(context.repositoryRoot, target.worktreePath)}`,
+            `thread-id: ${target.threadId}`,
+            `worktree: ${formatWorktreePath(context.repositoryRoot, target.worktreePath)}`,
             `stage: ${target.stage}`,
             `agent-id: ${paseoRunResult.agentId}`,
             `next-seq: ${nextSeq}`,

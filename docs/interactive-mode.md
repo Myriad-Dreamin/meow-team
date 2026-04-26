@@ -53,8 +53,11 @@ Legacy direct role commands still exist: `/meow-plan`, `/meow-code`,
 5. If the current checkout is occupied, it reports the thread id or name and
    latest agent id, then asks how to proceed with that thread.
 
-`mfl run` prints `agent-id: <id>` and `next-seq: <seq>`. Continue in the new
-agent chat and use `next-seq` when reading only handoffs created after launch.
+`mfl run` prints `thread-id: <id>`, `worktree: <path>`, `agent-id: <id>`, and
+`next-seq: <seq>`. Continue in the new agent chat and use `next-seq` when
+reading only handoffs created after launch.
+Planner agents must choose thread names in kebab-case matching
+`^[a-z0-9]+(-[a-z0-9]+)*$`.
 
 ## Handoffs
 

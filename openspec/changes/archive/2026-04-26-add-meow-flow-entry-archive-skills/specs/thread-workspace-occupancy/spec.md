@@ -99,7 +99,9 @@ agent id, persist the agent metadata when available, and print `agent-id:
 
 - **WHEN** `paseo run` creates agent `123456`
 - **AND** the current thread's latest handoff sequence is `2`
-- **THEN** `mfl run` prints `agent-id: 123456`
+- **THEN** `mfl run` prints `thread-id: <id>`
+- **AND** it prints `worktree: <path>`
+- **AND** it prints `agent-id: 123456`
 - **AND** it prints `next-seq: 3`
 
 #### Scenario: Failed Paseo run releases a fresh allocation

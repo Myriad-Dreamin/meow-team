@@ -15,6 +15,8 @@ type ThreadStatusOptions = {
   readonly color?: boolean;
 };
 
+const THREAD_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
 export function createThreadCommand(): Command {
   return new Command("thread")
     .description("Inspect and update MeowFlow thread metadata")
@@ -64,6 +66,9 @@ function createThreadSetNameCommand(): Command {
         if (trimmedName.length === 0) {
           throw new Error("Thread name must not be empty.");
         }
+        if (!THREAD_NAME_PATTERN.test(trimmedName)) {
+          throw new Error("Thread name must be kebab-case matching ^[a-z0-9]+(-[a-z0-9]+)*$.");
+        }
 
         const current = resolveCurrentThread("mfl thread set name");
         updateMeowFlowState(current.context.repositoryRoot, (state) => {
@@ -90,7 +95,7 @@ function createThreadArchiveCommand(): Command {
     .description("Archive the current MeowFlow thread and release this worktree")
     .action((_options: unknown, command: Command) => {
       try {
-        const current = resolveCurrentThread("mfl thread archive");
+        const current = resolveCurrentThread("mfl thread archive", { allowArchived: true });
         const now = new Date().toISOString();
 
         updateMeowFlowState(current.context.repositoryRoot, (state) => {
@@ -98,10 +103,13 @@ function createThreadArchiveCommand(): Command {
           if (!thread) {
             throw new Error(`Thread not found: ${current.threadId}`);
           }
+          if (thread.archivedAt !== null) {
+            throw new Error(`Thread is already archived: ${current.threadId}`);
+          }
 
           replaceThread(state, {
             ...thread,
-            archivedAt: thread.archivedAt ?? now,
+            archivedAt: now,
           });
           releaseActiveOccupation(state, {
             threadId: current.threadId,
@@ -117,7 +125,10 @@ function createThreadArchiveCommand(): Command {
     });
 }
 
-export function resolveCurrentThread(commandName: string): {
+export function resolveCurrentThread(
+  commandName: string,
+  options: { readonly allowArchived?: boolean } = {},
+): {
   readonly context: ReturnType<typeof resolveGitWorktreeContext>;
   readonly threadId: string;
   readonly worktreePath: string;
@@ -134,7 +145,7 @@ export function resolveCurrentThread(commandName: string): {
   }
 
   const thread = getThread(state, occupation.threadId);
-  if (thread && isThreadArchived(thread)) {
+  if (!options.allowArchived && thread && isThreadArchived(thread)) {
     throw new Error(`Thread is archived: ${occupation.threadId}`);
   }
 

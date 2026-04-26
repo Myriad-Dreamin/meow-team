@@ -83,7 +83,8 @@ existing `thread_occupations` table, not in repository-local JSON files.
 ### Requirement: `mfl thread set name` updates the current thread name
 
 The CLI SHALL provide `mfl thread set name <name>` to update the current
-thread's readable name.
+thread's readable name. Thread names SHALL be kebab-case and SHALL match
+`^[a-z0-9]+(-[a-z0-9]+)*$`.
 
 #### Scenario: Plan agent sets a readable thread name
 
@@ -97,6 +98,12 @@ thread's readable name.
 - **WHEN** a user runs `mfl thread set name ''`
 - **THEN** the command exits with an error explaining that the thread name must
   not be empty
+
+#### Scenario: Non-kebab-case thread name is rejected
+
+- **WHEN** a user runs `mfl thread set name 'Install_Meow'`
+- **THEN** the command exits with an error explaining that the thread name must
+  be kebab-case
 
 ### Requirement: `mfl agent update-self` records current agent metadata
 
@@ -204,6 +211,14 @@ reverting code changes.
 - **WHEN** thread `fix-test-ci` was archived
 - **THEN** `mfl thread status fix-test-ci --no-color` reports the archived
   state
+
+#### Scenario: Already archived thread cannot be archived again
+
+- **WHEN** the current worktree is occupied by thread `fix-test-ci`
+- **AND** thread `fix-test-ci` already has an archive timestamp
+- **THEN** `mfl thread archive` exits with an error explaining that the thread
+  is already archived
+- **AND** it does not release the worktree occupation
 
 #### Scenario: Archive without current thread fails clearly
 
