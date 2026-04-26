@@ -7,16 +7,18 @@ import type { Database as DatabaseConnection } from "better-sqlite3";
 export type MeowFlowStateDatabase = DatabaseConnection;
 
 export const SUPPORTED_STAGES = ["plan", "code", "review", "execute", "validate"] as const;
+export const SUPPORTED_MEOW_FLOW_SKILLS = [
+  "meow-plan",
+  "meow-code",
+  "meow-review",
+  "meow-execute",
+  "meow-validate",
+  "meow-archive",
+] as const;
 
 export type MeowFlowStage = (typeof SUPPORTED_STAGES)[number];
 export type DerivedThreadStage = MeowFlowStage | "archived";
-export type MeowFlowSkill =
-  | "meow-plan"
-  | "meow-code"
-  | "meow-review"
-  | "meow-execute"
-  | "meow-validate"
-  | "meow-archive";
+export type MeowFlowSkill = (typeof SUPPORTED_MEOW_FLOW_SKILLS)[number];
 
 export type ThreadAgentRecord = {
   readonly id: string;
@@ -786,7 +788,7 @@ export function skillToStage(skill: string | null | undefined): DerivedThreadSta
 }
 
 export function isSupportedSkill(skill: string): skill is MeowFlowSkill {
-  return skillToStage(skill) !== null;
+  return SUPPORTED_MEOW_FLOW_SKILLS.includes(skill as MeowFlowSkill);
 }
 
 export function deriveLatestStage(thread: ThreadRecord): DerivedThreadStage {

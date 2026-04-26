@@ -5,6 +5,7 @@ import { resolveCurrentThread } from "./thread-command.js";
 import {
   isSupportedSkill,
   type MeowFlowSkill,
+  SUPPORTED_MEOW_FLOW_SKILLS,
   stageToSkill,
   SUPPORTED_STAGES,
   upsertAgentRecord,
@@ -23,15 +24,6 @@ type AgentListEntry = {
   readonly shortId: string | null;
   readonly title: string | null;
 };
-
-const SUPPORTED_SKILLS: readonly MeowFlowSkill[] = [
-  "meow-plan",
-  "meow-code",
-  "meow-review",
-  "meow-execute",
-  "meow-validate",
-  "meow-archive",
-];
 
 const SKILL_LABEL_KEYS = ["x-meow-flow-skill", "meow-flow.skill"] as const;
 const STAGE_LABEL_KEYS = ["x-meow-flow-stage", "meow-flow.stage"] as const;
@@ -57,7 +49,7 @@ function createAgentUpdateSelfCommand(): Command {
           const inferred = inferCurrentAgentSkill(currentAgentId);
           if (!inferred.skill) {
             throw new Error(
-              "Current agent skill could not be detected. Expected one of meow-plan, meow-code, meow-review, meow-execute, meow-validate, or meow-archive.",
+              `Current agent skill could not be detected. Expected one of ${SUPPORTED_MEOW_FLOW_SKILLS.join(", ")}.`,
             );
           }
           const skill = inferred.skill;
@@ -138,7 +130,7 @@ function inferAgentSkillFromLabels(agentId: string): {
   readonly title: string | null;
 } | null {
   for (const labelKey of SKILL_LABEL_KEYS) {
-    for (const skill of SUPPORTED_SKILLS) {
+    for (const skill of SUPPORTED_MEOW_FLOW_SKILLS) {
       const entry = findAgentByLabel(agentId, `${labelKey}=${skill}`);
       if (entry) {
         return {

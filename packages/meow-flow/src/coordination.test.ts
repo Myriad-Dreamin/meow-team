@@ -408,4 +408,28 @@ describe("mfl coordination commands", () => {
       invocations.some((invocation) => invocation.argv.includes("x-meow-flow-stage=plan")),
     ).toBe(true);
   });
+
+  test("agent update-self reports shared supported skills when detection fails", () => {
+    const repositoryRoot = createGitRepository("meow-flow-agent-unknown-");
+    const worktreePath = createManualWorktree(repositoryRoot);
+    const fakePaseo = createFakePaseo();
+
+    const runResult = runCli(["run", "--id", "fix-test-ci", "initial request"], repositoryRoot, {
+      env: fakePaseo.env,
+    });
+    const updateSelf = runCli(["agent", "update-self"], worktreePath, {
+      env: {
+        ...fakePaseo.env,
+        PASEO_AGENT_ID: "self-agent-1",
+      },
+    });
+
+    expect(runResult.status).toBe(0);
+    expect(updateSelf.status).toBe(1);
+    expect(updateSelf.output).toContain(
+      "Current agent skill could not be detected. Expected one of meow-plan, meow-code, meow-review, meow-execute, meow-validate, meow-archive.",
+    );
+    expect(updateSelf.output).not.toContain("meow-flow");
+    expect(updateSelf.output).not.toContain("meow-dataset");
+  });
 });
