@@ -297,12 +297,72 @@ describe("mfl run", () => {
           "--label",
           "x-meow-flow-stage=plan",
           "--title",
-          "fix-test-ci plan",
+          "Plan: Create a echo hello script.",
           expectedStagePrompt("plan", "meow-plan", requestBody),
         ],
         cwd: repositoryRoot,
       },
     ]);
+  });
+
+  test("formats titles from unnamed requests and named thread sequences", () => {
+    const longRequestRepositoryRoot = createGitRepository("meow-flow-run-title-long-");
+    createManualWorktree(longRequestRepositoryRoot);
+    const longRequestFakePaseo = createFakePaseo();
+
+    const longRequestResult = runCli(
+      ["run", "--id", "line-folding", "supports line folding only feature in markdown preview"],
+      longRequestRepositoryRoot,
+      { env: longRequestFakePaseo.env },
+    );
+
+    expect(longRequestResult.status).toBe(0);
+    expect(readPaseoInvocations(longRequestFakePaseo.invocationLogPath).at(0)?.argv).toContain(
+      "Plan: supports line folding only feature ...",
+    );
+
+    const namedThreadRepositoryRoot = createGitRepository("meow-flow-run-title-named-");
+    const namedThreadWorktreePath = createManualWorktree(namedThreadRepositoryRoot);
+    const namedThreadFakePaseo = createFakePaseo();
+
+    const planResult = runCli(
+      ["run", "--id", "improve-skill", "改进meow-flow技能"],
+      namedThreadRepositoryRoot,
+      { env: namedThreadFakePaseo.env },
+    );
+    const setName = runCli(
+      ["thread", "set", "name", "improve-meow-flow-skill"],
+      namedThreadWorktreePath,
+      { env: namedThreadFakePaseo.env },
+    );
+    const codeResult = runCli(
+      ["run", "--stage", "code", "implement the approved plan"],
+      namedThreadWorktreePath,
+      { env: namedThreadFakePaseo.env },
+    );
+
+    expect(planResult.status).toBe(0);
+    expect(setName.status).toBe(0);
+    expect(codeResult.status).toBe(0);
+
+    const namedInvocations = readPaseoInvocations(namedThreadFakePaseo.invocationLogPath);
+    expect(namedInvocations.at(0)?.argv).toContain("Plan: 改进meow-flow技能");
+    expect(namedInvocations.at(1)?.argv).toContain("Code: improve-meow-flow-skill (2)");
+
+    const hanRepositoryRoot = createGitRepository("meow-flow-run-title-han-");
+    createManualWorktree(hanRepositoryRoot);
+    const hanFakePaseo = createFakePaseo();
+
+    const hanResult = runCli(
+      ["run", "--id", "han-title", "支持仅行折叠功能，通用配置"],
+      hanRepositoryRoot,
+      { env: hanFakePaseo.env },
+    );
+
+    expect(hanResult.status).toBe(0);
+    expect(readPaseoInvocations(hanFakePaseo.invocationLogPath).at(0)?.argv).toContain(
+      "Plan: 支持仅行折叠功能，通...",
+    );
   });
 
   test("passes an explicit provider through to paseo run", () => {
@@ -521,7 +581,7 @@ describe("mfl run", () => {
         "--label",
         "x-meow-flow-stage=code",
         "--title",
-        "fix-test-ci code",
+        "Code: implement the approved plan",
         expectedStagePrompt("code", "meow-code", "implement the approved plan"),
       ],
       cwd: worktreePath,
