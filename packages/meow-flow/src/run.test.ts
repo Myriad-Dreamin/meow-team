@@ -38,6 +38,23 @@ type PaseoInvocation = {
   readonly cwd: string;
 };
 
+function expectedStagePrompt(stage: string, skill: string, requestBody: string): string {
+  const lines = [
+    `/meow-${stage}`,
+    "",
+    `MeowFlow stage: ${stage}`,
+    `Related skill: ${skill}`,
+    "Load and follow the related skill before acting. If the slash-command prefix is stripped from model-visible context, this related-skill hint still applies.",
+    "Run `mfl agent update-self` before doing stage work.",
+  ];
+
+  if (requestBody.length > 0) {
+    lines.push("", "Request:", requestBody);
+  }
+
+  return lines.join("\n");
+}
+
 afterEach(() => {
   while (tempDirectories.length > 0) {
     const nextDirectory = tempDirectories.pop();
@@ -185,7 +202,6 @@ if (argv[0] === "agent" && argv[1] === "update") {
     invocationLogPath,
     env: {
       PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
-      MFL_PASEO_BIN: "paseo",
       MFL_CONFIG_PATH: path.join(binDirectory, "missing-meow-flow-config.json"),
       MFL_STATE_DB_PATH: path.join(binDirectory, "meow-flow.sqlite"),
       PASEO_COUNTER_PATH: counterPath,
@@ -282,7 +298,7 @@ describe("mfl run", () => {
           "x-meow-flow-stage=plan",
           "--title",
           "fix-test-ci plan",
-          `/meow-plan ${requestBody}`,
+          expectedStagePrompt("plan", "meow-plan", requestBody),
         ],
         cwd: repositoryRoot,
       },
@@ -506,7 +522,7 @@ describe("mfl run", () => {
         "x-meow-flow-stage=code",
         "--title",
         "fix-test-ci code",
-        "/meow-code implement the approved plan",
+        expectedStagePrompt("code", "meow-code", "implement the approved plan"),
       ],
       cwd: worktreePath,
     });

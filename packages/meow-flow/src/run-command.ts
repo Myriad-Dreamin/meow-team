@@ -418,12 +418,21 @@ function invokePaseoRun(input: {
 
 function composeStagePrompt(stage: MeowFlowStage, requestBody: string): string {
   const command = `/meow-${stage}`;
+  const skill = stageToSkill(stage);
+  const lines = [
+    command,
+    "",
+    `MeowFlow stage: ${stage}`,
+    `Related skill: ${skill}`,
+    "Load and follow the related skill before acting. If the slash-command prefix is stripped from model-visible context, this related-skill hint still applies.",
+    "Run `mfl agent update-self` before doing stage work.",
+  ];
 
-  if (requestBody.length === 0) {
-    return command;
+  if (requestBody.length > 0) {
+    lines.push("", "Request:", requestBody);
   }
 
-  return `${command} ${requestBody}`;
+  return lines.join("\n");
 }
 
 function parsePaseoRunOutput(
