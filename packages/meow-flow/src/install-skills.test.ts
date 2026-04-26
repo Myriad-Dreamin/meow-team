@@ -93,23 +93,27 @@ describe("mfl install-skills", () => {
     expect(result.stdout).toContain(
       `Installed 6 skills for opencode at ${opencodeConfigDir}/skills`,
     );
+    expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-validate\n");
+    expect(result.stdout).not.toContain("  paseo\n");
 
-    expect(readFileSync(path.join(codexHome, "skills", "paseo", "SKILL.md"), "utf8")).toContain(
-      "name: paseo",
+    expect(readFileSync(path.join(codexHome, "skills", "meow-code", "SKILL.md"), "utf8")).toContain(
+      "name: meow-code",
     );
     expect(
-      readFileSync(
-        path.join(claudeConfigDir, "skills", "paseo-orchestrate", "references", "preferences.md"),
-        "utf8",
-      ),
-    ).toContain("# Preferences");
+      readFileSync(path.join(claudeConfigDir, "skills", "meow-plan", "SKILL.md"), "utf8"),
+    ).toContain("name: meow-plan");
     expect(
-      readFileSync(path.join(opencodeConfigDir, "skills", "paseo-loop", "SKILL.md"), "utf8"),
-    ).toContain("name: paseo-loop");
+      readFileSync(path.join(opencodeConfigDir, "skills", "meow-execute", "SKILL.md"), "utf8"),
+    ).toContain("name: meow-execute");
+    expect(
+      readFileSync(path.join(codexHome, "skills", "meow-dataset", "agents", "openai.yaml"), "utf8"),
+    ).toContain("Meow Dataset");
+    expect(existsSync(path.join(codexHome, "skills", "paseo", "SKILL.md"))).toBe(false);
   });
 
-  test("asks for a provider when none is provided", () => {
-    const homeDirectory = createTempDirectory("meow-flow-skills-no-provider-");
+  test("lists embedded skills by default without installing", () => {
+    const homeDirectory = createTempDirectory("meow-flow-skills-list-default-");
 
     const result = runCli(["install-skills"], homeDirectory, {
       env: {
@@ -117,9 +121,44 @@ describe("mfl install-skills", () => {
       },
     });
 
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Embedded MeowFlow skills:");
+    expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-validate\n");
+    expect(result.stdout).not.toContain("  paseo\n");
+    expect(result.stdout).toContain("Install with: mfl install-skills <provider...>");
+    expect(result.stdout).toContain("Supported providers: claude, codex, opencode, agents");
+    expect(existsSync(path.join(homeDirectory, ".codex", "skills"))).toBe(false);
+  });
+
+  test("lists embedded skills explicitly without installing", () => {
+    const homeDirectory = createTempDirectory("meow-flow-skills-list-explicit-");
+
+    const result = runCli(["install-skills", "--list", "codex", "claude"], homeDirectory, {
+      env: {
+        HOME: homeDirectory,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Embedded MeowFlow skills:");
+    expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-validate\n");
+    expect(result.stdout).not.toContain("  paseo\n");
+    expect(existsSync(path.join(homeDirectory, ".codex", "skills"))).toBe(false);
+  });
+
+  test("rejects unsupported providers", () => {
+    const homeDirectory = createTempDirectory("meow-flow-skills-no-provider-");
+
+    const result = runCli(["install-skills", "not-a-provider"], homeDirectory, {
+      env: {
+        HOME: homeDirectory,
+      },
+    });
+
     expect(result.status).toBe(1);
-    expect(result.output).toContain("Please provide at least one LLM provider");
-    expect(result.output).toContain("mfl install-skills codex claude");
+    expect(result.output).toContain('Unsupported LLM provider "not-a-provider"');
     expect(existsSync(path.join(homeDirectory, ".codex", "skills"))).toBe(false);
   });
 });

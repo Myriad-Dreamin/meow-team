@@ -13,6 +13,11 @@ type SkillInstallTarget = {
 
 export type SkillInstallResult = SkillInstallTarget & {
   readonly skillCount: number;
+  readonly skillNames: readonly string[];
+};
+
+type InstallSkillsOptions = {
+  readonly list?: boolean;
 };
 
 const SUPPORTED_PROVIDERS = ["claude", "codex", "opencode", "agents"] as const;
@@ -21,14 +26,24 @@ export function createInstallSkillsCommand(): Command {
   const installSkillsCommand = new Command("install-skills")
     .description("Install embedded MeowFlow skills for one or more LLM providers")
     .argument("[providers...]", "provider(s) to install to: claude, codex, opencode")
+    .option("--list", "list embedded skills without installing them")
     .action(async (providers?: readonly string[]) => {
+      const providerList = Array.isArray(providers) ? providers : [];
+      const options = installSkillsCommand.opts<InstallSkillsOptions>();
+
       try {
-        const results = await installEmbeddedSkills({ providers: providers ?? [] });
+        if (options.list === true || providerList.length === 0) {
+          writeEmbeddedSkillsList();
+          return;
+        }
+
+        const results = await installEmbeddedSkills({ providers: providerList });
 
         for (const result of results) {
           process.stdout.write(
             `Installed ${result.skillCount} skills for ${result.provider} at ${result.skillsDir}\n`,
           );
+          writeSkillNames(result.skillNames);
         }
       } catch (error) {
         installSkillsCommand.error(error instanceof Error ? error.message : String(error));
@@ -53,7 +68,26 @@ export async function installEmbeddedSkills(input: {
   return targets.map((target) => ({
     ...target,
     skillCount: EMBEDDED_SKILLS.length,
+    skillNames: getEmbeddedSkillNames(),
   }));
+}
+
+function writeEmbeddedSkillsList(): void {
+  process.stdout.write("Embedded MeowFlow skills:\n");
+  writeSkillNames(getEmbeddedSkillNames());
+
+  process.stdout.write("\nInstall with: mfl install-skills <provider...>\n");
+  process.stdout.write(`Supported providers: ${SUPPORTED_PROVIDERS.join(", ")}\n`);
+}
+
+function writeSkillNames(skillNames: readonly string[]): void {
+  for (const skillName of skillNames) {
+    process.stdout.write(`  ${skillName}\n`);
+  }
+}
+
+function getEmbeddedSkillNames(): readonly string[] {
+  return EMBEDDED_SKILLS.map((skill) => skill.name);
 }
 
 function normalizeProviders(rawProviders: readonly string[]): readonly SupportedSkillProvider[] {

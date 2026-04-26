@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(scriptDirectory, "..");
 const repositoryRoot = path.resolve(packageRoot, "..", "..");
-const sourceDirectory = path.join(repositoryRoot, "skills");
+const sourceDirectory = path.join(repositoryRoot, ".codex", "skills");
 const outputPath = path.join(packageRoot, "src", "embedded-skills.ts");
 
 async function collectFiles(directory, relativePrefix = "") {
@@ -25,7 +25,7 @@ async function collectFiles(directory, relativePrefix = "") {
       continue;
     }
 
-    if (!relativePath.endsWith(".md")) {
+    if (!isEmbeddableTextFile(relativePath)) {
       continue;
     }
 
@@ -38,12 +38,18 @@ async function collectFiles(directory, relativePrefix = "") {
   return files;
 }
 
+function isEmbeddableTextFile(relativePath) {
+  return (
+    relativePath.endsWith(".md") || relativePath.endsWith(".yaml") || relativePath.endsWith(".yml")
+  );
+}
+
 async function main() {
   const entries = await fs.readdir(sourceDirectory, { withFileTypes: true });
   const skills = [];
 
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory()) {
+    if (!entry.isDirectory() || !entry.name.startsWith("meow-")) {
       continue;
     }
 

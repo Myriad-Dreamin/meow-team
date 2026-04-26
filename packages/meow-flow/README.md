@@ -76,13 +76,17 @@ The command does not install, read, or require a MeowFlow config file.
 ## Skills
 
 ```bash
+mfl install-skills
+mfl install-skills --list
 mfl install-skills codex
 mfl install-skills codex claude opencode
 ```
 
-`mfl install-skills` installs the embedded Paseo markdown skills into the
-requested provider skill directories. It installs all bundled skill files,
-including reference markdown used by `paseo-orchestrate`.
+`mfl install-skills` lists the embedded `meow-*` skills that MeowFlow can
+install. Pass one or more providers to install those bundled skill files into
+the requested provider skill directories.
+
+Use `--list` to force listing without writing files.
 
 Provider targets:
 
@@ -91,6 +95,3 @@ Provider targets:
 | `codex` | `$CODEX_HOME/skills` or `~/.codex/skills` |
 | `claude` | `$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills` |
 | `opencode` | `$OPENCODE_CONFIG_DIR/skills` or `~/.config/opencode/skills` |
-
-If no provider is provided, the command exits with a prompt to pass at least one
-provider.

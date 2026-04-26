@@ -103,6 +103,7 @@ describe("mfl foundation", () => {
     expect(result.output).toContain("Usage: mfl install-skills");
     expect(result.output).toContain("[providers...]");
     expect(result.output).toContain("claude, codex, opencode");
+    expect(result.output).toContain("--list");
   });
 
   test("run cli:mfl worktree --help succeeds and prints worktree subcommands", () => {
