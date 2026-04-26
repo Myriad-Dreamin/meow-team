@@ -82,7 +82,7 @@ describe("mfl foundation", () => {
     expect(result.output).toContain("thread");
     expect(result.output).toContain("agent");
     expect(result.output).toContain("handoff");
-    expect(result.output).not.toContain("config");
+    expect(result.output).toContain("config");
     expect(result.output).not.toContain("plan");
     expect(result.output).not.toContain("delete");
     expect(result.output).not.toContain("workspace");
@@ -100,6 +100,14 @@ describe("mfl foundation", () => {
     expect(result.output).toContain("--provider");
     expect(result.output).toContain("--stage");
     expect(result.output).not.toContain("--config");
+  });
+
+  test("run cli:mfl config set provider --help succeeds and prints provider argument", () => {
+    const result = runCliAlias(["config", "set", "provider", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: mfl config set provider");
+    expect(result.output).toContain("<provider-name>");
   });
 
   test("run cli:mfl install-skills --help succeeds and prints provider guidance", () => {

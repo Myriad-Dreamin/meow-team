@@ -110,6 +110,10 @@ continuation stage launches. When the flag is omitted, MeowFlow reads the
 run-provider config at `~/.local/share/meow-flow/config.json`, then falls back
 to `claude`.
 
+```bash
+mfl config set provider codex/gpt-5.4
+```
+
 ```json
 {
   "provider": "codex/gpt-5.4"
