@@ -337,6 +337,58 @@ describe("mfl run", () => {
     expect(invocation?.argv).toContain("opencode");
   });
 
+  test("config set provider creates the run provider config", () => {
+    const repositoryRoot = createGitRepository("meow-flow-config-provider-create-");
+    const configPath = path.join(createTempDirectory("meow-flow-provider-config-"), "config.json");
+
+    const result = runCli(["config", "set", "provider", "codex/gpt-5.4"], repositoryRoot, {
+      env: {
+        MFL_CONFIG_PATH: configPath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("provider: codex/gpt-5.4");
+    expect(result.stdout).toContain(`config: ${configPath}`);
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+      provider: "codex/gpt-5.4",
+    });
+  });
+
+  test("config set provider preserves unrelated config fields", () => {
+    const repositoryRoot = createGitRepository("meow-flow-config-provider-preserve-");
+    const configPath = path.join(createTempDirectory("meow-flow-provider-config-"), "config.json");
+    writeFile(configPath, JSON.stringify({ provider: "claude", extra: true }));
+
+    const result = runCli(["config", "set", "provider", "opencode"], repositoryRoot, {
+      env: {
+        MFL_CONFIG_PATH: configPath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+      provider: "opencode",
+      extra: true,
+    });
+  });
+
+  test("config set provider rejects empty provider values", () => {
+    const repositoryRoot = createGitRepository("meow-flow-config-provider-empty-");
+    const configPath = path.join(createTempDirectory("meow-flow-provider-config-"), "config.json");
+
+    const result = runCli(["config", "set", "provider", "   "], repositoryRoot, {
+      env: {
+        MFL_CONFIG_PATH: configPath,
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("provider must be a non-empty string");
+    expect(result.output).toContain("paseo provider ls");
+    expect(existsSync(configPath)).toBe(false);
+  });
+
   test("rejects invalid provider config before mutating occupations or invoking paseo", () => {
     const repositoryRoot = createGitRepository("meow-flow-run-provider-invalid-config-");
     const worktreePath = createManualWorktree(repositoryRoot);

@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { createAgentCommand } from "./agent-command.js";
+import { createConfigCommand } from "./config-command.js";
 import { createHandoffCommand } from "./handoff-command.js";
 import { createInstallSkillsCommand } from "./install-skills-command.js";
 import { createRunCommand } from "./run-command.js";
@@ -21,5 +22,6 @@ export function createCli(): Command {
     .addCommand(createThreadCommand())
     .addCommand(createAgentCommand())
     .addCommand(createHandoffCommand())
+    .addCommand(createConfigCommand())
     .addCommand(createWorktreeCommand());
 }
