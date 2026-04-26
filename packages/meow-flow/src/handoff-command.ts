@@ -7,6 +7,7 @@ import {
   parseStage,
   readMeowFlowState,
   updateMeowFlowState,
+  withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
 type HandoffAppendOptions = {
@@ -42,18 +43,28 @@ function createHandoffAppendCommand(): Command {
           throw new Error("Handoff content must not be empty.");
         }
 
-        const current = resolveCurrentThread("mfl handoff append");
-        const now = new Date().toISOString();
-        const handoff = updateMeowFlowState(current.context.repositoryRoot, (state) => {
-          appendHandoffRecord(state, {
-            threadId: current.threadId,
-            stage,
-            content: trimmedContent,
-            now,
-          });
+        const seq = withMeowFlowStateDatabase((database) => {
+          const current = resolveCurrentThread("mfl handoff append", { database });
+          const now = new Date().toISOString();
+          const handoff = updateMeowFlowState(
+            current.context.repositoryRoot,
+            (state) => {
+              appendHandoffRecord(state, {
+                threadId: current.threadId,
+                stage,
+                content: trimmedContent,
+                now,
+              });
+            },
+            {
+              database,
+              threadIds: [current.threadId],
+              includeOccupationThreads: false,
+            },
+          );
+          const thread = getThread(handoff, current.threadId);
+          return thread?.handoffs.at(-1)?.seq;
         });
-        const thread = getThread(handoff, current.threadId);
-        const seq = thread?.handoffs.at(-1)?.seq;
 
         process.stdout.write(`seq: ${seq ?? "unknown"}\n`);
       } catch (error) {
@@ -73,12 +84,22 @@ function createHandoffGetCommand(): Command {
           throw new Error("Use either -n/--count or --since, not both.");
         }
 
-        const current = resolveCurrentThread("mfl handoff get");
-        const state = readMeowFlowState(current.context.repositoryRoot);
-        const thread = getThread(state, current.threadId);
+        const resolved = withMeowFlowStateDatabase((database) => {
+          const current = resolveCurrentThread("mfl handoff get", { database });
+          const state = readMeowFlowState(current.context.repositoryRoot, {
+            database,
+            threadIds: [current.threadId],
+            includeOccupationThreads: false,
+          });
+          return {
+            thread: getThread(state, current.threadId),
+            threadId: current.threadId,
+          };
+        });
+        const thread = resolved.thread;
 
         if (!thread) {
-          throw new Error(`Thread not found: ${current.threadId}`);
+          throw new Error(`Thread not found: ${resolved.threadId}`);
         }
 
         const since = options.since;

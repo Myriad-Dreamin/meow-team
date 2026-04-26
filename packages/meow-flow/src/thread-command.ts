@@ -5,10 +5,12 @@ import {
   getActiveOccupationForWorktree,
   getThread,
   isThreadArchived,
+  type MeowFlowStateDatabase,
   readMeowFlowState,
   releaseActiveOccupation,
   replaceThread,
   updateMeowFlowState,
+  withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
 type ThreadStatusOptions = {
@@ -36,8 +38,14 @@ function createThreadStatusCommand(): Command {
           cwd: process.cwd(),
           commandName: "mfl thread status",
         });
-        const state = readMeowFlowState(context.repositoryRoot);
-        const thread = getThread(state, threadId);
+        const thread = withMeowFlowStateDatabase((database) => {
+          const state = readMeowFlowState(context.repositoryRoot, {
+            database,
+            threadIds: [threadId],
+            includeOccupationThreads: false,
+          });
+          return getThread(state, threadId);
+        });
 
         if (!thread) {
           throw new Error(`Thread not found: ${threadId}`);
@@ -70,17 +78,27 @@ function createThreadSetNameCommand(): Command {
           throw new Error("Thread name must be kebab-case matching ^[a-z0-9]+(-[a-z0-9]+)*$.");
         }
 
-        const current = resolveCurrentThread("mfl thread set name");
-        updateMeowFlowState(current.context.repositoryRoot, (state) => {
-          const thread = getThread(state, current.threadId);
-          if (!thread) {
-            throw new Error(`Thread not found: ${current.threadId}`);
-          }
+        withMeowFlowStateDatabase((database) => {
+          const current = resolveCurrentThread("mfl thread set name", { database });
+          updateMeowFlowState(
+            current.context.repositoryRoot,
+            (state) => {
+              const thread = getThread(state, current.threadId);
+              if (!thread) {
+                throw new Error(`Thread not found: ${current.threadId}`);
+              }
 
-          replaceThread(state, {
-            ...thread,
-            name: trimmedName,
-          });
+              replaceThread(state, {
+                ...thread,
+                name: trimmedName,
+              });
+            },
+            {
+              database,
+              threadIds: [current.threadId],
+              includeOccupationThreads: false,
+            },
+          );
         });
 
         process.stdout.write(`name: ${trimmedName}\n`);
@@ -95,30 +113,45 @@ function createThreadArchiveCommand(): Command {
     .description("Archive the current MeowFlow thread and release this worktree")
     .action((_options: unknown, command: Command) => {
       try {
-        const current = resolveCurrentThread("mfl thread archive", { allowArchived: true });
-        const now = new Date().toISOString();
-
-        updateMeowFlowState(current.context.repositoryRoot, (state) => {
-          const thread = getThread(state, current.threadId);
-          if (!thread) {
-            throw new Error(`Thread not found: ${current.threadId}`);
-          }
-          if (thread.archivedAt !== null) {
-            throw new Error(`Thread is already archived: ${current.threadId}`);
-          }
-
-          replaceThread(state, {
-            ...thread,
-            archivedAt: now,
+        const archivedThreadId = withMeowFlowStateDatabase((database) => {
+          const current = resolveCurrentThread("mfl thread archive", {
+            allowArchived: true,
+            database,
           });
-          releaseActiveOccupation(state, {
-            threadId: current.threadId,
-            worktreePath: current.worktreePath,
-            now,
-          });
+          const now = new Date().toISOString();
+
+          updateMeowFlowState(
+            current.context.repositoryRoot,
+            (state) => {
+              const thread = getThread(state, current.threadId);
+              if (!thread) {
+                throw new Error(`Thread not found: ${current.threadId}`);
+              }
+              if (thread.archivedAt !== null) {
+                throw new Error(`Thread is already archived: ${current.threadId}`);
+              }
+
+              replaceThread(state, {
+                ...thread,
+                archivedAt: now,
+              });
+              releaseActiveOccupation(state, {
+                threadId: current.threadId,
+                worktreePath: current.worktreePath,
+                now,
+              });
+            },
+            {
+              database,
+              threadIds: [current.threadId],
+              includeOccupationThreads: false,
+            },
+          );
+
+          return current.threadId;
         });
 
-        process.stdout.write(`archived: ${current.threadId}\n`);
+        process.stdout.write(`archived: ${archivedThreadId}\n`);
       } catch (error) {
         command.error(error instanceof Error ? error.message : String(error));
       }
@@ -127,7 +160,10 @@ function createThreadArchiveCommand(): Command {
 
 export function resolveCurrentThread(
   commandName: string,
-  options: { readonly allowArchived?: boolean } = {},
+  options: {
+    readonly allowArchived?: boolean;
+    readonly database?: MeowFlowStateDatabase;
+  } = {},
 ): {
   readonly context: ReturnType<typeof resolveGitWorktreeContext>;
   readonly threadId: string;
@@ -137,7 +173,9 @@ export function resolveCurrentThread(
     cwd: process.cwd(),
     commandName,
   });
-  const state = readMeowFlowState(context.repositoryRoot);
+  const state = readMeowFlowState(context.repositoryRoot, {
+    database: options.database,
+  });
   const occupation = getActiveOccupationForWorktree(state, context.currentWorktreeRoot);
 
   if (!occupation) {

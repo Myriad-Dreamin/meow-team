@@ -20,12 +20,14 @@ import {
   parseStage,
   readMeowFlowState,
   recordOccupation,
-  removeActiveOccupation,
+  releaseActiveOccupation,
   stageToSkill,
+  type MeowFlowStateDatabase,
   type MeowFlowStage,
   type ThreadRecord,
   updateMeowFlowState,
   upsertAgentRecord,
+  withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
 type RunCommandOptions = {
@@ -65,50 +67,61 @@ export function createRunCommand(): Command {
           cwd: process.cwd(),
           commandName: "mfl run",
         });
-        const target = resolveRunTarget({
-          context,
-          explicitThreadId: options.id,
-          explicitStage: options.stage,
-          requestBody: requestBody ?? "",
-        });
-        const paseoRunResult = invokePaseoRun({
-          threadId: target.threadId,
-          stage: target.stage,
-          requestBody: target.requestBody,
-          cwd: target.worktreePath,
-        });
+        withMeowFlowStateDatabase((database) => {
+          const target = resolveRunTarget({
+            context,
+            database,
+            explicitThreadId: options.id,
+            explicitStage: options.stage,
+            requestBody: requestBody ?? "",
+          });
+          const paseoRunResult = invokePaseoRun({
+            threadId: target.threadId,
+            stage: target.stage,
+            requestBody: target.requestBody,
+            cwd: target.worktreePath,
+          });
 
-        if (!paseoRunResult.ok) {
-          if (target.freshAllocation) {
-            rollbackFreshAllocation(context.repositoryRoot, target);
+          if (!paseoRunResult.ok) {
+            if (target.freshAllocation) {
+              rollbackFreshAllocation(context.repositoryRoot, target, database);
+            }
+
+            throw new Error(paseoRunResult.message);
           }
 
-          throw new Error(paseoRunResult.message);
-        }
+          const now = new Date().toISOString();
+          const state = updateMeowFlowState(
+            context.repositoryRoot,
+            (mutableState) => {
+              upsertAgentRecord(mutableState, {
+                threadId: target.threadId,
+                agentId: paseoRunResult.agentId,
+                title: paseoRunResult.title,
+                skill: stageToSkill(target.stage),
+                now,
+              });
+            },
+            {
+              database,
+              threadIds: [target.threadId],
+              includeOccupationThreads: false,
+            },
+          );
+          const thread = getThread(state, target.threadId);
+          const nextSeq = thread ? getNextHandoffSequence(thread) : 1;
 
-        const now = new Date().toISOString();
-        const state = updateMeowFlowState(context.repositoryRoot, (mutableState) => {
-          upsertAgentRecord(mutableState, {
-            threadId: target.threadId,
-            agentId: paseoRunResult.agentId,
-            title: paseoRunResult.title,
-            skill: stageToSkill(target.stage),
-            now,
-          });
+          process.stdout.write(
+            [
+              `thread-id: ${target.threadId}`,
+              `worktree: ${formatWorktreePath(context.repositoryRoot, target.worktreePath)}`,
+              `stage: ${target.stage}`,
+              `agent-id: ${paseoRunResult.agentId}`,
+              `next-seq: ${nextSeq}`,
+              "",
+            ].join("\n"),
+          );
         });
-        const thread = getThread(state, target.threadId);
-        const nextSeq = thread ? getNextHandoffSequence(thread) : 1;
-
-        process.stdout.write(
-          [
-            `thread-id: ${target.threadId}`,
-            `worktree: ${formatWorktreePath(context.repositoryRoot, target.worktreePath)}`,
-            `stage: ${target.stage}`,
-            `agent-id: ${paseoRunResult.agentId}`,
-            `next-seq: ${nextSeq}`,
-            "",
-          ].join("\n"),
-        );
       } catch (error) {
         command.error(error instanceof Error ? error.message : String(error));
       }
@@ -131,12 +144,17 @@ function resolveThreadId(explicitThreadId: string | undefined): string {
 
 function resolveRunTarget(input: {
   readonly context: GitWorktreeContext;
+  readonly database: MeowFlowStateDatabase;
   readonly explicitThreadId: string | undefined;
   readonly explicitStage: string | undefined;
   readonly requestBody: string;
 }): ResolvedRunTarget {
   const requestedStage = parseStage(input.explicitStage);
-  const state = readMeowFlowState(input.context.repositoryRoot);
+  const threadId = resolveThreadId(input.explicitThreadId);
+  const state = readMeowFlowState(input.context.repositoryRoot, {
+    database: input.database,
+    threadIds: [threadId],
+  });
   const currentOccupation = getActiveOccupationForWorktree(
     state,
     input.context.currentWorktreeRoot,
@@ -174,7 +192,6 @@ function resolveRunTarget(input: {
     };
   }
 
-  const threadId = resolveThreadId(input.explicitThreadId);
   const activeForThread = getActiveOccupationForThread(state, threadId);
   if (activeForThread) {
     throw new Error(
@@ -201,17 +218,25 @@ function resolveRunTarget(input: {
   const stage = requestedStage ?? deriveDefaultStage(existingThread);
   const now = new Date().toISOString();
 
-  updateMeowFlowState(input.context.repositoryRoot, (mutableState) => {
-    ensureThread(mutableState, {
-      threadId,
-      requestBody: existingThread?.requestBody ?? input.requestBody,
-    });
-    recordOccupation(mutableState, {
-      threadId,
-      worktreePath: worktree.path,
-      now,
-    });
-  });
+  updateMeowFlowState(
+    input.context.repositoryRoot,
+    (mutableState) => {
+      ensureThread(mutableState, {
+        threadId,
+        requestBody: existingThread?.requestBody ?? input.requestBody,
+      });
+      recordOccupation(mutableState, {
+        threadId,
+        worktreePath: worktree.path,
+        now,
+      });
+    },
+    {
+      database: input.database,
+      threadIds: [threadId],
+      includeOccupationThreads: false,
+    },
+  );
 
   return {
     threadId,
@@ -279,13 +304,26 @@ function selectWorktreeForNewThread(
   );
 }
 
-function rollbackFreshAllocation(repositoryRoot: string, target: ResolvedRunTarget): void {
-  updateMeowFlowState(repositoryRoot, (state) => {
-    removeActiveOccupation(state, {
-      threadId: target.threadId,
-      worktreePath: target.worktreePath,
-    });
-  });
+function rollbackFreshAllocation(
+  repositoryRoot: string,
+  target: ResolvedRunTarget,
+  database: MeowFlowStateDatabase,
+): void {
+  updateMeowFlowState(
+    repositoryRoot,
+    (state) => {
+      releaseActiveOccupation(state, {
+        threadId: target.threadId,
+        worktreePath: target.worktreePath,
+        now: new Date().toISOString(),
+      });
+    },
+    {
+      database,
+      threadIds: [target.threadId],
+      includeOccupationThreads: false,
+    },
+  );
 }
 
 function invokePaseoRun(input: {

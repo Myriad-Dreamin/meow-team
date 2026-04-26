@@ -4,6 +4,8 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import type { Database as DatabaseConnection } from "better-sqlite3";
 
+export type MeowFlowStateDatabase = DatabaseConnection;
+
 export const SUPPORTED_STAGES = ["plan", "code", "review", "execute", "validate"] as const;
 
 export type MeowFlowStage = (typeof SUPPORTED_STAGES)[number];
@@ -62,9 +64,24 @@ export type MutableMeowFlowState = {
 type UnknownRecord = Record<string, unknown>;
 
 const STATE_DATABASE_ENV_NAME = "MFL_STATE_DB_PATH";
-const STATE_DIRECTORY_PATH = [".local", "shared", "meow-flow"] as const;
+const STATE_DIRECTORY_PATH = [".local", "share", "meow-flow"] as const;
 const STATE_DATABASE_FILE_NAME = "meow-flow.sqlite";
 const DEFAULT_WORKTREE_DIRECTORY_NAME = ".paseo-workspaces";
+
+export type MeowFlowStateOperationOptions = {
+  readonly database?: MeowFlowStateDatabase;
+  readonly threadIds?: readonly string[];
+  readonly includeOccupationThreads?: boolean;
+};
+
+type StateReadScope = {
+  readonly threadIds?: readonly string[];
+  readonly includeOccupationThreads?: boolean;
+};
+
+type StateWriteScope = {
+  readonly replaceRepositoryOccupations?: boolean;
+};
 
 type OccupationRow = {
   readonly thread_id: string;
@@ -110,44 +127,51 @@ export function getStateFilePath(_repositoryRoot?: string): string {
   return getStateDatabasePath();
 }
 
-export function readMeowFlowState(repositoryRoot: string): MutableMeowFlowState {
-  const database = openStateDatabase();
-  try {
-    return readStateFromDatabase(database, repositoryRoot);
-  } finally {
-    database.close();
-  }
+export function readMeowFlowState(
+  repositoryRoot: string,
+  options: MeowFlowStateOperationOptions = {},
+): MutableMeowFlowState {
+  return useStateDatabase(options, (database) =>
+    readStateFromDatabase(database, repositoryRoot, options),
+  );
 }
 
-export function writeMeowFlowState(repositoryRoot: string, state: MeowFlowState): void {
-  const database = openStateDatabase();
-  try {
+export function writeMeowFlowState(
+  repositoryRoot: string,
+  state: MeowFlowState,
+  options: Pick<MeowFlowStateOperationOptions, "database"> = {},
+): void {
+  useStateDatabase(options, (database) => {
     const write = database.transaction((resolvedRepositoryRoot: string) => {
-      writeStateToDatabase(database, resolvedRepositoryRoot, state);
+      writeStateToDatabase(database, resolvedRepositoryRoot, state, {
+        replaceRepositoryOccupations: true,
+      });
     });
     write.immediate(path.resolve(repositoryRoot));
-  } finally {
-    database.close();
-  }
+  });
 }
 
 export function updateMeowFlowState(
   repositoryRoot: string,
   updater: (state: MutableMeowFlowState) => void,
+  options: MeowFlowStateOperationOptions = {},
 ): MutableMeowFlowState {
-  const database = openStateDatabase();
-  try {
+  return useStateDatabase(options, (database) => {
+    const scopedThreadIds = normalizeThreadIds(options.threadIds);
     const update = database.transaction((resolvedRepositoryRoot: string) => {
-      const state = readStateFromDatabase(database, resolvedRepositoryRoot);
+      const state = readStateFromDatabase(database, resolvedRepositoryRoot, {
+        ...options,
+        threadIds: scopedThreadIds,
+      });
       updater(state);
-      writeStateToDatabase(database, resolvedRepositoryRoot, state);
+      writeStateToDatabase(database, resolvedRepositoryRoot, state, {
+        replaceRepositoryOccupations: scopedThreadIds.length === 0,
+      });
       return state;
     });
 
     return update.immediate(path.resolve(repositoryRoot));
-  } finally {
-    database.close();
-  }
+  });
 }
 
 export function getStateDatabasePath(): string {
@@ -158,6 +182,26 @@ export function getStateDatabasePath(): string {
   }
 
   return path.join(resolveHomeDirectory(), ...STATE_DIRECTORY_PATH, STATE_DATABASE_FILE_NAME);
+}
+
+export function withMeowFlowStateDatabase<T>(operation: (database: MeowFlowStateDatabase) => T): T {
+  const database = openStateDatabase();
+  try {
+    return operation(database);
+  } finally {
+    database.close();
+  }
+}
+
+function useStateDatabase<T>(
+  options: Pick<MeowFlowStateOperationOptions, "database">,
+  operation: (database: MeowFlowStateDatabase) => T,
+): T {
+  if (options.database) {
+    return operation(options.database);
+  }
+
+  return withMeowFlowStateDatabase(operation);
 }
 
 function openStateDatabase(): DatabaseConnection {
@@ -214,50 +258,23 @@ function migrateDatabase(database: DatabaseConnection): void {
 function readStateFromDatabase(
   database: DatabaseConnection,
   repositoryRoot: string,
+  scope: StateReadScope = {},
 ): MutableMeowFlowState {
   const resolvedRepositoryRoot = path.resolve(repositoryRoot);
-  const occupationRows = database
-    .prepare<[], OccupationRow>(
-      `
-        SELECT
-          thread_id,
-          repository_root,
-          slot_number,
-          workspace_relative_path,
-          request_body,
-          created_at
-        FROM thread_occupations
-        ORDER BY repository_root, slot_number, thread_id
-      `,
-    )
-    .all();
-  const metadataRows = database
-    .prepare<[], ThreadMetadataRow>(
-      `
-        SELECT thread_id, name, request_body, archived_at
-        FROM thread_metadata
-        ORDER BY thread_id
-      `,
-    )
-    .all();
-  const agentRows = database
-    .prepare<[], ThreadAgentRow>(
-      `
-        SELECT thread_id, agent_id, title, skill, created_at
-        FROM thread_agents
-        ORDER BY thread_id, created_at, agent_id
-      `,
-    )
-    .all();
-  const handoffRows = database
-    .prepare<[], ThreadHandoffRow>(
-      `
-        SELECT thread_id, seq, stage, content, created_at
-        FROM thread_handoffs
-        ORDER BY thread_id, seq
-      `,
-    )
-    .all();
+  const scopedThreadIds = normalizeThreadIds(scope.threadIds);
+  const scopedThreadIdSet = new Set(scopedThreadIds);
+  const occupationRows = readOccupationRows(database, resolvedRepositoryRoot, scopedThreadIds);
+  const threadIdsToRead = new Set(scopedThreadIds);
+
+  if (scope.includeOccupationThreads !== false) {
+    for (const row of occupationRows) {
+      threadIdsToRead.add(row.thread_id);
+    }
+  }
+
+  const metadataRows = readThreadMetadataRows(database, [...threadIdsToRead]);
+  const agentRows = readThreadAgentRows(database, [...threadIdsToRead]);
+  const handoffRows = readThreadHandoffRows(database, [...threadIdsToRead]);
 
   const occupations = occupationRows.map((row): ThreadOccupationRecord => {
     const rowRepositoryRoot = path.resolve(row.repository_root);
@@ -271,7 +288,9 @@ function readStateFromDatabase(
   });
   const threadIds = new Set<string>();
   for (const row of occupationRows) {
-    threadIds.add(row.thread_id);
+    if (scope.includeOccupationThreads !== false || scopedThreadIdSet.has(row.thread_id)) {
+      threadIds.add(row.thread_id);
+    }
   }
   for (const row of metadataRows) {
     threadIds.add(row.thread_id);
@@ -319,20 +338,153 @@ function readStateFromDatabase(
   });
 }
 
+function readOccupationRows(
+  database: DatabaseConnection,
+  repositoryRoot: string,
+  threadIds: readonly string[],
+): readonly OccupationRow[] {
+  const selectSql = `
+    SELECT
+      thread_id,
+      repository_root,
+      slot_number,
+      workspace_relative_path,
+      request_body,
+      created_at
+    FROM thread_occupations
+  `;
+
+  if (threadIds.length === 0) {
+    return database
+      .prepare<[string], OccupationRow>(
+        `
+          ${selectSql}
+          WHERE repository_root = ?
+          ORDER BY repository_root, slot_number, thread_id
+        `,
+      )
+      .all(repositoryRoot);
+  }
+
+  return database
+    .prepare<unknown[], OccupationRow>(
+      `
+        ${selectSql}
+        WHERE repository_root = ? OR thread_id IN (${formatSqlPlaceholders(threadIds.length)})
+        ORDER BY repository_root, slot_number, thread_id
+      `,
+    )
+    .all(repositoryRoot, ...threadIds);
+}
+
+function readThreadMetadataRows(
+  database: DatabaseConnection,
+  threadIds: readonly string[],
+): readonly ThreadMetadataRow[] {
+  if (threadIds.length === 0) {
+    return [];
+  }
+
+  return database
+    .prepare<unknown[], ThreadMetadataRow>(
+      `
+        SELECT thread_id, name, request_body, archived_at
+        FROM thread_metadata
+        WHERE thread_id IN (${formatSqlPlaceholders(threadIds.length)})
+        ORDER BY thread_id
+      `,
+    )
+    .all(...threadIds);
+}
+
+function readThreadAgentRows(
+  database: DatabaseConnection,
+  threadIds: readonly string[],
+): readonly ThreadAgentRow[] {
+  if (threadIds.length === 0) {
+    return [];
+  }
+
+  return database
+    .prepare<unknown[], ThreadAgentRow>(
+      `
+        SELECT thread_id, agent_id, title, skill, created_at
+        FROM thread_agents
+        WHERE thread_id IN (${formatSqlPlaceholders(threadIds.length)})
+        ORDER BY thread_id, created_at, agent_id
+      `,
+    )
+    .all(...threadIds);
+}
+
+function readThreadHandoffRows(
+  database: DatabaseConnection,
+  threadIds: readonly string[],
+): readonly ThreadHandoffRow[] {
+  if (threadIds.length === 0) {
+    return [];
+  }
+
+  return database
+    .prepare<unknown[], ThreadHandoffRow>(
+      `
+        SELECT thread_id, seq, stage, content, created_at
+        FROM thread_handoffs
+        WHERE thread_id IN (${formatSqlPlaceholders(threadIds.length)})
+        ORDER BY thread_id, seq
+      `,
+    )
+    .all(...threadIds);
+}
+
+function normalizeThreadIds(threadIds: readonly string[] | undefined): readonly string[] {
+  if (!threadIds) {
+    return [];
+  }
+
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const threadId of threadIds) {
+    if (seen.has(threadId)) {
+      continue;
+    }
+
+    seen.add(threadId);
+    normalized.push(threadId);
+  }
+
+  return normalized;
+}
+
+function formatSqlPlaceholders(count: number): string {
+  return Array.from({ length: count }, () => "?").join(", ");
+}
+
 function writeStateToDatabase(
   database: DatabaseConnection,
   repositoryRoot: string,
   state: MeowFlowState,
+  scope: StateWriteScope = {},
 ): void {
   const resolvedRepositoryRoot = path.resolve(repositoryRoot);
   const normalized = normalizeState(state);
   const now = new Date().toISOString();
+  const replaceRepositoryOccupations = scope.replaceRepositoryOccupations ?? true;
 
-  database
-    .prepare<[string]>("DELETE FROM thread_occupations WHERE repository_root = ?")
-    .run(resolvedRepositoryRoot);
+  if (replaceRepositoryOccupations) {
+    database
+      .prepare<[string]>("DELETE FROM thread_occupations WHERE repository_root = ?")
+      .run(resolvedRepositoryRoot);
+  }
 
-  const insertOccupation = database.prepare<{
+  const deleteOccupation = database.prepare<{
+    readonly threadId: string;
+    readonly repositoryRoot: string;
+  }>(
+    "DELETE FROM thread_occupations WHERE thread_id = @threadId AND repository_root = @repositoryRoot",
+  );
+  const upsertOccupation = database.prepare<{
     readonly threadId: string;
     readonly repositoryRoot: string;
     readonly slotNumber: number;
@@ -358,17 +510,36 @@ function writeStateToDatabase(
       @createdAt,
       @updatedAt
     )
+    ON CONFLICT(thread_id) DO UPDATE SET
+      repository_root = excluded.repository_root,
+      slot_number = excluded.slot_number,
+      workspace_relative_path = excluded.workspace_relative_path,
+      request_body = excluded.request_body,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at
   `);
   for (const occupation of normalized.occupations) {
     const occupationRepositoryRoot = path.resolve(
       occupation.repositoryRoot ?? resolvedRepositoryRoot,
     );
-    if (occupation.releasedAt !== null || occupationRepositoryRoot !== resolvedRepositoryRoot) {
+    if (occupationRepositoryRoot !== resolvedRepositoryRoot) {
+      continue;
+    }
+
+    if (occupation.releasedAt !== null) {
+      deleteOccupation.run({
+        threadId: occupation.threadId,
+        repositoryRoot: resolvedRepositoryRoot,
+      });
       continue;
     }
 
     const thread = getThread(normalized, occupation.threadId);
-    insertOccupation.run({
+    if (!replaceRepositoryOccupations && !thread) {
+      continue;
+    }
+
+    upsertOccupation.run({
       threadId: occupation.threadId,
       repositoryRoot: resolvedRepositoryRoot,
       slotNumber: deriveSlotNumber(resolvedRepositoryRoot, occupation.worktreePath),

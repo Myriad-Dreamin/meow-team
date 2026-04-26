@@ -55,7 +55,7 @@ The CLI SHALL provide `mfl thread status <id> --no-color` and SHALL render the
 thread name, agents, request body, and handoffs in a deterministic
 YAML-compatible shape.
 Thread metadata, agent records, and handoffs SHALL be persisted in the shared
-SQLite database at `~/.local/shared/meow-flow/meow-flow.sqlite` alongside the
+SQLite database at `~/.local/share/meow-flow/meow-flow.sqlite` alongside the
 existing `thread_occupations` table, not in repository-local JSON files.
 
 #### Scenario: Thread status prints the sample fields

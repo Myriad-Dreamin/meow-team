@@ -32,15 +32,22 @@ steps and upstream citation.
 ```text
 mfl install-skills codex claude
 mfl worktree new
+mfl run "Create a echo hello script."
+```
+
+`mfl run` starts the initial plan stage and the new agent appears in the Paseo
+web app. You can also invoke the entry skill directly from any worktree that is
+not occupied by a MeowFlow thread:
+
+```text
 /meow-flow Create a echo hello script.
 ```
 
-`/meow-flow` and `/mfl` are the entry skills. They run `mfl status`, launch the
-initial plan stage when the current worktree is idle, and coordinate later
-stages through thread status and handoffs.
+`/meow-flow` and `/mfl` run `mfl status` and coordinate later stages through
+thread status and handoffs.
 
 Thread state is persisted in the shared SQLite database at
-`~/.local/shared/meow-flow/meow-flow.sqlite`, so all linked worktrees for the
+`~/.local/share/meow-flow/meow-flow.sqlite`, so all linked worktrees for the
 same machine see the same occupations, agents, and handoffs.
 
 ## Worktrees

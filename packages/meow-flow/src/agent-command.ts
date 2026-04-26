@@ -9,6 +9,7 @@ import {
   SUPPORTED_STAGES,
   upsertAgentRecord,
   updateMeowFlowState,
+  withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
 type PaseoInvocationResult = {
@@ -51,40 +52,50 @@ function createAgentUpdateSelfCommand(): Command {
           throw new Error("PASEO_AGENT_ID is not set; cannot detect the current Paseo agent.");
         }
 
-        const current = resolveCurrentThread("mfl agent update-self");
-        const inferred = inferCurrentAgentSkill(currentAgentId);
-        if (!inferred.skill) {
-          throw new Error(
-            "Current agent skill could not be detected. Expected one of meow-plan, meow-code, meow-review, meow-execute, meow-validate, or meow-archive.",
-          );
-        }
-        const skill = inferred.skill;
+        withMeowFlowStateDatabase((database) => {
+          const current = resolveCurrentThread("mfl agent update-self", { database });
+          const inferred = inferCurrentAgentSkill(currentAgentId);
+          if (!inferred.skill) {
+            throw new Error(
+              "Current agent skill could not be detected. Expected one of meow-plan, meow-code, meow-review, meow-execute, meow-validate, or meow-archive.",
+            );
+          }
+          const skill = inferred.skill;
 
-        invokePaseoAgentUpdate({
-          agentId: currentAgentId,
-          threadId: current.threadId,
-          skill,
-        });
-
-        const now = new Date().toISOString();
-        updateMeowFlowState(current.context.repositoryRoot, (state) => {
-          upsertAgentRecord(state, {
-            threadId: current.threadId,
+          invokePaseoAgentUpdate({
             agentId: currentAgentId,
-            title: inferred.title,
+            threadId: current.threadId,
             skill,
-            now,
           });
-        });
 
-        process.stdout.write(
-          [
-            `agent-id: ${currentAgentId}`,
-            `thread-id: ${current.threadId}`,
-            `skill: ${skill}`,
-            "",
-          ].join("\n"),
-        );
+          const now = new Date().toISOString();
+          updateMeowFlowState(
+            current.context.repositoryRoot,
+            (state) => {
+              upsertAgentRecord(state, {
+                threadId: current.threadId,
+                agentId: currentAgentId,
+                title: inferred.title,
+                skill,
+                now,
+              });
+            },
+            {
+              database,
+              threadIds: [current.threadId],
+              includeOccupationThreads: false,
+            },
+          );
+
+          process.stdout.write(
+            [
+              `agent-id: ${currentAgentId}`,
+              `thread-id: ${current.threadId}`,
+              `skill: ${skill}`,
+              "",
+            ].join("\n"),
+          );
+        });
       } catch (error) {
         command.error(error instanceof Error ? error.message : String(error));
       }

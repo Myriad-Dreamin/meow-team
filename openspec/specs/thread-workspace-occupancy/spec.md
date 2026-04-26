@@ -178,12 +178,12 @@ the same current thread and the thread is not archived.
 
 ### Requirement: Thread occupations are persisted in shared SQLite storage
 
-The CLI SHALL store running thread occupation state in `~/.local/shared/meow-flow/meow-flow.sqlite` using the `better-sqlite3` package.
+The CLI SHALL store running thread occupation state in `~/.local/share/meow-flow/meow-flow.sqlite` using the `better-sqlite3` package.
 
 #### Scenario: First allocation creates the shared database
 
 - **WHEN** a user runs `mfl run --id fix-test-ci "echo \"hello world\""`
-- **AND** `~/.local/shared/meow-flow/meow-flow.sqlite` does not exist
+- **AND** `~/.local/share/meow-flow/meow-flow.sqlite` does not exist
 - **THEN** the CLI creates the parent directory if needed
 - **AND** the CLI creates the SQLite database and thread occupation schema
 - **AND** the running occupation is persisted in that database
@@ -192,7 +192,7 @@ The CLI SHALL store running thread occupation state in `~/.local/shared/meow-flo
 
 - **WHEN** `mfl run --id fix-test-ci "echo \"hello world\""` has allocated `.paseo-workspaces/paseo-2`
 - **AND** a later CLI process runs `mfl thread ls` in the same repository
-- **THEN** the later process reads the allocation from `~/.local/shared/meow-flow/meow-flow.sqlite`
+- **THEN** the later process reads the allocation from `~/.local/share/meow-flow/meow-flow.sqlite`
 - **AND** the output reports `.paseo-workspaces/paseo-2 fix-test-ci`
 
 ### Requirement: Thread and workspace occupations are one-to-one
@@ -230,7 +230,7 @@ The CLI SHALL provide `mfl delete <id1> <id2> ...` to remove persisted running o
 
 - **WHEN** thread id `fix-test-ci` occupies `.paseo-workspaces/paseo-2`
 - **AND** a user runs `mfl delete fix-test-ci`
-- **THEN** the CLI removes the `fix-test-ci` occupation from `~/.local/shared/meow-flow/meow-flow.sqlite`
+- **THEN** the CLI removes the `fix-test-ci` occupation from `~/.local/share/meow-flow/meow-flow.sqlite`
 - **AND** the command output identifies `fix-test-ci` and `.paseo-workspaces/paseo-2` as released
 
 #### Scenario: Released workspace appears idle when listed

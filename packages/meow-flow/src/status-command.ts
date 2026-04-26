@@ -10,6 +10,7 @@ import {
   getActiveOccupationForWorktree,
   getThread,
   readMeowFlowState,
+  withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
 export function createStatusCommand(): Command {
@@ -21,7 +22,9 @@ export function createStatusCommand(): Command {
           cwd: process.cwd(),
           commandName: "mfl status",
         });
-        const state = readMeowFlowState(context.repositoryRoot);
+        const state = withMeowFlowStateDatabase((database) =>
+          readMeowFlowState(context.repositoryRoot, { database }),
+        );
         const occupation = getActiveOccupationForWorktree(state, context.currentWorktreeRoot);
 
         if (occupation) {

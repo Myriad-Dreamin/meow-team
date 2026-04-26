@@ -39,12 +39,19 @@ Install `mfl` with one of these options:
 ```text
 mfl install-skills codex
 mfl worktree new
+mfl run "Create a echo hello script."
+```
+
+`mfl run` starts the first plan agent in a linked Git worktree, and the agent
+appears in the Paseo web app. You can also invoke the entry skill directly from
+any worktree that is not occupied by a MeowFlow thread:
+
+```text
 /meow-flow Create a echo hello script.
 ```
 
-`/meow-flow` and `/mfl` are the entry skills. They inspect `mfl status`, launch
-the first plan agent in a linked Git worktree, and coordinate later stages
-through persisted thread state and handoffs.
+`/meow-flow` and `/mfl` inspect `mfl status` and coordinate later stages through
+persisted thread state and handoffs.
 
 For a small human-verified change, the minimal path can be:
 
@@ -102,7 +109,7 @@ create worktrees with MeowFlow or with plain `git worktree add`; either way,
 `mfl run` can use them.
 
 Thread occupations, agents, request bodies, and handoffs are stored in the
-shared SQLite database at `~/.local/shared/meow-flow/meow-flow.sqlite`.
+shared SQLite database at `~/.local/share/meow-flow/meow-flow.sqlite`.
 
 Worktree helpers:
 

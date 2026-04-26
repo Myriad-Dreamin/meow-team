@@ -18,18 +18,31 @@ import {
   recordOccupation,
   replaceThread,
   skillToStage,
+  updateMeowFlowState,
   upsertAgentRecord,
   writeMeowFlowState,
 } from "./thread-state.js";
 
 const tempDirectories: string[] = [];
 const originalStateDatabasePath = process.env.MFL_STATE_DB_PATH;
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 
 afterEach(() => {
   if (originalStateDatabasePath === undefined) {
     delete process.env.MFL_STATE_DB_PATH;
   } else {
     process.env.MFL_STATE_DB_PATH = originalStateDatabasePath;
+  }
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
+  }
+  if (originalUserProfile === undefined) {
+    delete process.env.USERPROFILE;
+  } else {
+    process.env.USERPROFILE = originalUserProfile;
   }
 
   while (tempDirectories.length > 0) {
@@ -56,6 +69,18 @@ function useTempStateDatabase(): string {
 }
 
 describe("MeowFlow thread state", () => {
+  test("uses ~/.local/share for the default SQLite database path", () => {
+    const homeDirectory = mkdtempSync(path.join(tmpdir(), "meow-flow-home-"));
+    tempDirectories.push(homeDirectory);
+    delete process.env.MFL_STATE_DB_PATH;
+    process.env.HOME = homeDirectory;
+    delete process.env.USERPROFILE;
+
+    expect(getStateDatabasePath()).toBe(
+      path.join(homeDirectory, ".local", "share", "meow-flow", "meow-flow.sqlite"),
+    );
+  });
+
   test("persists thread metadata, agents, handoffs, and archive state", () => {
     const state = createEmptyState();
 
@@ -201,6 +226,127 @@ describe("MeowFlow thread state", () => {
       slot_number: 1,
       workspace_relative_path: path.join(".paseo-workspaces", "paseo-1"),
     });
+  });
+
+  test("reads repository state and requested archived threads without loading every thread", () => {
+    const repositoryRoot = createTempRepositoryRoot();
+    const otherRepositoryRoot = createTempRepositoryRoot();
+    useTempStateDatabase();
+    const repositoryState = createEmptyState();
+    const otherState = createEmptyState();
+
+    recordOccupation(repositoryState, {
+      threadId: "active-thread",
+      worktreePath: path.join(repositoryRoot, ".paseo-workspaces", "paseo-1"),
+      now: "2026-04-26T00:00:00.000Z",
+    });
+    ensureThread(repositoryState, {
+      threadId: "active-thread",
+      requestBody: "active request",
+    });
+    replaceThread(otherState, {
+      id: "archived-thread",
+      name: "archived-thread",
+      requestBody: "archived request",
+      archivedAt: "2026-04-26T01:00:00.000Z",
+      agents: [],
+      handoffs: [],
+    });
+
+    writeMeowFlowState(repositoryRoot, repositoryState);
+    writeMeowFlowState(otherRepositoryRoot, otherState);
+
+    const repositoryOnly = readMeowFlowState(repositoryRoot);
+    const withRequestedThread = readMeowFlowState(repositoryRoot, {
+      threadIds: ["archived-thread"],
+      includeOccupationThreads: false,
+    });
+
+    expect(getThread(repositoryOnly, "active-thread")?.requestBody).toBe("active request");
+    expect(getThread(repositoryOnly, "archived-thread")).toBeNull();
+    expect(getThread(withRequestedThread, "archived-thread")?.archivedAt).toBe(
+      "2026-04-26T01:00:00.000Z",
+    );
+  });
+
+  test("scoped writes preserve unrelated occupation request bodies", () => {
+    const repositoryRoot = createTempRepositoryRoot();
+    const databasePath = useTempStateDatabase();
+    const state = createEmptyState();
+
+    for (const threadId of ["first-thread", "second-thread"]) {
+      recordOccupation(state, {
+        threadId,
+        worktreePath: path.join(
+          repositoryRoot,
+          ".paseo-workspaces",
+          threadId === "first-thread" ? "paseo-1" : "paseo-2",
+        ),
+        now: "2026-04-26T00:00:00.000Z",
+      });
+      ensureThread(state, {
+        threadId,
+        requestBody: `${threadId} request`,
+      });
+      upsertAgentRecord(state, {
+        threadId,
+        agentId: `${threadId}-agent`,
+        title: null,
+        skill: "meow-plan",
+        now: "2026-04-26T00:01:00.000Z",
+      });
+    }
+    writeMeowFlowState(repositoryRoot, state);
+
+    updateMeowFlowState(
+      repositoryRoot,
+      (mutableState) => {
+        const thread = getThread(mutableState, "first-thread");
+        if (!thread) {
+          throw new Error("Expected first-thread to be loaded.");
+        }
+        replaceThread(mutableState, {
+          ...thread,
+          name: "renamed-thread",
+        });
+      },
+      {
+        threadIds: ["first-thread"],
+        includeOccupationThreads: false,
+      },
+    );
+
+    const database = new Database(databasePath, { readonly: true });
+    const rows = database
+      .prepare(
+        `
+          SELECT thread_id, request_body
+          FROM thread_occupations
+          ORDER BY thread_id
+        `,
+      )
+      .all() as readonly { readonly thread_id: string; readonly request_body: string }[];
+    database.close();
+
+    expect(rows).toEqual([
+      {
+        thread_id: "first-thread",
+        request_body: "first-thread request",
+      },
+      {
+        thread_id: "second-thread",
+        request_body: "second-thread request",
+      },
+    ]);
+    expect(
+      getThread(
+        readMeowFlowState(repositoryRoot, {
+          threadIds: ["second-thread"],
+          includeOccupationThreads: false,
+        }),
+        "second-thread",
+      )?.agents.map((agent) => agent.id),
+    ).toEqual(["second-thread-agent"]);
   });
 
   test("supports legacy in-memory occupation records that used workspacePath", () => {
