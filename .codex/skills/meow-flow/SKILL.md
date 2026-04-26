@@ -1,9 +1,22 @@
 ---
 name: meow-flow
-description: Use when the user starts an interactive-mode request with `/meow-flow` or `/mfl`; coordinate staged MeowFlow agents through mfl thread state and handoffs.
+description: Use when the user starts an interactive-mode request with `/meow-flow` or `/mfl`; coordinate staged MeowFlow agents through mfl thread state, thread updates, mfl-run stage launches, and handoffs.
 ---
 
 Coordinate MeowFlow staged agent work through the `mfl` CLI.
+
+## Hard Rules
+
+- Do not use chat history as the source of truth for thread state. Discover and
+  update MeowFlow state with `mfl` before acting.
+- If a slash command arrives in the middle of an existing Paseo agent chat, this
+  chat is coordinator-mode unless `mfl agent update-self` confirms it is already
+  the requested MeowFlow stage agent for the current thread.
+- In coordinator-mode, do not perform plan/code/review/execute/validate work
+  locally. Launch the requested stage with `mfl run --stage <stage> ...`, report
+  the returned ids, and stop.
+- If `mfl agent update-self` cannot classify this session as a MeowFlow stage
+  agent, stay in coordinator-mode and use `mfl run` for the requested stage.
 
 ## Command Contract
 
@@ -36,11 +49,34 @@ Coordinate MeowFlow staged agent work through the `mfl` CLI.
    ```
 
 5. If status is `occupied`, report the thread name or id and latest agent id,
-   then ask how the user wants to proceed with that existing thread.
+   then:
+   - For `/mfl plan`, `/mfl code`, `/mfl review`, `/mfl execute`, or
+     `/mfl validate`, launch the matching stage with `mfl run`.
+   - For `/meow-flow`, `/mfl`, or `/meow-plan` with request content and no
+     explicit continuation stage, launch a plan stage in the current thread
+     with `mfl run --stage plan ...`.
+   - If there is no request content or the user asks for a different thread,
+     ask how they want to proceed before launching anything.
 
 When `mfl run` returns `agent-id: <id>` and `next-seq: <seq>`, include both in
 your response. Also include `thread-id` and `worktree` when `mfl run` prints
 them, then direct the user to continue in the new agent chat.
+
+## Session Mode
+
+After startup, decide whether this chat is a coordinator or a stage agent:
+
+- Coordinator-mode: any normal Paseo agent chat, any `mfl agent update-self`
+  failure, or any chat that is not confirmed as the requested stage. Launch with
+  `mfl run --stage <stage> ...` and do not perform the stage work locally.
+- Stage-agent mode: `mfl agent update-self` confirms this session belongs to
+  the current thread and requested stage. Before acting, read:
+
+  ```bash
+  mfl status
+  mfl thread status <id> --no-color
+  mfl handoff get -n 5
+  ```
 
 ## Stage Dispatch
 
@@ -59,7 +95,8 @@ mfl run --stage code --provider <provider> "<optional-content>"
 ```
 
 The launched stage agent reads `mfl thread status <id> --no-color` and recent
-handoffs before acting.
+handoffs before acting. The coordinator stops after reporting the launched
+agent details.
 
 ## Handoffs
 
@@ -70,10 +107,11 @@ mfl handoff get -n 5
 mfl handoff get --since <seq>
 ```
 
-Before finishing, agents that produce implementation, review, execution, or
-validation results append a compact handoff:
+Before finishing, agents that produce planning, implementation, review,
+execution, or validation results append a compact handoff:
 
 ```bash
+mfl handoff append --stage plan "planned X; proposal Y; next code"
 mfl handoff append --stage code "implemented X; tests Y passed"
 mfl handoff append --stage review "approved; checked A and B"
 mfl handoff append --stage execute "generated script X; output at Y"
