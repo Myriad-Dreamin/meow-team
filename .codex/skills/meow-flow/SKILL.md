@@ -32,6 +32,10 @@ Coordinate MeowFlow staged agent work through the `mfl` CLI.
   handoffs come from `mfl`, not from chat history alone.
 - Thread names set with `mfl thread set name` must be kebab-case matching
   `^[a-z0-9]+(-[a-z0-9]+)*$`.
+- Agent names from `mfl run` are `<Stage>: <request summary>` until the thread
+  has a name, then `<Stage>: <thread-name> (<agent-sequence>)`. If a stage
+  agent changes the thread name, update the current idle or running Paseo agent
+  with `paseo agent update <agent-id> --name "<Stage>: <thread-name> (<sequence>)"`.
 
 ## Startup
 

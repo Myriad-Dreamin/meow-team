@@ -102,6 +102,12 @@ Provider values are passed through to Paseo as opaque provider or
 provider/model strings. Run `paseo provider ls` to inspect providers available
 on the local daemon.
 
+Agent titles are chosen from thread metadata. Before a thread has a name,
+`mfl run` uses the stage plus a request summary: the first five space-separated
+words with `...` when truncated, or the first ten Han-aware tokens for Han
+text. After a thread has a name, `mfl run` uses the stage, thread name, and
+agent sequence, such as `Code: install-auth-flow (2)`.
+
 The resolved thread id is sent to Paseo as a label:
 
 ```text

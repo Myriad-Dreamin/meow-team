@@ -64,13 +64,23 @@ the current plan stage agent.
    If a concurrent `mfl` update causes a transient SQLite write conflict, wait
    for the previous `mfl` command to finish and retry the thread-name write
    once before proceeding.
-6. If the repository uses OpenSpec, create the matching OpenSpec change with
+6. After setting or changing the thread name, rename the current Paseo agent to
+   the named-thread format when `PASEO_AGENT_ID` is available:
+
+   ```bash
+   paseo agent update "$PASEO_AGENT_ID" --name "Plan: <name> (1)"
+   ```
+
+   Use the current stage label and the agent's sequence from
+   `mfl thread status <id> --no-color` when the renamed agent is not the first
+   plan agent.
+7. If the repository uses OpenSpec, create the matching OpenSpec change with
    the same name. Prefer project-local OpenSpec proposal skills or commands.
-7. Keep planning scoped. Do not edit production code.
-8. Commit proposal artifacts. Respect `git config --local paseo.prompt.title`
+8. Keep planning scoped. Do not edit production code.
+9. Commit proposal artifacts. Respect `git config --local paseo.prompt.title`
    when set; otherwise infer the local title style from recent main-branch
    commits. Use `docs: add proposal <name>` as the fallback.
-9. Append a concise planning handoff with the next suggested stage, usually
+10. Append a concise planning handoff with the next suggested stage, usually
    `/mfl code` or `/mfl execute`:
 
    ```bash

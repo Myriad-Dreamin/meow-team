@@ -54,8 +54,13 @@ type ResolvedRunTarget = {
   readonly worktreePath: string;
   readonly stage: MeowFlowStage;
   readonly requestBody: string;
+  readonly title: string;
   readonly freshAllocation: boolean;
 };
+
+const WORD_TITLE_TOKEN_LIMIT = 5;
+const HAN_TITLE_TOKEN_LIMIT = 10;
+const HAN_PATTERN = /\p{Script=Han}/u;
 
 export function createRunCommand(): Command {
   return new Command("run")
@@ -83,6 +88,7 @@ export function createRunCommand(): Command {
             threadId: target.threadId,
             stage: target.stage,
             requestBody: target.requestBody,
+            title: target.title,
             cwd: target.worktreePath,
             provider: runProvider.provider,
           });
@@ -189,11 +195,21 @@ function resolveRunTarget(input: {
       throw new Error("--stage is required after a thread already has agents.");
     }
 
+    const stage = requestedStage ?? "plan";
+
     return {
       threadId: currentOccupation.threadId,
       worktreePath: currentOccupation.worktreePath,
-      stage: requestedStage ?? "plan",
+      stage,
       requestBody: input.requestBody,
+      title: formatStageAgentTitle({
+        stage,
+        threadName: thread?.name ?? null,
+        threadRequestBody: thread?.requestBody ?? null,
+        requestBody: input.requestBody,
+        threadId: currentOccupation.threadId,
+        agentSequence: existingAgentCount + 1,
+      }),
       freshAllocation: false,
     };
   }
@@ -222,6 +238,7 @@ function resolveRunTarget(input: {
 
   const worktree = selectWorktreeForNewThread(input.context, state);
   const stage = requestedStage ?? deriveDefaultStage(existingThread);
+  const agentSequence = (existingThread?.agents.length ?? 0) + 1;
   const now = new Date().toISOString();
 
   updateMeowFlowState(
@@ -249,6 +266,14 @@ function resolveRunTarget(input: {
     worktreePath: worktree.path,
     stage,
     requestBody: input.requestBody,
+    title: formatStageAgentTitle({
+      stage,
+      threadName: existingThread?.name ?? null,
+      threadRequestBody: existingThread?.requestBody ?? null,
+      requestBody: input.requestBody,
+      threadId,
+      agentSequence,
+    }),
     freshAllocation: true,
   };
 }
@@ -264,6 +289,93 @@ function deriveDefaultStage(thread: ThreadRecord | null): MeowFlowStage {
   }
 
   return latestStage;
+}
+
+function formatStageAgentTitle(input: {
+  readonly stage: MeowFlowStage;
+  readonly threadName: string | null;
+  readonly threadRequestBody: string | null;
+  readonly requestBody: string;
+  readonly threadId: string;
+  readonly agentSequence: number;
+}): string {
+  const stageLabel = formatStageLabel(input.stage);
+  if (input.threadName !== null) {
+    return `${stageLabel}: ${input.threadName} (${input.agentSequence})`;
+  }
+
+  return `${stageLabel}: ${summarizeUntitledThreadSubject(
+    firstNonBlank(input.requestBody, input.threadRequestBody, input.threadId),
+  )}`;
+}
+
+function formatStageLabel(stage: MeowFlowStage): string {
+  return `${stage.charAt(0).toUpperCase()}${stage.slice(1)}`;
+}
+
+function summarizeUntitledThreadSubject(value: string): string {
+  const normalized = value.trim().split(/\s+/u).filter(Boolean).join(" ");
+  if (normalized.length === 0) {
+    return "untitled";
+  }
+
+  if (HAN_PATTERN.test(normalized)) {
+    return summarizeHanAwareSubject(normalized);
+  }
+
+  const words = normalized.split(" ");
+  if (words.length <= WORD_TITLE_TOKEN_LIMIT) {
+    return normalized;
+  }
+
+  return `${words.slice(0, WORD_TITLE_TOKEN_LIMIT).join(" ")} ...`;
+}
+
+function firstNonBlank(...values: readonly (string | null)[]): string {
+  return values.find((value): value is string => Boolean(value?.trim())) ?? "";
+}
+
+function summarizeHanAwareSubject(value: string): string {
+  const tokens = tokenizeHanAwareSubject(value);
+  if (tokens.length <= HAN_TITLE_TOKEN_LIMIT) {
+    return tokens.join("");
+  }
+
+  return `${tokens.slice(0, HAN_TITLE_TOKEN_LIMIT).join("")}...`;
+}
+
+function tokenizeHanAwareSubject(value: string): readonly string[] {
+  const tokens: string[] = [];
+  let asciiRun = "";
+
+  const flushAsciiRun = () => {
+    if (asciiRun.length > 0) {
+      tokens.push(asciiRun);
+      asciiRun = "";
+    }
+  };
+
+  for (const character of value) {
+    if (/\s/u.test(character)) {
+      flushAsciiRun();
+      continue;
+    }
+
+    if (isAsciiCharacter(character)) {
+      asciiRun += character;
+      continue;
+    }
+
+    flushAsciiRun();
+    tokens.push(character);
+  }
+
+  flushAsciiRun();
+  return tokens;
+}
+
+function isAsciiCharacter(value: string): boolean {
+  return value.charCodeAt(0) <= 0x7f;
 }
 
 function selectWorktreeForNewThread(
@@ -336,6 +448,7 @@ function invokePaseoRun(input: {
   readonly threadId: string;
   readonly stage: MeowFlowStage;
   readonly requestBody: string;
+  readonly title: string;
   readonly cwd: string;
   readonly provider: string;
 }): PaseoRunResult {
@@ -367,7 +480,7 @@ function invokePaseoRun(input: {
       "--label",
       `x-meow-flow-stage=${input.stage}`,
       "--title",
-      `${input.threadId} ${input.stage}`,
+      input.title,
       prompt,
     ],
     {
