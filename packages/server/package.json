@@ -1,6 +1,6 @@
 {
   "name": "@getpaseo/server",
-  "version": "0.1.61-beta.1",
+  "version": "0.1.61",
   "description": "Paseo backend server",
   "type": "module",
   "publishConfig": {
