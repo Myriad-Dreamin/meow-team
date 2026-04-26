@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { createInstallSkillsCommand } from "./install-skills-command.js";
 import { createRunCommand } from "./run-command.js";
 import { resolveCliVersion } from "./version.js";
 import { createWorktreeCommand } from "./worktree-command.js";
@@ -10,6 +11,7 @@ export function createCli(): Command {
     .showSuggestionAfterError()
     .showHelpAfterError()
     .version(resolveCliVersion(), "-v, --version", "output the version number")
+    .addCommand(createInstallSkillsCommand())
     .addCommand(createRunCommand())
     .addCommand(createWorktreeCommand());
 }

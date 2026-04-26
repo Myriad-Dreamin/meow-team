@@ -29,6 +29,7 @@ steps and upstream citation.
 ## Get Started
 
 ```text
+mfl install-skills codex claude
 mfl worktree new
 mfl run "Create a echo hello script."
 // You'll see the agent started in the paseo's webapp
@@ -71,3 +72,26 @@ x-meow-flow-id=<thread-id>
 ```
 
 The command does not install, read, or require a MeowFlow config file.
+
+## Skills
+
+```bash
+mfl install-skills
+mfl install-skills --list
+mfl install-skills codex
+mfl install-skills codex claude opencode
+```
+
+`mfl install-skills` lists the embedded `meow-*` skills that MeowFlow can
+install. Pass one or more providers to install those bundled skill files into
+the requested provider skill directories.
+
+Use `--list` to force listing without writing files.
+
+Provider targets:
+
+| Provider | Target directory |
+|---|---|
+| `codex` | `$CODEX_HOME/skills` or `~/.codex/skills` |
+| `claude` | `$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills` |
+| `opencode` | `$OPENCODE_CONFIG_DIR/skills` or `~/.config/opencode/skills` |

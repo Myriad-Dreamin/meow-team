@@ -75,6 +75,7 @@ describe("mfl foundation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain("Usage: mfl");
+    expect(result.output).toContain("install-skills");
     expect(result.output).toContain("run");
     expect(result.output).toContain("worktree");
     expect(result.output).not.toContain("config");
@@ -93,6 +94,16 @@ describe("mfl foundation", () => {
     expect(result.output).toContain("<request-body>");
     expect(result.output).toContain("--id");
     expect(result.output).not.toContain("--config");
+  });
+
+  test("run cli:mfl install-skills --help succeeds and prints provider guidance", () => {
+    const result = runCliAlias(["install-skills", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Usage: mfl install-skills");
+    expect(result.output).toContain("[providers...]");
+    expect(result.output).toContain("claude, codex, opencode");
+    expect(result.output).toContain("--list");
   });
 
   test("run cli:mfl worktree --help succeeds and prints worktree subcommands", () => {

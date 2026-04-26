@@ -11,7 +11,8 @@
     "mfl": "bin/mfl"
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",
+    "build": "node scripts/embed-skills.mjs && node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",
+    "embed-skills": "node scripts/embed-skills.mjs",
     "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "test": "vitest run"
