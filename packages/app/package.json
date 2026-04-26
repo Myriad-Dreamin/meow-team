@@ -1,7 +1,7 @@
 {
   "name": "@getpaseo/app",
   "main": "index.ts",
-  "version": "0.1.61",
+  "version": "0.1.62",
   "private": true,
   "scripts": {
     "start": "APP_VARIANT=development expo start",
