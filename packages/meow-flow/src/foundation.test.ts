@@ -97,6 +97,7 @@ describe("mfl foundation", () => {
     expect(result.output).toContain("Usage: mfl run");
     expect(result.output).toContain("[request-body]");
     expect(result.output).toContain("--id");
+    expect(result.output).toContain("--provider");
     expect(result.output).toContain("--stage");
     expect(result.output).not.toContain("--config");
   });

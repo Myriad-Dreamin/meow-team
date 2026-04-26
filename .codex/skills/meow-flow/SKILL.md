@@ -7,10 +7,14 @@ Coordinate MeowFlow staged agent work through the `mfl` CLI.
 
 ## Command Contract
 
-- Syntax: `/meow-flow [content]` or `/mfl [content]`.
-- Continuation syntax: `/mfl plan`, `/mfl code`, `/mfl review`,
-  `/mfl execute`, `/mfl validate`, `/mfl commit`, `/mfl archive`, and
-  `/mfl delete`.
+- Syntax: `/meow-flow [--provider <provider>] [content]` or
+  `/mfl [--provider <provider>] [content]`.
+- Continuation syntax: `/mfl plan [--provider <provider>]`,
+  `/mfl code [--provider <provider>]`,
+  `/mfl review [--provider <provider>]`,
+  `/mfl execute [--provider <provider>]`,
+  `/mfl validate [--provider <provider>]`, `/mfl commit`, `/mfl archive`,
+  and `/mfl delete`.
 - The current thread state, worktree occupation, agents, request body, and
   handoffs come from `mfl`, not from chat history alone.
 - Thread names set with `mfl thread set name` must be kebab-case matching
@@ -23,10 +27,12 @@ Coordinate MeowFlow staged agent work through the `mfl` CLI.
 3. If status is `repository-root`, tell the user to create a linked worktree
    with `mfl worktree new` and stop.
 4. If status is `idle` and the user provided request content, launch the first
-   plan agent:
+   plan agent. When the entry command includes `--provider <provider>`, pass it
+   to `mfl run`; otherwise rely on `mfl run` provider resolution:
 
    ```bash
    mfl run --stage plan "<content>"
+   mfl run --stage plan --provider <provider> "<content>"
    ```
 
 5. If status is `occupied`, report the thread name or id and latest agent id,
@@ -39,7 +45,8 @@ them, then direct the user to continue in the new agent chat.
 ## Stage Dispatch
 
 For staged continuation commands, run the matching stage through `mfl run` in
-the current thread worktree:
+the current thread worktree. Pass `--provider <provider>` when the user
+included it; otherwise rely on `mfl run` provider resolution:
 
 ```bash
 mfl run --stage plan "<optional-content>"
@@ -47,6 +54,8 @@ mfl run --stage code "<optional-content>"
 mfl run --stage review "<optional-content>"
 mfl run --stage execute "<optional-content>"
 mfl run --stage validate "<optional-content>"
+
+mfl run --stage code --provider <provider> "<optional-content>"
 ```
 
 The launched stage agent reads `mfl thread status <id> --no-color` and recent
@@ -89,6 +98,7 @@ For launches, report:
 - the stage launched
 - `thread-id`
 - `worktree`
+- `provider`
 - `agent-id`
 - `next-seq`
 - the next chat or command the user should use
