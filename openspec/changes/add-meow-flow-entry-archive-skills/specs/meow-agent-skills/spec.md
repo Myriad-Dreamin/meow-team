@@ -28,13 +28,13 @@ legacy `team-harness-workflow` skill.
 
 The `meow-flow` skill SHALL trigger when an agent chat starts with
 `/meow-flow [content]` or `/mfl [content]` and SHALL use `mfl` CLI state as the
-source of truth for workspace occupancy, current thread, stage dispatch, and
+source of truth for worktree occupancy, current thread, stage dispatch, and
 handoff coordination.
 
-#### Scenario: Initial request starts a plan agent in an idle workspace
+#### Scenario: Initial request starts a plan agent in an idle worktree
 
 - **WHEN** a user sends `/meow-flow implement user authentication`
-- **AND** `mfl status` reports an idle MeowFlow workspace
+- **AND** `mfl status` reports an idle MeowFlow worktree
 - **THEN** the skill runs `mfl run --stage plan "implement user authentication"`
 - **AND** the skill reports the returned `agent-id` and `next-seq`
 - **AND** the user is directed to continue in the new plan agent chat
@@ -45,20 +45,20 @@ handoff coordination.
 - **THEN** the skill follows the same behavior as
   `/meow-flow implement user authentication`
 
-#### Scenario: Repository root without a workspace suggests creating one
+#### Scenario: Repository root without a worktree suggests creating one
 
 - **WHEN** `mfl status` reports that the current directory is the repository
-  root and no MeowFlow workspace is available for the current thread
-- **THEN** the skill tells the user to create a workspace with
-  `mfl workspace new`
+  root and no MeowFlow worktree is available for the current thread
+- **THEN** the skill tells the user to create a worktree with
+  `mfl worktree new`
 - **AND** the skill does not launch a stage agent
 
-#### Scenario: Occupied workspace asks how to proceed
+#### Scenario: Occupied worktree asks how to proceed
 
-- **WHEN** `mfl status` reports that the workspace is occupied by thread
+- **WHEN** `mfl status` reports that the worktree is occupied by thread
   `install-meow-flow-skills`
 - **AND** the active Paseo agent id is `123456`
-- **THEN** the skill reports that the workspace is occupied by thread
+- **THEN** the skill reports that the worktree is occupied by thread
   `install-meow-flow-skills` and Paseo agent `123456`
 - **AND** the skill asks how the user wants to proceed with that existing
   thread instead of creating a duplicate thread
@@ -165,7 +165,7 @@ delete the associated OpenSpec proposal according to the requested variant.
 - **AND** the current thread has an OpenSpec proposal
 - **THEN** the skill archives the OpenSpec proposal using the repository's
   OpenSpec archive workflow
-- **AND** the skill runs `mfl thread archive` to release the workspace
+- **AND** the skill runs `mfl thread archive` to release the worktree
 
 #### Scenario: Delete archive removes the proposal without reverting code
 
@@ -173,7 +173,7 @@ delete the associated OpenSpec proposal according to the requested variant.
 - **AND** the current thread has an open OpenSpec proposal
 - **THEN** the skill removes the open proposal artifacts
 - **AND** the skill does not revert code changes
-- **AND** the skill runs `mfl thread archive` to release the workspace
+- **AND** the skill runs `mfl thread archive` to release the worktree
 
 #### Scenario: Archive still works without OpenSpec
 
@@ -194,8 +194,8 @@ and execute/validate workflows.
 - **THEN** the page describes `/meow-flow [content]` and `/mfl [content]` as
   the entry commands
 - **AND** it explains the startup `mfl status` check
-- **AND** it explains that repository-root users should create a workspace with
-  `mfl workspace new`
+- **AND** it explains that repository-root users should create a worktree with
+  `mfl worktree new`
 - **AND** it explains that stage agents coordinate through thread status and
   handoffs
 - **AND** it documents commit, archive, and delete actions

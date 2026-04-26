@@ -12,11 +12,9 @@ type WorktreeNewOptions = {
   readonly branch?: string;
 };
 
-export function createWorktreeCommand(name = "worktree"): Command {
-  return new Command(name)
-    .description(
-      name === "workspace" ? "Manage MeowFlow git workspaces" : "Manage MeowFlow git worktrees",
-    )
+export function createWorktreeCommand(): Command {
+  return new Command("worktree")
+    .description("Manage MeowFlow git worktrees")
     .addCommand(createWorktreeNewCommand())
     .addCommand(createWorktreeListCommand("ls"))
     .addCommand(createWorktreeListCommand("list"))

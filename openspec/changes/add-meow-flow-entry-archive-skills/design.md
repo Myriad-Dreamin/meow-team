@@ -22,7 +22,7 @@ and update.
   `meow-execute`, and `meow-validate`, but move shared staged-thread behavior
   into `meow-flow`.
 - Persist enough thread metadata for any stage agent to discover the request,
-  current name, agents, handoffs, and workspace archive state.
+  current name, agents, handoffs, and worktree archive state.
 - Let `mfl run` start the initial plan agent by default and require
   `--stage` for additional agents after a thread already has agents.
 - Support explicit stage launches for `plan`, `code`, `review`, `execute`,
@@ -109,13 +109,13 @@ from skill keeps the stored model closer to what Paseo and agent logs provide.
 ### Run Behavior
 
 `mfl run [request-body]` keeps the existing thread allocation behavior for the
-first agent in an idle workspace, but the request body is now stored as the
+first agent in an idle worktree, but the request body is now stored as the
 thread request body and the launched agent receives a stage-specific skill
 prompt. Without `--stage`, `mfl run` starts `plan` only when the thread has no
 agents. Once a thread has one or more agents, `mfl run` requires
 `--stage plan|code|review|execute|validate`.
 
-When a workspace is occupied, `mfl run` does not allocate another workspace for
+When a worktree is occupied, `mfl run` does not allocate another worktree for
 that checkout. It reports the occupying thread name and relevant Paseo agent id
 so the core skill can ask the user how to proceed with the existing thread.
 
@@ -132,7 +132,7 @@ already had at launch.
 
 Alternative considered: let each skill call `paseo run` directly. Keeping all
 agent launch behavior in `mfl run` avoids provider-specific prompt drift and
-keeps workspace occupancy checks in one place.
+keeps worktree occupancy checks in one place.
 
 ### Status And Current Thread Resolution
 
@@ -140,18 +140,17 @@ The core skill starts with `mfl agent update-self` when running inside an agent
 chat, then reads `mfl status`. `mfl status` determines whether the current
 checkout is:
 
-- a linked MeowFlow workspace occupied by a thread,
-- an idle linked MeowFlow workspace,
+- a linked MeowFlow worktree occupied by a thread,
+- an idle linked MeowFlow worktree,
 - the repository root with no current thread, or
 - outside a git repository.
 
-If the user is in the repository root and no workspace is available, the skill
-suggests `mfl workspace new`. `mfl workspace` should be an alias for the
-existing `mfl worktree` command group so the user-facing term matches the
-thread workflow without breaking existing worktree commands.
+If the user is in the repository root and no worktree is available, the skill
+suggests `mfl worktree new`. The user-facing term remains "worktree" because
+MeowFlow is coordinating Git worktrees directly.
 
 Current thread resolution for `mfl thread set`, `mfl handoff`, and
-`mfl thread archive` uses the current workspace first. If the command is run in
+`mfl thread archive` uses the current worktree first. If the command is run in
 an agent context, `mfl agent update-self` can also bind the current Paseo
 agent id to the thread before the command reads or mutates state.
 
@@ -181,7 +180,7 @@ corresponding OpenSpec proposal.
 
 `/meow-archive` performs the normal archive path: archive the OpenSpec change
 according to the repository workflow, then run `mfl thread archive` to release
-the workspace.
+the worktree.
 
 `/meow-archive delete` archives the MeowFlow thread and deletes the open
 OpenSpec proposal directory without reverting code changes. This gives users a
@@ -192,7 +191,7 @@ quick thread cleanup.
 
 Update `docs/interactive-mode.md` from the current manual-role command guide
 into the detailed guide for the `meow-flow` entry workflow. The page should
-explain the startup status check, workspace-root guidance, stage-agent
+explain the startup status check, worktree-root guidance, stage-agent
 launches, current-thread handoffs, commit/archive/delete actions, and how the
 legacy role commands relate to the core skill. Keep command examples short and
 operational.
@@ -268,8 +267,8 @@ flowchart LR
 - [Agent id parsing depends on `paseo run` output] -> Centralize parsing in
   the Paseo command adapter and add fake-Paseo tests for success and malformed
   output.
-- [Existing users know `worktree`, not `workspace`] -> Add `workspace` as an
-  alias and keep `worktree` fully supported.
+- [Worktree terminology can drift] -> Keep skills, docs, diagnostics, and
+  command examples using `worktree` consistently.
 - [Mermaid diagrams can become stale] -> Keep them in both README and
   interactive-mode docs using the same transition labels from the core
   `meow-flow` skill.

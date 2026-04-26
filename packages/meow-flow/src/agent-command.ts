@@ -38,11 +38,12 @@ function createAgentUpdateSelfCommand(): Command {
             "Current agent skill could not be detected. Expected one of meow-plan, meow-code, meow-review, meow-execute, meow-validate, or meow-archive.",
           );
         }
+        const skill = inferred.skill;
 
         invokePaseoAgentUpdate({
           agentId: currentAgentId,
           threadId: current.threadId,
-          skill: inferred.skill,
+          skill,
         });
 
         const now = new Date().toISOString();
@@ -51,7 +52,7 @@ function createAgentUpdateSelfCommand(): Command {
             threadId: current.threadId,
             agentId: currentAgentId,
             title: inferred.title,
-            skill: inferred.skill,
+            skill,
             now,
           });
         });
@@ -60,7 +61,7 @@ function createAgentUpdateSelfCommand(): Command {
           [
             `agent-id: ${currentAgentId}`,
             `thread-id: ${current.threadId}`,
-            `skill: ${inferred.skill}`,
+            `skill: ${skill}`,
             "",
           ].join("\n"),
         );

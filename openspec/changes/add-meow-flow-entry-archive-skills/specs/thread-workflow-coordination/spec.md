@@ -3,47 +3,46 @@
 ### Requirement: `mfl status` reports the current MeowFlow thread context
 
 The CLI SHALL provide `mfl status` to report whether the current directory is
-inside an active MeowFlow workspace, an idle MeowFlow workspace, the repository
+inside an active MeowFlow worktree, an idle MeowFlow worktree, the repository
 root, or outside a git repository.
 
-#### Scenario: Status reports occupied workspace
+#### Scenario: Status reports occupied worktree
 
-- **WHEN** the current directory is inside a linked MeowFlow workspace
-- **AND** that workspace is occupied by thread `install-meow-flow-skills`
+- **WHEN** the current directory is inside a linked MeowFlow worktree
+- **AND** that worktree is occupied by thread `install-meow-flow-skills`
 - **AND** the latest known Paseo agent id for that thread is `123456`
-- **THEN** `mfl status` reports that the workspace is occupied by thread
+- **THEN** `mfl status` reports that the worktree is occupied by thread
   `install-meow-flow-skills`
 - **AND** it reports Paseo agent id `123456`
 
-#### Scenario: Status suggests workspace creation from repository root
+#### Scenario: Status suggests worktree creation from repository root
 
 - **WHEN** the current directory is the root checkout for a git repository
 - **AND** no current MeowFlow thread is associated with that checkout
-- **THEN** `mfl status` reports that no MeowFlow workspace is selected
-- **AND** it suggests `mfl workspace new`
+- **THEN** `mfl status` reports that no MeowFlow worktree is selected
+- **AND** it suggests `mfl worktree new`
 
 #### Scenario: Status fails outside git
 
 - **WHEN** a user runs `mfl status` outside a git-managed folder
 - **THEN** the command exits with a diagnostic explaining that it must be run
-  inside a git repository or MeowFlow workspace
+  inside a git repository or MeowFlow worktree
 
-### Requirement: `mfl workspace` aliases the existing worktree commands
+### Requirement: `mfl worktree` remains the worktree management command group
 
-The CLI SHALL provide `mfl workspace` as an alias for the existing
-`mfl worktree` command group so user-facing thread guidance can use the
-workspace term without removing worktree commands.
+The CLI SHALL continue to provide `mfl worktree` for creating, listing, and
+removing linked Git worktrees used by MeowFlow threads.
 
-#### Scenario: Workspace new creates the next linked worktree
+#### Scenario: Worktree new creates the next linked worktree
 
-- **WHEN** a user runs `mfl workspace new`
-- **THEN** the CLI performs the same operation as `mfl worktree new`
-- **AND** the output identifies the created linked workspace path
+- **WHEN** a user runs `mfl worktree new`
+- **THEN** the CLI creates the next linked Git worktree
+- **AND** the output identifies the created linked worktree path
 
-#### Scenario: Workspace list matches worktree list
+#### Scenario: Worktree list remains available
 
-- **WHEN** a user runs `mfl workspace ls`
-- **THEN** the CLI performs the same operation as `mfl worktree ls`
+- **WHEN** a user runs `mfl worktree ls`
+- **THEN** the CLI lists linked Git worktrees available to MeowFlow
 
 ### Requirement: `mfl thread status` renders persisted thread metadata
 
@@ -80,7 +79,7 @@ thread's readable name.
 
 #### Scenario: Plan agent sets a readable thread name
 
-- **WHEN** the current workspace belongs to thread `fix-test-ci`
+- **WHEN** the current worktree belongs to thread `fix-test-ci`
 - **AND** a plan agent runs `mfl thread set name 'install-meow-flow-skills'`
 - **THEN** the thread status for `fix-test-ci` reports name
   `install-meow-flow-skills`
@@ -102,7 +101,7 @@ the current thread info.
 
 - **WHEN** the current chat is Paseo agent `123456`
 - **AND** the agent logs show that `meow-plan` is active
-- **AND** the current workspace belongs to thread `fix-test-ci`
+- **AND** the current worktree belongs to thread `fix-test-ci`
 - **THEN** `mfl agent update-self` calls `paseo agent update` for agent
   `123456` with MeowFlow thread metadata
 - **AND** thread status for `fix-test-ci` includes agent `123456` with skill
@@ -177,19 +176,19 @@ The CLI SHALL provide `mfl handoff get -n <count>` and
 - **THEN** the output includes handoff sequences `2` and `3`
 - **AND** the output does not include handoff sequence `1`
 
-### Requirement: `mfl thread archive` archives the current thread and releases the workspace
+### Requirement: `mfl thread archive` archives the current thread and releases the worktree
 
 The CLI SHALL provide `mfl thread archive` to mark the current thread archived
-and release the occupied workspace without deleting the workspace folder or
+and release the occupied worktree without deleting the worktree folder or
 reverting code changes.
 
-#### Scenario: Archive releases current workspace
+#### Scenario: Archive releases current worktree
 
-- **WHEN** the current workspace is occupied by thread `fix-test-ci`
+- **WHEN** the current worktree is occupied by thread `fix-test-ci`
 - **AND** a user runs `mfl thread archive`
 - **THEN** the CLI marks thread `fix-test-ci` archived
-- **AND** it releases the workspace occupation
-- **AND** it does not delete the workspace folder
+- **AND** it releases the worktree occupation
+- **AND** it does not delete the worktree folder
 
 #### Scenario: Archived thread appears archived in status
 

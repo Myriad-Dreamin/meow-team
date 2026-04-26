@@ -37,13 +37,27 @@ Install `mfl` with one of these options:
 ## Get Started
 
 ```text
+mfl install-skills codex
 mfl worktree new
-mfl run "Create a echo hello script."
-// You'll see the agent started in the paseo's webapp
+/meow-flow Create a echo hello script.
 ```
 
-`mfl run` launches a Paseo agent in a linked git worktree and passes the request
-through unchanged.
+`/meow-flow` and `/mfl` are the entry skills. They inspect `mfl status`, launch
+the first plan agent in a linked Git worktree, and coordinate later stages
+through persisted thread state and handoffs.
+
+For a small human-verified change, the minimal path can be:
+
+```text
+/meow-flow add a focused CLI help example
+/mfl code
+/mfl delete
+```
+
+That path plans, implements, and then deletes the temporary open proposal
+artifacts while keeping the code changes. Review remains available with
+`/mfl review`, but it is not mandatory for simple changes the human verifies
+directly.
 
 ## Philosophy
 
@@ -67,25 +81,84 @@ Execute mode is a variant of the Plan-Code-Review workflow with an additional `m
 
 ## Usage
 
-Start a MeowFlow agent with `mfl run`:
+Start from an installed skill:
 
-```bash
-mfl worktree new
-mfl run "implement user authentication"
-mfl run --id auth-flow "implement user authentication and add tests"
+```text
+/meow-flow implement user authentication
+/mfl code add tests too
+/mfl review focus on auth edge cases
 ```
 
-MeowFlow discovers workspaces with `git worktree list --porcelain`. You can
+The underlying CLI can also launch staged agents directly:
+
+```bash
+mfl run --stage plan "implement user authentication"
+mfl run --stage code "implement the approved plan"
+mfl run --stage review
+```
+
+MeowFlow discovers worktrees with `git worktree list --porcelain`. You can
 create worktrees with MeowFlow or with plain `git worktree add`; either way,
 `mfl run` can use them.
 
 Worktree helpers:
 
 ```bash
-mfl worktree new                    # creates .paseo-workspaces/paseo-{N+1}
+mfl worktree new                    # creates .paseo-worktrees/paseo-{N+1}
 mfl worktree new --branch auth-flow # use a specific branch name
 mfl worktree ls                     # alias: mfl worktree list
 mfl worktree rm paseo-1             # alias: mfl worktree remove paseo-1
+```
+
+Thread coordination commands:
+
+```bash
+mfl status
+mfl thread status <id> --no-color
+mfl thread set name install-auth-flow
+mfl handoff append --stage code "implemented auth form; tests passed"
+mfl handoff get -n 5
+mfl thread archive
+```
+
+Plan, code, review transitions:
+
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Code[code agent]
+  Plan --> CommitA[commit action]
+  Plan --> DeleteA[delete action]
+  Code --> Plan
+  Code --> Review[review agent]
+  Code --> Archive[archive agent]
+  Code --> CommitB[commit action]
+  Code --> DeleteB[delete action]
+  Review --> Plan
+  Review --> Code
+  Review --> Archive
+  Review --> CommitC[commit action]
+  Review --> DeleteC[delete action]
+  Code --> Execute[execute agent]
+  Review --> Execute
+```
+
+Plan, execute, validate transitions:
+
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Execute[execute agent]
+  Plan --> CommitA[commit action]
+  Plan --> DeleteA[delete action]
+  Execute --> Plan
+  Execute --> Validate[validate agent]
+  Execute --> Archive[archive agent]
+  Execute --> CommitB[commit action]
+  Execute --> DeleteB[delete action]
+  Validate --> Plan
+  Validate --> Execute
+  Validate --> Archive
+  Validate --> CommitC[commit action]
+  Validate --> DeleteC[delete action]
 ```
 
 Paseo's CLI remains available for direct agent management:

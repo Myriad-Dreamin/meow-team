@@ -18,8 +18,8 @@ instead of relying on chat history alone.
   `meow-validate` so shared thread orchestration rules live in `meow-flow` and
   role skills refer back to it instead of duplicating harness workflow text.
 - Extend `mfl run`, `mfl status`, `mfl thread`, `mfl agent`, and `mfl handoff`
-  behavior so skills can discover workspace occupancy, launch staged agents,
-  name threads, append/read handoffs, and archive or release workspaces.
+  behavior so skills can discover worktree occupancy, launch staged agents,
+  name threads, append/read handoffs, and archive or release worktrees.
 - Preserve the existing linked-worktree launch model while making stages,
   thread names, request bodies, agent metadata, and handoff sequence numbers
   explicit in MeowFlow state.
@@ -43,7 +43,7 @@ instead of relying on chat history alone.
 
 ### Modified Capabilities
 
-- `thread-workspace-occupancy`: Updates `mfl run` from an opaque request-body
+- `thread-worktree-occupancy`: Updates `mfl run` from an opaque request-body
   launcher into a stage-aware thread launcher that can create the initial plan
   thread or add stage agents to an occupied thread.
 
@@ -57,7 +57,7 @@ instead of relying on chat history alone.
   `thread status`, `thread set name`, `thread archive`, and `handoff`
   append/get.
 - `packages/meow-flow` storage schema and tests for thread request bodies,
-  stages, agents, handoffs, archive state, and workspace release behavior.
+  stages, agents, handoffs, archive state, and worktree release behavior.
 - Documentation in `docs/interactive-mode.md`, the root README, and package
   README for `/meow-flow`, `/mfl`, `/meow-archive`, minimal staged examples,
   and Mermaid workflow diagrams.

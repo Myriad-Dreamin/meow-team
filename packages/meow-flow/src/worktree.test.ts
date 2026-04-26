@@ -124,20 +124,20 @@ describe("mfl worktree", () => {
     const aliasRemoveResult = runCli(["worktree", "remove", "paseo-2"], repositoryRoot);
 
     expect(firstCreate.status).toBe(0);
-    expect(firstCreate.stdout).toContain(".paseo-workspaces/paseo-1 mfl-test-1");
+    expect(firstCreate.stdout).toContain(".paseo-worktrees/paseo-1 mfl-test-1");
     expect(secondCreate.status).toBe(0);
-    expect(secondCreate.stdout).toMatch(/\.paseo-workspaces\/paseo-2 mfl-[0-9a-f]{8}/);
+    expect(secondCreate.stdout).toMatch(/\.paseo-worktrees\/paseo-2 mfl-[0-9a-f]{8}/);
     expect(listResult.status).toBe(0);
-    expect(listResult.stdout).toContain(".paseo-workspaces/paseo-1 mfl-test-1");
-    expect(listResult.stdout).toContain(".paseo-workspaces/paseo-2 mfl-");
+    expect(listResult.stdout).toContain(".paseo-worktrees/paseo-1 mfl-test-1");
+    expect(listResult.stdout).toContain(".paseo-worktrees/paseo-2 mfl-");
     expect(aliasListResult.stdout).toBe(listResult.stdout);
     expect(removeResult.status).toBe(0);
-    expect(removeResult.stdout).toContain(".paseo-workspaces/paseo-1 mfl-test-1 removed");
+    expect(removeResult.stdout).toContain(".paseo-worktrees/paseo-1 mfl-test-1 removed");
     expect(aliasRemoveResult.status).toBe(0);
 
     const gitWorktreeList = readGitWorktreeList(repositoryRoot);
-    expect(gitWorktreeList).not.toContain(".paseo-workspaces/paseo-1");
-    expect(gitWorktreeList).not.toContain(".paseo-workspaces/paseo-2");
+    expect(gitWorktreeList).not.toContain(".paseo-worktrees/paseo-1");
+    expect(gitWorktreeList).not.toContain(".paseo-worktrees/paseo-2");
   });
 
   test("lists worktrees that were created outside mfl", () => {

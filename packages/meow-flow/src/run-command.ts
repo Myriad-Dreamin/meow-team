@@ -13,7 +13,7 @@ import {
   deriveLatestStage,
   ensureThread,
   getActiveOccupationForThread,
-  getActiveOccupationForWorkspace,
+  getActiveOccupationForWorktree,
   getNextHandoffSequence,
   getThread,
   isThreadArchived,
@@ -47,7 +47,7 @@ type PaseoRunResult =
 
 type ResolvedRunTarget = {
   readonly threadId: string;
-  readonly workspacePath: string;
+  readonly worktreePath: string;
   readonly stage: MeowFlowStage;
   readonly requestBody: string;
   readonly freshAllocation: boolean;
@@ -55,7 +55,7 @@ type ResolvedRunTarget = {
 
 export function createRunCommand(): Command {
   return new Command("run")
-    .description("Launch a staged MeowFlow Paseo agent in a git workspace")
+    .description("Launch a staged MeowFlow Paseo agent in a git worktree")
     .option("--id <id>", "use an explicit MeowFlow thread id instead of generating a UUID")
     .option("--stage <stage>", "stage to launch: plan, code, review, execute, or validate")
     .argument("[request-body]", "request body or stage-specific continuation text")
@@ -75,7 +75,7 @@ export function createRunCommand(): Command {
           threadId: target.threadId,
           stage: target.stage,
           requestBody: target.requestBody,
-          cwd: target.workspacePath,
+          cwd: target.worktreePath,
         });
 
         if (!paseoRunResult.ok) {
@@ -102,7 +102,7 @@ export function createRunCommand(): Command {
         process.stdout.write(
           [
             `Thread: ${target.threadId}`,
-            `Workspace: ${formatWorktreePath(context.repositoryRoot, target.workspacePath)}`,
+            `Worktree: ${formatWorktreePath(context.repositoryRoot, target.worktreePath)}`,
             `stage: ${target.stage}`,
             `agent-id: ${paseoRunResult.agentId}`,
             `next-seq: ${nextSeq}`,
@@ -137,19 +137,27 @@ function resolveRunTarget(input: {
 }): ResolvedRunTarget {
   const requestedStage = parseStage(input.explicitStage);
   const state = readMeowFlowState(input.context.repositoryRoot);
-  const currentOccupation = getActiveOccupationForWorkspace(state, input.context.currentWorktreeRoot);
+  const currentOccupation = getActiveOccupationForWorktree(
+    state,
+    input.context.currentWorktreeRoot,
+  );
   const trimmedRequestBody = input.requestBody.trim();
 
   if (currentOccupation) {
-    if (input.explicitThreadId !== undefined && input.explicitThreadId.trim() !== currentOccupation.threadId) {
+    if (
+      input.explicitThreadId !== undefined &&
+      input.explicitThreadId.trim() !== currentOccupation.threadId
+    ) {
       throw new Error(
-        `Current workspace is occupied by thread ${currentOccupation.threadId}; cannot launch thread ${input.explicitThreadId.trim()}.`,
+        `Current worktree is occupied by thread ${currentOccupation.threadId}; cannot launch thread ${input.explicitThreadId.trim()}.`,
       );
     }
 
     const thread = getThread(state, currentOccupation.threadId);
     if (thread && isThreadArchived(thread)) {
-      throw new Error(`Archived threads cannot launch new stage agents: ${currentOccupation.threadId}`);
+      throw new Error(
+        `Archived threads cannot launch new stage agents: ${currentOccupation.threadId}`,
+      );
     }
 
     const existingAgentCount = thread?.agents.length ?? 0;
@@ -159,7 +167,7 @@ function resolveRunTarget(input: {
 
     return {
       threadId: currentOccupation.threadId,
-      workspacePath: currentOccupation.workspacePath,
+      worktreePath: currentOccupation.worktreePath,
       stage: requestedStage ?? "plan",
       requestBody: input.requestBody,
       freshAllocation: false,
@@ -170,9 +178,9 @@ function resolveRunTarget(input: {
   const activeForThread = getActiveOccupationForThread(state, threadId);
   if (activeForThread) {
     throw new Error(
-      `Thread ${threadId} is already running in workspace ${formatWorktreePath(
+      `Thread ${threadId} is already running in worktree ${formatWorktreePath(
         input.context.repositoryRoot,
-        activeForThread.workspacePath,
+        activeForThread.worktreePath,
       )}.`,
     );
   }
@@ -189,7 +197,7 @@ function resolveRunTarget(input: {
     throw new Error("Request body is required for a new MeowFlow thread.");
   }
 
-  const workspace = selectWorkspaceForNewThread(input.context, state);
+  const worktree = selectWorktreeForNewThread(input.context, state);
   const stage = requestedStage ?? deriveDefaultStage(existingThread);
   const now = new Date().toISOString();
 
@@ -200,14 +208,14 @@ function resolveRunTarget(input: {
     });
     recordOccupation(mutableState, {
       threadId,
-      workspacePath: workspace.path,
+      worktreePath: worktree.path,
       now,
     });
   });
 
   return {
     threadId,
-    workspacePath: workspace.path,
+    worktreePath: worktree.path,
     stage,
     requestBody: input.requestBody,
     freshAllocation: true,
@@ -227,7 +235,7 @@ function deriveDefaultStage(thread: ThreadRecord | null): MeowFlowStage {
   return latestStage;
 }
 
-function selectWorkspaceForNewThread(
+function selectWorktreeForNewThread(
   context: GitWorktreeContext,
   state: ReturnType<typeof readMeowFlowState>,
 ): GitWorktree {
@@ -236,10 +244,13 @@ function selectWorkspaceForNewThread(
     (worktree) => worktree.path === context.currentWorktreeRoot,
   );
   const candidates = currentLinkedWorktree
-    ? [currentLinkedWorktree, ...linkedWorktrees.filter((worktree) => worktree !== currentLinkedWorktree)]
+    ? [
+        currentLinkedWorktree,
+        ...linkedWorktrees.filter((worktree) => worktree !== currentLinkedWorktree),
+      ]
     : linkedWorktrees;
   const availableWorktree = candidates.find(
-    (worktree) => !getActiveOccupationForWorkspace(state, worktree.path),
+    (worktree) => !getActiveOccupationForWorktree(state, worktree.path),
   );
 
   if (availableWorktree) {
@@ -247,12 +258,12 @@ function selectWorkspaceForNewThread(
   }
 
   if (linkedWorktrees.length === 0) {
-    throw new Error("No idle thread workspace is available. Create one with: mfl workspace new");
+    throw new Error("No idle thread worktree is available. Create one with: mfl worktree new");
   }
 
   const occupied = linkedWorktrees
     .map((worktree) => {
-      const occupation = getActiveOccupationForWorkspace(state, worktree.path);
+      const occupation = getActiveOccupationForWorktree(state, worktree.path);
       if (!occupation) {
         return null;
       }
@@ -264,7 +275,7 @@ function selectWorkspaceForNewThread(
     .filter((entry): entry is string => entry !== null);
 
   throw new Error(
-    `No idle thread workspace is available. Occupied workspaces: ${occupied.join(", ")}. Create one with: mfl workspace new`,
+    `No idle thread worktree is available. Occupied worktrees: ${occupied.join(", ")}. Create one with: mfl worktree new`,
   );
 }
 
@@ -272,7 +283,7 @@ function rollbackFreshAllocation(repositoryRoot: string, target: ResolvedRunTarg
   updateMeowFlowState(repositoryRoot, (state) => {
     removeActiveOccupation(state, {
       threadId: target.threadId,
-      workspacePath: target.workspacePath,
+      worktreePath: target.worktreePath,
     });
   });
 }
@@ -368,7 +379,9 @@ function composeStagePrompt(stage: MeowFlowStage, requestBody: string): string {
   return `${command} ${requestBody}`;
 }
 
-function parsePaseoRunOutput(stdout: string): { readonly agentId: string; readonly title: string | null } | null {
+function parsePaseoRunOutput(
+  stdout: string,
+): { readonly agentId: string; readonly title: string | null } | null {
   try {
     const parsed = JSON.parse(stdout) as unknown;
 

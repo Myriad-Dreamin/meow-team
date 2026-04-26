@@ -7,14 +7,14 @@ import {
 } from "./git-worktrees.js";
 import {
   deriveLatestStage,
-  getActiveOccupationForWorkspace,
+  getActiveOccupationForWorktree,
   getThread,
   readMeowFlowState,
 } from "./thread-state.js";
 
 export function createStatusCommand(): Command {
   return new Command("status")
-    .description("Show the current MeowFlow thread and workspace context")
+    .description("Show the current MeowFlow thread and worktree context")
     .action((_options: unknown, command: Command) => {
       try {
         const context = resolveGitWorktreeContext({
@@ -22,7 +22,7 @@ export function createStatusCommand(): Command {
           commandName: "mfl status",
         });
         const state = readMeowFlowState(context.repositoryRoot);
-        const occupation = getActiveOccupationForWorkspace(state, context.currentWorktreeRoot);
+        const occupation = getActiveOccupationForWorktree(state, context.currentWorktreeRoot);
 
         if (occupation) {
           const thread = getThread(state, occupation.threadId);
@@ -32,7 +32,7 @@ export function createStatusCommand(): Command {
               "status: occupied",
               `thread-id: ${occupation.threadId}`,
               `thread-name: ${thread?.name ?? occupation.threadId}`,
-              `workspace: ${formatWorktreePath(context.repositoryRoot, occupation.workspacePath)}`,
+              `worktree: ${formatWorktreePath(context.repositoryRoot, occupation.worktreePath)}`,
               `stage: ${thread ? deriveLatestStage(thread) : "plan"}`,
               `agent-id: ${latestAgent?.id ?? "unknown"}`,
               "",
@@ -49,8 +49,8 @@ export function createStatusCommand(): Command {
           process.stdout.write(
             [
               "status: idle",
-              `workspace: ${formatWorktreePath(context.repositoryRoot, currentLinkedWorktree.path)}`,
-              "No MeowFlow thread is active in this workspace.",
+              `worktree: ${formatWorktreePath(context.repositoryRoot, currentLinkedWorktree.path)}`,
+              "No MeowFlow thread is active in this worktree.",
               "",
             ].join("\n"),
           );
@@ -60,14 +60,14 @@ export function createStatusCommand(): Command {
         process.stdout.write(
           [
             "status: repository-root",
-            "No MeowFlow workspace selected.",
-            "Create one with: mfl workspace new",
+            "No MeowFlow worktree selected.",
+            "Create one with: mfl worktree new",
             "",
           ].join("\n"),
         );
       } catch (error) {
         if (error instanceof GitRepositoryRequiredError) {
-          command.error("mfl status must be run inside a git repository or MeowFlow workspace.");
+          command.error("mfl status must be run inside a git repository or MeowFlow worktree.");
           return;
         }
 

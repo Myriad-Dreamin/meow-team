@@ -81,9 +81,12 @@ function createHandoffGetCommand(): Command {
           throw new Error(`Thread not found: ${current.threadId}`);
         }
 
+        const since = options.since;
         const handoffs =
-          options.since !== undefined
-            ? thread.handoffs.filter((handoff) => handoff.seq >= parsePositiveInteger(options.since, "--since"))
+          since !== undefined
+            ? thread.handoffs.filter(
+                (handoff) => handoff.seq >= parsePositiveInteger(since, "--since"),
+              )
             : thread.handoffs.slice(-parsePositiveInteger(options.count ?? "10", "-n/--count"));
 
         process.stdout.write(`${formatHandoffs(handoffs)}\n`);

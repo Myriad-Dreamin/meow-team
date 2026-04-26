@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { resolveGitWorktreeContext } from "./git-worktrees.js";
 import {
   formatThreadStatus,
-  getActiveOccupationForWorkspace,
+  getActiveOccupationForWorktree,
   getThread,
   isThreadArchived,
   readMeowFlowState,
@@ -87,7 +87,7 @@ function createThreadSetNameCommand(): Command {
 
 function createThreadArchiveCommand(): Command {
   return new Command("archive")
-    .description("Archive the current MeowFlow thread and release this workspace")
+    .description("Archive the current MeowFlow thread and release this worktree")
     .action((_options: unknown, command: Command) => {
       try {
         const current = resolveCurrentThread("mfl thread archive");
@@ -105,7 +105,7 @@ function createThreadArchiveCommand(): Command {
           });
           releaseActiveOccupation(state, {
             threadId: current.threadId,
-            workspacePath: current.workspacePath,
+            worktreePath: current.worktreePath,
             now,
           });
         });
@@ -120,14 +120,14 @@ function createThreadArchiveCommand(): Command {
 export function resolveCurrentThread(commandName: string): {
   readonly context: ReturnType<typeof resolveGitWorktreeContext>;
   readonly threadId: string;
-  readonly workspacePath: string;
+  readonly worktreePath: string;
 } {
   const context = resolveGitWorktreeContext({
     cwd: process.cwd(),
     commandName,
   });
   const state = readMeowFlowState(context.repositoryRoot);
-  const occupation = getActiveOccupationForWorkspace(state, context.currentWorktreeRoot);
+  const occupation = getActiveOccupationForWorktree(state, context.currentWorktreeRoot);
 
   if (!occupation) {
     throw new Error("No current MeowFlow thread could be resolved.");
@@ -141,6 +141,6 @@ export function resolveCurrentThread(commandName: string): {
   return {
     context,
     threadId: occupation.threadId,
-    workspacePath: occupation.workspacePath,
+    worktreePath: occupation.worktreePath,
   };
 }

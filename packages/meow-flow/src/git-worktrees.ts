@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
-const DEFAULT_WORKTREE_DIRECTORY_NAME = ".paseo-workspaces";
+const DEFAULT_WORKTREE_DIRECTORY_NAME = ".paseo-worktrees";
 const DEFAULT_WORKTREE_BASENAME_PATTERN = /^paseo-(\d+)$/;
 
 export type GitWorktree = {

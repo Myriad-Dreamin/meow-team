@@ -38,7 +38,7 @@ export type ThreadRecord = {
 
 export type ThreadOccupationRecord = {
   readonly threadId: string;
-  readonly workspacePath: string;
+  readonly worktreePath: string;
   readonly createdAt: string;
   readonly releasedAt: string | null;
 };
@@ -184,9 +184,7 @@ export function isThreadArchived(thread: ThreadRecord): boolean {
 }
 
 export function getNextHandoffSequence(thread: ThreadRecord): number {
-  return (
-    thread.handoffs.reduce((max, handoff) => Math.max(max, handoff.seq), 0) + 1
-  );
+  return thread.handoffs.reduce((max, handoff) => Math.max(max, handoff.seq), 0) + 1;
 }
 
 export function getThread(state: MeowFlowState, threadId: string): ThreadRecord | null {
@@ -240,16 +238,17 @@ export function replaceThread(state: MutableMeowFlowState, thread: ThreadRecord)
   state.threads.splice(index, 1, thread);
 }
 
-export function getActiveOccupationForWorkspace(
+export function getActiveOccupationForWorktree(
   state: MeowFlowState,
-  workspacePath: string,
+  worktreePath: string,
 ): ThreadOccupationRecord | null {
-  const resolvedWorkspacePath = path.resolve(workspacePath);
+  const resolvedWorktreePath = path.resolve(worktreePath);
 
   return (
     state.occupations.find(
       (occupation) =>
-        occupation.releasedAt === null && path.resolve(occupation.workspacePath) === resolvedWorkspacePath,
+        occupation.releasedAt === null &&
+        path.resolve(occupation.worktreePath) === resolvedWorktreePath,
     ) ?? null
   );
 }
@@ -269,27 +268,27 @@ export function recordOccupation(
   state: MutableMeowFlowState,
   input: {
     readonly threadId: string;
-    readonly workspacePath: string;
+    readonly worktreePath: string;
     readonly now: string;
   },
 ): ThreadOccupationRecord {
-  const activeForWorkspace = getActiveOccupationForWorkspace(state, input.workspacePath);
-  if (activeForWorkspace) {
+  const activeForWorktree = getActiveOccupationForWorktree(state, input.worktreePath);
+  if (activeForWorktree) {
     throw new Error(
-      `Workspace is already occupied by thread ${activeForWorkspace.threadId}: ${input.workspacePath}`,
+      `Worktree is already occupied by thread ${activeForWorktree.threadId}: ${input.worktreePath}`,
     );
   }
 
   const activeForThread = getActiveOccupationForThread(state, input.threadId);
   if (activeForThread) {
     throw new Error(
-      `Thread ${input.threadId} is already running in workspace ${activeForThread.workspacePath}.`,
+      `Thread ${input.threadId} is already running in worktree ${activeForThread.worktreePath}.`,
     );
   }
 
   const occupation: ThreadOccupationRecord = {
     threadId: input.threadId,
-    workspacePath: path.resolve(input.workspacePath),
+    worktreePath: path.resolve(input.worktreePath),
     createdAt: input.now,
     releasedAt: null,
   };
@@ -302,17 +301,17 @@ export function removeActiveOccupation(
   state: MutableMeowFlowState,
   input: {
     readonly threadId: string;
-    readonly workspacePath: string;
+    readonly worktreePath: string;
   },
 ): void {
-  const resolvedWorkspacePath = path.resolve(input.workspacePath);
+  const resolvedWorktreePath = path.resolve(input.worktreePath);
 
   state.occupations = state.occupations.filter(
     (occupation) =>
       !(
         occupation.releasedAt === null &&
         occupation.threadId === input.threadId &&
-        path.resolve(occupation.workspacePath) === resolvedWorkspacePath
+        path.resolve(occupation.worktreePath) === resolvedWorktreePath
       ),
   );
 }
@@ -321,17 +320,17 @@ export function releaseActiveOccupation(
   state: MutableMeowFlowState,
   input: {
     readonly threadId: string;
-    readonly workspacePath: string;
+    readonly worktreePath: string;
     readonly now: string;
   },
 ): void {
-  const resolvedWorkspacePath = path.resolve(input.workspacePath);
+  const resolvedWorktreePath = path.resolve(input.worktreePath);
 
   state.occupations = state.occupations.map((occupation) => {
     if (
       occupation.releasedAt === null &&
       occupation.threadId === input.threadId &&
-      path.resolve(occupation.workspacePath) === resolvedWorkspacePath
+      path.resolve(occupation.worktreePath) === resolvedWorktreePath
     ) {
       return {
         ...occupation,
@@ -451,16 +450,16 @@ function normalizeOccupation(value: unknown): ThreadOccupationRecord | null {
   }
 
   const threadId = readString(value.threadId);
-  const workspacePath = readString(value.workspacePath);
+  const worktreePath = readString(value.worktreePath) ?? readString(value.workspacePath);
   const createdAt = readString(value.createdAt) ?? new Date(0).toISOString();
 
-  if (!threadId || !workspacePath) {
+  if (!threadId || !worktreePath) {
     return null;
   }
 
   return {
     threadId,
-    workspacePath: path.resolve(workspacePath),
+    worktreePath: path.resolve(worktreePath),
     createdAt,
     releasedAt: readString(value.releasedAt),
   };
