@@ -73,13 +73,30 @@ MeowFlow and can be used by `mfl run`.
 
 ```bash
 mfl run --stage plan "implement user authentication"
+mfl run --stage plan --provider codex/gpt-5.4 "implement user authentication"
 mfl run --id auth-flow --stage plan "implement user authentication and add tests"
 mfl run --stage code "implement the approved plan"
+mfl run --stage code --provider opencode "implement the approved plan"
 mfl run --stage review
 ```
 
 For a new thread with no agents, `plan` is the default stage. After a thread
 has agents, pass `--stage plan|code|review|execute|validate`.
+
+`mfl run --provider <provider>` selects the Paseo provider for both initial
+plan launches and continuation stage launches. When the flag is omitted,
+MeowFlow reads the run-provider config at
+`~/.local/share/meow-flow/config.json`, then falls back to `claude`.
+
+```json
+{
+  "provider": "codex/gpt-5.4"
+}
+```
+
+Provider values are passed through to Paseo as opaque provider or
+provider/model strings. Run `paseo provider ls` to inspect providers available
+on the local daemon.
 
 The resolved thread id is sent to Paseo as a label:
 
@@ -92,6 +109,8 @@ x-meow-flow-id=<thread-id>
 ```text
 thread-id: <thread-id>
 worktree: <path>
+stage: <stage>
+provider: <provider>
 agent-id: <id>
 next-seq: <seq>
 ```

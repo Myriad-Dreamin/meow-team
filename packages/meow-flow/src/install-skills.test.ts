@@ -106,9 +106,12 @@ describe("mfl install-skills", () => {
     expect(
       readFileSync(path.join(claudeConfigDir, "skills", "meow-plan", "SKILL.md"), "utf8"),
     ).toContain("name: meow-plan");
-    expect(readFileSync(path.join(codexHome, "skills", "meow-flow", "SKILL.md"), "utf8")).toContain(
-      "name: meow-flow",
+    const installedMeowFlowSkill = readFileSync(
+      path.join(codexHome, "skills", "meow-flow", "SKILL.md"),
+      "utf8",
     );
+    expect(installedMeowFlowSkill).toContain("name: meow-flow");
+    expect(installedMeowFlowSkill).toContain("mfl run --stage plan --provider <provider>");
     expect(
       readFileSync(path.join(codexHome, "skills", "meow-archive", "SKILL.md"), "utf8"),
     ).toContain("name: meow-archive");
