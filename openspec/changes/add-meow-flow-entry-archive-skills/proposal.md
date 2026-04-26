@@ -23,13 +23,20 @@ instead of relying on chat history alone.
 - Preserve the existing linked-worktree launch model while making stages,
   thread names, request bodies, agent metadata, and handoff sequence numbers
   explicit in MeowFlow state.
+- Update `docs/interactive-mode.md` with detailed `/meow-flow` interactive
+  behavior, handoff expectations, archive/delete behavior, and Mermaid
+  transition diagrams for code/review and execute/validate workflows.
+- Update the root README with a minimal "plan then code then delete" example
+  for simple changes that a human verifies quickly, where the OpenSpec
+  proposal is treated as temporary and deleted instead of archived.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `meow-agent-skills`: Defines the bundled `meow-flow`, `meow-archive`, and
-  role-skill command contracts installed by `mfl install-skills`.
+- `meow-agent-skills`: Defines the bundled `meow-flow`, `meow-archive`,
+  role-skill command contracts, and user-facing workflow documentation
+  installed or referenced by MeowFlow.
 - `thread-workflow-coordination`: Defines staged thread metadata, status,
   handoffs, self-updates, and archive/delete lifecycle commands used by the
   skills.
@@ -51,5 +58,6 @@ instead of relying on chat history alone.
   append/get.
 - `packages/meow-flow` storage schema and tests for thread request bodies,
   stages, agents, handoffs, archive state, and workspace release behavior.
-- Documentation in the root and package READMEs for `/meow-flow`, `/mfl`, and
-  `/meow-archive` usage.
+- Documentation in `docs/interactive-mode.md`, the root README, and package
+  README for `/meow-flow`, `/mfl`, `/meow-archive`, minimal staged examples,
+  and Mermaid workflow diagrams.

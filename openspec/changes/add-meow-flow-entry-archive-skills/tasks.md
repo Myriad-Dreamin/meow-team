@@ -39,9 +39,12 @@
 
 ## 5. Documentation
 
-- [ ] 5.1 Update the root README to present `meow-flow` as the entry skill described in the MeowFlow usage flow.
-- [ ] 5.2 Update `packages/meow-flow/README.md` with `/meow-flow`, `/mfl`, `/meow-archive`, staged `mfl run`, status, handoff, and archive examples.
-- [ ] 5.3 Update CLI help expectations or snapshots for `status`, `workspace`, `thread`, `agent`, `handoff`, and stage-aware `run` commands.
+- [ ] 5.1 Update `docs/interactive-mode.md` with detailed `/meow-flow` and `/mfl` startup behavior, `mfl status`, workspace creation guidance, stage-agent launch behavior, handoffs, commit/archive/delete actions, and how the role skills relate to the core skill.
+- [ ] 5.2 Update the root README to present `meow-flow` as the entry skill and include a minimal "plan then code then delete" example for simple human-verified changes where proposal artifacts are temporary and deleted rather than archived.
+- [ ] 5.3 Add matching Mermaid transition diagrams to `docs/interactive-mode.md` and the root README for the plan-code-review workflow, including plan-to-code, plan-to-commit, plan-to-delete, code-to-plan, code-to-review, code-to-archive, code-to-commit, code-to-delete, review-to-plan, review-to-code, review-to-archive, review-to-commit, review-to-delete, code-to-execute, and review-to-execute transitions.
+- [ ] 5.4 Add matching Mermaid transition diagrams to `docs/interactive-mode.md` and the root README for the plan-execute-validate workflow, including plan-to-execute, plan-to-commit, plan-to-delete, execute-to-plan, execute-to-validate, execute-to-archive, execute-to-commit, execute-to-delete, validate-to-plan, validate-to-execute, validate-to-archive, validate-to-commit, and validate-to-delete transitions.
+- [ ] 5.5 Update `packages/meow-flow/README.md` with `/meow-flow`, `/mfl`, `/meow-archive`, staged `mfl run`, status, handoff, archive, and delete examples.
+- [ ] 5.6 Update CLI help expectations or snapshots for `status`, `workspace`, `thread`, `agent`, `handoff`, and stage-aware `run` commands.
 
 ## 6. Validation
 

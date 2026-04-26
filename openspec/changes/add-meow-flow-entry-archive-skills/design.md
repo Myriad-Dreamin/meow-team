@@ -49,8 +49,8 @@ The core skill documents:
 - `/meow-flow [content]` and `/mfl [content]` entry behavior.
 - `/mfl plan`, `/mfl code`, `/mfl review`, `/mfl execute`, and
   `/mfl validate` stage dispatch.
-- `/mfl commit` and `/mfl archive` continuation actions when the user returns
-  to an older agent chat after a stage agent finishes.
+- `/mfl commit`, `/mfl archive`, and `/mfl delete` continuation actions when
+  the user returns to an older agent chat after a stage agent finishes.
 - The expectation that stage agents append compact handoffs with
   `mfl handoff append --stage <stage> <content>` and later agents read recent
   handoffs with `mfl handoff get`.
@@ -188,6 +188,73 @@ OpenSpec proposal directory without reverting code changes. This gives users a
 clean exit for repositories that do not use OpenSpec, for PR-only flows, or for
 quick thread cleanup.
 
+### Documentation Shape
+
+Update `docs/interactive-mode.md` from the current manual-role command guide
+into the detailed guide for the `meow-flow` entry workflow. The page should
+explain the startup status check, workspace-root guidance, stage-agent
+launches, current-thread handoffs, commit/archive/delete actions, and how the
+legacy role commands relate to the core skill. Keep command examples short and
+operational.
+
+Update the root README with a minimal happy-path example that shows:
+
+```text
+/meow-flow <request>
+/mfl code
+/mfl delete
+```
+
+This example intentionally skips review because some changes are small enough
+for the human to verify immediately after the code agent finishes. It also
+uses delete rather than archive because the proposal is temporary in this path:
+the code change remains, but the open proposal artifacts are removed instead
+of archived. The docs should still show review and archive as available paths
+rather than mandatory steps.
+
+Both `docs/interactive-mode.md` and the root README should include Mermaid
+diagrams for the two main transition maps.
+
+Code/review workflow:
+
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Code[code agent]
+  Plan --> CommitA[commit action]
+  Plan --> DeleteA[delete action]
+  Code --> Plan
+  Code --> Review[review agent]
+  Code --> Archive[archive agent]
+  Code --> CommitB[commit action]
+  Code --> DeleteB[delete action]
+  Review --> Plan
+  Review --> Code
+  Review --> Archive
+  Review --> CommitC[commit action]
+  Review --> DeleteC[delete action]
+  Code --> Execute[execute agent]
+  Review --> Execute
+```
+
+Execute/validate workflow:
+
+```mermaid
+flowchart LR
+  Plan[plan agent] --> Execute[execute agent]
+  Plan --> CommitA[commit action]
+  Plan --> DeleteA[delete action]
+  Execute --> Plan
+  Execute --> Validate[validate agent]
+  Execute --> Archive[archive agent]
+  Execute --> CommitB[commit action]
+  Execute --> DeleteB[delete action]
+  Validate --> Plan
+  Validate --> Execute
+  Validate --> Archive
+  Validate --> CommitC[commit action]
+  Validate --> DeleteC[delete action]
+```
+
 ## Risks / Trade-offs
 
 - [Skill and CLI contracts can drift] -> Keep shared coordination text only in
@@ -203,6 +270,9 @@ quick thread cleanup.
   output.
 - [Existing users know `worktree`, not `workspace`] -> Add `workspace` as an
   alias and keep `worktree` fully supported.
+- [Mermaid diagrams can become stale] -> Keep them in both README and
+  interactive-mode docs using the same transition labels from the core
+  `meow-flow` skill.
 
 ## Migration Plan
 
@@ -213,7 +283,8 @@ quick thread cleanup.
    behavior compatible for first plan-agent launches.
 3. Add `meow-flow` and `meow-archive` source skill directories, update role
    skills, remove `team-harness-workflow`, and regenerate embedded skills.
-4. Update README usage examples and targeted tests.
+4. Update `docs/interactive-mode.md`, README usage examples, package README
+   usage examples, and targeted tests.
 5. Rollback can keep older occupation rows; newer metadata tables are ignored
    by older CLI versions.
 

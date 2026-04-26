@@ -98,6 +98,13 @@ corresponding stage agent through `mfl run --stage <stage>`.
 - **THEN** the skill follows the same current-thread archive behavior as
   `/meow-archive`
 
+#### Scenario: Delete action delegates to proposal deletion behavior
+
+- **WHEN** a user sends `/mfl delete`
+- **THEN** the skill follows the same current-thread delete behavior as
+  `/meow-archive delete`
+- **AND** the skill does not revert code changes
+
 ### Requirement: Role skills use the core thread workflow
 
 Role skills SHALL refer to the `meow-flow` skill for shared thread behavior.
@@ -174,3 +181,72 @@ delete the associated OpenSpec proposal according to the requested variant.
 - **AND** the current repository does not use OpenSpec
 - **THEN** the skill runs `mfl thread archive`
 - **AND** the skill reports that no OpenSpec proposal was archived or deleted
+
+### Requirement: Documentation describes interactive workflow and transitions
+
+MeowFlow documentation SHALL describe the `/meow-flow` interactive workflow,
+minimal staged examples, and Mermaid transition diagrams for the code/review
+and execute/validate workflows.
+
+#### Scenario: Interactive mode documents the core entry workflow
+
+- **WHEN** a user opens `docs/interactive-mode.md`
+- **THEN** the page describes `/meow-flow [content]` and `/mfl [content]` as
+  the entry commands
+- **AND** it explains the startup `mfl status` check
+- **AND** it explains that repository-root users should create a workspace with
+  `mfl workspace new`
+- **AND** it explains that stage agents coordinate through thread status and
+  handoffs
+- **AND** it documents commit, archive, and delete actions
+
+#### Scenario: README includes a minimal plan-code-delete example
+
+- **WHEN** a user opens the root README
+- **THEN** it includes a minimal example for a simple human-verified change
+- **AND** the example shows a plan agent, then a code agent, then delete
+- **AND** the example explains that the proposal is temporary and is deleted
+  instead of archived
+- **AND** the example keeps the code changes from the code agent
+- **AND** the example makes review optional rather than mandatory for that
+  simple path
+
+#### Scenario: Code review Mermaid diagram lists supported transitions
+
+- **WHEN** a user opens `docs/interactive-mode.md` or the root README
+- **THEN** the page includes a Mermaid diagram for the plan-code-review
+  workflow
+- **AND** the diagram includes `plan agent -> code agent`
+- **AND** the diagram includes `plan agent -> commit action`
+- **AND** the diagram includes `plan agent -> delete action`
+- **AND** the diagram includes `code agent -> plan agent`
+- **AND** the diagram includes `code agent -> review agent`
+- **AND** the diagram includes `code agent -> archive agent`
+- **AND** the diagram includes `code agent -> commit action`
+- **AND** the diagram includes `code agent -> delete action`
+- **AND** the diagram includes `review agent -> plan agent`
+- **AND** the diagram includes `review agent -> code agent`
+- **AND** the diagram includes `review agent -> archive agent`
+- **AND** the diagram includes `review agent -> commit action`
+- **AND** the diagram includes `review agent -> delete action`
+- **AND** the diagram includes `code agent -> execute agent`
+- **AND** the diagram includes `review agent -> execute agent`
+
+#### Scenario: Execute validate Mermaid diagram lists supported transitions
+
+- **WHEN** a user opens `docs/interactive-mode.md` or the root README
+- **THEN** the page includes a Mermaid diagram for the plan-execute-validate
+  workflow
+- **AND** the diagram includes `plan agent -> execute agent`
+- **AND** the diagram includes `plan agent -> commit action`
+- **AND** the diagram includes `plan agent -> delete action`
+- **AND** the diagram includes `execute agent -> plan agent`
+- **AND** the diagram includes `execute agent -> validate agent`
+- **AND** the diagram includes `execute agent -> archive agent`
+- **AND** the diagram includes `execute agent -> commit action`
+- **AND** the diagram includes `execute agent -> delete action`
+- **AND** the diagram includes `validate agent -> plan agent`
+- **AND** the diagram includes `validate agent -> execute agent`
+- **AND** the diagram includes `validate agent -> archive agent`
+- **AND** the diagram includes `validate agent -> commit action`
+- **AND** the diagram includes `validate agent -> delete action`
