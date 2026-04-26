@@ -1,0 +1,53 @@
+## 1. Thread State Foundation
+
+- [ ] 1.1 Add or migrate persisted thread metadata for thread name, request body, archived state, agent records, and handoff records while preserving existing occupation rows.
+- [ ] 1.2 Add pure helpers for supported stages, skill-to-stage derivation, latest-stage derivation, archived-state detection, and next handoff sequence calculation.
+- [ ] 1.3 Add deterministic formatting for `mfl thread status <id> --no-color`, including YAML-compatible agents, request body, and handoffs.
+- [ ] 1.4 Add focused storage/helper tests for names, request bodies, agent metadata, stage derivation, archive state, and handoff sequence behavior.
+
+## 2. CLI Coordination Commands
+
+- [ ] 2.1 Implement `mfl status` for occupied workspace, idle workspace, repository-root, and outside-git diagnostics.
+- [ ] 2.2 Add `mfl workspace` as an alias for the existing `mfl worktree` command group without removing `mfl worktree`.
+- [ ] 2.3 Implement `mfl thread status <id> --no-color` and missing-thread diagnostics.
+- [ ] 2.4 Implement `mfl thread set name <name>` for the current thread with empty-name validation.
+- [ ] 2.5 Implement `mfl agent update-self`, including current-agent detection, supported `meow-*` skill inference, `paseo agent update` metadata updates, and persisted agent records.
+- [ ] 2.6 Implement `mfl handoff append --stage <stage> <content>` with monotonic sequence assignment.
+- [ ] 2.7 Implement `mfl handoff get -n <count>` and `mfl handoff get --since <seq>` for the current thread.
+- [ ] 2.8 Implement `mfl thread archive` to mark the current thread archived and release the workspace without deleting the workspace folder or reverting code changes.
+
+## 3. Stage-Aware Run Flow
+
+- [ ] 3.1 Extend `mfl run` option parsing with `--stage plan|code|review|execute|validate` and clear unsupported-stage errors.
+- [ ] 3.2 Store the initial request body and launch `plan` by default only when a thread has no agents.
+- [ ] 3.3 Require `--stage` when launching an additional agent for a thread that already has agents.
+- [ ] 3.4 Allow same-thread stage launches from the occupied current workspace without allocating another workspace.
+- [ ] 3.5 Keep duplicate new-thread launches blocked for workspaces occupied by a different thread, including diagnostics with the occupying thread and latest Paseo agent id when available.
+- [ ] 3.6 Compose stage-specific Paseo prompts that select `meow-plan`, `meow-code`, `meow-review`, `meow-execute`, or `meow-validate` while preserving the user request text unchanged inside the prompt.
+- [ ] 3.7 Parse the created Paseo agent id, persist agent metadata when available, and print `agent-id: <id>` plus `next-seq: <seq>`.
+- [ ] 3.8 Keep failed `paseo run` rollback behavior for fresh allocations and add diagnostics for malformed Paseo output.
+
+## 4. Skills
+
+- [ ] 4.1 Add `.codex/skills/meow-flow/SKILL.md` documenting `/meow-flow`, `/mfl`, status checks, stage dispatch, continuation actions, and handoff expectations.
+- [ ] 4.2 Add `.codex/skills/meow-archive/SKILL.md` documenting `/meow-archive` and `/meow-archive delete`.
+- [ ] 4.3 Remove `.codex/skills/team-harness-workflow` from the repository.
+- [ ] 4.4 Update `meow-plan` to follow the core `meow-flow` workflow, choose and persist a readable unused thread name, create the matching OpenSpec proposal, and commit using the configured or inferred title format.
+- [ ] 4.5 Update `meow-code`, `meow-review`, `meow-execute`, and `meow-validate` to refer to `meow-flow` for shared thread, workspace, stage, and handoff rules.
+- [ ] 4.6 Ensure stage role skills append concise handoffs through `mfl handoff append --stage <stage> <content>` before finishing when they produce implementation, review, execution, or validation results.
+- [ ] 4.7 Regenerate `packages/meow-flow/src/embedded-skills.ts` with the existing embed script.
+
+## 5. Documentation
+
+- [ ] 5.1 Update the root README to present `meow-flow` as the entry skill described in the MeowFlow usage flow.
+- [ ] 5.2 Update `packages/meow-flow/README.md` with `/meow-flow`, `/mfl`, `/meow-archive`, staged `mfl run`, status, handoff, and archive examples.
+- [ ] 5.3 Update CLI help expectations or snapshots for `status`, `workspace`, `thread`, `agent`, `handoff`, and stage-aware `run` commands.
+
+## 6. Validation
+
+- [ ] 6.1 Add targeted CLI tests for `mfl status` and the `mfl workspace` alias.
+- [ ] 6.2 Add targeted CLI tests for thread status, thread name updates, agent self-update, handoff append/get, and thread archive.
+- [ ] 6.3 Add targeted CLI tests for stage-aware `mfl run`, including default plan launch, required `--stage`, same-thread stage launch, occupied-workspace diagnostics, `agent-id`/`next-seq` output, failed-run rollback, and malformed Paseo output.
+- [ ] 6.4 Add targeted install-skills tests that `meow-flow` and `meow-archive` are installed and `team-harness-workflow` is not.
+- [ ] 6.5 Run the changed `packages/meow-flow` test files only with `npx vitest run <file> --bail=1`.
+- [ ] 6.6 Run `npm run typecheck`.
