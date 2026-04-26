@@ -100,9 +100,24 @@ The underlying CLI can also launch staged agents directly:
 
 ```bash
 mfl run --stage plan "implement user authentication"
+mfl run --stage plan --provider codex/gpt-5.4 "implement user authentication"
 mfl run --stage code "implement the approved plan"
 mfl run --stage review
 ```
+
+`mfl run --provider <provider>` applies to both first plan launches and later
+continuation stage launches. When the flag is omitted, MeowFlow reads the
+run-provider config at `~/.local/share/meow-flow/config.json`, then falls back
+to `claude`.
+
+```json
+{
+  "provider": "codex/gpt-5.4"
+}
+```
+
+Provider values are passed through to Paseo, including provider/model strings.
+Run `paseo provider ls` to inspect providers available on the local daemon.
 
 MeowFlow discovers worktrees with `git worktree list --porcelain`. You can
 create worktrees with MeowFlow or with plain `git worktree add`; either way,

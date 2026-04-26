@@ -186,6 +186,7 @@ if (argv[0] === "agent" && argv[1] === "update") {
     env: {
       PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
       MFL_PASEO_BIN: "paseo",
+      MFL_CONFIG_PATH: path.join(binDirectory, "missing-meow-flow-config.json"),
       MFL_STATE_DB_PATH: path.join(binDirectory, "meow-flow.sqlite"),
       PASEO_COUNTER_PATH: counterPath,
       PASEO_INVOCATION_LOG: invocationLogPath,
@@ -245,7 +246,7 @@ function runGit(args: readonly string[], cwd: string): void {
 }
 
 describe("mfl run", () => {
-  test("launches the initial plan stage in a git-discovered linked worktree", () => {
+  test("launches the initial plan stage in a git-discovered linked worktree with the default provider", () => {
     const repositoryRoot = createGitRepository("meow-flow-run-repo-");
     const worktreePath = createManualWorktree(repositoryRoot);
     const fakePaseo = createFakePaseo();
@@ -259,6 +260,7 @@ describe("mfl run", () => {
     expect(result.stdout).toContain("thread-id: fix-test-ci");
     expect(result.stdout).toContain("worktree: manual-worktrees/custom");
     expect(result.stdout).toContain("stage: plan");
+    expect(result.stdout).toContain("provider: claude");
     expect(result.stdout).toContain("agent-id: 123456");
     expect(result.stdout).toContain("next-seq: 1");
 
@@ -272,6 +274,8 @@ describe("mfl run", () => {
           "--detach",
           "--cwd",
           worktreePath,
+          "--provider",
+          "claude",
           "--label",
           "x-meow-flow-id=fix-test-ci",
           "--label",
@@ -283,6 +287,83 @@ describe("mfl run", () => {
         cwd: repositoryRoot,
       },
     ]);
+  });
+
+  test("passes an explicit provider through to paseo run", () => {
+    const repositoryRoot = createGitRepository("meow-flow-run-provider-explicit-");
+    createManualWorktree(repositoryRoot);
+    const fakePaseo = createFakePaseo();
+    const configPath = path.join(createTempDirectory("meow-flow-provider-config-"), "config.json");
+    writeFile(configPath, JSON.stringify({ provider: "opencode" }));
+
+    const result = runCli(
+      ["run", "--provider", "codex/gpt-5.4", "--id", "fix-test-ci", "use codex"],
+      repositoryRoot,
+      {
+        env: {
+          ...fakePaseo.env,
+          MFL_CONFIG_PATH: configPath,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("provider: codex/gpt-5.4");
+
+    const invocation = readPaseoInvocations(fakePaseo.invocationLogPath).at(0);
+    expect(invocation?.argv).toContain("--provider");
+    expect(invocation?.argv).toContain("codex/gpt-5.4");
+  });
+
+  test("uses the configured provider when no provider flag is passed", () => {
+    const repositoryRoot = createGitRepository("meow-flow-run-provider-configured-");
+    createManualWorktree(repositoryRoot);
+    const fakePaseo = createFakePaseo();
+    const configPath = path.join(createTempDirectory("meow-flow-provider-config-"), "config.json");
+    writeFile(configPath, JSON.stringify({ provider: "opencode" }));
+
+    const result = runCli(["run", "--id", "fix-test-ci", "use config"], repositoryRoot, {
+      env: {
+        ...fakePaseo.env,
+        MFL_CONFIG_PATH: configPath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("provider: opencode");
+
+    const invocation = readPaseoInvocations(fakePaseo.invocationLogPath).at(0);
+    expect(invocation?.argv).toContain("--provider");
+    expect(invocation?.argv).toContain("opencode");
+  });
+
+  test("rejects invalid provider config before mutating occupations or invoking paseo", () => {
+    const repositoryRoot = createGitRepository("meow-flow-run-provider-invalid-config-");
+    const worktreePath = createManualWorktree(repositoryRoot);
+    const fakePaseo = createFakePaseo();
+    const configPath = path.join(createTempDirectory("meow-flow-provider-config-"), "config.json");
+    writeFile(configPath, JSON.stringify({ provider: "  " }));
+
+    const result = runCli(["run", "--id", "fix-test-ci", "invalid config"], repositoryRoot, {
+      env: {
+        ...fakePaseo.env,
+        MFL_CONFIG_PATH: configPath,
+      },
+    });
+    const status = runCli(["status"], worktreePath, {
+      env: {
+        ...fakePaseo.env,
+        MFL_CONFIG_PATH: configPath,
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(`Invalid MeowFlow config at ${configPath}`);
+    expect(result.output).toContain("provider must be a non-empty string");
+    expect(result.output).toContain("paseo provider ls");
+    expect(readPaseoInvocations(fakePaseo.invocationLogPath)).toHaveLength(0);
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain("status: idle");
   });
 
   test("rejects unsupported stages without invoking paseo", () => {
@@ -365,6 +446,8 @@ describe("mfl run", () => {
         "--detach",
         "--cwd",
         worktreePath,
+        "--provider",
+        "claude",
         "--label",
         "x-meow-flow-id=fix-test-ci",
         "--label",

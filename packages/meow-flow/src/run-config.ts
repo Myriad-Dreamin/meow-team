@@ -5,6 +5,7 @@ import path from "node:path";
 const CONFIG_PATH_ENV_NAME = "MFL_CONFIG_PATH";
 const CONFIG_DIRECTORY_PATH = [".local", "share", "meow-flow"] as const;
 const CONFIG_FILE_NAME = "config.json";
+const PROVIDER_DISCOVERY_HINT = 'Run "paseo provider ls" to list providers.';
 
 export const DEFAULT_RUN_PROVIDER = "claude";
 
@@ -65,11 +66,15 @@ function readConfiguredRunProvider(configPath: string): string | null {
     parsed = JSON.parse(readFileSync(configPath, "utf8"));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid MeowFlow config at ${configPath}: ${message}`);
+    throw new Error(
+      `Invalid MeowFlow config at ${configPath}: ${message}. ${PROVIDER_DISCOVERY_HINT}`,
+    );
   }
 
   if (!isPlainObject(parsed)) {
-    throw new Error(`Invalid MeowFlow config at ${configPath}: expected a JSON object.`);
+    throw new Error(
+      `Invalid MeowFlow config at ${configPath}: expected a JSON object. ${PROVIDER_DISCOVERY_HINT}`,
+    );
   }
 
   if (!Object.prototype.hasOwnProperty.call(parsed, "provider")) {
@@ -85,7 +90,7 @@ function readProviderValue(value: unknown, fieldName: string, configPath?: strin
       configPath === undefined
         ? `${fieldName} must be a non-empty string.`
         : `Invalid MeowFlow config at ${configPath}: ${fieldName} must be a non-empty string.`;
-    throw new Error(`${prefix} Run "paseo provider ls" to list providers.`);
+    throw new Error(`${prefix} ${PROVIDER_DISCOVERY_HINT}`);
   }
 
   return value.trim();

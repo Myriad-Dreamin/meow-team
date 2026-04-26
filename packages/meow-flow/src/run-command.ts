@@ -9,6 +9,7 @@ import {
   type GitWorktreeContext,
 } from "./git-worktrees.js";
 import { resolvePaseoCommandInvocation } from "./paseo-command.js";
+import { resolveRunProvider } from "./run-config.js";
 import {
   deriveLatestStage,
   ensureThread,
@@ -32,6 +33,7 @@ import {
 
 type RunCommandOptions = {
   readonly id?: string;
+  readonly provider?: string;
   readonly stage?: string;
 };
 
@@ -59,6 +61,7 @@ export function createRunCommand(): Command {
   return new Command("run")
     .description("Launch a staged MeowFlow Paseo agent in a git worktree")
     .option("--id <id>", "use an explicit MeowFlow thread id instead of generating a UUID")
+    .option("--provider <provider>", "Paseo provider to use for this staged launch")
     .option("--stage <stage>", "stage to launch: plan, code, review, execute, or validate")
     .argument("[request-body]", "request body or stage-specific continuation text")
     .action((requestBody: string | undefined, options: RunCommandOptions, command: Command) => {
@@ -67,6 +70,7 @@ export function createRunCommand(): Command {
           cwd: process.cwd(),
           commandName: "mfl run",
         });
+        const runProvider = resolveRunProvider(options.provider);
         withMeowFlowStateDatabase((database) => {
           const target = resolveRunTarget({
             context,
@@ -80,6 +84,7 @@ export function createRunCommand(): Command {
             stage: target.stage,
             requestBody: target.requestBody,
             cwd: target.worktreePath,
+            provider: runProvider.provider,
           });
 
           if (!paseoRunResult.ok) {
@@ -116,6 +121,7 @@ export function createRunCommand(): Command {
               `thread-id: ${target.threadId}`,
               `worktree: ${formatWorktreePath(context.repositoryRoot, target.worktreePath)}`,
               `stage: ${target.stage}`,
+              `provider: ${runProvider.provider}`,
               `agent-id: ${paseoRunResult.agentId}`,
               `next-seq: ${nextSeq}`,
               "",
@@ -331,6 +337,7 @@ function invokePaseoRun(input: {
   readonly stage: MeowFlowStage;
   readonly requestBody: string;
   readonly cwd: string;
+  readonly provider: string;
 }): PaseoRunResult {
   let paseoCommand: ReturnType<typeof resolvePaseoCommandInvocation>;
 
@@ -353,6 +360,8 @@ function invokePaseoRun(input: {
       "--detach",
       "--cwd",
       input.cwd,
+      "--provider",
+      input.provider,
       "--label",
       `x-meow-flow-id=${input.threadId}`,
       "--label",
