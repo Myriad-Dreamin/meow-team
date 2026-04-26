@@ -11,10 +11,20 @@ function createAgentTab(): WorkspaceTabDescriptor {
   };
 }
 
+function createFileTab(path = "/repo/src/index.ts"): WorkspaceTabDescriptor {
+  return {
+    key: "file_%2Frepo%2Fsrc%2Findex.ts",
+    tabId: "file_%2Frepo%2Fsrc%2Findex.ts",
+    kind: "file",
+    target: { kind: "file", path },
+  };
+}
+
 describe("buildWorkspaceTabMenuEntries", () => {
   it("uses desktop tab ordering labels for desktop menus", () => {
     const onCopyResumeCommand = vi.fn();
     const onCopyAgentId = vi.fn();
+    const onCopyFilePath = vi.fn();
     const onReloadAgent = vi.fn();
     const onCloseTab = vi.fn();
     const onCloseTabsBefore = vi.fn();
@@ -29,6 +39,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       menuTestIDBase: "workspace-tab-context-agent_123",
       onCopyResumeCommand,
       onCopyAgentId,
+      onCopyFilePath,
       onReloadAgent,
       onCloseTab,
       onCloseTabsBefore,
@@ -56,6 +67,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       menuTestIDBase: "workspace-tab-menu-agent_123",
       onCopyResumeCommand: vi.fn(),
       onCopyAgentId: vi.fn(),
+      onCopyFilePath: vi.fn(),
       onReloadAgent: vi.fn(),
       onCloseTab: vi.fn(),
       onCloseTabsBefore: vi.fn(),
@@ -88,6 +100,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       menuTestIDBase: "workspace-tab-menu-draft_123",
       onCopyResumeCommand: vi.fn(),
       onCopyAgentId: vi.fn(),
+      onCopyFilePath: vi.fn(),
       onReloadAgent: vi.fn(),
       onCloseTab: vi.fn(),
       onCloseTabsBefore: vi.fn(),
@@ -113,6 +126,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       menuTestIDBase: "workspace-tab-context-agent_123",
       onCopyResumeCommand: vi.fn(),
       onCopyAgentId: vi.fn(),
+      onCopyFilePath: vi.fn(),
       onReloadAgent: vi.fn(),
       onCloseTab: vi.fn(),
       onCloseTabsBefore: vi.fn(),
@@ -127,5 +141,49 @@ describe("buildWorkspaceTabMenuEntries", () => {
         tooltip: "Reload agent to update skills, MCPs or login status.",
       }),
     );
+  });
+
+  it("adds copy path for file tabs", () => {
+    const onCopyFilePath = vi.fn();
+    const entries = buildWorkspaceTabMenuEntries({
+      surface: "desktop",
+      tab: createFileTab("/repo/src/index.ts"),
+      index: 0,
+      tabCount: 2,
+      menuTestIDBase: "workspace-tab-context-file_%2Frepo%2Fsrc%2Findex.ts",
+      onCopyResumeCommand: vi.fn(),
+      onCopyAgentId: vi.fn(),
+      onCopyFilePath,
+      onReloadAgent: vi.fn(),
+      onCloseTab: vi.fn(),
+      onCloseTabsBefore: vi.fn(),
+      onCloseTabsAfter: vi.fn(),
+      onCloseOtherTabs: vi.fn(),
+    });
+
+    expect(entries.filter((entry) => entry.kind === "item").map((entry) => entry.label)).toEqual([
+      "Copy path",
+      "Close to the left",
+      "Close to the right",
+      "Close other tabs",
+      "Close",
+    ]);
+
+    const copyPathEntry = entries.find(
+      (entry) => entry.kind === "item" && entry.key === "copy-path",
+    );
+    expect(copyPathEntry).toEqual(
+      expect.objectContaining({
+        kind: "item",
+        icon: "copy",
+        label: "Copy path",
+        testID: "workspace-tab-context-file_%2Frepo%2Fsrc%2Findex.ts-copy-path",
+      }),
+    );
+
+    if (copyPathEntry?.kind === "item") {
+      copyPathEntry.onSelect();
+    }
+    expect(onCopyFilePath).toHaveBeenCalledWith("/repo/src/index.ts");
   });
 });
