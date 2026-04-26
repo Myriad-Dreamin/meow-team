@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -14,6 +14,11 @@ export type RunProviderSource = "option" | "config" | "default";
 export type ResolvedRunProvider = {
   readonly provider: string;
   readonly source: RunProviderSource;
+  readonly configPath: string;
+};
+
+export type UpdatedRunProviderConfig = {
+  readonly provider: string;
   readonly configPath: string;
 };
 
@@ -56,9 +61,43 @@ export function resolveRunProvider(explicitProvider: string | undefined): Resolv
   };
 }
 
+export function setConfiguredRunProvider(provider: string): UpdatedRunProviderConfig {
+  const configPath = getMeowFlowConfigPath();
+  const resolvedProvider = readProviderValue(provider, "provider");
+  const config = readConfigObject(configPath);
+
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(
+    configPath,
+    `${JSON.stringify(
+      {
+        ...config,
+        provider: resolvedProvider,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  return {
+    provider: resolvedProvider,
+    configPath,
+  };
+}
+
 function readConfiguredRunProvider(configPath: string): string | null {
-  if (!existsSync(configPath)) {
+  const parsed = readConfigObject(configPath);
+
+  if (!Object.prototype.hasOwnProperty.call(parsed, "provider")) {
     return null;
+  }
+
+  return readProviderValue(parsed.provider, "provider", configPath);
+}
+
+function readConfigObject(configPath: string): UnknownRecord {
+  if (!existsSync(configPath)) {
+    return {};
   }
 
   let parsed: unknown;
@@ -77,11 +116,7 @@ function readConfiguredRunProvider(configPath: string): string | null {
     );
   }
 
-  if (!Object.prototype.hasOwnProperty.call(parsed, "provider")) {
-    return null;
-  }
-
-  return readProviderValue(parsed.provider, "provider", configPath);
+  return parsed;
 }
 
 function readProviderValue(value: unknown, fieldName: string, configPath?: string): string {
