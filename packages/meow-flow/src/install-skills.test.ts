@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
+import { EMBEDDED_SKILLS } from "./embedded-skills.js";
 
 const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(THIS_DIR, "..");
@@ -72,6 +73,19 @@ function runCli(
 }
 
 describe("mfl install-skills", () => {
+  test("embeds the distinct 8-skill installable set", () => {
+    expect(EMBEDDED_SKILLS.map((skill) => skill.name)).toEqual([
+      "meow-archive",
+      "meow-code",
+      "meow-dataset",
+      "meow-execute",
+      "meow-flow",
+      "meow-plan",
+      "meow-review",
+      "meow-validate",
+    ]);
+  });
+
   test("installs embedded skills and reference markdown for requested providers", () => {
     const homeDirectory = createTempDirectory("meow-flow-skills-home-");
     const codexHome = path.join(homeDirectory, "codex-home");
@@ -95,6 +109,7 @@ describe("mfl install-skills", () => {
     );
     expect(result.stdout).toContain("  meow-archive\n");
     expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-dataset\n");
     expect(result.stdout).toContain("  meow-flow\n");
     expect(result.stdout).toContain("  meow-validate\n");
     expect(result.stdout).not.toContain("  team-harness-workflow\n");
@@ -140,6 +155,7 @@ describe("mfl install-skills", () => {
     expect(result.stdout).toContain("Embedded MeowFlow skills:");
     expect(result.stdout).toContain("  meow-archive\n");
     expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-dataset\n");
     expect(result.stdout).toContain("  meow-flow\n");
     expect(result.stdout).toContain("  meow-validate\n");
     expect(result.stdout).not.toContain("  team-harness-workflow\n");
@@ -162,6 +178,7 @@ describe("mfl install-skills", () => {
     expect(result.stdout).toContain("Embedded MeowFlow skills:");
     expect(result.stdout).toContain("  meow-archive\n");
     expect(result.stdout).toContain("  meow-code\n");
+    expect(result.stdout).toContain("  meow-dataset\n");
     expect(result.stdout).toContain("  meow-flow\n");
     expect(result.stdout).toContain("  meow-validate\n");
     expect(result.stdout).not.toContain("  team-harness-workflow\n");
