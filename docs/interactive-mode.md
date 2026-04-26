@@ -90,20 +90,17 @@ run `mfl thread archive`.
 ```mermaid
 flowchart LR
   Plan[plan agent] --> Code[code agent]
-  Plan --> CommitA[commit action]
-  Plan --> DeleteA[delete action]
   Code --> Plan
   Code --> Review[review agent]
-  Code --> Archive[archive agent]
-  Code --> CommitB[commit action]
-  Code --> DeleteB[delete action]
+  Code --> Final[final]
   Review --> Plan
   Review --> Code
-  Review --> Archive
-  Review --> CommitC[commit action]
-  Review --> DeleteC[delete action]
-  Code --> Execute[execute agent]
+  Review --> Final
   Review --> Execute
+  Code --> Execute[execute agent]
+  Final --> Archive[archive agent]
+  Final --> Commit[commit action]
+  Final --> Delete[delete action]
 ```
 
 ## Plan, execute, validate
@@ -111,16 +108,13 @@ flowchart LR
 ```mermaid
 flowchart LR
   Plan[plan agent] --> Execute[execute agent]
-  Plan --> CommitA[commit action]
-  Plan --> DeleteA[delete action]
   Execute --> Plan
-  Execute --> Validate[validate agent]
-  Execute --> Archive[archive agent]
-  Execute --> CommitB[commit action]
-  Execute --> DeleteB[delete action]
+  Execute --> Validate[review agent]
+  Execute --> Final[final]
   Validate --> Plan
   Validate --> Execute
-  Validate --> Archive
-  Validate --> CommitC[commit action]
-  Validate --> DeleteC[delete action]
+  Validate --> Final
+  Final --> Archive[archive agent]
+  Final --> Commit[commit action]
+  Final --> Delete[delete action]
 ```
