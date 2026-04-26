@@ -17,6 +17,7 @@ import {
   readMeowFlowState,
   recordOccupation,
   replaceThread,
+  SUPPORTED_MEOW_FLOW_SKILLS,
   skillToStage,
   updateMeowFlowState,
   upsertAgentRecord,
@@ -112,6 +113,14 @@ describe("MeowFlow thread state", () => {
       now: "2026-04-26T00:02:00.000Z",
     });
 
+    expect(SUPPORTED_MEOW_FLOW_SKILLS).toEqual([
+      "meow-plan",
+      "meow-code",
+      "meow-review",
+      "meow-execute",
+      "meow-validate",
+      "meow-archive",
+    ]);
     expect(skillToStage("meow-code")).toBe("code");
     expect(skillToStage("meow-archive")).toBe("archived");
     expect(deriveLatestStage(thread)).toBe("plan");
