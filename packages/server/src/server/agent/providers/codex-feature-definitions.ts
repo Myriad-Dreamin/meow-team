@@ -20,6 +20,15 @@ export const CODEX_PLAN_MODE_FEATURE: Omit<AgentFeatureToggle, "value"> = {
   icon: "list-todo",
 };
 
+export const CODEX_STREAMING_CHAT_FEATURE: Omit<AgentFeatureToggle, "value"> = {
+  type: "toggle",
+  id: "streaming_chat",
+  label: "Stream",
+  description: "Stream Codex assistant text as it arrives",
+  tooltip: "Toggle streaming responses",
+  icon: "radio",
+};
+
 function normalizeCodexModelId(modelId: string | null | undefined): string | null {
   const normalized = typeof modelId === "string" ? modelId.trim() : "";
   return normalized.length > 0 ? normalized : null;
@@ -39,6 +48,7 @@ export function buildCodexFeatures(input: {
   modelId: string | null | undefined;
   fastModeEnabled: boolean;
   planModeEnabled: boolean;
+  streamingChatEnabled: boolean;
   planModeAvailable?: boolean;
 }): AgentFeature[] {
   const features: AgentFeature[] = [];
@@ -56,6 +66,11 @@ export function buildCodexFeatures(input: {
       value: input.planModeEnabled,
     });
   }
+
+  features.push({
+    ...CODEX_STREAMING_CHAT_FEATURE,
+    value: input.streamingChatEnabled,
+  });
 
   return features;
 }

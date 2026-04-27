@@ -491,6 +491,140 @@ describe("Codex app-server provider", () => {
     expect(env.PASEO_TEST_FLAG).toBe(launchContext.env?.PASEO_TEST_FLAG);
   });
 
+  test("buffers Codex agent message deltas by default until item completion", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    (session as any).handleNotification("item/agentMessage/delta", {
+      itemId: "message-1",
+      delta: "Hello",
+    });
+    (session as any).handleNotification("item/agentMessage/delta", {
+      itemId: "message-1",
+      delta: " world",
+    });
+
+    expect(events).toEqual([]);
+
+    (session as any).handleNotification("item/completed", {
+      item: {
+        id: "message-1",
+        type: "agentMessage",
+        text: "fallback text",
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "assistant_message",
+          text: "Hello world",
+        },
+      },
+    ]);
+    expect((session as any).pendingAgentMessages.has("message-1")).toBe(false);
+  });
+
+  test("streams Codex agent message deltas when streaming chat is enabled", () => {
+    const session = createSession({ featureValues: { streaming_chat: true } });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    (session as any).handleNotification("item/agentMessage/delta", {
+      itemId: "message-1",
+      delta: "Hello",
+    });
+    (session as any).handleNotification("item/agentMessage/delta", {
+      itemId: "message-1",
+      delta: " world",
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "assistant_message",
+          text: "Hello",
+        },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "assistant_message",
+          text: " world",
+        },
+      },
+    ]);
+
+    (session as any).handleNotification("item/completed", {
+      item: {
+        id: "message-1",
+        type: "agentMessage",
+        text: "Hello world",
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    expect((session as any).pendingAgentMessages.has("message-1")).toBe(false);
+    expect((session as any).streamedAgentMessageItemIds.has("message-1")).toBe(false);
+  });
+
+  test("streams Codex reasoning deltas when streaming chat is enabled", () => {
+    const session = createSession({ featureValues: { streaming_chat: true } });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    (session as any).handleNotification("item/reasoning/summaryTextDelta", {
+      itemId: "reasoning-1",
+      delta: "Thinking",
+    });
+    (session as any).handleNotification("item/reasoning/summaryTextDelta", {
+      itemId: "reasoning-1",
+      delta: " through it",
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "reasoning",
+          text: "Thinking",
+        },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "reasoning",
+          text: " through it",
+        },
+      },
+    ]);
+
+    (session as any).handleNotification("item/completed", {
+      item: {
+        id: "reasoning-1",
+        type: "reasoning",
+        summary: ["Thinking through it"],
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    expect((session as any).pendingReasoning.has("reasoning-1")).toBe(false);
+    expect((session as any).streamedReasoningItemIds.has("reasoning-1")).toBe(false);
+  });
+
   test("projects request_user_input into a question permission and running timeline tool call", () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
