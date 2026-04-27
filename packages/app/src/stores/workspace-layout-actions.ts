@@ -139,7 +139,7 @@ function shouldReplaceExistingTabTarget(
   if (currentTarget.kind !== "file" || nextTarget.kind !== "file") {
     return false;
   }
-  if (currentTarget.path !== nextTarget.path) {
+  if (!workspaceTabTargetsEqual(currentTarget, nextTarget)) {
     return false;
   }
   return (

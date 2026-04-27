@@ -11,12 +11,12 @@ function createAgentTab(): WorkspaceTabDescriptor {
   };
 }
 
-function createFileTab(path = "/repo/src/index.ts"): WorkspaceTabDescriptor {
+function createFileTab(path = "/repo/src/index.ts", directory?: string): WorkspaceTabDescriptor {
   return {
     key: "file_%2Frepo%2Fsrc%2Findex.ts",
     tabId: "file_%2Frepo%2Fsrc%2Findex.ts",
     kind: "file",
-    target: { kind: "file", path },
+    target: { kind: "file", ...(directory ? { directory } : {}), path },
   };
 }
 
@@ -184,6 +184,37 @@ describe("buildWorkspaceTabMenuEntries", () => {
     if (copyPathEntry?.kind === "item") {
       copyPathEntry.onSelect();
     }
-    expect(onCopyFilePath).toHaveBeenCalledWith("/repo/src/index.ts");
+    expect(onCopyFilePath).toHaveBeenCalledWith({ path: "/repo/src/index.ts" });
+  });
+
+  it("includes file directory when copying a file tab path", () => {
+    const onCopyFilePath = vi.fn();
+    const entries = buildWorkspaceTabMenuEntries({
+      surface: "desktop",
+      tab: createFileTab("src/index.ts", "/repo"),
+      index: 0,
+      tabCount: 1,
+      menuTestIDBase: "workspace-tab-context-file_src%2Findex.ts",
+      onCopyResumeCommand: vi.fn(),
+      onCopyAgentId: vi.fn(),
+      onCopyFilePath,
+      onReloadAgent: vi.fn(),
+      onCloseTab: vi.fn(),
+      onCloseTabsBefore: vi.fn(),
+      onCloseTabsAfter: vi.fn(),
+      onCloseOtherTabs: vi.fn(),
+    });
+
+    const copyPathEntry = entries.find(
+      (entry) => entry.kind === "item" && entry.key === "copy-path",
+    );
+    if (copyPathEntry?.kind === "item") {
+      copyPathEntry.onSelect();
+    }
+
+    expect(onCopyFilePath).toHaveBeenCalledWith({
+      directory: "/repo",
+      path: "src/index.ts",
+    });
   });
 });

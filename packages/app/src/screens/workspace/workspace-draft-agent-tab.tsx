@@ -39,6 +39,7 @@ type WorkspaceDraftAgentTabProps = {
   isPaneFocused: boolean;
   onCreated: (snapshot: AgentSnapshotPayload) => void;
   onOpenWorkspaceFile: (input: {
+    directory?: string;
     filePath: string;
     lineStart?: number;
     columnStart?: number;
