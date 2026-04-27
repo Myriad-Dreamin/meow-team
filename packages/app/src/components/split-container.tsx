@@ -86,7 +86,7 @@ interface SplitContainerProps {
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
-  onCopyFilePath: (path: string) => Promise<void> | void;
+  onCopyFilePath: (input: { path: string; directory?: string }) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onCloseTabsToLeft: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;

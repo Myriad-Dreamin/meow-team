@@ -3,6 +3,7 @@ import invariant from "tiny-invariant";
 import type { WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
 
 export interface OpenWorkspaceFileInput {
+  directory?: string;
   filePath: string;
   lineStart?: number;
   columnStart?: number;
