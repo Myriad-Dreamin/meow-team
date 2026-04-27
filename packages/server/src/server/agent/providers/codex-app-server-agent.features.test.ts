@@ -18,6 +18,42 @@ const TEST_COLLABORATION_MODES = [
   },
 ];
 
+function fastFeature(value: boolean) {
+  return {
+    type: "toggle",
+    id: "fast_mode",
+    label: "Fast",
+    description: "Priority inference at 2x usage",
+    tooltip: "Toggle fast mode",
+    icon: "zap",
+    value,
+  };
+}
+
+function planFeature(value: boolean) {
+  return {
+    type: "toggle",
+    id: "plan_mode",
+    label: "Plan",
+    description: "Switch Codex into planning-only collaboration mode",
+    tooltip: "Toggle plan mode",
+    icon: "list-todo",
+    value,
+  };
+}
+
+function streamFeature(value: boolean) {
+  return {
+    type: "toggle",
+    id: "streaming_chat",
+    label: "Stream",
+    description: "Stream Codex assistant text as it arrives",
+    tooltip: "Toggle streaming responses",
+    icon: "radio",
+    value,
+  };
+}
+
 function createConfig(overrides: Partial<AgentSessionConfig> = {}): AgentSessionConfig {
   return {
     provider: CODEX_PROVIDER,
@@ -46,69 +82,26 @@ function createSession(configOverrides: Partial<AgentSessionConfig> = {}) {
 }
 
 describe("Codex app-server provider features", () => {
-  test("features returns fast and plan toggles when supported", async () => {
+  test("features returns fast, plan, and streaming toggles when supported", async () => {
     const session = createSession();
 
     expect(session.features).toEqual([
-      {
-        type: "toggle",
-        id: "fast_mode",
-        label: "Fast",
-        description: "Priority inference at 2x usage",
-        tooltip: "Toggle fast mode",
-        icon: "zap",
-        value: false,
-      },
-      {
-        type: "toggle",
-        id: "plan_mode",
-        label: "Plan",
-        description: "Switch Codex into planning-only collaboration mode",
-        tooltip: "Toggle plan mode",
-        icon: "list-todo",
-        value: false,
-      },
+      fastFeature(false),
+      planFeature(false),
+      streamFeature(false),
     ]);
 
     await session.setFeature?.("fast_mode", true);
     await session.setFeature?.("plan_mode", true);
+    await session.setFeature?.("streaming_chat", true);
 
-    expect(session.features).toEqual([
-      {
-        type: "toggle",
-        id: "fast_mode",
-        label: "Fast",
-        description: "Priority inference at 2x usage",
-        tooltip: "Toggle fast mode",
-        icon: "zap",
-        value: true,
-      },
-      {
-        type: "toggle",
-        id: "plan_mode",
-        label: "Plan",
-        description: "Switch Codex into planning-only collaboration mode",
-        tooltip: "Toggle plan mode",
-        icon: "list-todo",
-        value: true,
-      },
-    ]);
+    expect(session.features).toEqual([fastFeature(true), planFeature(true), streamFeature(true)]);
   });
 
-  test("features returns only plan toggle when model does not support fast mode", () => {
+  test("features omits fast toggle when model does not support fast mode", () => {
     const session = createSession({ model: "gpt-3.5-turbo" });
 
-    expect(session.features).toEqual([
-      {
-        type: "toggle",
-        id: "plan_mode",
-        label: "Plan",
-        description: "Switch Codex into planning-only collaboration mode",
-        tooltip: "Toggle plan mode",
-        icon: "list-todo",
-        value: false,
-      },
-    ]);
+    expect(session.features).toEqual([planFeature(false), streamFeature(false)]);
   });
 
   test("setFeature('fast_mode', true) sets serviceTier to fast", async () => {
@@ -150,31 +143,13 @@ describe("Codex app-server provider features", () => {
 
   test("constructor restores feature flags from config.featureValues", () => {
     const session = createSession({
-      featureValues: { fast_mode: true, plan_mode: true },
+      featureValues: { fast_mode: true, plan_mode: true, streaming_chat: true },
     });
 
     expect((session as any).serviceTier).toBe("fast");
     expect((session as any).planModeEnabled).toBe(true);
-    expect(session.features).toEqual([
-      {
-        type: "toggle",
-        id: "fast_mode",
-        label: "Fast",
-        description: "Priority inference at 2x usage",
-        tooltip: "Toggle fast mode",
-        icon: "zap",
-        value: true,
-      },
-      {
-        type: "toggle",
-        id: "plan_mode",
-        label: "Plan",
-        description: "Switch Codex into planning-only collaboration mode",
-        tooltip: "Toggle plan mode",
-        icon: "list-todo",
-        value: true,
-      },
-    ]);
+    expect((session as any).streamingChatEnabled).toBe(true);
+    expect(session.features).toEqual([fastFeature(true), planFeature(true), streamFeature(true)]);
   });
 
   test("startTurn includes serviceTier when fast mode is enabled", async () => {
@@ -214,17 +189,7 @@ describe("Codex app-server provider features", () => {
     await session.setFeature?.("fast_mode", true);
     await session.setModel("gpt-3.5-turbo");
 
-    expect(session.features).toEqual([
-      {
-        type: "toggle",
-        id: "plan_mode",
-        label: "Plan",
-        description: "Switch Codex into planning-only collaboration mode",
-        tooltip: "Toggle plan mode",
-        icon: "list-todo",
-        value: false,
-      },
-    ]);
+    expect(session.features).toEqual([planFeature(false), streamFeature(false)]);
     expect((session as any).serviceTier).toBeNull();
 
     await session.startTurn("hello");

@@ -2454,6 +2454,7 @@ class CodexAppServerAgentSession implements AgentSession {
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private serviceTier: "fast" | null = null;
   private planModeEnabled = false;
+  private streamingChatEnabled = false;
   private historyPending = false;
   private persistedHistory: AgentTimelineItem[] = [];
   private pendingPermissions = new Map<string, AgentPermissionRequest>();
@@ -2469,6 +2470,8 @@ class CodexAppServerAgentSession implements AgentSession {
   private resolvedPermissionRequests = new Set<string>();
   private pendingAgentMessages = new Map<string, string>();
   private pendingReasoning = new Map<string, string[]>();
+  private streamedAgentMessageItemIds = new Set<string>();
+  private streamedReasoningItemIds = new Set<string>();
   private pendingCommandOutputDeltas = new Map<string, string[]>();
   private pendingFileChangeOutputDeltas = new Map<string, string[]>();
   private terminalCommandByProcessId = new Map<string, string>();
@@ -2519,6 +2522,9 @@ class CodexAppServerAgentSession implements AgentSession {
     if (this.config.featureValues?.plan_mode) {
       this.planModeEnabled = true;
     }
+    if (this.config.featureValues?.streaming_chat) {
+      this.streamingChatEnabled = true;
+    }
 
     if (this.resumeHandle?.sessionId) {
       this.currentThreadId = this.resumeHandle.sessionId;
@@ -2535,6 +2541,7 @@ class CodexAppServerAgentSession implements AgentSession {
       modelId: this.config.model,
       fastModeEnabled: this.serviceTier === "fast",
       planModeEnabled: this.planModeEnabled,
+      streamingChatEnabled: this.streamingChatEnabled,
       planModeAvailable: this.hasPlanCollaborationMode(),
     });
   }
@@ -2670,7 +2677,10 @@ class CodexAppServerAgentSession implements AgentSession {
     this.resolvedCollaborationMode = this.resolveCollaborationMode();
   }
 
-  private applyFeatureValue(featureId: "fast_mode" | "plan_mode", value: boolean): void {
+  private applyFeatureValue(
+    featureId: "fast_mode" | "plan_mode" | "streaming_chat",
+    value: boolean,
+  ): void {
     this.config.featureValues = {
       ...(this.config.featureValues ?? {}),
       [featureId]: value,
@@ -2679,6 +2689,11 @@ class CodexAppServerAgentSession implements AgentSession {
     if (featureId === "fast_mode") {
       this.serviceTier = value ? "fast" : null;
       this.cachedRuntimeInfo = null;
+      return;
+    }
+
+    if (featureId === "streaming_chat") {
+      this.streamingChatEnabled = value;
       return;
     }
 
@@ -3143,6 +3158,10 @@ class CodexAppServerAgentSession implements AgentSession {
       this.applyFeatureValue("plan_mode", Boolean(value));
       return;
     }
+    if (featureId === "streaming_chat") {
+      this.applyFeatureValue("streaming_chat", Boolean(value));
+      return;
+    }
     throw new Error(`Unknown Codex feature: ${featureId}`);
   }
 
@@ -3306,6 +3325,7 @@ class CodexAppServerAgentSession implements AgentSession {
         modeId: this.currentMode,
         model: this.config.model ?? null,
         thinkingOptionId,
+        featureValues: this.config.featureValues,
         extra: this.config.extra,
         systemPrompt: this.config.systemPrompt,
         mcpServers: this.config.mcpServers,
@@ -3455,12 +3475,38 @@ class CodexAppServerAgentSession implements AgentSession {
   }
 
   private emitEvent(event: AgentStreamEvent): void {
-    if (event.type === "timeline") {
-      if (event.item.type === "assistant_message") {
-        this.pendingAgentMessages.clear();
-      }
-    }
     this.notifySubscribers(event);
+  }
+
+  private maybeEmitStreamingText(params: {
+    itemId: string;
+    delta: string;
+    pendingText: string;
+    streamedItemIds: Set<string>;
+    itemType: "assistant_message" | "reasoning";
+  }): void {
+    if (!this.streamingChatEnabled) {
+      return;
+    }
+
+    const alreadyStreaming = params.streamedItemIds.has(params.itemId);
+    const text = alreadyStreaming ? params.delta : params.pendingText;
+    if (text.length === 0) {
+      return;
+    }
+    if (!alreadyStreaming && !/\S/.test(text)) {
+      return;
+    }
+
+    params.streamedItemIds.add(params.itemId);
+    this.emitEvent({
+      type: "timeline",
+      provider: CODEX_PROVIDER,
+      item:
+        params.itemType === "assistant_message"
+          ? { type: "assistant_message", text }
+          : { type: "reasoning", text },
+    });
   }
 
   private notifySubscribers(event: AgentStreamEvent): void {
@@ -3499,6 +3545,10 @@ class CodexAppServerAgentSession implements AgentSession {
       this.emittedItemCompletedIds.clear();
       this.emittedExecCommandStartedCallIds.clear();
       this.emittedExecCommandCompletedCallIds.clear();
+      this.pendingAgentMessages.clear();
+      this.pendingReasoning.clear();
+      this.streamedAgentMessageItemIds.clear();
+      this.streamedReasoningItemIds.clear();
       this.pendingCommandOutputDeltas.clear();
       this.pendingFileChangeOutputDeltas.clear();
       this.warnedIncompleteEditToolCallIds.clear();
@@ -3580,7 +3630,15 @@ class CodexAppServerAgentSession implements AgentSession {
 
     if (parsed.kind === "agent_message_delta") {
       const prev = this.pendingAgentMessages.get(parsed.itemId) ?? "";
-      this.pendingAgentMessages.set(parsed.itemId, prev + parsed.delta);
+      const pendingText = prev + parsed.delta;
+      this.pendingAgentMessages.set(parsed.itemId, pendingText);
+      this.maybeEmitStreamingText({
+        itemId: parsed.itemId,
+        delta: parsed.delta,
+        pendingText,
+        streamedItemIds: this.streamedAgentMessageItemIds,
+        itemType: "assistant_message",
+      });
       return;
     }
 
@@ -3588,6 +3646,13 @@ class CodexAppServerAgentSession implements AgentSession {
       const prev = this.pendingReasoning.get(parsed.itemId) ?? [];
       prev.push(parsed.delta);
       this.pendingReasoning.set(parsed.itemId, prev);
+      this.maybeEmitStreamingText({
+        itemId: parsed.itemId,
+        delta: parsed.delta,
+        pendingText: prev.join(""),
+        streamedItemIds: this.streamedReasoningItemIds,
+        itemType: "reasoning",
+      });
       return;
     }
 
@@ -3738,12 +3803,26 @@ class CodexAppServerAgentSession implements AgentSession {
         }
         if (timelineItem.type === "assistant_message" && itemId) {
           const buffered = this.pendingAgentMessages.get(itemId);
+          if (this.streamedAgentMessageItemIds.has(itemId)) {
+            this.emittedItemCompletedIds.add(itemId);
+            this.emittedItemStartedIds.delete(itemId);
+            this.pendingAgentMessages.delete(itemId);
+            this.streamedAgentMessageItemIds.delete(itemId);
+            return;
+          }
           if (buffered && buffered.length > 0) {
             timelineItem.text = buffered;
           }
         }
         if (timelineItem.type === "reasoning" && itemId) {
           const buffered = this.pendingReasoning.get(itemId);
+          if (this.streamedReasoningItemIds.has(itemId)) {
+            this.emittedItemCompletedIds.add(itemId);
+            this.emittedItemStartedIds.delete(itemId);
+            this.pendingReasoning.delete(itemId);
+            this.streamedReasoningItemIds.delete(itemId);
+            return;
+          }
           if (buffered && buffered.length > 0) {
             timelineItem.text = buffered.join("");
           }
@@ -3758,6 +3837,10 @@ class CodexAppServerAgentSession implements AgentSession {
         if (itemId) {
           this.emittedItemCompletedIds.add(itemId);
           this.emittedItemStartedIds.delete(itemId);
+          this.pendingAgentMessages.delete(itemId);
+          this.pendingReasoning.delete(itemId);
+          this.streamedAgentMessageItemIds.delete(itemId);
+          this.streamedReasoningItemIds.delete(itemId);
           this.pendingCommandOutputDeltas.delete(itemId);
           this.pendingFileChangeOutputDeltas.delete(itemId);
         }
