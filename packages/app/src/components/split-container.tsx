@@ -86,6 +86,7 @@ interface SplitContainerProps {
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
+  onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onCloseTabsToLeft: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
@@ -255,6 +256,7 @@ export function SplitContainer({
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
+  onCopyFilePath,
   onReloadAgent,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -525,6 +527,7 @@ export function SplitContainer({
         onCloseTab={onCloseTab}
         onCopyResumeCommand={onCopyResumeCommand}
         onCopyAgentId={onCopyAgentId}
+        onCopyFilePath={onCopyFilePath}
         onReloadAgent={onReloadAgent}
         onCloseTabsToLeft={onCloseTabsToLeft}
         onCloseTabsToRight={onCloseTabsToRight}
@@ -648,6 +651,7 @@ function SplitNodeView({
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
+  onCopyFilePath,
   onReloadAgent,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -684,6 +688,7 @@ function SplitNodeView({
         onCloseTab={onCloseTab}
         onCopyResumeCommand={onCopyResumeCommand}
         onCopyAgentId={onCopyAgentId}
+        onCopyFilePath={onCopyFilePath}
         onReloadAgent={onReloadAgent}
         onCloseTabsToLeft={onCloseTabsToLeft}
         onCloseTabsToRight={onCloseTabsToRight}
@@ -735,6 +740,7 @@ function SplitNodeView({
               onCloseTab={onCloseTab}
               onCopyResumeCommand={onCopyResumeCommand}
               onCopyAgentId={onCopyAgentId}
+              onCopyFilePath={onCopyFilePath}
               onReloadAgent={onReloadAgent}
               onCloseTabsToLeft={onCloseTabsToLeft}
               onCloseTabsToRight={onCloseTabsToRight}
@@ -785,6 +791,7 @@ function SplitPaneView({
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
+  onCopyFilePath,
   onReloadAgent,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -891,6 +898,7 @@ function SplitPaneView({
           onCloseTab={onCloseTab}
           onCopyResumeCommand={onCopyResumeCommand}
           onCopyAgentId={onCopyAgentId}
+          onCopyFilePath={onCopyFilePath}
           onReloadAgent={onReloadAgent}
           onCloseTabsToLeft={(tabId) => onCloseTabsToLeft(tabId, paneTabs)}
           onCloseTabsToRight={(tabId) => onCloseTabsToRight(tabId, paneTabs)}
