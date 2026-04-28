@@ -91,6 +91,7 @@ import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-ur
 import { persistAttachmentFromBase64, persistAttachmentFromDataUrl } from "@/attachments/service";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
+import { useSmoothStreamingText } from "./use-smooth-streaming-text";
 
 interface UserMessageProps {
   message: string;
@@ -440,6 +441,7 @@ interface AssistantMessageProps {
   client?: DaemonClient | null;
   disableOuterSpacing?: boolean;
   spacing?: "default" | "compactTop" | "compactBottom" | "compactBoth";
+  smoothStreaming?: boolean;
 }
 
 export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
@@ -1151,8 +1153,10 @@ export const AssistantMessage = memo(function AssistantMessage({
   client,
   disableOuterSpacing,
   spacing = "default",
+  smoothStreaming = false,
 }: AssistantMessageProps) {
   const { theme } = useUnistyles();
+  const displayedMessage = useSmoothStreamingText(message, smoothStreaming);
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(
     disableOuterSpacing ?? spacing !== "default",
   );
@@ -1349,7 +1353,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     };
   }, [client, handleLinkPress, markdownParser, onInlinePathPress, serverId, workspaceRoot]);
 
-  const blocks = useMemo(() => splitMarkdownBlocks(message), [message]);
+  const blocks = useMemo(() => splitMarkdownBlocks(displayedMessage), [displayedMessage]);
 
   return (
     <View
