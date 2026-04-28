@@ -420,7 +420,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 serverId={serverId}
                 client={client}
                 spacing={spacing}
-                smoothStreaming={isLiveHead}
+                streamingMarkdown={isLiveHead}
               />
             );
           }
