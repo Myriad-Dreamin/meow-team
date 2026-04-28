@@ -31,6 +31,7 @@ export function getFeatureHighlightColor(featureId: string): FeatureHighlightCol
     case "fast_mode":
       return "yellow";
     case "plan_mode":
+    case "streaming_chat":
       return "blue";
     default:
       return "default";
