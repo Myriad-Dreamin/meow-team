@@ -50,7 +50,10 @@ test.describe("File explorer collapse", () => {
     await expectExplorerEntryVisible(page, "logo.png");
 
     await openFileFromExplorer(page, "logo.png");
-    await expectFileTabOpen(page, "assets/logo.png");
+    await expectFileTabOpen(page, {
+      directory: tempRepo.path,
+      filePath: "assets/logo.png",
+    });
 
     await collapseFolder(page, "assets");
     await expectExplorerEntryHidden(page, "logo.png");
