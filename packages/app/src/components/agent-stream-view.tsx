@@ -343,7 +343,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         index: number,
         items: StreamItem[],
         seamAboveItem: StreamItem | null = null,
-        isLiveHead = false,
       ) => {
         const handleInlineDetailsExpandedChange = (expanded: boolean) => {
           if (!streamRenderStrategy.shouldDisableParentScrollOnInlineDetailsExpansion()) {
@@ -420,7 +419,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 serverId={serverId}
                 client={client}
                 spacing={spacing}
-                streamingMarkdown={isLiveHead}
               />
             );
           }
@@ -523,9 +521,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         index: number,
         items: StreamItem[],
         seamAboveItem: StreamItem | null = null,
-        isLiveHead = false,
       ) => {
-        const content = renderStreamItemContent(item, index, items, seamAboveItem, isLiveHead);
+        const content = renderStreamItemContent(item, index, items, seamAboveItem);
         if (!content) {
           return null;
         }
@@ -652,7 +649,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const renderLiveHeadRow = useCallback<StreamSegmentRenderers["renderLiveHeadRow"]>(
       (item, index, items) =>
-        renderStreamItem(item, index, items, index === 0 ? lastHistoryItem : null, true),
+        renderStreamItem(item, index, items, index === 0 ? lastHistoryItem : null),
       [lastHistoryItem, renderStreamItem],
     );
     const renderLiveAuxiliary = useCallback<StreamSegmentRenderers["renderLiveAuxiliary"]>(() => {
