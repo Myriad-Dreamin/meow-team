@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { buildDeterministicWorkspaceTabId } from "../../src/utils/workspace-tab-identity";
 
 function fileExplorerTree(page: Page) {
   return page.getByTestId("file-explorer-tree-scroll");
@@ -34,8 +35,16 @@ export async function expectExplorerEntryHidden(page: Page, name: string): Promi
   await expect(fileExplorerEntry(page, name)).toBeHidden({ timeout: 30_000 });
 }
 
-export async function expectFileTabOpen(page: Page, filePath: string): Promise<void> {
-  await expect(page.getByTestId(`workspace-tab-file_${filePath}`).first()).toBeVisible({
+export async function expectFileTabOpen(
+  page: Page,
+  input: { filePath: string; directory?: string },
+): Promise<void> {
+  const tabId = buildDeterministicWorkspaceTabId({
+    kind: "file",
+    directory: input.directory,
+    path: input.filePath,
+  });
+  await expect(page.getByTestId(`workspace-tab-${tabId}`).first()).toBeVisible({
     timeout: 30_000,
   });
 }
