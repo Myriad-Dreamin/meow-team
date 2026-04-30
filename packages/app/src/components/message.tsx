@@ -91,10 +91,6 @@ import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-ur
 import { persistAttachmentFromBase64, persistAttachmentFromDataUrl } from "@/attachments/service";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
-import {
-  AssistantStreamingMarkdown,
-  supportsAssistantStreamingMarkdown,
-} from "./assistant-streaming-markdown";
 
 interface UserMessageProps {
   message: string;
@@ -444,7 +440,6 @@ interface AssistantMessageProps {
   client?: DaemonClient | null;
   disableOuterSpacing?: boolean;
   spacing?: "default" | "compactTop" | "compactBottom" | "compactBoth";
-  streamingMarkdown?: boolean;
 }
 
 export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
@@ -1156,7 +1151,6 @@ export const AssistantMessage = memo(function AssistantMessage({
   client,
   disableOuterSpacing,
   spacing = "default",
-  streamingMarkdown = false,
 }: AssistantMessageProps) {
   const { theme } = useUnistyles();
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(
@@ -1192,35 +1186,6 @@ export const AssistantMessage = memo(function AssistantMessage({
       return false;
     },
     [onInlinePathPress, workspaceRoot],
-  );
-  const resolveInlinePathTarget = useCallback(
-    (content: string) => (onInlinePathPress ? parseInlinePathToken(content) : null),
-    [onInlinePathPress],
-  );
-  const resolveInlineCodeLinkUrl = useCallback(
-    (content: string) => getInlineCodeAutoLinkUrl(markdownParser, content),
-    [markdownParser],
-  );
-  const renderImage = useCallback(
-    ({
-      source,
-      alt,
-      hasLeadingContent,
-    }: {
-      source: string;
-      alt?: string;
-      hasLeadingContent: boolean;
-    }) => (
-      <AssistantMarkdownImage
-        source={source}
-        alt={alt}
-        hasLeadingContent={hasLeadingContent}
-        client={client}
-        workspaceRoot={workspaceRoot}
-        serverId={serverId}
-      />
-    ),
-    [client, serverId, workspaceRoot],
   );
 
   const markdownRules = useMemo<RenderRules>(() => {
@@ -1384,11 +1349,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     };
   }, [client, handleLinkPress, markdownParser, onInlinePathPress, serverId, workspaceRoot]);
 
-  const shouldUseStreamingMarkdown = streamingMarkdown && supportsAssistantStreamingMarkdown;
-  const blocks = useMemo(
-    () => (shouldUseStreamingMarkdown ? [] : splitMarkdownBlocks(message)),
-    [message, shouldUseStreamingMarkdown],
-  );
+  const blocks = useMemo(() => splitMarkdownBlocks(message), [message]);
 
   return (
     <View
@@ -1402,31 +1363,20 @@ export const AssistantMessage = memo(function AssistantMessage({
         !resolvedDisableOuterSpacing && assistantMessageStylesheet.containerSpacing,
       ]}
     >
-      {shouldUseStreamingMarkdown ? (
-        <AssistantStreamingMarkdown
-          message={message}
-          onLinkPress={handleLinkPress}
-          onInlinePathPress={onInlinePathPress}
-          resolveInlinePathTarget={resolveInlinePathTarget}
-          resolveInlineCodeLinkUrl={resolveInlineCodeLinkUrl}
-          renderImage={renderImage}
-        />
-      ) : (
-        blocks.map((block, index) => (
-          <View
-            key={index}
-            style={index < blocks.length - 1 ? { marginBottom: theme.spacing[3] } : undefined}
-          >
-            <MemoizedMarkdownBlock
-              text={block}
-              styles={markdownStyles}
-              rules={markdownRules}
-              parser={markdownParser}
-              onLinkPress={handleLinkPress}
-            />
-          </View>
-        ))
-      )}
+      {blocks.map((block, index) => (
+        <View
+          key={index}
+          style={index < blocks.length - 1 ? { marginBottom: theme.spacing[3] } : undefined}
+        >
+          <MemoizedMarkdownBlock
+            text={block}
+            styles={markdownStyles}
+            rules={markdownRules}
+            parser={markdownParser}
+            onLinkPress={handleLinkPress}
+          />
+        </View>
+      ))}
     </View>
   );
 });
