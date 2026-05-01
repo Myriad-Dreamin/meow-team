@@ -4,19 +4,19 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/server/**'
-      - '.github/actions/setup-pnpm/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/server-ci.yml'
+      - "packages/server/**"
+      - ".github/actions/setup-pnpm/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/server-ci.yml"
   pull_request:
     branches: [main]
     paths:
-      - 'packages/server/**'
-      - '.github/actions/setup-pnpm/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/server-ci.yml'
+      - "packages/server/**"
+      - ".github/actions/setup-pnpm/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/server-ci.yml"
 
 jobs:
   test:
@@ -29,7 +29,7 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Fetch origin/main (worktree tests)
         run: git fetch --no-tags origin main:refs/remotes/origin/main
