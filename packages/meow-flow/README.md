@@ -176,8 +176,8 @@ Use `--list` to force listing without writing files.
 
 Provider targets:
 
-| Provider | Target directory |
-|---|---|
-| `codex` | `$CODEX_HOME/skills` or `~/.codex/skills` |
-| `claude` | `$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills` |
+| Provider   | Target directory                                             |
+| ---------- | ------------------------------------------------------------ |
+| `codex`    | `$CODEX_HOME/skills` or `~/.codex/skills`                    |
+| `claude`   | `$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills`            |
 | `opencode` | `$OPENCODE_CONFIG_DIR/skills` or `~/.config/opencode/skills` |

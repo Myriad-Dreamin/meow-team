@@ -1,9 +1,11 @@
 # thread-workspace-listing Specification
 
 ## Purpose
+
 Define how Meow Flow lists configured Paseo thread worktree slots for the current repository, including root resolution, configured slot counts, and displayed allocation status.
 
 ## Requirements
+
 ### Requirement: Thread list command resolves the current repository root
 
 The CLI SHALL provide `mfl thread ls` for use from inside a git-managed folder and SHALL resolve the canonical repository root that owns the `.paseo-workspaces` directory.

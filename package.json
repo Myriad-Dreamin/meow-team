@@ -1,8 +1,26 @@
 {
   "name": "paseo",
   "version": "0.1.62",
-  "packageManager": "pnpm@10.16.1",
   "private": true,
+  "description": "Paseo: voice-controlled development environment with OpenAI Realtime API",
+  "keywords": [
+    "development",
+    "mcp",
+    "openai",
+    "realtime",
+    "voice",
+    "voice-assistant"
+  ],
+  "homepage": "https://paseo.sh",
+  "license": "AGPL-3.0-or-later",
+  "author": {
+    "name": "Mohamed Boudra",
+    "email": "hello@moboudra.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/getpaseo/paseo.git"
+  },
   "scripts": {
     "dev": "./scripts/dev.sh",
     "dev:win": "powershell ./scripts/dev.ps1",
@@ -16,8 +34,10 @@
     "typecheck": "pnpm -r --if-present run typecheck",
     "typecheck:daemon": "pnpm --filter @getpaseo/relay run typecheck && pnpm --filter @getpaseo/server run typecheck && pnpm --filter @getpaseo/cli run typecheck",
     "test": "pnpm -r --if-present run test",
-    "format": "biome format --write .",
-    "format:check": "biome format .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "start": "pnpm --filter @getpaseo/server run start",
     "android": "pnpm --filter @getpaseo/app run android",
     "android:development": "pnpm --filter @getpaseo/app run android:development",
@@ -57,40 +77,6 @@
     "release:minor": "pnpm run release:check && pnpm run version:all:minor && pnpm run release:publish && pnpm run release:push",
     "release:major": "pnpm run release:check && pnpm run version:all:major && pnpm run release:publish && pnpm run release:push"
   },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.8",
-    "concurrently": "^9.2.1",
-    "get-port-cli": "^3.0.0",
-    "knip": "^5.82.1",
-    "patch-package": "^8.0.1",
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "typescript": "^5.9.3"
-  },
-  "description": "Paseo: voice-controlled development environment with OpenAI Realtime API",
-  "homepage": "https://paseo.sh",
-  "keywords": [
-    "openai",
-    "realtime",
-    "voice",
-    "voice-assistant",
-    "development",
-    "mcp"
-  ],
-  "author": {
-    "name": "Mohamed Boudra",
-    "email": "hello@moboudra.com"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/getpaseo/paseo.git"
-  },
-  "license": "AGPL-3.0-or-later",
-  "overrides": {
-    "lightningcss": "1.30.1",
-    "react": "19.1.0",
-    "react-dom": "19.1.0"
-  },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.11",
     "@modelcontextprotocol/sdk": "^1.27.1",
@@ -98,9 +84,25 @@
     "react": "19.1.0",
     "react-native": "0.81.5"
   },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "get-port-cli": "^3.0.0",
+    "knip": "^5.82.1",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "patch-package": "^8.0.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "lightningcss": "1.30.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "packageManager": "pnpm@10.16.1",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@biomejs/biome",
       "better-sqlite3",
       "dtrace-provider",
       "electron",

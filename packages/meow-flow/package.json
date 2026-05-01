@@ -2,14 +2,14 @@
   "name": "meow-flow",
   "version": "0.1.61-beta.1",
   "description": "MeowFlow CLI bootstrap package",
-  "type": "module",
+  "bin": {
+    "mfl": "bin/mfl"
+  },
   "files": [
     "bin",
     "dist"
   ],
-  "bin": {
-    "mfl": "bin/mfl"
-  },
+  "type": "module",
   "scripts": {
     "build": "node scripts/embed-skills.mjs && node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",
     "embed-skills": "node scripts/embed-skills.mjs",
