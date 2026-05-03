@@ -68,7 +68,9 @@
     "get-port-cli",
     "patch-package",
     "cross-env",
-    "expo-module-scripts"
+    "expo-module-scripts",
+    "buffer",
+    "metro-config"
   ],
   "ignoreBinaries": [
     "expo-module",
