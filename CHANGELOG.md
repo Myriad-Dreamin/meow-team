@@ -1,8 +1,5 @@
 # Changelog
 
-<<<<<<< HEAD
-## 0.1.61-beta.1 - 2026-04-22
-=======
 ## 0.1.62 - 2026-04-23
 
 ### Added
@@ -17,7 +14,6 @@
 - Agents launched from the desktop app no longer inherit Electron-only environment variables.
 
 ## 0.1.61 - 2026-04-23
->>>>>>> 75b8ae64
 
 ### Added
 - `additionalModels` option in provider config lets you add or relabel models without replacing the full list — entries merge with runtime-discovered models (ACP) or your static `models` list. See the [Providers docs](https://paseo.sh/docs/providers).

@@ -635,17 +635,11 @@ function AssistantMarkdownImage({
 
       return await persistAttachmentFromBase64({
         id: createPreviewAttachmentId({
-<<<<<<< HEAD
-          base64: file.content,
-          mimeType: file.mimeType ?? "image/png",
-          path: file.path || resolution.path,
-=======
           mimeType: file.mimeType ?? "image/png",
           path: file.path || resolution.path,
           size: file.size,
           modifiedAt: file.modifiedAt,
           contentLength: file.content.length,
->>>>>>> 75b8ae64
         }),
         base64: file.content,
         mimeType: file.mimeType,
@@ -663,14 +657,10 @@ function AssistantMarkdownImage({
       }
 
       return await persistAttachmentFromDataUrl({
-<<<<<<< HEAD
-        id: createPreviewAttachmentId(dataImage),
-=======
         id: createPreviewAttachmentId({
           mimeType: dataImage.mimeType,
           contentLength: dataImage.base64.length,
         }),
->>>>>>> 75b8ae64
         dataUrl: source,
         mimeType: dataImage.mimeType,
       });

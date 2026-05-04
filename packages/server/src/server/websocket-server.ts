@@ -70,54 +70,6 @@ type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
 
 function createFallbackWorkspaceGitSnapshot(cwd: string): WorkspaceGitRuntimeSnapshot {
   return {
-<<<<<<< HEAD
-    subscribe: async ({ cwd }: { cwd: string }) => ({
-      initial: {
-        cwd,
-        git: {
-          isGit: false,
-          repoRoot: null,
-          mainRepoRoot: null,
-          currentBranch: null,
-          remoteUrl: null,
-          isPaseoOwnedWorktree: false,
-          isDirty: null,
-          aheadBehind: null,
-          aheadOfOrigin: null,
-          behindOfOrigin: null,
-          diffStat: null,
-        },
-        github: {
-          featuresEnabled: false,
-          pullRequest: null,
-          error: null,
-        },
-      },
-      unsubscribe: () => {},
-    }),
-    peekSnapshot: () => null,
-    getSnapshot: async (cwd: string) => ({
-      cwd,
-      git: {
-        isGit: false,
-        repoRoot: null,
-        mainRepoRoot: null,
-        currentBranch: null,
-        remoteUrl: null,
-        isPaseoOwnedWorktree: false,
-        isDirty: null,
-        aheadBehind: null,
-        aheadOfOrigin: null,
-        behindOfOrigin: null,
-        diffStat: null,
-      },
-      github: {
-        featuresEnabled: false,
-        pullRequest: null,
-        error: null,
-      },
-    }),
-=======
     cwd,
     git: {
       isGit: false,
@@ -170,7 +122,6 @@ function createFallbackWorkspaceGitService(): WorkspaceGitService {
     resolveRepoRoot: async (cwd: string) => cwd,
     resolveDefaultBranch: async () => "main",
     resolveRepoRemoteUrl: async () => null,
->>>>>>> 75b8ae64
     refresh: async () => {},
     requestWorkingTreeWatch: async () => ({
       repoRoot: null,

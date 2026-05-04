@@ -46,11 +46,8 @@ interface FilePreviewBodyProps {
   showDesktopWebScrollbar: boolean;
   isMobile: boolean;
   filePath: string;
-<<<<<<< HEAD
   lineStart?: number;
   columnStart?: number;
-=======
->>>>>>> 75b8ae64
   imagePreviewUri: string | null;
 }
 
@@ -86,17 +83,11 @@ async function createFilePanePreview(file: ExplorerFile | null): Promise<{
   const { content: _content, ...imageFile } = file;
   const imageAttachment = await persistAttachmentFromBase64({
     id: createPreviewAttachmentId({
-<<<<<<< HEAD
-      base64: file.content,
-      mimeType: file.mimeType ?? "image/png",
-      path: file.path,
-=======
       mimeType: file.mimeType ?? "image/png",
       path: file.path,
       size: file.size,
       modifiedAt: file.modifiedAt,
       contentLength: file.content.length,
->>>>>>> 75b8ae64
     }),
     base64: file.content,
     mimeType: file.mimeType,
@@ -184,11 +175,8 @@ function FilePreviewBody({
   showDesktopWebScrollbar,
   isMobile,
   filePath,
-<<<<<<< HEAD
   lineStart,
   columnStart: _columnStart,
-=======
->>>>>>> 75b8ae64
   imagePreviewUri,
 }: FilePreviewBodyProps) {
   const { theme } = useUnistyles();
@@ -438,11 +426,8 @@ export function FilePane({
         showDesktopWebScrollbar={showDesktopWebScrollbar}
         isMobile={isMobile}
         filePath={filePath}
-<<<<<<< HEAD
         lineStart={lineStart}
         columnStart={columnStart}
-=======
->>>>>>> 75b8ae64
         imagePreviewUri={imagePreviewUri}
       />
     </View>

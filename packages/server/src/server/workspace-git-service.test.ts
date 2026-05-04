@@ -284,12 +284,8 @@ describe("WorkspaceGitServiceImpl", () => {
       now: () => new Date(nowMs),
     });
     const listener = vi.fn();
-<<<<<<< HEAD
-    const subscription = await service.subscribe({ cwd: "/tmp/repo" }, listener);
-=======
     await service.getSnapshot("/tmp/repo");
     const subscription = service.registerWorkspace({ cwd: "/tmp/repo" }, listener);
->>>>>>> 75b8ae64
 
     nowMs += 3_000;
     await service.refresh("/tmp/repo");
@@ -301,11 +297,7 @@ describe("WorkspaceGitServiceImpl", () => {
     service.dispose();
   });
 
-<<<<<<< HEAD
-  test("cold getSnapshot calls share one workspace target setup and cache the snapshot", async () => {
-=======
   test("cold getSnapshot calls share one workspace target and cache the snapshot", async () => {
->>>>>>> 75b8ae64
     const checkoutStatusDeferred = createDeferred<CheckoutStatusGit>();
     const getCheckoutStatus = vi.fn(async () => checkoutStatusDeferred.promise);
     const getPullRequestStatus = vi.fn(async () => createPullRequestStatusResult());

@@ -81,7 +81,6 @@ function makeManagedAgent(input: {
     updatedAt: input.updatedAt,
   });
 
-<<<<<<< HEAD
   return {
     ...snapshot,
     lifecycle: snapshot.status,
@@ -107,98 +106,6 @@ function makeManagedAgent(input: {
     unsubscribeSession: null,
     session: null,
     activeForegroundTurnId: input.lifecycle === "running" ? "turn-1" : null,
-  };
-}
-
-function agentIdsFromEntries(entries: Array<{ agent: Pick<AgentSnapshotPayload, "id"> }>) {
-  return entries.map((entry) => entry.agent.id);
-}
-
-function createNoopWorkspaceGitService() {
-  return {
-    subscribe: async (params: { cwd: string }) => ({
-      initial: {
-        cwd: params.cwd,
-        git: {
-          isGit: false,
-          repoRoot: null,
-          mainRepoRoot: null,
-          currentBranch: null,
-          remoteUrl: null,
-          isPaseoOwnedWorktree: false,
-          isDirty: null,
-          aheadBehind: null,
-          aheadOfOrigin: null,
-          behindOfOrigin: null,
-          diffStat: null,
-        },
-        github: {
-          featuresEnabled: false,
-          pullRequest: null,
-          error: null,
-        },
-      },
-      unsubscribe: () => {},
-    }),
-    peekSnapshot: (_cwd: string) => null,
-    getSnapshot: async (cwd: string) => ({
-      cwd,
-      git: {
-        isGit: false,
-        repoRoot: null,
-        mainRepoRoot: null,
-        currentBranch: null,
-        remoteUrl: null,
-        isPaseoOwnedWorktree: false,
-        isDirty: null,
-        aheadBehind: null,
-        aheadOfOrigin: null,
-        behindOfOrigin: null,
-        diffStat: null,
-      },
-      github: {
-        featuresEnabled: false,
-        pullRequest: null,
-        error: null,
-      },
-    }),
-    resolveRepoRemoteUrl: async () => null,
-    resolveRepoRoot: async (cwd: string) => cwd,
-    resolveDefaultBranch: async () => "main",
-    refresh: async () => {},
-    requestWorkingTreeWatch: async (cwd: string) => ({
-      repoRoot: cwd,
-      unsubscribe: () => {},
-    }),
-    scheduleRefreshForCwd: () => {},
-    dispose: () => {},
-=======
-  return {
-    ...snapshot,
-    lifecycle: snapshot.status,
-    config: {
-      provider: snapshot.provider,
-      cwd: snapshot.cwd,
-    },
-    createdAt: now,
-    updatedAt: now,
-    pendingPermissions: new Map(),
-    bufferedPermissionResolutions: new Map(),
-    inFlightPermissionResponses: new Set(),
-    pendingReplacement: false,
-    persistence: null,
-    historyPrimed: true,
-    lastUserMessageAt: null,
-    attention: {
-      requiresAttention: false,
-      attentionReason: null,
-      attentionTimestamp: now,
-    },
-    foregroundTurnWaiters: new Set(),
-    unsubscribeSession: null,
-    session: null,
-    activeForegroundTurnId: input.lifecycle === "running" ? "turn-1" : null,
->>>>>>> 75b8ae64
   };
 }
 

@@ -773,12 +773,8 @@ describe("WorkspaceGitServiceImpl primitive refresh entrypoint", () => {
       getCheckoutStatus,
       github,
     });
-<<<<<<< HEAD
-    const subscription = await service.subscribe({ cwd: "/tmp/repo" }, vi.fn());
-=======
     const subscription = service.registerWorkspace({ cwd: "/tmp/repo" }, vi.fn());
     await flushPromises();
->>>>>>> 75b8ae64
 
     expect(retainCurrentPullRequestStatusPoll).not.toHaveBeenCalled();
 

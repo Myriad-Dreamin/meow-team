@@ -6,10 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import { Buffer } from "node:buffer";
 import dotenv from "dotenv";
-<<<<<<< HEAD
 import { resolvePlaywrightSpeechEnabled } from "../src/utils/e2e-speech";
-=======
->>>>>>> 75b8ae64
 import { forkPaseoHomeMetadata, resolvePaseoHomePath } from "./helpers/paseo-home-fork";
 
 type WaitForServerOptions = {

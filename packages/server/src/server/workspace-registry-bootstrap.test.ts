@@ -11,68 +11,6 @@ import type { WorkspaceGitService } from "./workspace-git-service.js";
 import { FileBackedProjectRegistry, FileBackedWorkspaceRegistry } from "./workspace-registry.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 
-<<<<<<< HEAD
-function createNoopWorkspaceGitService(): WorkspaceGitService {
-  return {
-    subscribe: async (params) => ({
-      initial: {
-        cwd: params.cwd,
-        git: {
-          isGit: false,
-          repoRoot: null,
-          mainRepoRoot: null,
-          currentBranch: null,
-          remoteUrl: null,
-          isPaseoOwnedWorktree: false,
-          isDirty: null,
-          aheadBehind: null,
-          aheadOfOrigin: null,
-          behindOfOrigin: null,
-          diffStat: null,
-        },
-        github: {
-          featuresEnabled: false,
-          pullRequest: null,
-          error: null,
-        },
-      },
-      unsubscribe: () => {},
-    }),
-    peekSnapshot: () => null,
-    getSnapshot: async (cwd) => ({
-      cwd,
-      git: {
-        isGit: false,
-        repoRoot: null,
-        mainRepoRoot: null,
-        currentBranch: null,
-        remoteUrl: null,
-        isPaseoOwnedWorktree: false,
-        isDirty: null,
-        aheadBehind: null,
-        aheadOfOrigin: null,
-        behindOfOrigin: null,
-        diffStat: null,
-      },
-      github: {
-        featuresEnabled: false,
-        pullRequest: null,
-        error: null,
-      },
-    }),
-    resolveRepoRemoteUrl: async () => null,
-    refresh: async () => {},
-    requestWorkingTreeWatch: async () => ({
-      repoRoot: null,
-      unsubscribe: () => {},
-    }),
-    scheduleRefreshForCwd: () => {},
-    dispose: () => {},
-  };
-}
-
-=======
->>>>>>> 75b8ae64
 describe("bootstrapWorkspaceRegistries", () => {
   let tmpDir: string;
   let paseoHome: string;
