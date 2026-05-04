@@ -48,10 +48,21 @@ stdenv.mkDerivation rec {
     hash = "sha256-MiVlINil1xMdiqwLgqVnoR8e39nujiB/uuK1qRjsStk=";
   };
 
+<<<<<<< HEAD
   # nixpkgs may provide a newer pnpm 10.x than the repo's pinned packageManager.
   # Without this, pnpm tries to install the pinned version into ~/.local/share
   # during sandboxed builds and fails with EACCES under /homeless-shelter.
   npm_config_manage_package_manager_versions = "false";
+=======
+  # To update: run `nix build` with lib.fakeHash, copy the `got:` hash.
+  # CI auto-updates this when package-lock.json changes (see .github/workflows/).
+  npmDepsHash = "sha256-OfKhiXXFux4PPgTmBFG9GtznD4BSt2VMrXI2+ZEc6Es=";
+
+  # Prevent onnxruntime-node's install script from running during automatic
+  # npm rebuild (it tries to download from api.nuget.org, which fails in the sandbox).
+  # We manually rebuild only node-pty in buildPhase.
+  npmRebuildFlags = [ "--ignore-scripts" ];
+>>>>>>> 75b8ae64
 
   nativeBuildInputs = [
     nodejs
