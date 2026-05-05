@@ -1330,9 +1330,6 @@ describe("session checkout pull request creation", () => {
         base: "main",
       },
       expect.anything(),
-      expect.objectContaining({
-        getCheckoutDiff: workspaceGitService.getCheckoutDiff,
-      }),
     );
   });
 
