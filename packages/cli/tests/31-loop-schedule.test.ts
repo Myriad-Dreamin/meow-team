@@ -171,7 +171,6 @@ try {
         break;
       }
       await sleep(250);
-      return pollStatus(attempt + 1);
     }
     assert.notStrictEqual(
       status,
