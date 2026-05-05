@@ -62,7 +62,7 @@ existing `thread_occupations` table, not in repository-local JSON files.
 - **AND** it has a handoff with sequence `1`, stage `code`, and content
   `code diff`
 - **THEN** `mfl thread status fix-test-ci --no-color` prints `name:
-  install-meow-flow-skills`
+install-meow-flow-skills`
 - **AND** it prints an `agents` list containing id `123456`, the title, the
   skill, and an RFC 3339 creation timestamp
 - **AND** it prints `request-body: |` followed by the request content

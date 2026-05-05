@@ -13,6 +13,7 @@
 ## Capabilities
 
 ### New Capabilities
+
 - `shared-team-config`: Install and consume a shared Meow Flow config artifact from `~/.local/shared/meow-flow/config.js`.
 
 ### Modified Capabilities

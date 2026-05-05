@@ -2,10 +2,10 @@
   "name": "@myriaddreamin/meow-flow-core",
   "version": "0.1.61-beta.1",
   "description": "Reusable core primitives for Meow Flow",
+  "files": [
+    "dist"
+  ],
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -15,9 +15,9 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",
     "prepack": "pnpm run build",

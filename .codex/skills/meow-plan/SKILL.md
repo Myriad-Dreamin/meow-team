@@ -64,6 +64,7 @@ the current plan stage agent.
    If a concurrent `mfl` update causes a transient SQLite write conflict, wait
    for the previous `mfl` command to finish and retry the thread-name write
    once before proceeding.
+
 6. After setting or changing the thread name, rename the current Paseo agent to
    the named-thread format when `PASEO_AGENT_ID` is available:
 
@@ -74,6 +75,7 @@ the current plan stage agent.
    Use the current stage label and the agent's sequence from
    `mfl thread status <id> --no-color` when the renamed agent is not the first
    plan agent.
+
 7. If the repository uses OpenSpec, create the matching OpenSpec change with
    the same name. Prefer project-local OpenSpec proposal skills or commands.
 8. Keep planning scoped. Do not edit production code.
@@ -81,11 +83,11 @@ the current plan stage agent.
    when set; otherwise infer the local title style from recent main-branch
    commits. Use `docs: add proposal <name>` as the fallback.
 10. Append a concise planning handoff with the next suggested stage, usually
-   `/mfl code` or `/mfl execute`:
+    `/mfl code` or `/mfl execute`:
 
-   ```bash
-   mfl handoff append --stage plan "planned <name>; proposal <path>; next <stage>"
-   ```
+```bash
+mfl handoff append --stage plan "planned <name>; proposal <path>; next <stage>"
+```
 
 The coding and review stages stay idle until the user approves or asks for the
 next stage.

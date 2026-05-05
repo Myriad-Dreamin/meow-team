@@ -44,5 +44,6 @@ pnpm run dev
 The dev script starts the daemon and Expo app together. It automatically derives
 isolated `PASEO_HOME` state for worktrees.
 
-[^paseo-docs]: [Paseo Getting Started](https://paseo.sh/docs)
+[^paseo-docs]:
+    [Paseo Getting Started](https://paseo.sh/docs)
     documents Paseo's daemon, app, CLI, and prerequisite agent setup.

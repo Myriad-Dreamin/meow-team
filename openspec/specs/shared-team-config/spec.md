@@ -1,6 +1,7 @@
 # shared-team-config Specification
 
 ## Purpose
+
 Define how Meow Flow installs and resolves a shared team configuration artifact for planning and later CLI commands.
 
 ## Requirements
