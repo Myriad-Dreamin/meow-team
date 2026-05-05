@@ -47,9 +47,47 @@ import {
   LoopLogsResponseSchema,
   LoopStopResponseSchema,
 } from "../server/loop/rpc-schemas.js";
+import {
+  PaseoConfigRawSchema,
+  PaseoLifecycleCommandRawSchema,
+  PaseoScriptEntryRawSchema,
+  PaseoWorktreeConfigRawSchema,
+  PaseoConfigRevisionSchema,
+  ProjectConfigRpcErrorSchema,
+  type PaseoConfigRaw,
+  type PaseoConfigRevision,
+  type PaseoScriptEntryRaw,
+  type ProjectConfigRpcError,
+} from "../utils/paseo-config-schema.js";
+export {
+  PaseoConfigRawSchema,
+  PaseoLifecycleCommandRawSchema,
+  PaseoScriptEntryRawSchema,
+  PaseoWorktreeConfigRawSchema,
+  type PaseoConfigRaw,
+  type PaseoConfigRevision,
+  type PaseoScriptEntryRaw,
+  type ProjectConfigRpcError,
+};
 // ---------------------------------------------------------------------------
 // Mutable daemon config schemas (shared between server store and client)
 // ---------------------------------------------------------------------------
+
+const MutableDaemonProviderModelSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().optional(),
+    isDefault: z.boolean().optional(),
+  })
+  .passthrough();
+
+const MutableDaemonProviderConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    additionalModels: z.array(MutableDaemonProviderModelSchema).optional(),
+  })
+  .passthrough();
 
 export const MutableDaemonConfigSchema = z
   .object({
@@ -58,12 +96,16 @@ export const MutableDaemonConfigSchema = z
         injectIntoAgents: z.boolean(),
       })
       .passthrough(),
+    providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
   })
   .passthrough();
 
 export const MutableDaemonConfigPatchSchema = z
   .object({
     mcp: MutableDaemonConfigSchema.shape.mcp.partial().optional(),
+    providers: z
+      .record(z.string(), MutableDaemonProviderConfigSchema.partial().passthrough())
+      .optional(),
   })
   .partial()
   .passthrough();
@@ -78,7 +120,6 @@ import type {
   AgentPermissionRequest,
   AgentPermissionResponse,
   AgentPersistenceHandle,
-  ProviderSnapshotEntry,
   ProviderStatus,
   AgentRuntimeInfo,
   AgentTimelineItem,
@@ -149,9 +190,10 @@ const AgentModelDefinitionSchema: z.ZodType<AgentModelDefinition> = z.object({
   defaultThinkingOptionId: z.string().optional(),
 });
 
-const ProviderSnapshotEntrySchema: z.ZodType<ProviderSnapshotEntry> = z.object({
+export const ProviderSnapshotEntrySchema = z.object({
   provider: AgentProviderSchema,
   status: ProviderStatusSchema,
+  enabled: z.boolean().optional().default(true),
   error: z.string().optional(),
   models: z.array(AgentModelDefinitionSchema).optional(),
   modes: z.array(AgentModeSchema).optional(),
@@ -578,6 +620,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
   attentionTimestamp: z.string().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
+  providerUnavailable: z.boolean().optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -600,6 +643,7 @@ export const AgentListItemPayloadSchema = z.object({
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
   attentionTimestamp: z.string().nullable().optional(),
   labels: z.record(z.string(), z.string()).default({}),
+  providerUnavailable: z.boolean().optional(),
 });
 
 export type AgentListItemPayload = z.infer<typeof AgentListItemPayloadSchema>;
@@ -848,6 +892,20 @@ export const SetDaemonConfigRequestMessageSchema = z.object({
   type: z.literal("set_daemon_config_request"),
   requestId: z.string(),
   config: MutableDaemonConfigPatchSchema,
+});
+
+export const ReadProjectConfigRequestMessageSchema = z.object({
+  type: z.literal("read_project_config_request"),
+  requestId: z.string(),
+  repoRoot: z.string(),
+});
+
+export const WriteProjectConfigRequestMessageSchema = z.object({
+  type: z.literal("write_project_config_request"),
+  requestId: z.string(),
+  repoRoot: z.string(),
+  config: PaseoConfigRawSchema,
+  expectedRevision: PaseoConfigRevisionSchema.nullable(),
 });
 
 // ============================================================================
@@ -1579,6 +1637,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WaitForFinishRequestSchema,
   GetDaemonConfigRequestMessageSchema,
   SetDaemonConfigRequestMessageSchema,
+  ReadProjectConfigRequestMessageSchema,
+  WriteProjectConfigRequestMessageSchema,
   DictationStreamStartMessageSchema,
   DictationStreamChunkMessageSchema,
   DictationStreamFinishMessageSchema,
@@ -1972,7 +2032,7 @@ export const ProjectCheckoutLiteGitNonPaseoPayloadSchema = z
     remoteUrl: z.string().nullable(),
     worktreeRoot: z.string().optional(),
     isPaseoOwnedWorktree: z.literal(false),
-    mainRepoRoot: z.null(),
+    mainRepoRoot: z.string().nullable().optional().default(null),
   })
   .transform((value) => ({
     ...value,
@@ -2088,6 +2148,7 @@ export const WorkspaceDescriptorPayloadSchema = z
     scripts: z.array(WorkspaceScriptPayloadSchema).default([]),
     gitRuntime: WorkspaceGitRuntimePayloadSchema,
     githubRuntime: WorkspaceGitHubRuntimePayloadSchema,
+    project: ProjectPlacementPayloadSchema.optional(),
   })
   .transform((workspace) => ({
     ...workspace,
@@ -2385,6 +2446,44 @@ export const SetDaemonConfigResponseMessageSchema = z.object({
     .passthrough(),
 });
 
+export const ReadProjectConfigResponseMessageSchema = z.object({
+  type: z.literal("read_project_config_response"),
+  payload: z.discriminatedUnion("ok", [
+    z.object({
+      requestId: z.string(),
+      repoRoot: z.string(),
+      ok: z.literal(true),
+      config: PaseoConfigRawSchema.nullable(),
+      revision: PaseoConfigRevisionSchema.nullable(),
+    }),
+    z.object({
+      requestId: z.string(),
+      repoRoot: z.string(),
+      ok: z.literal(false),
+      error: ProjectConfigRpcErrorSchema,
+    }),
+  ]),
+});
+
+export const WriteProjectConfigResponseMessageSchema = z.object({
+  type: z.literal("write_project_config_response"),
+  payload: z.discriminatedUnion("ok", [
+    z.object({
+      requestId: z.string(),
+      repoRoot: z.string(),
+      ok: z.literal(true),
+      config: PaseoConfigRawSchema,
+      revision: PaseoConfigRevisionSchema,
+    }),
+    z.object({
+      requestId: z.string(),
+      repoRoot: z.string(),
+      ok: z.literal(false),
+      error: ProjectConfigRpcErrorSchema,
+    }),
+  ]),
+});
+
 export const AgentPermissionRequestMessageSchema = z.object({
   type: z.literal("agent_permission_request"),
   payload: z.object({
@@ -2467,6 +2566,7 @@ const CheckoutStatusGitNonPaseoSchema = CheckoutStatusCommonSchema.extend({
   isGit: z.literal(true),
   isPaseoOwnedWorktree: z.literal(false),
   repoRoot: z.string(),
+  mainRepoRoot: z.string().nullable().optional().default(null),
   currentBranch: z.string().nullable(),
   isDirty: z.boolean(),
   baseRef: z.string().nullable(),
@@ -3164,6 +3264,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SetVoiceModeResponseMessageSchema,
   GetDaemonConfigResponseMessageSchema,
   SetDaemonConfigResponseMessageSchema,
+  ReadProjectConfigResponseMessageSchema,
+  WriteProjectConfigResponseMessageSchema,
   SetAgentModeResponseMessageSchema,
   SetAgentModelResponseMessageSchema,
   SetAgentThinkingResponseMessageSchema,

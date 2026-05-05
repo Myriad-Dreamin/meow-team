@@ -1,9 +1,12 @@
 # meow-agent-skills Specification
 
 ## Purpose
+
 Define the embedded MeowFlow skills, role-skill coordination rules, and
 interactive workflow documentation for staged MeowFlow threads.
+
 ## Requirements
+
 ### Requirement: Embedded MeowFlow skills expose the core entry and archive skills
 
 The embedded skill set SHALL include `meow-flow` and `meow-archive`, SHALL
@@ -284,4 +287,3 @@ hardcoded list in the agent command.
 - **WHEN** the current Paseo agent has label `x-meow-flow-stage=plan`
 - **THEN** `mfl agent update-self` records the agent skill as `meow-plan`
 - **AND** the recorded skill remains valid for deriving the thread stage
-

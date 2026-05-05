@@ -70,8 +70,8 @@ function stripOpenSearchParamFromBrowserUrl() {
 }
 
 function clearConsumedOpenIntent(input: {
-  navigation: { setParams: (...args: any[]) => void };
-  router: { replace: (...args: any[]) => void };
+  navigation: { setParams: (params: { open?: string | undefined }) => void };
+  router: ReturnType<typeof useRouter>;
   serverId: string;
   workspaceId: string;
 }) {
@@ -142,7 +142,9 @@ function HostWorkspaceLayoutContent() {
     const consumptionKey = `${serverId}:${workspaceId}:${openValue}`;
     if (consumedIntentRef.current === consumptionKey) {
       clearConsumedOpenIntent({
-        navigation,
+        navigation: navigation as unknown as {
+          setParams: (params: { open?: string | undefined }) => void;
+        },
         router,
         serverId,
         workspaceId,
@@ -166,7 +168,9 @@ function HostWorkspaceLayoutContent() {
     // skips search params). Strip ?open from the browser URL directly so the
     // address bar reflects the clean workspace route.
     clearConsumedOpenIntent({
-      navigation,
+      navigation: navigation as unknown as {
+        setParams: (params: { open?: string | undefined }) => void;
+      },
       router,
       serverId,
       workspaceId,

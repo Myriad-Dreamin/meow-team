@@ -1,3 +1,8 @@
+// TODO: this duplicates parseGitHubRepoFromRemote in packages/server/src/services/github-service.ts.
+// Consolidate into a shared package once we have a third caller.
+
+// Note: SSH host aliases (e.g. `git@github-work:acme/repo.git` resolved via ~/.ssh/config)
+// are not detected here, so the GitHub action will silently not appear for those remotes.
 function trimNonEmpty(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -22,7 +27,6 @@ export function parseGitHubRepoFromRemote(remoteUrl: string | null | undefined):
     } catch {
       return null;
     }
-
     if (parsed.hostname !== "github.com") {
       return null;
     }
@@ -38,7 +42,6 @@ export function parseGitHubRepoFromRemote(remoteUrl: string | null | undefined):
   if (cleaned.endsWith(".git")) {
     cleaned = cleaned.slice(0, -".git".length);
   }
-
   if (!cleaned.includes("/")) {
     return null;
   }

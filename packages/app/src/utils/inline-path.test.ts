@@ -118,6 +118,19 @@ describe("parseAssistantFileLink", () => {
     });
   });
 
+  it("parses absolute POSIX hrefs with VS Code-style line suffixes inside the active workspace", () => {
+    expect(
+      parseAssistantFileLink("/Users/test/project/src/app.tsx:33", {
+        workspaceRoot: "/Users/test/project",
+      }),
+    ).toEqual({
+      raw: "/Users/test/project/src/app.tsx:33",
+      path: "/Users/test/project/src/app.tsx",
+      lineStart: 33,
+      lineEnd: undefined,
+    });
+  });
+
   it("parses relative hrefs with trailing line suffixes", () => {
     expect(parseAssistantFileLink("src/app.tsx:33:2")).toEqual({
       raw: "src/app.tsx:33:2",
@@ -135,6 +148,19 @@ describe("parseAssistantFileLink", () => {
       }),
     ).toEqual({
       raw: "C:/repo/src/app.tsx#L12-L20",
+      path: "C:/repo/src/app.tsx",
+      lineStart: 12,
+      lineEnd: 20,
+    });
+  });
+
+  it("parses absolute Windows hrefs with VS Code-style line suffixes inside the active workspace", () => {
+    expect(
+      parseAssistantFileLink("C:/repo/src/app.tsx:12-20", {
+        workspaceRoot: "C:/repo",
+      }),
+    ).toEqual({
+      raw: "C:/repo/src/app.tsx:12-20",
       path: "C:/repo/src/app.tsx",
       lineStart: 12,
       lineEnd: 20,

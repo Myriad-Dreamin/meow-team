@@ -14,6 +14,13 @@ const INLINE_PATH_LINE_COLUMN_SUFFIX = /^(.+):([0-9]+):([0-9]+)$/;
 const INLINE_PATH_LINE_RANGE_SUFFIX = /^(.+):([0-9]+)-([0-9]+)$/;
 const INLINE_PATH_LINE_SUFFIX = /^(.+):([0-9]+)$/;
 
+type PathLocationSuffixKind = "column" | "range" | "line";
+
+interface PathLocationSuffixMatch {
+  match: RegExpMatchArray;
+  kind: PathLocationSuffixKind;
+}
+
 export interface AssistantHrefParseOptions {
   workspaceRoot?: string;
 }
@@ -57,17 +64,35 @@ function parseLineFragment(value: string): Pick<InlinePathTarget, "lineStart" | 
   return { lineStart, lineEnd };
 }
 
+function parsePositiveInteger(value: string | undefined): number | null {
+  const parsed = parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function matchPathLocationSuffix(value: string): PathLocationSuffixMatch | null {
+  const columnMatch = value.match(INLINE_PATH_LINE_COLUMN_SUFFIX);
+  if (columnMatch) {
+    return { match: columnMatch, kind: "column" };
+  }
+
+  const rangeMatch = value.match(INLINE_PATH_LINE_RANGE_SUFFIX);
+  if (rangeMatch) {
+    return { match: rangeMatch, kind: "range" };
+  }
+
+  const lineMatch = value.match(INLINE_PATH_LINE_SUFFIX);
+  return lineMatch ? { match: lineMatch, kind: "line" } : null;
+}
+
 function parsePathLocationSuffix(
   value: string,
 ): Pick<InlinePathTarget, "path" | "lineStart" | "lineEnd" | "columnStart"> | null {
-  const columnMatch = value.match(INLINE_PATH_LINE_COLUMN_SUFFIX);
-  const rangeMatch = columnMatch ? null : value.match(INLINE_PATH_LINE_RANGE_SUFFIX);
-  const lineMatch = columnMatch || rangeMatch ? null : value.match(INLINE_PATH_LINE_SUFFIX);
-  const match = columnMatch ?? rangeMatch ?? lineMatch;
-  if (!match) {
+  const suffixMatch = matchPathLocationSuffix(value);
+  if (!suffixMatch) {
     return null;
   }
 
+  const { match, kind } = suffixMatch;
   const basePathRaw = match[1]?.trim();
   if (!basePathRaw) {
     return null;
@@ -78,27 +103,25 @@ function parsePathLocationSuffix(
     return null;
   }
 
-  const lineStart = parseInt(match[2] ?? "", 10);
-  if (!Number.isFinite(lineStart) || lineStart <= 0) {
+  const lineStart = parsePositiveInteger(match[2]);
+  if (lineStart === null) {
     return null;
   }
 
-  const lineEnd = rangeMatch?.[3] ? parseInt(rangeMatch[3], 10) : undefined;
-  if (lineEnd !== undefined) {
-    if (!Number.isFinite(lineEnd) || lineEnd <= 0 || lineEnd < lineStart) {
-      return null;
-    }
+  const lineEnd = kind === "range" ? parsePositiveInteger(match[3]) : null;
+  if (kind === "range" && (lineEnd === null || lineEnd < lineStart)) {
+    return null;
   }
 
-  const columnStart = columnMatch?.[3] ? parseInt(columnMatch[3], 10) : undefined;
-  if (columnStart !== undefined && (!Number.isFinite(columnStart) || columnStart <= 0)) {
+  const columnStart = kind === "column" ? parsePositiveInteger(match[3]) : null;
+  if (kind === "column" && columnStart === null) {
     return null;
   }
 
   return {
     path: normalizedPath,
     lineStart,
-    lineEnd,
+    ...(lineEnd ? { lineEnd } : {}),
     ...(columnStart ? { columnStart } : {}),
   };
 }
@@ -193,6 +216,86 @@ export function parseFileProtocolUrl(value: string): InlinePathTarget | null {
   };
 }
 
+function parseAssistantInlinePathLink(
+  value: string,
+  options: AssistantHrefParseOptions,
+): InlinePathTarget | null {
+  const inlinePathTarget = parseInlinePathToken(value);
+  if (!inlinePathTarget) {
+    return null;
+  }
+
+  const normalizedPath = normalizePathToken(inlinePathTarget.path);
+  if (!normalizedPath || !isAbsolutePath(normalizedPath)) {
+    return null;
+  }
+
+  if (!isAllowedAbsolutePath(normalizedPath, options.workspaceRoot)) {
+    return null;
+  }
+
+  return {
+    ...inlinePathTarget,
+    path: normalizedPath,
+  };
+}
+
+function parseWindowsPathLink(
+  rawValue: string,
+  trimmedValue: string,
+  options: AssistantHrefParseOptions,
+): InlinePathTarget | null {
+  const windowsPathMatch = trimmedValue.match(/^([A-Za-z]:[\\/][^?#]*)(#[^?]+)?$/);
+  if (!windowsPathMatch) {
+    return null;
+  }
+
+  const normalizedPath = normalizePathToken(windowsPathMatch[1] ?? "");
+  const hrefPath = normalizedPath
+    ? parseHrefPathAndLines(normalizedPath, windowsPathMatch[2] ?? "")
+    : null;
+  if (!hrefPath || !isAllowedAbsolutePath(hrefPath.path, options.workspaceRoot)) {
+    return null;
+  }
+
+  return {
+    raw: rawValue,
+    ...hrefPath,
+  };
+}
+
+function parseAbsolutePathLink(
+  rawValue: string,
+  trimmedValue: string,
+  options: AssistantHrefParseOptions,
+): InlinePathTarget | null {
+  if (!isAbsolutePath(trimmedValue)) {
+    return null;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(trimmedValue, "http://paseo.invalid");
+  } catch {
+    return null;
+  }
+
+  const normalizedPath = normalizePathToken(decodeURIComponent(parsedUrl.pathname));
+  const hrefPath = normalizedPath ? parseHrefPathAndLines(normalizedPath, parsedUrl.hash) : null;
+  if (!hrefPath || !isAbsolutePath(hrefPath.path)) {
+    return null;
+  }
+
+  if (!isAllowedAbsolutePath(hrefPath.path, options.workspaceRoot)) {
+    return null;
+  }
+
+  return {
+    raw: rawValue,
+    ...hrefPath,
+  };
+}
+
 export function parseAssistantFileLink(
   value: string,
   options: AssistantHrefParseOptions = {},
@@ -211,20 +314,16 @@ export function parseAssistantFileLink(
     return null;
   }
 
-  const windowsPathMatch = trimmed.match(/^([A-Za-z]:[\\/][^?#]*)(#[^?]+)?$/);
-  if (windowsPathMatch) {
-    const normalizedPath = normalizePathToken(windowsPathMatch[1] ?? "");
-    const hrefPath = normalizedPath
-      ? parseHrefPathAndLines(normalizedPath, windowsPathMatch[2] ?? "")
-      : null;
-    if (!hrefPath || !isAllowedAbsolutePath(hrefPath.path, options.workspaceRoot)) {
-      return null;
-    }
+  const inlinePathTarget = parseAssistantInlinePathLink(trimmed, {
+    workspaceRoot: options.workspaceRoot,
+  });
+  if (inlinePathTarget) {
+    return inlinePathTarget;
+  }
 
-    return {
-      raw: value,
-      ...hrefPath,
-    };
+  const windowsPathTarget = parseWindowsPathLink(value, trimmed, options);
+  if (windowsPathTarget) {
+    return windowsPathTarget;
   }
 
   const relativeLocation = parsePathLocationSuffix(trimmed);
@@ -235,31 +334,7 @@ export function parseAssistantFileLink(
     };
   }
 
-  if (!isAbsolutePath(trimmed)) {
-    return null;
-  }
-
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(trimmed, "http://paseo.invalid");
-  } catch {
-    return null;
-  }
-
-  const normalizedPath = normalizePathToken(decodeURIComponent(parsedUrl.pathname));
-  const hrefPath = normalizedPath ? parseHrefPathAndLines(normalizedPath, parsedUrl.hash) : null;
-  if (!hrefPath || !isAbsolutePath(hrefPath.path)) {
-    return null;
-  }
-
-  if (!isAllowedAbsolutePath(hrefPath.path, options.workspaceRoot)) {
-    return null;
-  }
-
-  return {
-    raw: value,
-    ...hrefPath,
-  };
+  return parseAbsolutePathLink(value, trimmed, options);
 }
 
 export function normalizeInlinePathTarget(

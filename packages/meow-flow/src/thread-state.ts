@@ -20,48 +20,48 @@ export type MeowFlowStage = (typeof SUPPORTED_STAGES)[number];
 export type DerivedThreadStage = MeowFlowStage | "archived";
 export type MeowFlowSkill = (typeof SUPPORTED_MEOW_FLOW_SKILLS)[number];
 
-export type ThreadAgentRecord = {
+export interface ThreadAgentRecord {
   readonly id: string;
   readonly title: string | null;
   readonly skill: MeowFlowSkill;
   readonly createdAt: string;
-};
+}
 
-export type ThreadHandoffRecord = {
+export interface ThreadHandoffRecord {
   readonly seq: number;
   readonly stage: MeowFlowStage;
   readonly content: string;
   readonly createdAt: string;
-};
+}
 
-export type ThreadRecord = {
+export interface ThreadRecord {
   readonly id: string;
   readonly name: string | null;
   readonly requestBody: string | null;
   readonly archivedAt: string | null;
   readonly agents: readonly ThreadAgentRecord[];
   readonly handoffs: readonly ThreadHandoffRecord[];
-};
+}
 
-export type ThreadOccupationRecord = {
+export interface ThreadOccupationRecord {
   readonly threadId: string;
   readonly repositoryRoot?: string;
   readonly worktreePath: string;
   readonly createdAt: string;
   readonly releasedAt: string | null;
-};
+}
 
-export type MeowFlowState = {
+export interface MeowFlowState {
   readonly version: 1;
   readonly occupations: readonly ThreadOccupationRecord[];
   readonly threads: readonly ThreadRecord[];
-};
+}
 
-export type MutableMeowFlowState = {
+export interface MutableMeowFlowState {
   version: 1;
   occupations: ThreadOccupationRecord[];
   threads: ThreadRecord[];
-};
+}
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -70,52 +70,52 @@ const STATE_DIRECTORY_PATH = [".local", "share", "meow-flow"] as const;
 const STATE_DATABASE_FILE_NAME = "meow-flow.sqlite";
 const DEFAULT_WORKTREE_DIRECTORY_NAME = ".paseo-workspaces";
 
-export type MeowFlowStateOperationOptions = {
+export interface MeowFlowStateOperationOptions {
   readonly database?: MeowFlowStateDatabase;
   readonly threadIds?: readonly string[];
   readonly includeOccupationThreads?: boolean;
-};
+}
 
-type StateReadScope = {
+interface StateReadScope {
   readonly threadIds?: readonly string[];
   readonly includeOccupationThreads?: boolean;
-};
+}
 
-type StateWriteScope = {
+interface StateWriteScope {
   readonly replaceRepositoryOccupations?: boolean;
-};
+}
 
-type OccupationRow = {
+interface OccupationRow {
   readonly thread_id: string;
   readonly repository_root: string;
   readonly slot_number: number;
   readonly workspace_relative_path: string;
   readonly request_body: string;
   readonly created_at: string;
-};
+}
 
-type ThreadMetadataRow = {
+interface ThreadMetadataRow {
   readonly thread_id: string;
   readonly name: string | null;
   readonly request_body: string | null;
   readonly archived_at: string | null;
-};
+}
 
-type ThreadAgentRow = {
+interface ThreadAgentRow {
   readonly thread_id: string;
   readonly agent_id: string;
   readonly title: string | null;
   readonly skill: string;
   readonly created_at: string;
-};
+}
 
-type ThreadHandoffRow = {
+interface ThreadHandoffRow {
   readonly thread_id: string;
   readonly seq: number;
   readonly stage: string;
   readonly content: string;
   readonly created_at: string;
-};
+}
 
 export function createEmptyState(): MutableMeowFlowState {
   return {
@@ -133,7 +133,7 @@ export function readMeowFlowState(
   repositoryRoot: string,
   options: MeowFlowStateOperationOptions = {},
 ): MutableMeowFlowState {
-  return useStateDatabase(options, (database) =>
+  return withStateDatabase(options, (database) =>
     readStateFromDatabase(database, repositoryRoot, options),
   );
 }
@@ -143,7 +143,7 @@ export function writeMeowFlowState(
   state: MeowFlowState,
   options: Pick<MeowFlowStateOperationOptions, "database"> = {},
 ): void {
-  useStateDatabase(options, (database) => {
+  withStateDatabase(options, (database) => {
     const write = database.transaction((resolvedRepositoryRoot: string) => {
       writeStateToDatabase(database, resolvedRepositoryRoot, state, {
         replaceRepositoryOccupations: true,
@@ -158,7 +158,7 @@ export function updateMeowFlowState(
   updater: (state: MutableMeowFlowState) => void,
   options: MeowFlowStateOperationOptions = {},
 ): MutableMeowFlowState {
-  return useStateDatabase(options, (database) => {
+  return withStateDatabase(options, (database) => {
     const scopedThreadIds = normalizeThreadIds(options.threadIds);
     const update = database.transaction((resolvedRepositoryRoot: string) => {
       const state = readStateFromDatabase(database, resolvedRepositoryRoot, {
@@ -195,7 +195,7 @@ export function withMeowFlowStateDatabase<T>(operation: (database: MeowFlowState
   }
 }
 
-function useStateDatabase<T>(
+function withStateDatabase<T>(
   options: Pick<MeowFlowStateOperationOptions, "database">,
   operation: (database: MeowFlowStateDatabase) => T,
 ): T {

@@ -109,32 +109,52 @@ const CodeLine = React.memo(function CodeLine({
   isTargetLine,
   targetGutterColor,
 }: CodeLineProps) {
+  const gutterStyle = useMemo(() => [codeLineStyles.gutter, { width: gutterWidth }], [gutterWidth]);
+  const gutterTextStyle = useMemo(
+    () => [
+      codeLineStyles.gutterText,
+      { color: isTargetLine ? targetGutterColor : baseColor },
+      isTargetLine && codeLineStyles.targetGutterText,
+    ],
+    [baseColor, isTargetLine, targetGutterColor],
+  );
+  const keyedTokens = useMemo(
+    () => tokens.map((token, index) => ({ key: `${index}-${token.text}`, token })),
+    [tokens],
+  );
+  const lineStyle = useMemo(
+    () => [codeLineStyles.line, isTargetLine && codeLineStyles.targetLine],
+    [isTargetLine],
+  );
   return (
-    <View style={[codeLineStyles.line, isTargetLine && codeLineStyles.targetLine]}>
-      <View style={[codeLineStyles.gutter, { width: gutterWidth }]}>
-        <Text
-          style={[
-            codeLineStyles.gutterText,
-            { color: isTargetLine ? targetGutterColor : baseColor },
-            isTargetLine && codeLineStyles.targetGutterText,
-          ]}
-        >
+    <View style={lineStyle}>
+      <View style={gutterStyle}>
+        <Text numberOfLines={1} style={gutterTextStyle}>
           {String(lineNumber)}
         </Text>
       </View>
       <Text selectable style={codeLineStyles.lineText}>
-        {tokens.map((token, index) => (
-          <Text
-            key={index}
-            style={{ color: token.style ? (colorMap[token.style] ?? baseColor) : baseColor }}
-          >
-            {token.text}
-          </Text>
+        {keyedTokens.map(({ key, token }) => (
+          <CodeLineToken
+            key={key}
+            color={token.style ? (colorMap[token.style] ?? baseColor) : baseColor}
+            text={token.text}
+          />
         ))}
       </Text>
     </View>
   );
 });
+
+interface CodeLineTokenProps {
+  color: string;
+  text: string;
+}
+
+function CodeLineToken({ color, text }: CodeLineTokenProps) {
+  const style = useMemo(() => ({ color }), [color]);
+  return <Text style={style}>{text}</Text>;
+}
 
 const codeLineStyles = StyleSheet.create((theme) => ({
   line: {
@@ -206,12 +226,13 @@ function FilePreviewBody({
     }
 
     return highlightCode(preview.content ?? "", filePath);
-  }, [isMarkdownFile, preview?.kind, preview?.content, filePath]);
+  }, [isMarkdownFile, preview, filePath]);
 
   const gutterWidth = useMemo(() => {
     if (!highlightedLines) return 0;
-    return lineNumberGutterWidth(highlightedLines.length);
-  }, [highlightedLines]);
+    return lineNumberGutterWidth(highlightedLines.length, theme.fontSize.sm);
+  }, [highlightedLines, theme.fontSize.sm]);
+
   const boundedTargetLine = useMemo(() => {
     if (!targetLine || !highlightedLines?.length) {
       return null;
@@ -236,6 +257,11 @@ function FilePreviewBody({
 
     return () => clearTimeout(timer);
   }, [boundedTargetLine, codeLineHeight, isMarkdownFile, preview, previewPadding]);
+
+  const imageSource = useMemo(
+    () => (imagePreviewUri ? { uri: imagePreviewUri } : null),
+    [imagePreviewUri],
+  );
 
   if (isLoading && !preview) {
     return (
@@ -278,17 +304,22 @@ function FilePreviewBody({
     }
 
     const lines = highlightedLines ?? [[{ text: preview.content ?? "", style: null }]];
+    const keyedLines = lines.map((tokens, index) => ({
+      key: `line-${index}`,
+      tokens,
+      lineNumber: index + 1,
+    }));
     const codeLines = (
       <View>
-        {lines.map((tokens, index) => (
+        {keyedLines.map(({ key, tokens, lineNumber }) => (
           <CodeLine
-            key={index}
+            key={key}
             tokens={tokens}
-            lineNumber={index + 1}
+            lineNumber={lineNumber}
             gutterWidth={gutterWidth}
             colorMap={colorMap}
             baseColor={baseColor}
-            isTargetLine={boundedTargetLine === index + 1}
+            isTargetLine={boundedTargetLine === lineNumber}
             targetGutterColor={theme.colors.primary}
           />
         ))}
@@ -348,9 +379,7 @@ function FilePreviewBody({
           showsVerticalScrollIndicator={!showDesktopWebScrollbar}
         >
           <RNImage
-            source={{
-              uri: imagePreviewUri,
-            }}
+            source={imageSource ?? undefined}
             style={styles.previewImage}
             resizeMode="contain"
           />

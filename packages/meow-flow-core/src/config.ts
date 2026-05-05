@@ -17,7 +17,7 @@ export type MeowFlowRepositoryRootInput =
       readonly worktreeTheme?: string;
     };
 
-export type MeowFlowTeamConfigInput = {
+export interface MeowFlowTeamConfigInput {
   readonly repositories: readonly MeowFlowRepositoryRootInput[];
   readonly notifications?: {
     readonly target?: MeowFlowNotificationTarget;
@@ -25,23 +25,23 @@ export type MeowFlowTeamConfigInput = {
   readonly dispatch?: {
     readonly maxConcurrentWorkers?: number;
   };
-};
+}
 
-export type MeowFlowValidationIssue = {
+export interface MeowFlowValidationIssue {
   readonly path: string;
   readonly message: string;
-};
+}
 
-export type NormalizedMeowFlowRepositoryRoot = {
+export interface NormalizedMeowFlowRepositoryRoot {
   readonly id: string;
   readonly label: string;
   readonly directory: string;
   readonly worktreeParentDirectory: string;
   readonly worktreeTheme: string;
   readonly priority: number;
-};
+}
 
-export type NormalizedMeowFlowTeamConfig = {
+export interface NormalizedMeowFlowTeamConfig {
   readonly configPath: string;
   readonly configDirectory: string;
   readonly notifications: {
@@ -51,16 +51,16 @@ export type NormalizedMeowFlowTeamConfig = {
     readonly maxConcurrentWorkers: number | null;
   };
   readonly repositories: readonly NormalizedMeowFlowRepositoryRoot[];
-};
+}
 
-type RepositoryCandidate = {
+interface RepositoryCandidate {
   readonly requestedId: string | null;
   readonly requestedLabel: string | null;
   readonly requestedWorktreeTheme: string | null;
   readonly directory: string;
   readonly worktreeParentDirectory: string;
   readonly priority: number;
-};
+}
 
 export class TeamConfigValidationError extends Error {
   readonly configPath: string;
