@@ -5,7 +5,7 @@ export type MeowFlowRepositoryCandidate = Pick<
   "id" | "label" | "directory" | "priority"
 >;
 
-export type MeowFlowWorktreeAllocationDescriptor = {
+export interface MeowFlowWorktreeAllocationDescriptor {
   readonly repositoryId: string;
   readonly repositoryLabel: string;
   readonly repositoryDirectory: string;
@@ -13,12 +13,12 @@ export type MeowFlowWorktreeAllocationDescriptor = {
   readonly worktreeTheme: string;
   readonly worktreeNameTemplate: string;
   readonly priority: number;
-};
+}
 
-export type MeowFlowTeamPlan = {
+export interface MeowFlowTeamPlan {
   readonly repositoryCandidates: readonly MeowFlowRepositoryCandidate[];
   readonly worktreeAllocations: readonly MeowFlowWorktreeAllocationDescriptor[];
-};
+}
 
 export function createMeowFlowTeamPlan(config: NormalizedMeowFlowTeamConfig): MeowFlowTeamPlan {
   const repositoryCandidates = config.repositories.map((repository) => ({

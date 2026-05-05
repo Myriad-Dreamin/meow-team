@@ -1,14 +1,68 @@
 import { Gift } from "lucide-react-native";
 import { type ReactNode, useEffect, useRef } from "react";
 import { useUnistyles } from "react-native-unistyles";
-import { CalloutDescriptionText } from "@/components/callout-card";
-import { type SidebarCalloutAction, useSidebarCallouts } from "@/contexts/sidebar-callout-context";
+import {
+  type SidebarCalloutAction,
+  SidebarCalloutDescriptionText,
+} from "@/components/sidebar-callout";
+import { useSidebarCallouts } from "@/contexts/sidebar-callout-context";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { openExternalUrl } from "@/utils/open-external-url";
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const CHANGELOG_URL = "https://paseo.sh/changelog";
+
+function resolveUpdateCalloutTitle(args: {
+  isInstalled: boolean;
+  isInstalling: boolean;
+  isError: boolean;
+}): string {
+  if (args.isInstalled) return "Update installed";
+  if (args.isInstalling) return "Installing update";
+  if (args.isError) return "Update failed";
+  return "Update available";
+}
+
+function resolveUpdateCalloutDescription(args: {
+  isInstalled: boolean;
+  isInstalling: boolean;
+  isError: boolean;
+  errorMessage: string | null;
+  latestVersion: string | undefined;
+}): ReactNode {
+  if (args.isInstalled) return "Restart to use the new version.";
+  if (args.isInstalling) return "Installing and restarting...";
+  if (args.isError) return args.errorMessage ?? "Something went wrong.";
+  if (args.latestVersion) {
+    return (
+      <UpdateAvailableDescription versionLabel={`v${args.latestVersion.replace(/^v/i, "")}`} />
+    );
+  }
+  return <UpdateAvailableDescription />;
+}
+
+function buildUpdateCalloutActions(args: {
+  isInstalled: boolean;
+  isInstalling: boolean;
+  isError: boolean;
+  openChangelog: () => void;
+  retry: () => void;
+  install: () => void;
+}): SidebarCalloutAction[] {
+  const actions: SidebarCalloutAction[] = [{ label: "What's new", onPress: args.openChangelog }];
+  if (args.isError) {
+    actions.push({ label: "Retry", onPress: args.retry, variant: "primary" });
+  } else if (!args.isInstalled) {
+    actions.push({
+      label: args.isInstalling ? "Installing..." : "Install & restart",
+      onPress: args.install,
+      variant: "primary",
+      disabled: args.isInstalling,
+    });
+  }
+  return actions;
+}
 
 export function UpdateCalloutSource() {
   const callouts = useSidebarCallouts();
@@ -66,42 +120,22 @@ export function UpdateCalloutSource() {
     const isError = status === "error";
     const isAvailable = !isInstalled && !isInstalling && !isError;
 
-    let title = "Update available";
-    if (isInstalled) {
-      title = "Update installed";
-    } else if (isInstalling) {
-      title = "Installing update";
-    } else if (isError) {
-      title = "Update failed";
-    }
-
-    let description: ReactNode = <UpdateAvailableDescription />;
-    if (isInstalled) {
-      description = "Restart to use the new version.";
-    } else if (isInstalling) {
-      description = "Installing and restarting...";
-    } else if (isError) {
-      description = errorMessage ?? "Something went wrong.";
-    } else if (availableUpdate?.latestVersion) {
-      description = (
-        <UpdateAvailableDescription
-          versionLabel={`v${availableUpdate.latestVersion.replace(/^v/i, "")}`}
-        />
-      );
-    }
-
-    const actions: SidebarCalloutAction[] = [{ label: "What's new", onPress: openChangelog }];
-
-    if (isError) {
-      actions.push({ label: "Retry", onPress: retry, variant: "primary" });
-    } else if (!isInstalled) {
-      actions.push({
-        label: isInstalling ? "Installing..." : "Install & restart",
-        onPress: install,
-        variant: "primary",
-        disabled: isInstalling,
-      });
-    }
+    const title = resolveUpdateCalloutTitle({ isInstalled, isInstalling, isError });
+    const description = resolveUpdateCalloutDescription({
+      isInstalled,
+      isInstalling,
+      isError,
+      errorMessage,
+      latestVersion: availableUpdate?.latestVersion ?? undefined,
+    });
+    const actions = buildUpdateCalloutActions({
+      isInstalled,
+      isInstalling,
+      isError,
+      openChangelog,
+      retry,
+      install,
+    });
 
     return callouts.show({
       id: "desktop-update",
@@ -136,14 +170,14 @@ export function UpdateCalloutSource() {
 function UpdateAvailableDescription({ versionLabel }: { versionLabel?: string }) {
   return (
     <>
-      <CalloutDescriptionText>
+      <SidebarCalloutDescriptionText>
         {versionLabel
           ? `${versionLabel} is ready to install.`
           : "A new version is ready to install."}
-      </CalloutDescriptionText>
-      <CalloutDescriptionText>
+      </SidebarCalloutDescriptionText>
+      <SidebarCalloutDescriptionText>
         Upgrading the app will stop running agents and close terminal sessions.
-      </CalloutDescriptionText>
+      </SidebarCalloutDescriptionText>
     </>
   );
 }

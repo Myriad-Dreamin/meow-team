@@ -6,19 +6,19 @@ import { EMBEDDED_SKILLS, type EmbeddedSkill } from "./embedded-skills.js";
 
 type SupportedSkillProvider = "agents" | "claude" | "codex" | "opencode";
 
-type SkillInstallTarget = {
+interface SkillInstallTarget {
   readonly provider: SupportedSkillProvider;
   readonly skillsDir: string;
-};
+}
 
 export type SkillInstallResult = SkillInstallTarget & {
   readonly skillCount: number;
   readonly skillNames: readonly string[];
 };
 
-type InstallSkillsOptions = {
+interface InstallSkillsOptions {
   readonly list?: boolean;
-};
+}
 
 const SUPPORTED_PROVIDERS = ["claude", "codex", "opencode", "agents"] as const;
 
@@ -66,7 +66,8 @@ export async function installEmbeddedSkills(input: {
   }
 
   return targets.map((target) => ({
-    ...target,
+    provider: target.provider,
+    skillsDir: target.skillsDir,
     skillCount: EMBEDDED_SKILLS.length,
     skillNames: getEmbeddedSkillNames(),
   }));

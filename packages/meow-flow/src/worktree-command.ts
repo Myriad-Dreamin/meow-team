@@ -8,9 +8,9 @@ import {
   type GitWorktree,
 } from "./git-worktrees.js";
 
-type WorktreeNewOptions = {
+interface WorktreeNewOptions {
   readonly branch?: string;
-};
+}
 
 export function createWorktreeCommand(): Command {
   return new Command("worktree")

@@ -13,17 +13,17 @@ import {
   withMeowFlowStateDatabase,
 } from "./thread-state.js";
 
-type PaseoInvocationResult = {
+interface PaseoInvocationResult {
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
-};
+}
 
-type AgentListEntry = {
+interface AgentListEntry {
   readonly id: string | null;
   readonly shortId: string | null;
   readonly title: string | null;
-};
+}
 
 const SKILL_LABEL_KEYS = ["x-meow-flow-skill", "meow-flow.skill"] as const;
 const STAGE_LABEL_KEYS = ["x-meow-flow-stage", "meow-flow.stage"] as const;
@@ -214,13 +214,15 @@ function invokePaseo(args: readonly string[]): PaseoInvocationResult {
 function parseAgentList(stdout: string): readonly AgentListEntry[] {
   try {
     const parsed = JSON.parse(stdout) as unknown;
-    const entries = Array.isArray(parsed)
-      ? parsed
-      : isRecord(parsed) && Array.isArray(parsed.data)
-        ? parsed.data
-        : isRecord(parsed)
-          ? [parsed]
-          : [];
+    let entries: readonly unknown[] = [];
+
+    if (Array.isArray(parsed)) {
+      entries = parsed;
+    } else if (isRecord(parsed) && Array.isArray(parsed.data)) {
+      entries = parsed.data;
+    } else if (isRecord(parsed)) {
+      entries = [parsed];
+    }
 
     return entries.map(normalizeAgentListEntry).filter(isNotNull);
   } catch {

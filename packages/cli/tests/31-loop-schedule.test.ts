@@ -17,7 +17,18 @@ try {
   {
     console.log("Test 1: schedule create/ls/inspect/pause/resume/delete work");
     const created = await ctx.paseo(
-      ["schedule", "create", "Review new PRs", "--every", "5m", "--name", "review-prs", "--json"],
+      [
+        "schedule",
+        "create",
+        "Review new PRs",
+        "--every",
+        "5m",
+        "--name",
+        "review-prs",
+        "--provider",
+        "claude",
+        "--json",
+      ],
       { timeout: 30000 },
     );
     assert.strictEqual(created.exitCode, 0, created.stderr);
@@ -160,6 +171,7 @@ try {
         break;
       }
       await sleep(250);
+      return pollStatus(attempt + 1);
     }
     assert.notStrictEqual(
       status,

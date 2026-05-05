@@ -1,31 +1,30 @@
 {
   "name": "@getpaseo/cli",
-  "version": "0.1.62",
+  "version": "0.1.63",
   "description": "Paseo CLI - control your AI coding agents from the command line",
-  "type": "module",
+  "bin": {
+    "paseo": "bin/paseo"
+  },
   "files": [
     "bin",
     "dist"
   ],
+  "type": "module",
   "publishConfig": {
     "access": "public"
   },
-  "bin": {
-    "paseo": "bin/paseo"
-  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",
-    "prepack": "pnpm run build",
-    "typecheck": "tsc --noEmit",
-    "test": "pnpm run test:local",
+    "prepack": "npm run build",
+    "typecheck": "tsgo --noEmit",
+    "test": "npm run test:local",
     "test:local": "tsx tests/run-all.ts",
-    "test:e2e": "pnpm run test:local",
+    "test:e2e": "npm run test:local",
     "test:e2e:lifecycle": "npx tsx tests/e2e/agent-lifecycle.test.ts"
   },
   "dependencies": {
     "@clack/prompts": "^1.0.0",
-    "@getpaseo/relay": "workspace:*",
-    "@getpaseo/server": "workspace:*",
+    "@getpaseo/server": "0.1.63",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "mime-types": "^2.1.35",
@@ -37,6 +36,7 @@
     "@types/ws": "^8.5.8",
     "tsx": "^4.6.0",
     "typescript": "^5.2.2",
+    "vitest": "^3.2.4",
     "zx": "^8.8.5"
   }
 }

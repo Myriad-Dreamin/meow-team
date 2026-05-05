@@ -10,13 +10,13 @@ import type { CheckoutStatusResponse } from "@server/shared/messages";
 import { WorkspaceOpenInEditorButton } from "./workspace-open-in-editor-button";
 
 type CheckoutStatusPayload = CheckoutStatusResponse["payload"];
-type CheckoutStatusQueryResult = {
+interface CheckoutStatusQueryResult {
   status: CheckoutStatusPayload | null;
   isLoading: boolean;
   isFetching: boolean;
   isError: boolean;
   error: Error | null;
-};
+}
 
 const {
   theme,
@@ -27,7 +27,7 @@ const {
   preferredEditorState,
   checkoutStatusState,
 } = vi.hoisted(() => {
-  const theme = {
+  const mockTheme = {
     spacing: { 1: 4, 2: 8, 3: 12 },
     borderWidth: { 1: 1 },
     borderRadius: { md: 6 },
@@ -41,7 +41,7 @@ const {
     },
   };
 
-  const mockClient = {
+  const runtimeClient = {
     listAvailableEditors: vi.fn(async () => ({
       error: null,
       editors: [{ id: "vscode", label: "VS Code" }],
@@ -50,8 +50,8 @@ const {
   };
 
   return {
-    theme,
-    mockClient,
+    theme: mockTheme,
+    mockClient: runtimeClient,
     openExternalUrlMock: vi.fn(async () => undefined),
     updatePreferredEditorMock: vi.fn(async () => undefined),
     toastErrorMock: vi.fn(),

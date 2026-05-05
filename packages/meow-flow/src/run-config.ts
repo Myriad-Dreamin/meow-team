@@ -11,16 +11,16 @@ export const DEFAULT_RUN_PROVIDER = "claude";
 
 export type RunProviderSource = "option" | "config" | "default";
 
-export type ResolvedRunProvider = {
+export interface ResolvedRunProvider {
   readonly provider: string;
   readonly source: RunProviderSource;
   readonly configPath: string;
-};
+}
 
-export type UpdatedRunProviderConfig = {
+export interface UpdatedRunProviderConfig {
   readonly provider: string;
   readonly configPath: string;
-};
+}
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -107,6 +107,7 @@ function readConfigObject(configPath: string): UnknownRecord {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Invalid MeowFlow config at ${configPath}: ${message}. ${PROVIDER_DISCOVERY_HINT}`,
+      { cause: error },
     );
   }
 
