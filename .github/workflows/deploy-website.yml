@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'CHANGELOG.md'
       - 'packages/website/**'
       - '.github/actions/setup-pnpm/**'
       - 'package.json'
@@ -11,7 +12,7 @@ on:
       - 'patches/**'
       - '.github/workflows/deploy-website.yml'
   release:
-    types: [published, edited]
+    types: [published]
   workflow_dispatch:
 
 jobs:
