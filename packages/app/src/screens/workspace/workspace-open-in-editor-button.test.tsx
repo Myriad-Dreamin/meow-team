@@ -77,6 +77,7 @@ vi.mock("react-native-unistyles", () => ({
     create: (factory: unknown) => (typeof factory === "function" ? factory(theme) : factory),
   },
   useUnistyles: () => ({ theme }),
+  withUnistyles: <T,>(component: T) => component,
 }));
 
 vi.mock("@/constants/platform", () => ({
