@@ -43,8 +43,8 @@ interface Failure {
   error: string;
 }
 
-function workspaceRunCommand(filter: string, script: string): string {
-  return `pnpm -C ${JSON.stringify(repoRoot)} --filter ${filter} run ${script}`;
+function workspaceRunCommand(workspace: string, script: string): string {
+  return `npm --prefix ${JSON.stringify(repoRoot)} run ${script} --workspace=${workspace}`;
 }
 
 async function runCommand(label: string, command: string): Promise<void> {
@@ -79,7 +79,7 @@ async function writeJsonSummary({
     JSON.stringify(
       {
         suite: "cli-local",
-        command: "pnpm --filter @getpaseo/cli run test",
+        command: "npm run test --workspace=@getpaseo/cli",
         counts: {
           passed,
           failed,

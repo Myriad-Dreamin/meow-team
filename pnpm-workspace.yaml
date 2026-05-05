@@ -9,3 +9,5 @@ packages:
   - "packages/website"
   - "packages/desktop"
   - "packages/cli"
+linkWorkspacePackages: true
+preferWorkspacePackages: true
