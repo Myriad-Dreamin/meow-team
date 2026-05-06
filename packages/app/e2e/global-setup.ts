@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess, execFileSync, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { Buffer } from "node:buffer";
+import { pathToFileURL } from "node:url";
 import dotenv from "dotenv";
 import { forkPaseoHomeMetadata, resolvePaseoHomePath } from "./helpers/paseo-home-fork";
 import { resolvePlaywrightSpeechEnabled } from "../src/utils/e2e-speech";
@@ -275,6 +277,15 @@ function ensureRelayBuildArtifact(repoRoot: string): void {
   });
 }
 
+function resolveWorkspacePackagePath(packageDir: string, packagePath: string): string {
+  const packageRequire = createRequire(path.join(packageDir, "package.json"));
+  return packageRequire.resolve(packagePath);
+}
+
+function resolveTsxImportSpecifier(packageDir: string): string {
+  return pathToFileURL(resolveWorkspacePackagePath(packageDir, "tsx")).href;
+}
+
 function decodeOfferFromFragmentUrl(url: string): OfferPayload {
   const marker = "#offer=";
   const idx = url.indexOf(marker);
@@ -292,9 +303,17 @@ function decodeOfferFromFragmentUrl(url: string): OfferPayload {
 }
 
 function loadPairingOfferFromCli(repoRoot: string, paseoHomePath: string): OfferPayload {
+  const cliDir = path.join(repoRoot, "packages/cli");
   const stdout = execFileSync(
     process.execPath,
-    ["--import", "tsx", "packages/cli/src/index.ts", "daemon", "pair", "--json"],
+    [
+      "--import",
+      resolveTsxImportSpecifier(cliDir),
+      "packages/cli/src/index.ts",
+      "daemon",
+      "pair",
+      "--json",
+    ],
     {
       cwd: repoRoot,
       env: {
@@ -494,6 +513,8 @@ async function awaitRelayReady(
 
 async function startRelay(): Promise<number> {
   const relayDir = path.resolve(__dirname, "..", "..", "relay");
+  const appDir = path.resolve(__dirname, "..");
+  const wranglerBin = resolveWorkspacePackagePath(appDir, "wrangler/bin/wrangler.js");
   const maxRelayStartupAttempts = 5;
   let lastRelayStartupError: unknown = null;
 
@@ -503,8 +524,8 @@ async function startRelay(): Promise<number> {
     const state: RelayStreamState = { failureLine: null, readyForSelectedPort: false };
 
     relayProcess = spawn(
-      "npx",
-      ["wrangler", "dev", "--local", "--ip", "127.0.0.1", "--port", String(relayPort)],
+      process.execPath,
+      [wranglerBin, "dev", "--local", "--ip", "127.0.0.1", "--port", String(relayPort)],
       {
         cwd: relayDir,
         env: { ...process.env },
@@ -535,7 +556,8 @@ async function startRelay(): Promise<number> {
 
 function startMetro(metroPort: number, buffer: ReturnType<typeof createLineBuffer>): ChildProcess {
   const appDir = path.resolve(__dirname, "..");
-  const child = spawn("npx", ["expo", "start", "--web", "--port", String(metroPort)], {
+  const expoBin = resolveWorkspacePackagePath(appDir, "expo/bin/cli");
+  const child = spawn(process.execPath, [expoBin, "start", "--web", "--port", String(metroPort)], {
     cwd: appDir,
     env: {
       ...process.env,
@@ -583,8 +605,9 @@ interface DaemonSpawnArgs {
 function startDaemon(args: DaemonSpawnArgs): ChildProcess {
   const serverDir = path.resolve(__dirname, "../../..", "packages/server");
   const { enabled, openAiUsable, localModelsDir } = args.dictation;
+  const tsxImportSpecifier = resolveTsxImportSpecifier(serverDir);
 
-  const child = spawn(process.execPath, ["--import", "tsx", "src/server/index.ts"], {
+  const child = spawn(process.execPath, ["--import", tsxImportSpecifier, "src/server/index.ts"], {
     cwd: serverDir,
     env: {
       ...process.env,
