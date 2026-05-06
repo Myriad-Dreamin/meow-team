@@ -286,6 +286,10 @@ function resolveTsxImportSpecifier(packageDir: string): string {
   return pathToFileURL(resolveWorkspacePackagePath(packageDir, "tsx")).href;
 }
 
+function resolvePnpmCommand(): string {
+  return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+}
+
 function decodeOfferFromFragmentUrl(url: string): OfferPayload {
   const marker = "#offer=";
   const idx = url.indexOf(marker);
@@ -556,16 +560,19 @@ async function startRelay(): Promise<number> {
 
 function startMetro(metroPort: number, buffer: ReturnType<typeof createLineBuffer>): ChildProcess {
   const appDir = path.resolve(__dirname, "..");
-  const expoBin = resolveWorkspacePackagePath(appDir, "expo/bin/cli");
-  const child = spawn(process.execPath, [expoBin, "start", "--web", "--port", String(metroPort)], {
-    cwd: appDir,
-    env: {
-      ...process.env,
-      BROWSER: "none",
+  const child = spawn(
+    resolvePnpmCommand(),
+    ["exec", "expo", "start", "--web", "--port", String(metroPort)],
+    {
+      cwd: appDir,
+      env: {
+        ...process.env,
+        BROWSER: "none",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
     },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: false,
-  });
+  );
 
   child.stdout?.on("data", (data: Buffer) => {
     const lines = data
