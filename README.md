@@ -210,10 +210,6 @@ For the current `MeowFlow` workflow and usage guidance, see [issue #93](https://
 
 `MeowFlow` builds on [Paseo][paseo] and [OpenSpec][openspec]. Paseo provides the agent runtime and orchestration surface, while OpenSpec provides the roadmap, spec, and task-oriented structure that this workflow relies on.
 
-<<<<<<< HEAD
-[paseo]: https://paseo.sh
-[openspec]: https://openspec.dev
-=======
 ```bash
 # Use handoff when you discuss something with an agent but want another one to implement.
 # I use this to plan with Claude and then handoff to Codex to implement.
@@ -224,7 +220,7 @@ For the current `MeowFlow` workflow and usage guidance, see [issue #93](https://
 
 # Orchestrator teaches the agent how to create teams and manage them via a chat room.
 # Very opinionated and expects both Codex and Claude to work.
-/paseo-orchestrator spin up a team to implement the database refactor, use chat to coordinate. use claude to plan and codex to implement and review
+/paseo-orchestrate spin up a team to implement the database refactor, use chat to coordinate. use claude to plan and codex to implement and review
 ```
 
 ## Development
@@ -270,4 +266,6 @@ npm run typecheck
 ## License
 
 AGPL-3.0
->>>>>>> v0.1.65
+
+[paseo]: https://paseo.sh
+[openspec]: https://openspec.dev

@@ -3215,128 +3215,11 @@ function WorkspaceScreenContent({
   ]);
 
   return (
-<<<<<<< HEAD
-    <View style={containerStyle}>
-      {documentTitleEffectTab ? (
-        <WorkspaceTabPresentationResolver
-          tab={documentTitleEffectTab}
-          serverId={normalizedServerId}
-          workspaceId={normalizedWorkspaceId}
-        >
-          {(presentation) => (
-            <WorkspaceDocumentTitleEffect
-              label={presentation.label}
-              titleState={presentation.titleState}
-            />
-          )}
-        </WorkspaceTabPresentationResolver>
-      ) : null}
-      <View style={styles.threePaneRow}>
-        <View style={styles.centerColumn}>
-          {showScreenHeader && (
-            <ScreenHeader
-              onRowLayout={onHeaderLayout}
-              left={
-                <>
-                  <SidebarMenuToggle />
-                  <WorkspaceHeaderTitleBar
-                    isLoading={isWorkspaceHeaderLoading}
-                    title={workspaceHeaderTitle}
-                    subtitle={workspaceHeaderSubtitle}
-                    showSubtitle={shouldShowWorkspaceHeaderSubtitle}
-                    currentBranchName={currentBranchName}
-                    isGitCheckout={isGitCheckout}
-                    normalizedServerId={normalizedServerId}
-                    normalizedWorkspaceId={normalizedWorkspaceId}
-                    showWorkspaceSetup={showWorkspaceSetup}
-                    isMobile={isMobile}
-                    createTerminalDisabled={createTerminalDisabled}
-                    menuNewAgentIcon={menuNewAgentIcon}
-                    menuNewTerminalIcon={menuNewTerminalIcon}
-                    menuCopyIcon={menuCopyIcon}
-                    menuSettingsIcon={menuSettingsIcon}
-                    onCreateDraftTab={handleCreateDraftTab}
-                    onCreateTerminal={handleCreateTerminal}
-                    onCopyWorkspacePath={handleCopyWorkspacePath}
-                    onCopyBranchName={handleCopyBranchName}
-                    onOpenSetupTab={handleOpenSetupTab}
-                  />
-                </>
-              }
-              right={headerRight}
-            />
-          )}
-
-          {isMobile ? (
-            <MobileWorkspaceTabSwitcher
-              tabs={tabs}
-              activeTabKey={activeTabKey}
-              activeTab={activeTabDescriptor}
-              tabSwitcherOptions={tabSwitcherOptions}
-              tabByKey={tabByKey}
-              normalizedServerId={normalizedServerId}
-              normalizedWorkspaceId={normalizedWorkspaceId}
-              onSelectSwitcherTab={handleSelectSwitcherTab}
-              onCopyResumeCommand={handleCopyResumeCommand}
-              onCopyAgentId={handleCopyAgentId}
-              onCopyFilePath={handleCopyFilePath}
-              onReloadAgent={handleReloadAgent}
-              onCloseTab={handleCloseTabById}
-              onCloseTabsAbove={handleCloseTabsToLeft}
-              onCloseTabsBelow={handleCloseTabsToRight}
-              onCloseOtherTabs={handleCloseOtherTabs}
-            />
-          ) : null}
-
-          {shouldRenderDesktopPaneFallback ? (
-            <WorkspaceDesktopTabsRow
-              paneId={focusedPaneIdOrUndefined}
-              isFocused={isRouteFocused}
-              tabs={desktopTabRowItems}
-              normalizedServerId={normalizedServerId}
-              normalizedWorkspaceId={normalizedWorkspaceId}
-              setHoveredTabKey={setHoveredTabKey}
-              setHoveredCloseTabKey={setHoveredCloseTabKey}
-              onNavigateTab={navigateToTabId}
-              onCloseTab={handleCloseTabById}
-              onCopyResumeCommand={handleCopyResumeCommand}
-              onCopyAgentId={handleCopyAgentId}
-              onCopyFilePath={handleCopyFilePath}
-              onReloadAgent={handleReloadAgent}
-              onCloseTabsToLeft={handleCloseTabsToLeft}
-              onCloseTabsToRight={handleCloseTabsToRight}
-              onCloseOtherTabs={handleCloseOtherTabs}
-              onCreateDraftTab={handleCreateDraftTab}
-              onCreateTerminalTab={handleCreateTerminal}
-              disableCreateTerminal={createTerminalMutation.isPending}
-              isWaitingOnTerminalReadiness={pendingTerminalCreateInput !== null}
-              onReorderTabs={handleReorderTabsInFocusedPane}
-              onSplitRight={noop}
-              onSplitDown={noop}
-              showPaneSplitActions={false}
-            />
-          ) : null}
-
-          <View style={styles.centerContent}>
-            {isMobile ? (
-              <GestureDetector gesture={explorerOpenGesture} touchAction="pan-y">
-                <View style={styles.content}>{content}</View>
-              </GestureDetector>
-            ) : (
-              <View style={styles.content}>{desktopContent}</View>
-            )}
-          </View>
-        </View>
-
-        {showExplorerSidebar && workspaceDirectory ? (
-          <ExplorerSidebar
-=======
     gatedWorkspaceScreen ?? (
       <WorkspaceFocusProvider workspaceKey={persistenceKey}>
         <View style={containerStyle}>
           <WorkspaceDocumentTitleEffectSlot
             tab={activeTabDescriptor}
->>>>>>> v0.1.65
             serverId={normalizedServerId}
             workspaceId={normalizedWorkspaceId}
             isRouteFocused={isRouteFocused}
@@ -3392,6 +3275,7 @@ function WorkspaceScreenContent({
                   onSelectSwitcherTab={handleSelectSwitcherTab}
                   onCopyResumeCommand={handleCopyResumeCommand}
                   onCopyAgentId={handleCopyAgentId}
+                  onCopyFilePath={handleCopyFilePath}
                   onReloadAgent={handleReloadAgent}
                   onCloseTab={handleCloseTabById}
                   onCloseTabsAbove={handleCloseTabsToLeft}
@@ -3413,6 +3297,7 @@ function WorkspaceScreenContent({
                   onCloseTab={handleCloseTabById}
                   onCopyResumeCommand={handleCopyResumeCommand}
                   onCopyAgentId={handleCopyAgentId}
+                  onCopyFilePath={handleCopyFilePath}
                   onReloadAgent={handleReloadAgent}
                   onCloseTabsToLeft={handleCloseTabsToLeft}
                   onCloseTabsToRight={handleCloseTabsToRight}

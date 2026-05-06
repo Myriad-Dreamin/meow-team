@@ -1034,12 +1034,8 @@ function AgentStreamSection({
   canFinalizePendingCreate: boolean;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
-<<<<<<< HEAD
-  onOpenWorkspaceFile?: (input: OpenWorkspaceFileInput) => void;
-=======
   toast: ReturnType<typeof useToastHost>["api"];
-  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
->>>>>>> v0.1.65
+  onOpenWorkspaceFile?: (input: OpenWorkspaceFileInput) => void;
 }) {
   const streamItemsRaw = useSessionStore((state) =>
     agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,

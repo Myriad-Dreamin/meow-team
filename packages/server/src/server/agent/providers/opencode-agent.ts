@@ -2276,34 +2276,6 @@ class OpenCodeAgentSession implements AgentSession {
       subscribe: (callback) => this.subscribe(callback),
       getSessionId: () => this.sessionId,
     });
-<<<<<<< HEAD
-    const unsubscribe = this.subscribe((event) => {
-      if (!turnId) {
-        bufferedEvents.push(event);
-        return;
-      }
-      processEvent(event);
-    });
-
-    try {
-      const result = await this.startTurn(prompt, options);
-      turnId = result.turnId;
-      for (const event of bufferedEvents) {
-        processEvent(event);
-      }
-      await completion;
-    } finally {
-      unsubscribe();
-    }
-
-    return {
-      sessionId: this.sessionId,
-      finalText,
-      usage,
-      timeline,
-    };
-=======
->>>>>>> v0.1.65
   }
 
   async interrupt(): Promise<void> {
@@ -2348,8 +2320,6 @@ class OpenCodeAgentSession implements AgentSession {
 
     const turnId = this.createTurnId();
     this.activeForegroundTurnId = turnId;
-<<<<<<< HEAD
-=======
 
     // OpenCode's /event SSE endpoint does NOT replay past events. If we send
     // the prompt before our reader is connected, terminal events fired early
@@ -2364,7 +2334,6 @@ class OpenCodeAgentSession implements AgentSession {
       // consumeEventStream already finished the turn with the subscription error.
       return { turnId };
     }
->>>>>>> v0.1.65
 
     const slashCommand = await this.resolveSlashCommandInvocation(prompt);
     if (slashCommand) {
@@ -2405,8 +2374,6 @@ class OpenCodeAgentSession implements AgentSession {
           });
         return { turnId };
       }
-
-      void this.consumeEventStream(turnId, turnAbortController);
 
       // command() blocks until the server finishes processing. OpenCode's SSE
       // endpoint does NOT replay past events, so if the command completes before
@@ -2468,29 +2435,6 @@ class OpenCodeAgentSession implements AgentSession {
           );
         });
     } else {
-<<<<<<< HEAD
-      void this.consumeEventStream(turnId, turnAbortController);
-
-      void this.client.session
-        .promptAsync({
-          sessionID: this.sessionId,
-          directory: this.config.cwd,
-          parts,
-          ...(options?.outputSchema
-            ? {
-                format: {
-                  type: "json_schema" as const,
-                  schema: options.outputSchema as Record<string, unknown>,
-                },
-              }
-            : {}),
-          ...(this.config.systemPrompt ? { system: this.config.systemPrompt } : {}),
-          ...(model ? { model } : {}),
-          ...(effectiveMode ? { agent: effectiveMode } : {}),
-          ...(effectiveVariant ? { variant: effectiveVariant } : {}),
-        })
-        .then((promptResponse) => {
-=======
       // Wrap in an async IIFE so a synchronous throw from promptAsync (e.g.
       // SDK input validation) is caught alongside async rejections. A plain
       // `.then().catch()` chain would let a sync throw escape unhandled.
@@ -2513,7 +2457,6 @@ class OpenCodeAgentSession implements AgentSession {
             ...(effectiveMode ? { agent: effectiveMode } : {}),
             ...(effectiveVariant ? { variant: effectiveVariant } : {}),
           });
->>>>>>> v0.1.65
           if (promptResponse.error) {
             this.finishForegroundTurn(
               {
@@ -2550,14 +2493,14 @@ class OpenCodeAgentSession implements AgentSession {
   private async consumeEventStream(
     turnId: string,
     turnAbortController: AbortController,
-    subscriptionReady: Deferred<void>,
+    subscriptionReady?: Deferred<void>,
   ): Promise<void> {
     try {
       const result = await this.client.event.subscribe(
         { directory: this.config.cwd },
         { signal: turnAbortController.signal, sseMaxRetryAttempts: 0 },
       );
-      subscriptionReady.resolve();
+      subscriptionReady?.resolve();
 
       for await (const event of result.stream) {
         if (turnAbortController.signal.aborted || this.activeForegroundTurnId !== turnId) {
@@ -2592,7 +2535,7 @@ class OpenCodeAgentSession implements AgentSession {
         );
       }
     } catch (error) {
-      subscriptionReady.reject(error);
+      subscriptionReady?.reject(error);
       if (!turnAbortController.signal.aborted && this.activeForegroundTurnId === turnId) {
         this.finishForegroundTurn(
           {

@@ -147,17 +147,13 @@ export interface AgentStreamViewProps {
   pendingPermissions: Map<string, PendingPermission>;
   routeBottomAnchorRequest?: BottomAnchorRouteRequest | null;
   isAuthoritativeHistoryReady?: boolean;
-<<<<<<< HEAD
+  toast?: ToastApi | null;
   onOpenWorkspaceFile?: (input: {
     directory?: string;
     filePath: string;
     lineStart?: number;
     columnStart?: number;
   }) => void;
-=======
-  toast?: ToastApi | null;
-  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
->>>>>>> v0.1.65
 }
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
