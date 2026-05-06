@@ -582,10 +582,9 @@ interface DaemonSpawnArgs {
 
 function startDaemon(args: DaemonSpawnArgs): ChildProcess {
   const serverDir = path.resolve(__dirname, "../../..", "packages/server");
-  const tsxBin = execSync("which tsx").toString().trim();
   const { enabled, openAiUsable, localModelsDir } = args.dictation;
 
-  const child = spawn(tsxBin, ["src/server/index.ts"], {
+  const child = spawn(process.execPath, ["--import", "tsx", "src/server/index.ts"], {
     cwd: serverDir,
     env: {
       ...process.env,

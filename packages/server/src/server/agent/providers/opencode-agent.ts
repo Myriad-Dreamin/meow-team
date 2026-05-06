@@ -77,14 +77,14 @@ const DEFAULT_MODES: AgentMode[] = [
     description: "Allows edits and tool execution for implementation work",
   },
   {
-    id: "plan",
-    label: "Plan",
-    description: "Read-only planning mode that avoids file edits",
-  },
-  {
     id: OPENCODE_FULL_ACCESS_MODE_ID,
     label: "Full Access",
     description: "Automatically approves all tool permission prompts for the session",
+  },
+  {
+    id: "plan",
+    label: "Plan",
+    description: "Read-only planning mode that avoids file edits",
   },
 ];
 
@@ -2004,9 +2004,7 @@ class OpenCodeAgentSession implements AgentSession {
       for (const event of bufferedEvents) {
         processEvent(event);
       }
-      if (!settled) {
-        await completion;
-      }
+      await completion;
     } finally {
       unsubscribe();
     }
@@ -2058,7 +2056,6 @@ class OpenCodeAgentSession implements AgentSession {
 
     const turnId = this.createTurnId();
     this.activeForegroundTurnId = turnId;
-    void this.consumeEventStream(turnId, turnAbortController);
 
     const slashCommand = await this.resolveSlashCommandInvocation(prompt);
     if (slashCommand) {
@@ -2099,6 +2096,8 @@ class OpenCodeAgentSession implements AgentSession {
           });
         return { turnId };
       }
+
+      void this.consumeEventStream(turnId, turnAbortController);
 
       // command() blocks until the server finishes processing. OpenCode's SSE
       // endpoint does NOT replay past events, so if the command completes before
@@ -2160,6 +2159,8 @@ class OpenCodeAgentSession implements AgentSession {
           );
         });
     } else {
+      void this.consumeEventStream(turnId, turnAbortController);
+
       void this.client.session
         .promptAsync({
           sessionID: this.sessionId,
