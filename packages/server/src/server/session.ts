@@ -8,11 +8,13 @@ import { basename, resolve, sep } from "path";
 import { homedir } from "node:os";
 import { z } from "zod";
 import type { ToolSet } from "ai";
+import { CLIENT_CAPS, type ClientCapability } from "../shared/client-capabilities.js";
 import {
   isLegacyEditorTargetId,
   serializeAgentStreamEvent,
   type AgentSnapshotPayload,
   type AgentAttachment,
+  type FirstAgentContext,
   type SessionInboundMessage,
   type SessionOutboundMessage,
   type FileExplorerRequest,
@@ -20,17 +22,8 @@ import {
   type GitSetupOptions,
   type CheckoutPrStatusResponse,
   type CheckoutStatusResponse,
-  type ListTerminalsRequest,
-  type SubscribeTerminalsRequest,
-  type UnsubscribeTerminalsRequest,
-  type CreateTerminalRequest,
   type StartWorkspaceScriptRequest,
-  type SubscribeTerminalRequest,
-  type UnsubscribeTerminalRequest,
-  type TerminalInput,
   type CloseItemsRequest,
-  type KillTerminalRequest,
-  type CaptureTerminalRequest,
   type SubscribeCheckoutDiffRequest,
   type UnsubscribeCheckoutDiffRequest,
   type DirectorySuggestionsRequest,
@@ -39,18 +32,16 @@ import {
   type ProjectPlacementPayload,
   type WorkspaceSetupSnapshot,
   type WorkspaceDescriptorPayload,
-  type WorkspaceStateBucket,
 } from "./messages.js";
-import type { TerminalManager, TerminalsChangedEvent } from "../terminal/terminal-manager.js";
-import { captureTerminalLines, type TerminalSession } from "../terminal/terminal.js";
-import { TerminalOutputCoalescer } from "../terminal/terminal-output-coalescer.js";
+import type { TerminalManager } from "../terminal/terminal-manager.js";
+import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import {
-  TerminalStreamOpcode,
-  encodeTerminalSnapshotPayload,
-  encodeTerminalStreamFrame,
-  decodeTerminalResizePayload,
+  encodeFileTransferFrame,
+  FileTransferOpcode,
   type TerminalStreamFrame,
-} from "../shared/terminal-stream-protocol.js";
+} from "../shared/binary-frames/index.js";
+import { CursorError } from "./pagination/cursor.js";
+import { SortablePager, type SortSpec } from "./pagination/sortable-pager.js";
 import { TTSManager } from "./agent/tts-manager.js";
 import { STTManager } from "./agent/stt-manager.js";
 import type { SpeechToTextProvider, TextToSpeechProvider } from "./speech/speech-provider.js";
@@ -133,6 +124,7 @@ import type {
   AgentRunOptions,
   AgentSessionConfig,
   AgentStreamEvent,
+  AgentTimelineItem,
   ProviderSnapshotEntry,
 } from "./agent/agent-sdk-types.js";
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
@@ -161,17 +153,16 @@ import { isVoicePermissionAllowed } from "./voice-permission-policy.js";
 import {
   listDirectoryEntries,
   readExplorerFile,
+  readExplorerFileBytes,
   getDownloadableFileInfo,
 } from "./file-explorer/service.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import { PushTokenStore } from "./push/token-store.js";
-import { type WorktreeConfig } from "../utils/worktree.js";
 import {
   readPaseoConfigForEdit,
   writePaseoConfigForEdit,
   type ProjectConfigRpcError,
 } from "../utils/paseo-config-file.js";
-import { runAsyncWorktreeBootstrap } from "./worktree-bootstrap.js";
 import { archivePersistedWorkspaceRecord } from "./workspace-archive-service.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
 import type { ScriptRouteStore } from "./script-proxy.js";
@@ -208,6 +199,12 @@ import {
   type PullRequestTimelineItem,
 } from "../services/github-service.js";
 import {
+  summarizeFetchWorkspacesEntries,
+  WorkspaceDirectory,
+  type WorkspaceUpdatesFilter,
+} from "./workspace-directory.js";
+import {
+  attemptFirstAgentBranchAutoName,
   createPaseoWorktree,
   type CreatePaseoWorktreeInput,
   type CreatePaseoWorktreeResult,
@@ -216,13 +213,14 @@ import { createWorktreeCoreDeps } from "./worktree-core.js";
 import {
   assertSafeGitRef as assertWorktreeSafeGitRef,
   buildAgentSessionConfig as buildWorktreeAgentSessionConfig,
-  runWorktreeSetupInBackground as runWorktreeSetupInBackgroundSession,
+  createPaseoWorktreeWorkflow as createWorktreeWorkflow,
+  type CreatePaseoWorktreeSetupContinuationInput,
+  type CreatePaseoWorktreeWorkflowResult,
   handleCreatePaseoWorktreeRequest as handleCreateWorktreeRequest,
   handlePaseoWorktreeArchiveRequest as handleWorktreeArchiveRequest,
   handlePaseoWorktreeListRequest as handleWorktreeListRequest,
   handleWorkspaceSetupStatusRequest as handleWorkspaceSetupStatusRequestMessage,
 } from "./worktree-session.js";
-import { killTerminalsUnderPath as killWorktreeTerminalsUnderPath } from "./paseo-worktree-archive-service.js";
 import { toWorktreeWireError } from "./worktree-errors.js";
 
 const MAX_INITIAL_AGENT_TITLE_CHARS = Math.min(60, MAX_EXPLICIT_AGENT_TITLE_CHARS);
@@ -276,6 +274,7 @@ type GitMutationRefreshReason =
   | "create-pr"
   | "switch-branch"
   | "create-branch"
+  | "rename-branch"
   | "stash-push"
   | "stash-pop"
   | "create-worktree";
@@ -370,8 +369,6 @@ function clientSupportsFlexibleEditorIds(appVersion: string | null): boolean {
   return isAppVersionAtLeast(appVersion, MIN_VERSION_FLEXIBLE_EDITOR_IDS);
 }
 
-const MAX_TERMINAL_STREAM_SLOTS = 256;
-
 type DeleteFencedAgentStorage = AgentStorage & {
   beginDelete(agentId: string): void;
 };
@@ -416,61 +413,20 @@ export function resolveCreateAgentTitles(options: {
   };
 }
 
-function parseFetchWorkspacesCursorSort(raw: unknown[]): FetchWorkspacesRequestSort[] {
-  const cursorSort: FetchWorkspacesRequestSort[] = [];
-  for (const item of raw) {
-    if (
-      !item ||
-      typeof item !== "object" ||
-      typeof (item as { key?: unknown }).key !== "string" ||
-      typeof (item as { direction?: unknown }).direction !== "string"
-    ) {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_workspaces cursor");
+function getFirstUserMessageText(timeline: readonly AgentTimelineItem[]): string | null {
+  for (const item of timeline) {
+    if (item.type !== "user_message") {
+      continue;
     }
-
-    const key = (item as { key: string }).key;
-    const direction = (item as { direction: string }).direction;
-    if (
-      (key !== "status_priority" &&
-        key !== "activity_at" &&
-        key !== "name" &&
-        key !== "project_id") ||
-      (direction !== "asc" && direction !== "desc")
-    ) {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_workspaces cursor");
+    const text = item.text.trim();
+    if (text) {
+      return text;
     }
-    cursorSort.push({ key, direction });
   }
-  return cursorSort;
+  return null;
 }
 
-function parseFetchAgentsCursorSort(raw: unknown[]): FetchAgentsRequestSort[] {
-  const cursorSort: FetchAgentsRequestSort[] = [];
-  for (const item of raw) {
-    if (
-      !item ||
-      typeof item !== "object" ||
-      typeof (item as { key?: unknown }).key !== "string" ||
-      typeof (item as { direction?: unknown }).direction !== "string"
-    ) {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_agents cursor");
-    }
-
-    const key = (item as { key: string }).key;
-    const direction = (item as { direction: string }).direction;
-    if (
-      (key !== "status_priority" &&
-        key !== "created_at" &&
-        key !== "updated_at" &&
-        key !== "title") ||
-      (direction !== "asc" && direction !== "desc")
-    ) {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_agents cursor");
-    }
-    cursorSort.push({ key, direction });
-  }
-  return cursorSort;
-}
+const FETCH_AGENTS_SORT_KEYS = ["status_priority", "created_at", "updated_at", "title"] as const;
 
 export function resolveWaitForFinishError(options: {
   status: "permission" | "error" | "idle";
@@ -493,14 +449,6 @@ interface WorkspaceGitWatchTarget {
   refreshQueued: boolean;
   latestDescriptorStateKey: string | null;
   lastBranchName: string | null;
-}
-
-interface ActiveTerminalStream {
-  terminalId: string;
-  slot: number;
-  unsubscribe: () => void;
-  needsSnapshot: boolean;
-  outputCoalescer: TerminalOutputCoalescer;
 }
 
 export interface SessionRuntimeMetrics {
@@ -532,17 +480,11 @@ interface AgentUpdatesSubscriptionState {
   isBootstrapping: boolean;
   pendingUpdatesByAgentId: Map<string, AgentUpdatePayload>;
 }
-interface FetchAgentsCursor {
-  sort: FetchAgentsRequestSort[];
-  values: Record<string, string | number | null>;
-  id: string;
-}
 type FetchWorkspacesRequestMessage = Extract<
   SessionInboundMessage,
   { type: "fetch_workspaces_request" }
 >;
 type FetchWorkspacesRequestFilter = NonNullable<FetchWorkspacesRequestMessage["filter"]>;
-type FetchWorkspacesRequestSort = NonNullable<FetchWorkspacesRequestMessage["sort"]>[number];
 type FetchWorkspacesResponsePayload = Extract<
   SessionOutboundMessage,
   { type: "fetch_workspaces_response" }
@@ -553,54 +495,12 @@ type WorkspaceUpdatePayload = Extract<
   SessionOutboundMessage,
   { type: "workspace_update" }
 >["payload"];
-type WorkspaceUpdatesFilter = FetchWorkspacesRequestFilter;
 interface WorkspaceUpdatesSubscriptionState {
   subscriptionId: string;
   filter?: WorkspaceUpdatesFilter;
   isBootstrapping: boolean;
   pendingUpdatesByWorkspaceId: Map<string, WorkspaceUpdatePayload>;
   lastEmittedByWorkspaceId: Map<string, WorkspaceUpdatePayload>;
-}
-interface FetchWorkspacesCursor {
-  sort: FetchWorkspacesRequestSort[];
-  values: Record<string, string | number | null>;
-  id: string;
-}
-
-function summarizeFetchWorkspacesEntries(entries: Iterable<FetchWorkspacesResponseEntry>): {
-  count: number;
-  projectIds: string[];
-  statusCounts: Record<string, number>;
-  workspaces: Array<{
-    id: string;
-    projectId: string;
-    projectDisplayName: string;
-    name: string;
-    status: FetchWorkspacesResponseEntry["status"];
-    workspaceKind: FetchWorkspacesResponseEntry["workspaceKind"];
-    activityAt: string | null;
-  }>;
-} {
-  const workspaces = Array.from(entries, (entry) => ({
-    id: entry.id,
-    projectId: entry.projectId,
-    projectDisplayName: entry.projectDisplayName,
-    name: entry.name,
-    status: entry.status,
-    workspaceKind: entry.workspaceKind,
-    activityAt: entry.activityAt,
-  }));
-  const statusCounts = new Map<string, number>();
-  for (const workspace of workspaces) {
-    statusCounts.set(workspace.status, (statusCounts.get(workspace.status) ?? 0) + 1);
-  }
-
-  return {
-    count: workspaces.length,
-    projectIds: [...new Set(workspaces.map((workspace) => workspace.projectId))],
-    statusCounts: Object.fromEntries(statusCounts),
-    workspaces,
-  };
 }
 
 class SessionRequestError extends Error {
@@ -655,6 +555,7 @@ interface VoiceTranscriptionResultPayload {
 export interface SessionOptions {
   clientId: string;
   appVersion?: string | null;
+  clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
   onBinaryMessage?: (frame: Uint8Array) => void;
   onLifecycleIntent?: (intent: SessionLifecycleIntent) => void;
@@ -760,6 +661,45 @@ class VoiceFeatureUnavailableError extends Error {
   }
 }
 
+interface BuildImportPersistenceHandleInput {
+  provider: AgentProvider;
+  sessionId: string;
+  cwd?: string;
+}
+
+function buildImportPersistenceHandle(
+  input: BuildImportPersistenceHandleInput,
+): AgentPersistenceHandle {
+  const cwd = input.cwd ?? process.cwd();
+  return {
+    provider: input.provider,
+    sessionId: input.sessionId,
+    nativeHandle: input.sessionId,
+    metadata: {
+      provider: input.provider,
+      cwd,
+    },
+  };
+}
+
+function applyImportCwdOverride(
+  handle: AgentPersistenceHandle,
+  cwd: string | undefined,
+): AgentPersistenceHandle {
+  if (!cwd) {
+    return handle;
+  }
+
+  return {
+    ...handle,
+    metadata: {
+      ...handle.metadata,
+      provider: handle.provider,
+      cwd,
+    },
+  };
+}
+
 function convertPCMToWavBuffer(
   pcmBuffer: Buffer,
   sampleRate: number,
@@ -789,6 +729,20 @@ function convertPCMToWavBuffer(
   return wavBuffer;
 }
 
+function parseClientCapabilities(
+  capabilities: Record<string, unknown> | null | undefined,
+): ReadonlySet<ClientCapability> {
+  if (!capabilities) {
+    return new Set();
+  }
+  const known = new Set<ClientCapability>(Object.values(CLIENT_CAPS));
+  return new Set(
+    Object.entries(capabilities).flatMap(([key, value]) =>
+      value === true && known.has(key as ClientCapability) ? [key as ClientCapability] : [],
+    ),
+  );
+}
+
 /**
  * Session represents a single connected client session.
  * It owns all state management, orchestration logic, and message processing.
@@ -797,6 +751,7 @@ function convertPCMToWavBuffer(
 export class Session {
   private readonly clientId: string;
   private appVersion: string | null;
+  private clientCapabilities: ReadonlySet<ClientCapability>;
   private readonly sessionId: string;
   private readonly onMessage: (msg: SessionOutboundMessage) => void;
   private readonly onBinaryMessage: ((frame: Uint8Array) => void) | null;
@@ -874,12 +829,7 @@ export class Session {
   private readonly getDaemonTcpPort: (() => number | null) | null;
   private readonly getDaemonTcpHost: (() => string | null) | null;
   private readonly resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | null;
-  private readonly subscribedTerminalDirectories = new Set<string>();
-  private unsubscribeTerminalsChanged: (() => void) | null = null;
-  private terminalExitSubscriptions: Map<string, () => void> = new Map();
-  private readonly activeTerminalStreams = new Map<number, ActiveTerminalStream>();
-  private readonly terminalIdToSlot = new Map<string, number>();
-  private nextTerminalSlot = 0;
+  private readonly terminalController: TerminalSessionController;
   private inflightRequests = 0;
   private peakInflightRequests = 0;
   private readonly availableEditorTargetsCache = new TTLCache<
@@ -902,6 +852,7 @@ export class Session {
   private readonly workspaceSetupSnapshots: Map<string, WorkspaceSetupSnapshot>;
   private readonly workspaceGitFetchSubscriptions = new Map<string, () => void>();
   private readonly workspaceGitSubscriptions = new Map<string, () => void>();
+  private readonly workspaceDirectory: WorkspaceDirectory;
   private registerVoiceSpeakHandler?: (agentId: string, handler: VoiceSpeakHandler) => void;
   private unregisterVoiceSpeakHandler?: (agentId: string) => void;
   private registerVoiceCallerContext?: (agentId: string, context: VoiceCallerContext) => void;
@@ -917,6 +868,7 @@ export class Session {
     const {
       clientId,
       appVersion,
+      clientCapabilities,
       onMessage,
       onBinaryMessage,
       onLifecycleIntent,
@@ -956,6 +908,7 @@ export class Session {
     } = options;
     this.clientId = clientId;
     this.appVersion = appVersion ?? null;
+    this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
     this.onMessage = onMessage;
     this.onBinaryMessage = onBinaryMessage ?? null;
@@ -981,6 +934,14 @@ export class Session {
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl ?? null;
     this.terminalManager = terminalManager;
+    this.terminalController = new TerminalSessionController({
+      terminalManager,
+      emit: (msg) => this.emit(msg),
+      emitBinary: (frame) => this.emitBinary(frame),
+      hasBinaryChannel: () => this.onBinaryMessage !== null,
+      isPathWithinRoot: (rootPath, candidatePath) => this.isPathWithinRoot(rootPath, candidatePath),
+      sessionLogger: this.sessionLogger,
+    });
     this.providerSnapshotManager = providerSnapshotManager ?? null;
     this.scriptRouteStore = scriptRouteStore ?? null;
     this.scriptRuntimeStore = scriptRuntimeStore ?? null;
@@ -995,6 +956,14 @@ export class Session {
     this.providerOverrides = providerOverrides;
     this.isDev = isDev === true;
     this.abortController = new AbortController();
+    this.workspaceDirectory = new WorkspaceDirectory({
+      logger: this.sessionLogger,
+      projectRegistry: this.projectRegistry,
+      workspaceRegistry: this.workspaceRegistry,
+      listAgentPayloads: () => this.listAgentPayloads(),
+      isProviderVisibleToClient: (provider) => this.isProviderVisibleToClient(provider),
+      buildWorkspaceDescriptor: (input) => this.buildWorkspaceDescriptor(input),
+    });
 
     this.initializePerSessionManagers({ tts, stt, dictation });
 
@@ -1011,6 +980,14 @@ export class Session {
     }
   }
 
+  updateClientCapabilities(capabilities: Record<string, unknown> | null): void {
+    this.clientCapabilities = parseClientCapabilities(capabilities);
+  }
+
+  supports(capability: ClientCapability): boolean {
+    return this.clientCapabilities.has(capability);
+  }
+
   async syncWorkspaceGitObserverForWorkspace(workspace: PersistedWorkspaceRecord): Promise<void> {
     const descriptor = await this.describeWorkspaceRecordWithGitData(workspace);
     this.syncWorkspaceGitObservers([descriptor]);
@@ -1024,8 +1001,23 @@ export class Session {
     await this.archiveWorkspaceRecord(workspaceId);
   }
 
+  markWorkspaceArchivingForExternalMutation(
+    workspaceIds: Iterable<string>,
+    archivingAt: string,
+  ): void {
+    this.markWorkspaceArchiving(workspaceIds, archivingAt);
+  }
+
+  clearWorkspaceArchivingForExternalMutation(workspaceIds: Iterable<string>): void {
+    this.clearWorkspaceArchiving(workspaceIds);
+  }
+
+  async emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIds: Iterable<string>): Promise<void> {
+    await this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds);
+  }
+
   async emitWorkspaceUpdatesForExternalCwds(cwds: Iterable<string>): Promise<void> {
-    await this.emitWorkspaceUpdatesForCwds(cwds);
+    await Promise.all(Array.from(cwds, (cwd) => this.emitWorkspaceUpdateForCwd(cwd)));
   }
 
   async warmWorkspaceGitDataForWorkspace(workspace: PersistedWorkspaceRecord): Promise<void> {
@@ -1047,9 +1039,10 @@ export class Session {
   }
 
   public getRuntimeMetrics(): SessionRuntimeMetrics {
+    const terminalMetrics = this.terminalController.getMetrics();
     return {
-      terminalDirectorySubscriptionCount: this.subscribedTerminalDirectories.size,
-      terminalSubscriptionCount: this.activeTerminalStreams.size,
+      terminalDirectorySubscriptionCount: terminalMetrics.directorySubscriptionCount,
+      terminalSubscriptionCount: terminalMetrics.streamSubscriptionCount,
       inflightRequests: this.inflightRequests,
       peakInflightRequests: this.peakInflightRequests,
     };
@@ -1231,11 +1224,7 @@ export class Session {
    * Subscribe to AgentManager events and forward them to the client
    */
   private subscribeToOptionalManagers(): void {
-    if (this.terminalManager) {
-      this.unsubscribeTerminalsChanged = this.terminalManager.subscribeTerminalsChanged((event) =>
-        this.handleTerminalsChanged(event),
-      );
-    }
+    this.terminalController.start();
     if (this.providerSnapshotManager) {
       const handleProviderSnapshotChange = (entries: ProviderSnapshotEntry[], cwd: string) => {
         // COMPAT(providersSnapshot): keep provider visibility gating for older clients.
@@ -1848,6 +1837,8 @@ export class Session {
         return this.handleCreateAgentRequest(msg);
       case "resume_agent_request":
         return this.handleResumeAgentRequest(msg);
+      case "import_agent_request":
+        return this.handleImportAgentRequest(msg);
       case "refresh_agent_request":
         return this.handleRefreshAgentRequest(msg);
       case "cancel_agent_request":
@@ -2122,34 +2113,10 @@ export class Session {
   }
 
   private dispatchTerminalMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    switch (msg.type) {
-      case "subscribe_terminals_request":
-        this.handleSubscribeTerminalsRequest(msg);
-        return undefined;
-      case "unsubscribe_terminals_request":
-        this.handleUnsubscribeTerminalsRequest(msg);
-        return undefined;
-      case "list_terminals_request":
-        return this.handleListTerminalsRequest(msg);
-      case "create_terminal_request":
-        return this.handleCreateTerminalRequest(msg);
-      case "start_workspace_script_request":
-        return this.handleStartWorkspaceScriptRequest(msg);
-      case "subscribe_terminal_request":
-        return this.handleSubscribeTerminalRequest(msg);
-      case "unsubscribe_terminal_request":
-        this.handleUnsubscribeTerminalRequest(msg);
-        return undefined;
-      case "terminal_input":
-        this.handleTerminalInput(msg);
-        return undefined;
-      case "kill_terminal_request":
-        return this.handleKillTerminalRequest(msg);
-      case "capture_terminal_request":
-        return this.handleCaptureTerminalRequest(msg);
-      default:
-        return undefined;
+    if (msg.type === "start_workspace_script_request") {
+      return this.handleStartWorkspaceScriptRequest(msg);
     }
+    return this.terminalController.dispatch(msg);
   }
 
   private dispatchChatScheduleLoopMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -2213,41 +2180,7 @@ export class Session {
   }
 
   public handleBinaryFrame(frame: TerminalStreamFrame): void {
-    const activeStream = this.activeTerminalStreams.get(frame.slot);
-    if (!activeStream || !this.terminalManager) {
-      return;
-    }
-    const terminal = this.terminalManager.getTerminal(activeStream.terminalId);
-    if (!terminal) {
-      this.detachTerminalStream(activeStream.terminalId, { emitExit: true });
-      return;
-    }
-
-    switch (frame.opcode) {
-      case TerminalStreamOpcode.Input: {
-        if (frame.payload.byteLength === 0) {
-          return;
-        }
-        const text = Buffer.from(frame.payload).toString("utf8");
-        if (!text) {
-          return;
-        }
-        terminal.send({ type: "input", data: text });
-        return;
-      }
-
-      case TerminalStreamOpcode.Resize: {
-        const resize = decodeTerminalResizePayload(frame.payload);
-        if (!resize) {
-          return;
-        }
-        terminal.send({ type: "resize", rows: resize.rows, cols: resize.cols });
-        return;
-      }
-
-      default:
-        return;
-    }
+    this.terminalController.handleBinaryFrame(frame);
   }
 
   private async handleRestartServerRequest(requestId: string, reason?: string): Promise<void> {
@@ -2465,7 +2398,7 @@ export class Session {
     const terminals = [];
     for (const terminalId of msg.terminalIds) {
       try {
-        terminals.push(this.killTerminalForClose(terminalId));
+        terminals.push(this.terminalController.killTerminalForClose(terminalId));
       } catch (error) {
         this.sessionLogger.warn(
           { err: error, terminalId, requestId: msg.requestId },
@@ -3054,19 +2987,27 @@ export class Session {
         ...(provisionalTitle ? { title: provisionalTitle } : {}),
       };
 
-      const { sessionConfig, worktreeBootstrap } = await this.buildAgentSessionConfig(
+      const firstAgentContext: FirstAgentContext = {
+        ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      };
+      const { sessionConfig, setupContinuation } = await this.buildAgentSessionConfig(
         resolvedConfig,
         git,
         worktreeName,
-        attachments,
+        firstAgentContext,
       );
-      const resolvedWorkspace = msg.workspaceId
+      let resolvedWorkspace = msg.workspaceId
         ? await this.workspaceRegistry.get(msg.workspaceId)
         : ((await this.findWorkspaceByDirectory(sessionConfig.cwd)) ??
           (await this.findOrCreateWorkspaceForDirectory(sessionConfig.cwd)));
       if (!resolvedWorkspace) {
         throw new Error(`Workspace not found: ${msg.workspaceId}`);
       }
+      resolvedWorkspace = await this.maybeAutoNameWorkspaceBranchForFirstAgent({
+        workspace: resolvedWorkspace,
+        firstAgentContext,
+      });
       const snapshot = await this.agentManager.createAgent(
         {
           ...sessionConfig,
@@ -3104,27 +3045,9 @@ export class Session {
         });
       }
 
-      if (worktreeBootstrap) {
-        void runAsyncWorktreeBootstrap({
-          agentId: snapshot.id,
-          worktree: worktreeBootstrap.worktree,
-          shouldBootstrap: worktreeBootstrap.shouldBootstrap,
-          terminalManager: this.terminalManager,
-          appendTimelineItem: (item) =>
-            appendTimelineItemIfAgentKnown({
-              agentManager: this.agentManager,
-              agentId: snapshot.id,
-              item,
-            }),
-          emitLiveTimelineItem: (item) =>
-            emitLiveTimelineItemIfAgentKnown({
-              agentManager: this.agentManager,
-              agentId: snapshot.id,
-              item,
-            }),
-          logger: this.sessionLogger,
-        });
-      }
+      setupContinuation?.startAfterAgentCreate({
+        agentId: snapshot.id,
+      });
 
       this.sessionLogger.info(
         { agentId: snapshot.id, provider: snapshot.provider },
@@ -3180,9 +3103,6 @@ export class Session {
       explicitTitle: params.explicitTitle,
       paseoHome: this.paseoHome,
       logger: this.sessionLogger,
-      deps: {
-        workspaceGitService: this.workspaceGitService,
-      },
     });
 
     const started = await this.handleSendAgentMessage(
@@ -3251,6 +3171,98 @@ export class Session {
         },
       });
     }
+  }
+
+  private async handleImportAgentRequest(
+    msg: Extract<SessionInboundMessage, { type: "import_agent_request" }>,
+  ): Promise<void> {
+    const { provider, sessionId, cwd, labels, requestId } = msg;
+    this.sessionLogger.info({ sessionId, provider }, `Importing agent ${sessionId} (${provider})`);
+
+    try {
+      const descriptor = await this.agentManager.findPersistedAgent(provider, sessionId);
+      if (!descriptor && provider === "opencode" && !cwd) {
+        throw new Error(
+          "OpenCode sessions require --cwd when the session cannot be found in persisted agents",
+        );
+      }
+
+      const handle = descriptor
+        ? applyImportCwdOverride(descriptor.persistence, cwd)
+        : buildImportPersistenceHandle({ provider, sessionId, cwd });
+      const overrides = cwd ? ({ cwd } satisfies Partial<AgentSessionConfig>) : undefined;
+
+      await this.unarchiveAgentByHandle(handle);
+      const snapshot = await this.agentManager.resumeAgentFromPersistence(
+        handle,
+        overrides,
+        undefined,
+        {
+          labels,
+        },
+      );
+      await unarchiveAgentState(this.agentStorage, this.agentManager, snapshot.id);
+      await this.agentManager.hydrateTimelineFromProvider(snapshot.id);
+      await this.applyImportedAgentTitle(snapshot);
+      await this.forwardAgentUpdate(snapshot);
+      const timelineSize = this.agentManager.getTimeline(snapshot.id).length;
+      const agentPayload = await this.buildAgentPayload(snapshot);
+      this.emit({
+        type: "status",
+        payload: {
+          status: "agent_resumed",
+          agentId: snapshot.id,
+          requestId,
+          timelineSize,
+          agent: agentPayload,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.sessionLogger.error({ err: error }, "Failed to import agent");
+      this.emit({
+        type: "status",
+        payload: {
+          status: "agent_create_failed",
+          requestId,
+          error: message,
+        },
+      });
+      this.emit({
+        type: "activity_log",
+        payload: {
+          id: uuidv4(),
+          timestamp: new Date(),
+          type: "error",
+          content: `Failed to import agent: ${message}`,
+        },
+      });
+    }
+  }
+
+  private async applyImportedAgentTitle(snapshot: ManagedAgent): Promise<void> {
+    const initialPrompt = getFirstUserMessageText(this.agentManager.getTimeline(snapshot.id));
+    if (!initialPrompt) {
+      return;
+    }
+
+    const { explicitTitle, provisionalTitle } = resolveCreateAgentTitles({
+      configTitle: snapshot.config.title,
+      initialPrompt,
+    });
+    if (!explicitTitle && provisionalTitle) {
+      await this.agentManager.setTitle(snapshot.id, provisionalTitle);
+    }
+
+    scheduleAgentMetadataGeneration({
+      agentManager: this.agentManager,
+      agentId: snapshot.id,
+      cwd: snapshot.cwd,
+      initialPrompt,
+      explicitTitle,
+      paseoHome: this.paseoHome,
+      logger: this.sessionLogger,
+    });
   }
 
   private async handleRefreshAgentRequest(
@@ -3342,10 +3354,10 @@ export class Session {
     config: AgentSessionConfig,
     gitOptions?: GitSetupOptions,
     legacyWorktreeName?: string,
-    attachments?: AgentAttachment[],
+    firstAgentContext?: FirstAgentContext,
   ): Promise<{
     sessionConfig: AgentSessionConfig;
-    worktreeBootstrap?: { worktree: WorktreeConfig; shouldBootstrap: boolean };
+    setupContinuation?: CreatePaseoWorktreeWorkflowResult["setupContinuation"];
   }> {
     return buildWorktreeAgentSessionConfig(
       {
@@ -3353,7 +3365,26 @@ export class Session {
         sessionLogger: this.sessionLogger,
         workspaceGitService: this.workspaceGitService,
         createPaseoWorktree: (input, serviceOptions) =>
-          this.createPaseoWorktree(input, serviceOptions),
+          this.createPaseoWorktreeWorkflow(input, {
+            ...serviceOptions,
+            setupContinuation: {
+              kind: "agent",
+              terminalManager: this.terminalManager,
+              appendTimelineItem: ({ agentId, item }) =>
+                appendTimelineItemIfAgentKnown({
+                  agentManager: this.agentManager,
+                  agentId,
+                  item,
+                }),
+              emitLiveTimelineItem: ({ agentId, item }) =>
+                emitLiveTimelineItemIfAgentKnown({
+                  agentManager: this.agentManager,
+                  agentId,
+                  item,
+                }),
+              logger: this.sessionLogger,
+            },
+          }),
         checkoutExistingBranch: (cwd, branch) => this.checkoutExistingBranch(cwd, branch),
         createBranchFromBase: (params) => this.createBranchFromBase(params),
         github: this.github,
@@ -3361,8 +3392,33 @@ export class Session {
       config,
       gitOptions,
       legacyWorktreeName,
-      attachments,
+      firstAgentContext,
     );
+  }
+
+  private async maybeAutoNameWorkspaceBranchForFirstAgent(input: {
+    workspace: PersistedWorkspaceRecord;
+    firstAgentContext: FirstAgentContext;
+  }): Promise<PersistedWorkspaceRecord> {
+    const coreDeps = createWorktreeCoreDeps(this.github);
+    const result = await attemptFirstAgentBranchAutoName({
+      cwd: input.workspace.cwd,
+      firstAgentContext: input.firstAgentContext,
+      generateBranchName: coreDeps.generateBranchName,
+    });
+    if (!result.renamed || !result.branchName) {
+      return input.workspace;
+    }
+
+    const updatedWorkspace: PersistedWorkspaceRecord = {
+      ...input.workspace,
+      displayName: result.branchName,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.workspaceRegistry.upsert(updatedWorkspace);
+    await this.notifyGitMutation(input.workspace.cwd, "rename-branch");
+    await this.emitWorkspaceUpdateForCwd(input.workspace.cwd);
+    return updatedWorkspace;
   }
 
   private emitProviderDisabledResponse(
@@ -5409,17 +5465,17 @@ export class Session {
         workspaceGitService: this.workspaceGitService,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
-        archiveWorkspaceRecord: async (workspaceDirectory) => {
-          const workspace = await this.findWorkspaceByDirectory(workspaceDirectory);
-          if (workspace) {
-            await this.archiveWorkspaceRecord(workspace.workspaceId);
-          }
-        },
+        archiveWorkspaceRecord: (workspaceId) => this.archiveWorkspaceRecord(workspaceId),
         emit: (message) => this.emit(message),
-        emitWorkspaceUpdatesForCwds: (cwds) => this.emitWorkspaceUpdatesForCwds(cwds),
+        emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds) =>
+          this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds),
+        markWorkspaceArchiving: (workspaceIds, archivingAt) =>
+          this.markWorkspaceArchiving(workspaceIds, archivingAt),
+        clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
         isPathWithinRoot: (rootPath, candidatePath) =>
           this.isPathWithinRoot(rootPath, candidatePath),
-        killTerminalsUnderPath: (rootPath) => this.killTerminalsUnderPath(rootPath),
+        killTerminalsUnderPath: (rootPath) =>
+          this.terminalController.killTerminalsUnderPath(rootPath),
         sessionLogger: this.sessionLogger,
       },
       msg,
@@ -5468,23 +5524,56 @@ export class Session {
           },
         });
       } else {
-        const file = await readExplorerFile({
-          root: cwd,
-          relativePath: requestedPath,
-        });
+        if (request.acceptBinary && this.onBinaryMessage) {
+          const file = await readExplorerFileBytes({
+            root: cwd,
+            relativePath: requestedPath,
+          });
 
-        this.emit({
-          type: "file_explorer_response",
-          payload: {
-            cwd,
-            path: file.path,
-            mode,
-            directory: null,
-            file,
-            error: null,
-            requestId,
-          },
-        });
+          this.emitBinary(
+            encodeFileTransferFrame({
+              opcode: FileTransferOpcode.FileBegin,
+              requestId,
+              metadata: {
+                mime: file.mimeType,
+                size: file.size,
+                encoding: file.encoding,
+                modifiedAt: file.modifiedAt,
+              },
+            }),
+          );
+          this.emitBinary(
+            encodeFileTransferFrame({
+              opcode: FileTransferOpcode.FileChunk,
+              requestId,
+              payload: file.bytes,
+            }),
+          );
+          this.emitBinary(
+            encodeFileTransferFrame({
+              opcode: FileTransferOpcode.FileEnd,
+              requestId,
+            }),
+          );
+        } else {
+          const file = await readExplorerFile({
+            root: cwd,
+            relativePath: requestedPath,
+          });
+
+          this.emit({
+            type: "file_explorer_response",
+            payload: {
+              cwd,
+              path: file.path,
+              mode,
+              directory: null,
+              file,
+              error: null,
+              requestId,
+            },
+          });
+        }
       }
     } catch (error) {
       this.sessionLogger.error(
@@ -5724,26 +5813,6 @@ export class Session {
     return this.isProviderVisibleToClient(payload.provider) ? payload : null;
   }
 
-  private normalizeFetchAgentsSort(
-    sort: FetchAgentsRequestSort[] | undefined,
-  ): FetchAgentsRequestSort[] {
-    const fallback: FetchAgentsRequestSort[] = [{ key: "updated_at", direction: "desc" }];
-    if (!sort || sort.length === 0) {
-      return fallback;
-    }
-
-    const deduped: FetchAgentsRequestSort[] = [];
-    const seen = new Set<string>();
-    for (const entry of sort) {
-      if (seen.has(entry.key)) {
-        continue;
-      }
-      seen.add(entry.key);
-      deduped.push(entry);
-    }
-    return deduped.length > 0 ? deduped : fallback;
-  }
-
   private getStatusPriority(agent: AgentSnapshotPayload): number {
     const attentionReason = agent.attentionReason ?? null;
     const hasPendingPermission = (agent.pendingPermissions?.length ?? 0) > 0;
@@ -5760,157 +5829,6 @@ export class Session {
       return 3;
     }
     return 4;
-  }
-
-  private getFetchAgentsSortValue(
-    entry: FetchAgentsResponseEntry,
-    key: FetchAgentsRequestSort["key"],
-  ): string | number | null {
-    switch (key) {
-      case "status_priority":
-        return this.getStatusPriority(entry.agent);
-      case "created_at":
-        return Date.parse(entry.agent.createdAt);
-      case "updated_at":
-        return Date.parse(entry.agent.updatedAt);
-      case "title":
-        return entry.agent.title?.toLocaleLowerCase() ?? "";
-    }
-  }
-
-  private getFetchAgentsSortValueFromAgent(
-    agent: AgentSnapshotPayload,
-    key: FetchAgentsRequestSort["key"],
-  ): string | number | null {
-    switch (key) {
-      case "status_priority":
-        return this.getStatusPriority(agent);
-      case "created_at":
-        return Date.parse(agent.createdAt);
-      case "updated_at":
-        return Date.parse(agent.updatedAt);
-      case "title":
-        return agent.title?.toLocaleLowerCase() ?? "";
-    }
-  }
-
-  private compareSortValues(left: string | number | null, right: string | number | null): number {
-    if (left === right) {
-      return 0;
-    }
-    if (left === null) {
-      return -1;
-    }
-    if (right === null) {
-      return 1;
-    }
-    if (typeof left === "number" && typeof right === "number") {
-      return left < right ? -1 : 1;
-    }
-    return String(left).localeCompare(String(right));
-  }
-
-  private compareFetchAgentsAgents(
-    left: AgentSnapshotPayload,
-    right: AgentSnapshotPayload,
-    sort: FetchAgentsRequestSort[],
-  ): number {
-    for (const spec of sort) {
-      const leftValue = this.getFetchAgentsSortValueFromAgent(left, spec.key);
-      const rightValue = this.getFetchAgentsSortValueFromAgent(right, spec.key);
-      const base = this.compareSortValues(leftValue, rightValue);
-      if (base === 0) {
-        continue;
-      }
-      return spec.direction === "asc" ? base : -base;
-    }
-    return left.id.localeCompare(right.id);
-  }
-
-  private encodeFetchAgentsCursor(
-    entry: FetchAgentsResponseEntry,
-    sort: FetchAgentsRequestSort[],
-  ): string {
-    const values: Record<string, string | number | null> = {};
-    for (const spec of sort) {
-      values[spec.key] = this.getFetchAgentsSortValue(entry, spec.key);
-    }
-    return Buffer.from(
-      JSON.stringify({
-        sort,
-        values,
-        id: entry.agent.id,
-      }),
-      "utf8",
-    ).toString("base64url");
-  }
-
-  private decodeFetchAgentsCursor(
-    cursor: string,
-    sort: FetchAgentsRequestSort[],
-  ): FetchAgentsCursor {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    } catch {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_agents cursor");
-    }
-
-    if (!parsed || typeof parsed !== "object") {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_agents cursor");
-    }
-
-    const payload = parsed as {
-      sort?: unknown;
-      values?: unknown;
-      id?: unknown;
-    };
-
-    if (!Array.isArray(payload.sort) || typeof payload.id !== "string") {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_agents cursor");
-    }
-    if (!payload.values || typeof payload.values !== "object") {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_agents cursor");
-    }
-
-    const cursorSort = parseFetchAgentsCursorSort(payload.sort);
-
-    if (
-      cursorSort.length !== sort.length ||
-      cursorSort.some(
-        (entry, index) =>
-          entry.key !== sort[index]?.key || entry.direction !== sort[index]?.direction,
-      )
-    ) {
-      throw new SessionRequestError(
-        "invalid_cursor",
-        "fetch_agents cursor does not match current sort",
-      );
-    }
-
-    return {
-      sort: cursorSort,
-      values: payload.values as Record<string, string | number | null>,
-      id: payload.id,
-    };
-  }
-
-  private compareAgentWithCursor(
-    agent: AgentSnapshotPayload,
-    cursor: FetchAgentsCursor,
-    sort: FetchAgentsRequestSort[],
-  ): number {
-    for (const spec of sort) {
-      const leftValue = this.getFetchAgentsSortValueFromAgent(agent, spec.key);
-      const rightValue =
-        cursor.values[spec.key] !== undefined ? (cursor.values[spec.key] ?? null) : null;
-      const base = this.compareSortValues(leftValue, rightValue);
-      if (base === 0) {
-        continue;
-      }
-      return spec.direction === "asc" ? base : -base;
-    }
-    return agent.id.localeCompare(cursor.id);
   }
 
   private async buildActiveProjectPlacementsByWorkspaceCwd(): Promise<
@@ -5998,7 +5916,7 @@ export class Session {
         ? { ...request.filter, includeArchived: true }
         : request.filter;
     const scope = request.type === "fetch_agents_request" ? request.scope : undefined;
-    const sort = this.normalizeFetchAgentsSort(request.sort);
+    const sort = this.agentsPager.normalizeSort(request.sort);
 
     let agents = await this.listAgentPayloads({
       labels: filter?.labels,
@@ -6030,12 +5948,12 @@ export class Session {
     };
 
     let candidates = [...agents];
-    candidates.sort((left, right) => this.compareFetchAgentsAgents(left, right, sort));
+    candidates.sort((left, right) => this.agentsPager.compare(left, right, sort));
     const cursorToken = request.page?.cursor;
     if (cursorToken) {
-      const cursor = this.decodeFetchAgentsCursor(cursorToken, sort);
+      const cursor = this.decodeAgentCursor(cursorToken, sort);
       candidates = candidates.filter(
-        (agent) => this.compareAgentWithCursor(agent, cursor, sort) > 0,
+        (agent) => this.agentsPager.compareWithCursor(agent, cursor, sort) > 0,
       );
     }
 
@@ -6052,7 +5970,7 @@ export class Session {
     const hasMore = matchedEntries.length > limit;
     const nextCursor =
       hasMore && pagedEntries.length > 0
-        ? this.encodeFetchAgentsCursor(pagedEntries[pagedEntries.length - 1], sort)
+        ? this.agentsPager.encode(pagedEntries[pagedEntries.length - 1].agent, sort)
         : null;
 
     return {
@@ -6065,29 +5983,37 @@ export class Session {
     };
   }
 
-  private readonly workspaceStatePriority: Record<WorkspaceStateBucket, number> = {
-    needs_input: 0,
-    failed: 1,
-    running: 2,
-    attention: 3,
-    done: 4,
-  };
+  private readonly agentsPager = new SortablePager<
+    AgentSnapshotPayload,
+    FetchAgentsRequestSort["key"]
+  >({
+    validKeys: FETCH_AGENTS_SORT_KEYS,
+    defaultSort: [{ key: "updated_at", direction: "desc" }],
+    label: "fetch_agents",
+    getId: (agent) => agent.id,
+    getSortValue: (agent, key) => {
+      switch (key) {
+        case "status_priority":
+          return this.getStatusPriority(agent);
+        case "created_at":
+          return Date.parse(agent.createdAt);
+        case "updated_at":
+          return Date.parse(agent.updatedAt);
+        case "title":
+          return agent.title?.toLocaleLowerCase() ?? "";
+      }
+    },
+  });
 
-  private deriveWorkspaceStateBucket(agent: AgentSnapshotPayload): WorkspaceStateBucket {
-    const pendingPermissionCount = agent.pendingPermissions?.length ?? 0;
-    if (pendingPermissionCount > 0 || agent.attentionReason === "permission") {
-      return "needs_input";
+  private decodeAgentCursor(token: string, sort: SortSpec<FetchAgentsRequestSort["key"]>[]) {
+    try {
+      return this.agentsPager.decode(token, sort);
+    } catch (error) {
+      if (error instanceof CursorError) {
+        throw new SessionRequestError("invalid_cursor", error.message);
+      }
+      throw error;
     }
-    if (agent.status === "error" || agent.attentionReason === "error") {
-      return "failed";
-    }
-    if (agent.status === "running") {
-      return "running";
-    }
-    if (agent.requiresAttention) {
-      return "attention";
-    }
-    return "done";
   }
 
   private async describeWorkspaceRecord(
@@ -6112,6 +6038,7 @@ export class Session {
       projectKind: (resolvedProjectRecord?.kind ?? "directory") === "git" ? "git" : "non_git",
       workspaceKind: workspace.kind,
       name: workspace.displayName,
+      archivingAt: null,
       status: "done",
       activityAt: null,
       diffStat,
@@ -6199,6 +6126,7 @@ export class Session {
       projectKind: "git",
       workspaceKind: result.workspace.kind,
       name: result.worktree.branchName || result.workspace.displayName,
+      archivingAt: null,
       status: "done",
       activityAt: null,
       diffStat: { additions: 0, deletions: 0 },
@@ -6227,283 +6155,33 @@ export class Session {
     return this.describeWorkspaceRecord(input.workspace, input.projectRecord);
   }
 
+  markWorkspaceArchiving(workspaceIds: Iterable<string>, archivingAt: string): void {
+    this.workspaceDirectory.markArchiving(workspaceIds, archivingAt);
+  }
+
+  clearWorkspaceArchiving(workspaceIds: Iterable<string>): void {
+    this.workspaceDirectory.clearArchiving(workspaceIds);
+  }
+
   private async buildWorkspaceDescriptorMap(options: {
     includeGitData: boolean;
     workspaceIds?: Iterable<string>;
   }): Promise<Map<string, WorkspaceDescriptorPayload>> {
-    const [agents, persistedWorkspaces, persistedProjects] = await Promise.all([
-      this.listAgentPayloads(),
-      this.workspaceRegistry.list(),
-      this.projectRegistry.list(),
-    ]);
-
-    const activeProjects = new Map(
-      persistedProjects
-        .filter((project) => !project.archivedAt)
-        .map((project) => [project.projectId, project] as const),
-    );
-    const archivedProjectIds = new Set(
-      persistedProjects.filter((project) => project.archivedAt).map((project) => project.projectId),
-    );
-    const activeRecords = persistedWorkspaces.filter(
-      (workspace) => !workspace.archivedAt && !archivedProjectIds.has(workspace.projectId),
-    );
-    const descriptorsByWorkspaceId = new Map<string, WorkspaceDescriptorPayload>();
-    const workspaceIds = options.workspaceIds ? new Set(options.workspaceIds) : null;
-    const workspaceIdsByDirectory = new Map(
-      activeRecords.map(
-        (workspace) =>
-          [normalizePersistedWorkspaceId(workspace.cwd), workspace.workspaceId] as const,
-      ),
-    );
-
-    const includedWorkspaces = activeRecords.filter(
-      (workspace) => !workspaceIds || workspaceIds.has(workspace.workspaceId),
-    );
-    const workspaceDescriptors = await Promise.all(
-      includedWorkspaces.map((workspace) =>
-        this.buildWorkspaceDescriptor({
-          workspace,
-          projectRecord: activeProjects.get(workspace.projectId) ?? null,
-          includeGitData: options.includeGitData,
-        }),
-      ),
-    );
-    for (let i = 0; i < includedWorkspaces.length; i += 1) {
-      descriptorsByWorkspaceId.set(includedWorkspaces[i]!.workspaceId, workspaceDescriptors[i]!);
-    }
-
-    for (const agent of agents) {
-      if (agent.archivedAt) {
-        continue;
-      }
-      if (!this.isProviderVisibleToClient(agent.provider)) {
-        continue;
-      }
-
-      const workspaceId = workspaceIdsByDirectory.get(normalizePersistedWorkspaceId(agent.cwd));
-      if (workspaceId === undefined) {
-        continue;
-      }
-      const existing = descriptorsByWorkspaceId.get(workspaceId);
-      if (!existing) {
-        continue;
-      }
-
-      const bucket = this.deriveWorkspaceStateBucket(agent);
-      if (this.workspaceStatePriority[bucket] < this.workspaceStatePriority[existing.status]) {
-        existing.status = bucket;
-      }
-    }
-
-    return descriptorsByWorkspaceId;
+    return this.workspaceDirectory.buildDescriptorMap(options);
   }
 
   private resolveRegisteredWorkspaceIdForCwd(
     cwd: string,
     workspaces: PersistedWorkspaceRecord[],
   ): string {
-    const normalizedCwd = normalizePersistedWorkspaceId(cwd);
-    const exact = workspaces.find((workspace) => workspace.cwd === normalizedCwd);
-    if (exact) {
-      return exact.workspaceId;
-    }
-
-    const userHome = homedir();
-    let bestMatch: PersistedWorkspaceRecord | null = null;
-    for (const workspace of workspaces) {
-      if (workspace.cwd === userHome) continue;
-      if (workspace.archivedAt) continue;
-      const prefix = workspace.cwd.endsWith(sep) ? workspace.cwd : `${workspace.cwd}${sep}`;
-      if (!normalizedCwd.startsWith(prefix)) {
-        continue;
-      }
-      if (!bestMatch || workspace.cwd.length > bestMatch.cwd.length) {
-        bestMatch = workspace;
-      }
-    }
-
-    return bestMatch?.workspaceId ?? normalizedCwd;
-  }
-
-  private async listWorkspaceDescriptors(): Promise<WorkspaceDescriptorPayload[]> {
-    return Array.from(
-      (
-        await this.buildWorkspaceDescriptorMap({
-          includeGitData: true,
-        })
-      ).values(),
-    );
-  }
-
-  private normalizeFetchWorkspacesSort(
-    sort: FetchWorkspacesRequestSort[] | undefined,
-  ): FetchWorkspacesRequestSort[] {
-    const fallback: FetchWorkspacesRequestSort[] = [{ key: "activity_at", direction: "desc" }];
-    if (!sort || sort.length === 0) {
-      return fallback;
-    }
-    const deduped: FetchWorkspacesRequestSort[] = [];
-    const seen = new Set<string>();
-    for (const entry of sort) {
-      if (seen.has(entry.key)) {
-        continue;
-      }
-      seen.add(entry.key);
-      deduped.push(entry);
-    }
-    return deduped.length > 0 ? deduped : fallback;
-  }
-
-  private getFetchWorkspacesSortValue(
-    workspace: WorkspaceDescriptorPayload,
-    key: FetchWorkspacesRequestSort["key"],
-  ): string | number | null {
-    switch (key) {
-      case "status_priority":
-        return this.workspaceStatePriority[workspace.status];
-      case "activity_at":
-        return workspace.activityAt ? Date.parse(workspace.activityAt) : null;
-      case "name":
-        return workspace.name.toLocaleLowerCase();
-      case "project_id":
-        return workspace.projectId.toLocaleLowerCase();
-    }
-  }
-
-  private compareFetchWorkspacesEntries(
-    left: WorkspaceDescriptorPayload,
-    right: WorkspaceDescriptorPayload,
-    sort: FetchWorkspacesRequestSort[],
-  ): number {
-    for (const spec of sort) {
-      const leftValue = this.getFetchWorkspacesSortValue(left, spec.key);
-      const rightValue = this.getFetchWorkspacesSortValue(right, spec.key);
-      const base = this.compareSortValues(leftValue, rightValue);
-      if (base === 0) {
-        continue;
-      }
-      return spec.direction === "asc" ? base : -base;
-    }
-    return left.id.localeCompare(right.id);
-  }
-
-  private encodeFetchWorkspacesCursor(
-    entry: FetchWorkspacesResponseEntry,
-    sort: FetchWorkspacesRequestSort[],
-  ): string {
-    const values: Record<string, string | number | null> = {};
-    for (const spec of sort) {
-      values[spec.key] = this.getFetchWorkspacesSortValue(entry, spec.key);
-    }
-    return Buffer.from(
-      JSON.stringify({
-        sort,
-        values,
-        id: entry.id,
-      }),
-      "utf8",
-    ).toString("base64url");
-  }
-
-  private decodeFetchWorkspacesCursor(
-    cursor: string,
-    sort: FetchWorkspacesRequestSort[],
-  ): FetchWorkspacesCursor {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    } catch {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_workspaces cursor");
-    }
-
-    if (!parsed || typeof parsed !== "object") {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_workspaces cursor");
-    }
-
-    const payload = parsed as {
-      sort?: unknown;
-      values?: unknown;
-      id?: unknown;
-    };
-
-    if (!Array.isArray(payload.sort) || typeof payload.id !== "string") {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_workspaces cursor");
-    }
-    if (!payload.values || typeof payload.values !== "object") {
-      throw new SessionRequestError("invalid_cursor", "Invalid fetch_workspaces cursor");
-    }
-
-    const cursorSort = parseFetchWorkspacesCursorSort(payload.sort);
-
-    if (
-      cursorSort.length !== sort.length ||
-      cursorSort.some(
-        (entry, index) =>
-          entry.key !== sort[index]?.key || entry.direction !== sort[index]?.direction,
-      )
-    ) {
-      throw new SessionRequestError(
-        "invalid_cursor",
-        "fetch_workspaces cursor does not match current sort",
-      );
-    }
-
-    return {
-      sort: cursorSort,
-      values: payload.values as Record<string, string | number | null>,
-      id: String(payload.id),
-    };
-  }
-
-  private compareWorkspaceWithCursor(
-    workspace: WorkspaceDescriptorPayload,
-    cursor: FetchWorkspacesCursor,
-    sort: FetchWorkspacesRequestSort[],
-  ): number {
-    for (const spec of sort) {
-      const leftValue = this.getFetchWorkspacesSortValue(workspace, spec.key);
-      const rightValue =
-        cursor.values[spec.key] !== undefined ? (cursor.values[spec.key] ?? null) : null;
-      const base = this.compareSortValues(leftValue, rightValue);
-      if (base === 0) {
-        continue;
-      }
-      return spec.direction === "asc" ? base : -base;
-    }
-    return workspace.id.localeCompare(cursor.id);
+    return this.workspaceDirectory.resolveRegisteredWorkspaceIdForCwd(cwd, workspaces);
   }
 
   private matchesWorkspaceFilter(input: {
     workspace: WorkspaceDescriptorPayload;
     filter: FetchWorkspacesRequestFilter | undefined;
   }): boolean {
-    const { workspace, filter } = input;
-    if (!filter) {
-      return true;
-    }
-
-    if (filter.projectId && filter.projectId.trim().length > 0) {
-      if (workspace.projectId !== filter.projectId.trim()) {
-        return false;
-      }
-    }
-
-    if (filter.idPrefix && filter.idPrefix.trim().length > 0) {
-      if (!String(workspace.id).startsWith(filter.idPrefix.trim())) {
-        return false;
-      }
-    }
-
-    if (filter.query && filter.query.trim().length > 0) {
-      const query = filter.query.trim().toLocaleLowerCase();
-      const haystacks = [workspace.name, String(workspace.projectId), String(workspace.id)];
-      if (!haystacks.some((value) => value.toLocaleLowerCase().includes(query))) {
-        return false;
-      }
-    }
-
-    return true;
+    return this.workspaceDirectory.matchesFilter(input);
   }
 
   private async listFetchWorkspacesEntries(
@@ -6512,53 +6190,14 @@ export class Session {
     entries: FetchWorkspacesResponseEntry[];
     pageInfo: FetchWorkspacesResponsePageInfo;
   }> {
-    const filter = request.filter;
-    const sort = this.normalizeFetchWorkspacesSort(request.sort);
-    let entries = await this.listWorkspaceDescriptors();
-    const listedCount = entries.length;
-    entries = entries.filter((workspace) => this.matchesWorkspaceFilter({ workspace, filter }));
-    const filteredCount = entries.length;
-    entries.sort((left, right) => this.compareFetchWorkspacesEntries(left, right, sort));
-
-    const cursorToken = request.page?.cursor;
-    if (cursorToken) {
-      const cursor = this.decodeFetchWorkspacesCursor(cursorToken, sort);
-      entries = entries.filter(
-        (workspace) => this.compareWorkspaceWithCursor(workspace, cursor, sort) > 0,
-      );
+    try {
+      return await this.workspaceDirectory.listFetchEntries(request);
+    } catch (error) {
+      if (error instanceof CursorError) {
+        throw new SessionRequestError("invalid_cursor", error.message);
+      }
+      throw error;
     }
-
-    const limit = request.page?.limit ?? 200;
-    const pagedEntries = entries.slice(0, limit);
-    const hasMore = entries.length > limit;
-    const nextCursor =
-      hasMore && pagedEntries.length > 0
-        ? this.encodeFetchWorkspacesCursor(pagedEntries[pagedEntries.length - 1], sort)
-        : null;
-
-    this.sessionLogger.debug(
-      {
-        requestId: request.requestId,
-        filter: request.filter ?? null,
-        sort,
-        page: request.page ?? null,
-        listedCount,
-        filteredCount,
-        returnedCount: pagedEntries.length,
-        hasMore,
-        nextCursor,
-      },
-      "fetch_workspaces_entries_listed",
-    );
-
-    return {
-      entries: pagedEntries,
-      pageInfo: {
-        nextCursor,
-        prevCursor: request.page?.cursor ?? null,
-        hasMore,
-      },
-    };
   }
 
   private bufferOrEmitWorkspaceUpdate(
@@ -6960,15 +6599,6 @@ export class Session {
     await this.emitWorkspaceUpdatesForWorkspaceIds([workspaceId], options);
   }
 
-  private async emitWorkspaceUpdatesForCwds(cwds: Iterable<string>): Promise<void> {
-    const workspaces = await this.workspaceRegistry.list();
-    const uniqueWorkspaceIds = new Set<string>();
-    for (const cwd of cwds) {
-      uniqueWorkspaceIds.add(this.resolveRegisteredWorkspaceIdForCwd(cwd, workspaces));
-    }
-    await this.emitWorkspaceUpdatesForWorkspaceIds(uniqueWorkspaceIds);
-  }
-
   private async handleFetchAgents(
     request: Extract<SessionInboundMessage, { type: "fetch_agents_request" }>,
   ): Promise<void> {
@@ -7368,27 +6998,26 @@ export class Session {
         paseoHome: this.paseoHome,
         describeWorkspaceRecord: (result) => this.describeCreatedWorktreeWorkspace(result),
         emit: (message) => this.emit(message),
-        createPaseoWorktree: (input) => this.createPaseoWorktree(input),
-        warmWorkspaceGitData: (workspace) => this.warmWorkspaceGitDataForWorkspace(workspace),
         sessionLogger: this.sessionLogger,
-        runWorktreeSetupInBackground: (options) => this.runWorktreeSetupInBackground(options),
+        createPaseoWorktreeWorkflow: (input) => this.createPaseoWorktreeWorkflow(input),
       },
       request,
     );
   }
 
-  private async runWorktreeSetupInBackground(options: {
-    requestCwd: string;
-    repoRoot: string;
-    workspaceId: string;
-    worktree: { branchName: string; worktreePath: string };
-    shouldBootstrap: boolean;
-    slug: string;
-    worktreePath: string;
-  }): Promise<void> {
-    return runWorktreeSetupInBackgroundSession(
+  private async createPaseoWorktreeWorkflow(
+    input: CreatePaseoWorktreeInput,
+    options?: {
+      resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
+      setupContinuation?: CreatePaseoWorktreeSetupContinuationInput;
+    },
+  ): Promise<CreatePaseoWorktreeWorkflowResult> {
+    return createWorktreeWorkflow(
       {
         paseoHome: this.paseoHome,
+        createPaseoWorktree: (workflowInput, serviceOptions) =>
+          this.createPaseoWorktree(workflowInput, serviceOptions),
+        warmWorkspaceGitData: (workspace) => this.warmWorkspaceGitDataForWorkspace(workspace),
         emitWorkspaceUpdateForCwd: (cwd, emitOptions) =>
           this.emitWorkspaceUpdateForCwd(cwd, emitOptions),
         cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) => {
@@ -7406,6 +7035,7 @@ export class Session {
           this.emitWorkspaceScriptStatusUpdate(workspaceId, workspaceDirectory);
         },
       },
+      input,
       options,
     );
   }
@@ -7499,7 +7129,6 @@ export class Session {
     direction: AgentTimelineFetchDirection;
     cursor: AgentTimelineCursor | undefined;
     requestedLimit: number;
-    provider: AgentSnapshotPayload["provider"];
     timeline: ReturnType<AgentManager["fetchTimeline"]>;
   }): {
     timeline: ReturnType<AgentManager["fetchTimeline"]>;
@@ -7507,13 +7136,12 @@ export class Session {
     minSeq: number | null;
     maxSeq: number | null;
   } {
-    const { agentId, direction, cursor, requestedLimit, provider } = params;
+    const { agentId, direction, cursor, requestedLimit } = params;
     let timeline = params.timeline;
     const projectedLimit = Math.max(1, Math.floor(requestedLimit));
     let fetchLimit = projectedLimit;
     let projectedWindow = selectTimelineWindowByProjectedLimit({
       rows: timeline.rows,
-      provider,
       direction,
       limit: projectedLimit,
       collapseToolLifecycle: false,
@@ -7548,7 +7176,6 @@ export class Session {
       });
       projectedWindow = selectTimelineWindowByProjectedLimit({
         rows: timeline.rows,
-        provider,
         direction,
         limit: projectedLimit,
         collapseToolLifecycle: false,
@@ -7610,11 +7237,10 @@ export class Session {
           direction,
           cursor,
           requestedLimit,
-          provider: snapshot.provider,
           timeline,
         });
         timeline = projectedResult.timeline;
-        entries = projectTimelineRows(projectedResult.selectedRows, snapshot.provider, projection);
+        entries = projectTimelineRows({ rows: projectedResult.selectedRows, mode: projection });
         if (projectedResult.minSeq !== null && projectedResult.maxSeq !== null) {
           startCursor = { epoch: timeline.epoch, seq: projectedResult.minSeq };
           endCursor = { epoch: timeline.epoch, seq: projectedResult.maxSeq };
@@ -7626,7 +7252,7 @@ export class Session {
         const lastRow = timeline.rows[timeline.rows.length - 1];
         startCursor = firstRow ? { epoch: timeline.epoch, seq: firstRow.seq } : null;
         endCursor = lastRow ? { epoch: timeline.epoch, seq: lastRow.seq } : null;
-        entries = projectTimelineRows(timeline.rows, snapshot.provider, projection);
+        entries = projectTimelineRows({ rows: timeline.rows, mode: projection });
       }
 
       this.emit({
@@ -7646,7 +7272,17 @@ export class Session {
           endCursor,
           hasOlder,
           hasNewer,
-          entries,
+          entries: entries.map((entry) => ({
+            provider: snapshot.provider,
+            item: entry.item,
+            timestamp: entry.timestamp,
+            seqStart: entry.seqStart,
+            seqEnd: entry.seqEnd,
+            sourceSeqRanges: entry.sourceSeqRanges,
+            collapsed: this.supports(CLIENT_CAPS.reasoningMergeEnum)
+              ? entry.collapsed
+              : entry.collapsed.filter((value) => value !== "reasoning_merge"),
+          })),
           error: null,
         },
       });
@@ -8593,18 +8229,7 @@ export class Session {
     await this.disableVoiceModeForActiveAgent(true);
     this.isVoiceMode = false;
 
-    // Unsubscribe from all terminals
-    if (this.unsubscribeTerminalsChanged) {
-      this.unsubscribeTerminalsChanged();
-      this.unsubscribeTerminalsChanged = null;
-    }
-    this.subscribedTerminalDirectories.clear();
-
-    for (const unsubscribeExit of this.terminalExitSubscriptions.values()) {
-      unsubscribeExit();
-    }
-    this.terminalExitSubscriptions.clear();
-    this.disposeTerminalSubscriptions();
+    this.terminalController.dispose();
 
     for (const unsubscribe of this.checkoutDiffSubscriptions.values()) {
       unsubscribe();
@@ -8615,31 +8240,6 @@ export class Session {
       unsubscribe();
     }
     this.workspaceGitSubscriptions.clear();
-  }
-
-  // ----------------------------------------------------------------------------
-  // Terminal Handlers
-  // ----------------------------------------------------------------------------
-
-  private ensureTerminalExitSubscription(terminal: TerminalSession): void {
-    if (this.terminalExitSubscriptions.has(terminal.id)) {
-      return;
-    }
-
-    const unsubscribeExit = terminal.onExit(() => {
-      this.handleTerminalExited(terminal.id);
-    });
-    this.terminalExitSubscriptions.set(terminal.id, unsubscribeExit);
-  }
-
-  private handleTerminalExited(terminalId: string): void {
-    const unsubscribeExit = this.terminalExitSubscriptions.get(terminalId);
-    if (unsubscribeExit) {
-      unsubscribeExit();
-      this.terminalExitSubscriptions.delete(terminalId);
-    }
-
-    this.detachTerminalStream(terminalId, { emitExit: true });
   }
 
   private emitChatRpcError(request: { requestId: string; type: string }, error: unknown): void {
@@ -9122,537 +8722,6 @@ export class Session {
       });
     } catch (error) {
       this.emitLoopRpcError(request, error);
-    }
-  }
-
-  private emitTerminalsChangedSnapshot(input: {
-    cwd: string;
-    terminals: Array<{ id: string; name: string; title?: string }>;
-  }): void {
-    this.emit({
-      type: "terminals_changed",
-      payload: {
-        cwd: input.cwd,
-        terminals: input.terminals,
-      },
-    });
-  }
-
-  private filterStandaloneTerminals<T extends { id: string }>(terminals: T[]): T[] {
-    return terminals;
-  }
-
-  private toTerminalInfo(terminal: Pick<TerminalSession, "id" | "name" | "getTitle">): {
-    id: string;
-    name: string;
-    title?: string;
-  } {
-    const title = terminal.getTitle();
-    return {
-      id: terminal.id,
-      name: terminal.name,
-      ...(title ? { title } : {}),
-    };
-  }
-
-  private handleTerminalsChanged(event: TerminalsChangedEvent): void {
-    if (!this.subscribedTerminalDirectories.has(event.cwd)) {
-      return;
-    }
-
-    this.emitTerminalsChangedSnapshot({
-      cwd: event.cwd,
-      terminals: this.filterStandaloneTerminals(event.terminals).map((terminal) =>
-        Object.assign(
-          { id: terminal.id, name: terminal.name },
-          terminal.title ? { title: terminal.title } : {},
-        ),
-      ),
-    });
-  }
-
-  private handleSubscribeTerminalsRequest(msg: SubscribeTerminalsRequest): void {
-    this.subscribedTerminalDirectories.add(msg.cwd);
-    void this.emitInitialTerminalsChangedSnapshot(msg.cwd);
-  }
-
-  private handleUnsubscribeTerminalsRequest(msg: UnsubscribeTerminalsRequest): void {
-    this.subscribedTerminalDirectories.delete(msg.cwd);
-  }
-
-  private async emitInitialTerminalsChangedSnapshot(cwd: string): Promise<void> {
-    if (!this.terminalManager || !this.subscribedTerminalDirectories.has(cwd)) {
-      return;
-    }
-
-    try {
-      const terminals = this.filterStandaloneTerminals(
-        await this.terminalManager.getTerminals(cwd),
-      );
-      for (const terminal of terminals) {
-        this.ensureTerminalExitSubscription(terminal);
-      }
-
-      if (!this.subscribedTerminalDirectories.has(cwd)) {
-        return;
-      }
-
-      this.emitTerminalsChangedSnapshot({
-        cwd,
-        terminals: terminals.map((terminal) => this.toTerminalInfo(terminal)),
-      });
-    } catch (error) {
-      this.sessionLogger.warn({ err: error, cwd }, "Failed to emit initial terminal snapshot");
-    }
-  }
-
-  private async handleListTerminalsRequest(msg: ListTerminalsRequest): Promise<void> {
-    if (!this.terminalManager) {
-      this.emit({
-        type: "list_terminals_response",
-        payload: {
-          ...(msg.cwd ? { cwd: msg.cwd } : {}),
-          terminals: [],
-          requestId: msg.requestId,
-        },
-      });
-      return;
-    }
-
-    try {
-      const terminals = this.filterStandaloneTerminals(
-        typeof msg.cwd === "string"
-          ? await this.terminalManager.getTerminals(msg.cwd)
-          : await this.getAllTerminalSessions(),
-      );
-      for (const terminal of terminals) {
-        this.ensureTerminalExitSubscription(terminal);
-      }
-      this.emit({
-        type: "list_terminals_response",
-        payload: {
-          ...(msg.cwd ? { cwd: msg.cwd } : {}),
-          terminals: terminals.map((terminal) => this.toTerminalInfo(terminal)),
-          requestId: msg.requestId,
-        },
-      });
-    } catch (error) {
-      this.sessionLogger.error({ err: error, cwd: msg.cwd }, "Failed to list terminals");
-      this.emit({
-        type: "list_terminals_response",
-        payload: {
-          ...(msg.cwd ? { cwd: msg.cwd } : {}),
-          terminals: [],
-          requestId: msg.requestId,
-        },
-      });
-    }
-  }
-
-  private async getAllTerminalSessions(): Promise<TerminalSession[]> {
-    if (!this.terminalManager) {
-      return [];
-    }
-
-    const directories = this.terminalManager.listDirectories();
-    const terminalsByDirectory = await Promise.all(
-      directories.map((cwd) => this.terminalManager!.getTerminals(cwd)),
-    );
-    return terminalsByDirectory.flat();
-  }
-
-  private async handleCreateTerminalRequest(msg: CreateTerminalRequest): Promise<void> {
-    if (!this.terminalManager) {
-      this.emit({
-        type: "create_terminal_response",
-        payload: {
-          terminal: null,
-          error: "Terminal manager not available",
-          requestId: msg.requestId,
-        },
-      });
-      return;
-    }
-
-    try {
-      if (msg.agentId) {
-        this.emit({
-          type: "create_terminal_response",
-          payload: {
-            terminal: null,
-            error: `Agent-backed terminals are no longer supported for agent ${msg.agentId}`,
-            requestId: msg.requestId,
-          },
-        });
-        return;
-      }
-
-      const session = await this.terminalManager.createTerminal({
-        cwd: msg.cwd,
-        name: msg.name,
-        command: msg.command,
-        args: msg.args,
-      });
-      this.ensureTerminalExitSubscription(session);
-      this.emit({
-        type: "create_terminal_response",
-        payload: {
-          terminal: {
-            id: session.id,
-            name: session.name,
-            cwd: session.cwd,
-            ...(session.getTitle() ? { title: session.getTitle() } : {}),
-          },
-          error: null,
-          requestId: msg.requestId,
-        },
-      });
-    } catch (error) {
-      this.sessionLogger.error({ err: error, cwd: msg.cwd }, "Failed to create terminal");
-      this.emit({
-        type: "create_terminal_response",
-        payload: {
-          terminal: null,
-          error: (error as Error).message,
-          requestId: msg.requestId,
-        },
-      });
-    }
-  }
-
-  private async handleSubscribeTerminalRequest(msg: SubscribeTerminalRequest): Promise<void> {
-    if (!this.terminalManager) {
-      this.emit({
-        type: "subscribe_terminal_response",
-        payload: {
-          terminalId: msg.terminalId,
-          error: "Terminal manager not available",
-          requestId: msg.requestId,
-        },
-      });
-      return;
-    }
-
-    const session = this.terminalManager.getTerminal(msg.terminalId);
-    if (!session) {
-      this.emit({
-        type: "subscribe_terminal_response",
-        payload: {
-          terminalId: msg.terminalId,
-          error: "Terminal not found",
-          requestId: msg.requestId,
-        },
-      });
-      return;
-    }
-    this.ensureTerminalExitSubscription(session);
-
-    const slot = this.bindActiveTerminalStream(session);
-    if (slot === null) {
-      this.sessionLogger.warn(
-        {
-          terminalId: msg.terminalId,
-          activeTerminalStreamCount: this.activeTerminalStreams.size,
-        },
-        "Terminal stream slot exhaustion",
-      );
-      this.emit({
-        type: "subscribe_terminal_response",
-        payload: {
-          terminalId: msg.terminalId,
-          error: "No terminal stream slots available",
-          requestId: msg.requestId,
-        },
-      });
-      return;
-    }
-
-    this.emit({
-      type: "subscribe_terminal_response",
-      payload: {
-        terminalId: msg.terminalId,
-        slot,
-        error: null,
-        requestId: msg.requestId,
-      },
-    });
-
-    const activeStream = this.activeTerminalStreams.get(slot);
-    if (activeStream) {
-      this.trySendTerminalSnapshot(activeStream);
-    }
-  }
-
-  private handleUnsubscribeTerminalRequest(msg: UnsubscribeTerminalRequest): void {
-    this.detachTerminalStream(msg.terminalId, { emitExit: false });
-  }
-
-  private handleTerminalInput(msg: TerminalInput): void {
-    if (!this.terminalManager) {
-      return;
-    }
-
-    const session = this.terminalManager.getTerminal(msg.terminalId);
-    if (!session) {
-      this.sessionLogger.warn({ terminalId: msg.terminalId }, "Terminal not found for input");
-      return;
-    }
-    this.ensureTerminalExitSubscription(session);
-
-    if (msg.message.type === "resize") {
-      const currentSize = session.getSize();
-      if (currentSize.rows === msg.message.rows && currentSize.cols === msg.message.cols) {
-        return;
-      }
-    }
-
-    session.send(msg.message);
-  }
-
-  private killTrackedTerminal(terminalId: string, options?: { emitExit: boolean }): void {
-    this.detachTerminalStream(terminalId, { emitExit: options?.emitExit ?? true });
-    this.terminalManager?.killTerminal(terminalId);
-  }
-
-  private async killTerminalsUnderPath(rootPath: string): Promise<void> {
-    return killWorktreeTerminalsUnderPath(
-      {
-        isPathWithinRoot: (pathRoot, candidatePath) =>
-          this.isPathWithinRoot(pathRoot, candidatePath),
-        killTrackedTerminal: (terminalId, options) => this.killTrackedTerminal(terminalId, options),
-        detachTerminalStream: (terminalId, options) =>
-          void this.detachTerminalStream(terminalId, options),
-        sessionLogger: this.sessionLogger,
-        terminalManager: this.terminalManager,
-      },
-      rootPath,
-    );
-  }
-
-  private async handleKillTerminalRequest(msg: KillTerminalRequest): Promise<void> {
-    const result = this.killTerminalForClose(msg.terminalId);
-    this.emit({
-      type: "kill_terminal_response",
-      payload: {
-        terminalId: result.terminalId,
-        success: result.success,
-        requestId: msg.requestId,
-      },
-    });
-  }
-
-  private killTerminalForClose(terminalId: string): { terminalId: string; success: boolean } {
-    if (!this.terminalManager) {
-      return {
-        terminalId,
-        success: false,
-      };
-    }
-
-    this.killTrackedTerminal(terminalId, { emitExit: true });
-    return {
-      terminalId,
-      success: true,
-    };
-  }
-
-  private async handleCaptureTerminalRequest(msg: CaptureTerminalRequest): Promise<void> {
-    if (!this.terminalManager) {
-      this.emit({
-        type: "capture_terminal_response",
-        payload: {
-          terminalId: msg.terminalId,
-          lines: [],
-          totalLines: 0,
-          requestId: msg.requestId,
-        },
-      });
-      return;
-    }
-
-    const session = this.terminalManager.getTerminal(msg.terminalId);
-    if (!session) {
-      this.emit({
-        type: "capture_terminal_response",
-        payload: {
-          terminalId: msg.terminalId,
-          lines: [],
-          totalLines: 0,
-          requestId: msg.requestId,
-        },
-      });
-      return;
-    }
-
-    this.ensureTerminalExitSubscription(session);
-
-    try {
-      const capture = captureTerminalLines(session, {
-        start: msg.start,
-        end: msg.end,
-        stripAnsi: msg.stripAnsi,
-      });
-      this.emit({
-        type: "capture_terminal_response",
-        payload: {
-          terminalId: msg.terminalId,
-          lines: capture.lines,
-          totalLines: capture.totalLines,
-          requestId: msg.requestId,
-        },
-      });
-    } catch (error) {
-      this.sessionLogger.error(
-        { err: error, terminalId: msg.terminalId },
-        "Failed to capture terminal",
-      );
-      this.emit({
-        type: "capture_terminal_response",
-        payload: {
-          terminalId: msg.terminalId,
-          lines: [],
-          totalLines: 0,
-          requestId: msg.requestId,
-        },
-      });
-    }
-  }
-
-  private bindActiveTerminalStream(terminal: TerminalSession): number | null {
-    if (!this.onBinaryMessage) {
-      return null;
-    }
-
-    const existingSlot = this.terminalIdToSlot.get(terminal.id);
-    if (typeof existingSlot === "number") {
-      const existingStream = this.activeTerminalStreams.get(existingSlot);
-      if (existingStream) {
-        existingStream.needsSnapshot = true;
-        return existingSlot;
-      }
-      this.terminalIdToSlot.delete(terminal.id);
-    }
-
-    const slot = this.allocateTerminalSlot();
-    if (slot === null) {
-      return null;
-    }
-
-    const activeStream: ActiveTerminalStream = {
-      terminalId: terminal.id,
-      slot,
-      unsubscribe: () => {},
-      needsSnapshot: true,
-      outputCoalescer: new TerminalOutputCoalescer({
-        timers: { setTimeout, clearTimeout },
-        onFlush: ({ payload }) => {
-          if (this.activeTerminalStreams.get(slot) !== activeStream) {
-            return;
-          }
-          this.emitBinary(
-            encodeTerminalStreamFrame({
-              opcode: TerminalStreamOpcode.Output,
-              slot,
-              payload,
-            }),
-          );
-        },
-      }),
-    };
-
-    this.activeTerminalStreams.set(slot, activeStream);
-    this.terminalIdToSlot.set(terminal.id, slot);
-
-    activeStream.unsubscribe = terminal.subscribe((message) => {
-      if (this.activeTerminalStreams.get(slot) !== activeStream) {
-        return;
-      }
-      if (message.type === "snapshot") {
-        activeStream.outputCoalescer.flush();
-        activeStream.needsSnapshot = true;
-        this.trySendTerminalSnapshot(activeStream);
-        return;
-      }
-      if (message.type === "titleChange") {
-        return;
-      }
-      if (activeStream.needsSnapshot || message.data.length === 0) {
-        return;
-      }
-      activeStream.outputCoalescer.handle(message.data);
-    });
-    return slot;
-  }
-
-  private trySendTerminalSnapshot(activeStream: ActiveTerminalStream): void {
-    if (
-      this.activeTerminalStreams.get(activeStream.slot) !== activeStream ||
-      !activeStream.needsSnapshot
-    ) {
-      return;
-    }
-
-    const terminal = this.terminalManager?.getTerminal(activeStream.terminalId);
-    if (!terminal) {
-      this.detachTerminalStream(activeStream.terminalId, { emitExit: true });
-      return;
-    }
-
-    activeStream.outputCoalescer.flush();
-    activeStream.needsSnapshot = false;
-    this.emitBinary(
-      encodeTerminalStreamFrame({
-        opcode: TerminalStreamOpcode.Snapshot,
-        slot: activeStream.slot,
-        payload: encodeTerminalSnapshotPayload(terminal.getState()),
-      }),
-    );
-  }
-
-  private allocateTerminalSlot(): number | null {
-    for (let attempt = 0; attempt < MAX_TERMINAL_STREAM_SLOTS; attempt += 1) {
-      const slot = (this.nextTerminalSlot + attempt) % MAX_TERMINAL_STREAM_SLOTS;
-      if (this.activeTerminalStreams.has(slot)) {
-        continue;
-      }
-      this.nextTerminalSlot = (slot + 1) % MAX_TERMINAL_STREAM_SLOTS;
-      return slot;
-    }
-    return null;
-  }
-
-  private detachTerminalStream(terminalId: string, options?: { emitExit: boolean }): boolean {
-    const slot = this.terminalIdToSlot.get(terminalId);
-    if (typeof slot !== "number") {
-      return false;
-    }
-    const activeStream = this.activeTerminalStreams.get(slot);
-    if (!activeStream) {
-      this.terminalIdToSlot.delete(terminalId);
-      return false;
-    }
-    activeStream.outputCoalescer.flush();
-    this.activeTerminalStreams.delete(slot);
-    this.terminalIdToSlot.delete(terminalId);
-    try {
-      activeStream.unsubscribe();
-    } catch (error) {
-      this.sessionLogger.warn({ err: error }, "Failed to unsubscribe terminal stream");
-    }
-    if (options?.emitExit) {
-      this.emit({
-        type: "terminal_stream_exit",
-        payload: {
-          terminalId: activeStream.terminalId,
-        },
-      });
-    }
-    return true;
-  }
-
-  private disposeTerminalSubscriptions(): void {
-    for (const terminalId of Array.from(this.terminalIdToSlot.keys())) {
-      this.detachTerminalStream(terminalId, { emitExit: false });
     }
   }
 }

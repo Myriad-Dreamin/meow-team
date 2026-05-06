@@ -624,8 +624,14 @@ function startDaemon(args: DaemonSpawnArgs): ChildProcess {
       PASEO_LISTEN: `0.0.0.0:${args.port}`,
       PASEO_RELAY_ENDPOINT: `127.0.0.1:${args.relayPort}`,
       PASEO_CORS_ORIGINS: `http://localhost:${args.metroPort}`,
+<<<<<<< HEAD
       PASEO_DICTATION_ENABLED: enabled ? "1" : "0",
       PASEO_VOICE_MODE_ENABLED: enabled ? "1" : "0",
+=======
+      PASEO_DICTATION_ENABLED: openAiUsable ? "1" : "0",
+      PASEO_VOICE_MODE_ENABLED: openAiUsable ? "1" : "0",
+      PASEO_NODE_ENV: "development",
+>>>>>>> v0.1.65
       ...(openAiUsable
         ? {
             PASEO_DICTATION_STT_PROVIDER: "openai",

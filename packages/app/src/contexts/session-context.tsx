@@ -12,7 +12,8 @@ import {
   processTimelineResponse,
   type ProcessTimelineResponseOutput,
   type TimelineReducerSideEffect,
-} from "@/contexts/session-stream-reducers";
+} from "@/timeline/session-stream-reducers";
+import { TIMELINE_FETCH_PAGE_SIZE } from "@/timeline/timeline-fetch-policy";
 import type {
   AgentAttachment,
   AgentStreamEventPayload,
@@ -41,6 +42,7 @@ import {
   normalizeWorkspaceDescriptor,
 } from "@/stores/session-store";
 import { useDraftStore } from "@/stores/draft-store";
+import { isLocalWorktreeArchivePending } from "@/stores/checkout-git-actions-store";
 import { useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { sendOsNotification } from "@/utils/os-notifications";
 import { getIsAppActivelyVisible } from "@/utils/app-visibility";
@@ -58,6 +60,7 @@ import type { AttachmentMetadata } from "@/attachments/types";
 import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
 import { reconcilePreviousAgentStatuses } from "@/contexts/session-status-tracking";
 import { patchWorkspaceScripts } from "@/contexts/session-workspace-scripts";
+import { shouldSuppressWorkspaceUpsertForLocalArchive } from "@/contexts/session-workspace-upserts";
 import { isNative } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
@@ -449,6 +452,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const setAgentStreamState = useSessionStore((state) => state.setAgentStreamState);
   const clearAgentStreamHead = useSessionStore((state) => state.clearAgentStreamHead);
   const setAgentTimelineCursor = useSessionStore((state) => state.setAgentTimelineCursor);
+  const setAgentTimelineHasOlder = useSessionStore((state) => state.setAgentTimelineHasOlder);
   const setInitializingAgents = useSessionStore((state) => state.setInitializingAgents);
   const bumpHistorySyncGeneration = useSessionStore((state) => state.bumpHistorySyncGeneration);
   const markAgentHistorySynchronized = useSessionStore(
@@ -746,17 +750,15 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       if (isNative) {
         const session = useSessionStore.getState().sessions[serverId];
         const agentId = session?.focusedAgentId;
-        const cursor = agentId ? session?.agentTimelineCursor.get(agentId) : undefined;
-        if (agentId && cursor) {
+        if (agentId) {
           void client
             .fetchAgentTimeline(agentId, {
-              direction: "after",
-              cursor: { epoch: cursor.epoch, seq: cursor.endSeq },
-              limit: 0,
+              direction: "tail",
+              limit: TIMELINE_FETCH_PAGE_SIZE,
               projection: "canonical",
             })
             .catch((error) => {
-              console.warn("[Session] failed to fetch catch-up timeline on resume", agentId, error);
+              console.warn("[Session] failed to fetch tail timeline on resume", agentId, error);
             });
         }
       }
@@ -1022,7 +1024,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         .fetchAgentTimeline(agentId, {
           direction: "after",
           cursor: { epoch: cursor.epoch, seq: cursor.endSeq },
-          limit: 0,
+          limit: TIMELINE_FETCH_PAGE_SIZE,
           projection: "canonical",
         })
         .catch((error) => {
@@ -1052,6 +1054,15 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       const currentCursor = session?.agentTimelineCursor.get(agentId);
       const currentTail = session?.agentStreamTail.get(agentId) ?? [];
       const currentHead = session?.agentStreamHead.get(agentId) ?? [];
+
+      setAgentTimelineHasOlder(serverId, (prev) => {
+        if (prev.get(agentId) === payload.hasOlder) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.set(agentId, payload.hasOlder);
+        return next;
+      });
 
       if (payload.agent) {
         const normalized = normalizeAgentSnapshot(payload.agent, serverId);
@@ -1125,6 +1136,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       setAgentStreamHead,
       setAgentStreamTail,
       setAgentTimelineCursor,
+      setAgentTimelineHasOlder,
       setInitializingAgents,
     ],
   );
@@ -1232,6 +1244,15 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         return;
       }
       const workspace = normalizeWorkspaceDescriptor(message.payload.workspace);
+      if (
+        shouldSuppressWorkspaceUpsertForLocalArchive({
+          serverId,
+          workspace,
+          isArchivePending: isLocalWorktreeArchivePending,
+        })
+      ) {
+        return;
+      }
       mergeWorkspaces(serverId, [workspace]);
     });
 

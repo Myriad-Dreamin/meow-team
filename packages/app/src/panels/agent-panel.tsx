@@ -14,6 +14,12 @@ import { FileDropZone } from "@/components/file-drop-zone";
 import type { ImageAttachment } from "@/components/message-input";
 import { getProviderIcon } from "@/components/provider-icons";
 import { ToastViewport, useToastHost } from "@/components/toast-host";
+import type { WorkspaceComposerAttachment } from "@/attachments/types";
+import {
+  useWorkspaceAttachments,
+  useWorkspaceAttachmentScopeKey,
+} from "@/attachments/workspace-attachments-store";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative, isWeb } from "@/constants/platform";
 import { useAgentAttentionClear } from "@/hooks/use-agent-attention-clear";
 import { useAgentInitialization } from "@/hooks/use-agent-initialization";
@@ -43,6 +49,7 @@ import {
 } from "@/screens/agent/agent-ready-screen-bottom-anchor";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
+import { usePanelStore } from "@/stores/panel-store";
 import { type Agent, useSessionStore } from "@/stores/session-store";
 import type { Theme } from "@/styles/theme";
 import type { PendingPermission } from "@/types/shared";
@@ -701,7 +708,10 @@ function ChatAgentContent({
 
   useEffect(() => {
     if (connectionStatus === "online") {
-      reconnectToastArmedRef.current = false;
+      if (reconnectToastArmedRef.current) {
+        reconnectToastArmedRef.current = false;
+        panelToast.dismiss();
+      }
       return;
     }
     if (connectionStatus === "idle") {
@@ -710,11 +720,11 @@ function ChatAgentContent({
     if (!reconnectToastArmedRef.current) {
       reconnectToastArmedRef.current = true;
       panelToast.api.show("Reconnecting...", {
-        durationMs: 2200,
+        durationMs: null,
         testID: "agent-reconnecting-toast",
       });
     }
-  }, [connectionStatus, panelToast.api]);
+  }, [connectionStatus, panelToast]);
 
   useEffect(() => {
     if (!isPaneFocused || !agentId || !isConnected || !hasSession) {
@@ -954,6 +964,7 @@ function ChatAgentContent({
                 canFinalizePendingCreate={canFinalizePendingCreate}
                 routeBottomAnchorRequest={routeBottomAnchorRequest}
                 hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
+                toast={panelToast.api}
                 onOpenWorkspaceFile={onOpenWorkspaceFile}
               />
             </ReanimatedAnimated.View>
@@ -1011,6 +1022,7 @@ function AgentStreamSection({
   canFinalizePendingCreate,
   routeBottomAnchorRequest,
   hasAppliedAuthoritativeHistory,
+  toast,
   onOpenWorkspaceFile,
 }: {
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
@@ -1022,7 +1034,12 @@ function AgentStreamSection({
   canFinalizePendingCreate: boolean;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
+<<<<<<< HEAD
   onOpenWorkspaceFile?: (input: OpenWorkspaceFileInput) => void;
+=======
+  toast: ReturnType<typeof useToastHost>["api"];
+  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+>>>>>>> v0.1.65
 }) {
   const streamItemsRaw = useSessionStore((state) =>
     agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,
@@ -1071,6 +1088,9 @@ function AgentStreamSection({
         ...(pendingCreate.images && pendingCreate.images.length > 0
           ? { images: pendingCreate.images }
           : {}),
+        ...(pendingCreate.attachments && pendingCreate.attachments.length > 0
+          ? { attachments: pendingCreate.attachments }
+          : {}),
       },
     ];
   }, [pendingCreate, shouldUseOptimisticStream]);
@@ -1101,7 +1121,10 @@ function AgentStreamSection({
     }
 
     const pendingImages = pendingCreate.images;
-    if (agentId && pendingImages && pendingImages.length > 0) {
+    const pendingAttachments = pendingCreate.attachments;
+    const hasPendingImages = Boolean(pendingImages && pendingImages.length > 0);
+    const hasPendingAttachments = Boolean(pendingAttachments && pendingAttachments.length > 0);
+    if (agentId && (hasPendingImages || hasPendingAttachments)) {
       setAgentStreamTail(serverId, (previous) => {
         const current = previous.get(agentId);
         if (!current) {
@@ -1112,6 +1135,7 @@ function AgentStreamSection({
           streamItems: current,
           clientMessageId: pendingCreate.clientMessageId,
           images: pendingImages,
+          attachments: pendingAttachments,
         });
         if (merged === current) {
           return previous;
@@ -1149,6 +1173,7 @@ function AgentStreamSection({
       pendingPermissions={pendingPermissions}
       routeBottomAnchorRequest={routeBottomAnchorRequest}
       isAuthoritativeHistoryReady={hasAppliedAuthoritativeHistory}
+      toast={toast}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
     />
   );
@@ -1231,6 +1256,8 @@ function ActiveAgentComposer({
   onMessageSent: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const isCompact = useIsCompactFormFactor();
+  const { workspaceId } = usePaneContext();
   const agentInputDraft = useAgentInputDraft({
     draftKey: buildDraftStoreKey({
       serverId,
@@ -1238,6 +1265,35 @@ function ActiveAgentComposer({
     }),
     initialCwd,
   });
+  const workspaceAttachmentScopeKey = useWorkspaceAttachmentScopeKey({
+    serverId,
+    cwd: agentInputDraft.cwd,
+    workspaceId,
+  });
+  const workspaceAttachments = useWorkspaceAttachments(workspaceAttachmentScopeKey);
+  const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
+  const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
+  const handleOpenWorkspaceAttachment = useCallback(
+    (attachment: WorkspaceComposerAttachment) => {
+      if (attachment.kind !== "review") {
+        return;
+      }
+      const checkout = {
+        serverId,
+        cwd: attachment.attachment.cwd,
+        isGit: true,
+      };
+      openFileExplorerForCheckout({
+        checkout,
+        isCompact,
+      });
+      setExplorerTabForCheckout({
+        ...checkout,
+        tab: "changes",
+      });
+    },
+    [isCompact, openFileExplorerForCheckout, serverId, setExplorerTabForCheckout],
+  );
 
   const inputAreaStyle = useMemo(
     () => [styles.inputAreaWrapper, { paddingBottom: insets.bottom }],
@@ -1253,6 +1309,8 @@ function ActiveAgentComposer({
         value={agentInputDraft.text}
         onChangeText={agentInputDraft.setText}
         attachments={agentInputDraft.attachments}
+        workspaceAttachments={workspaceAttachments}
+        onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
         onChangeAttachments={agentInputDraft.setAttachments}
         cwd={agentInputDraft.cwd}
         clearDraft={agentInputDraft.clear}

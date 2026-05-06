@@ -70,7 +70,13 @@ import { submitAgentInput } from "@/components/agent-input-submit";
 import { useAppSettings } from "@/hooks/use-settings";
 import { isWeb, isNative } from "@/constants/platform";
 import type { GitHubSearchItem } from "@server/shared/messages";
-import type { AttachmentMetadata, ComposerAttachment } from "@/attachments/types";
+import type {
+  AttachmentMetadata,
+  ComposerAttachment,
+  UserComposerAttachment,
+  WorkspaceComposerAttachment,
+} from "@/attachments/types";
+import { composerWorkspaceAttachment } from "@/attachments/composer-workspace-attachments";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
 import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
 import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
@@ -86,8 +92,8 @@ interface QueuedMessage {
 }
 
 type AttachmentListUpdater =
-  | ComposerAttachment[]
-  | ((prev: ComposerAttachment[]) => ComposerAttachment[]);
+  | UserComposerAttachment[]
+  | ((prev: UserComposerAttachment[]) => UserComposerAttachment[]);
 
 function noop() {}
 
@@ -145,7 +151,7 @@ async function pickAndPersistImages(
   );
 }
 
-function removeAttachmentAtIndex(prev: ComposerAttachment[], index: number): ComposerAttachment[] {
+function removeAttachmentAtIndex<T extends ComposerAttachment>(prev: T[], index: number): T[] {
   const removed = prev[index];
   if (removed?.kind === "image") {
     void deleteAttachments([removed.metadata]);
@@ -242,26 +248,28 @@ function findGithubItemByOption(
 }
 
 function isAttachmentSelectedForGithubItem(
-  attachments: readonly ComposerAttachment[],
+  current: readonly ComposerAttachment[],
   item: GitHubSearchItem,
 ): boolean {
-  return attachments.some(
-    (attachment) =>
-      attachment.kind !== "image" &&
-      attachment.item.kind === item.kind &&
-      attachment.item.number === item.number,
-  );
+  return composerWorkspaceAttachment
+    .userAttachmentsOnly(current)
+    .some(
+      (attachment) =>
+        attachment.kind !== "image" &&
+        attachment.item.kind === item.kind &&
+        attachment.item.number === item.number,
+    );
 }
 
-function buildGithubAttachment(item: GitHubSearchItem): ComposerAttachment {
+function buildGithubAttachment(item: GitHubSearchItem): UserComposerAttachment {
   return item.kind === "pr" ? { kind: "github_pr", item } : { kind: "github_issue", item };
 }
 
 function toggleGithubAttachment(
-  current: ComposerAttachment[],
+  current: UserComposerAttachment[],
   item: GitHubSearchItem,
-): ComposerAttachment[] {
-  const matches = (attachment: ComposerAttachment) =>
+): UserComposerAttachment[] {
+  const matches = (attachment: UserComposerAttachment) =>
     attachment.kind !== "image" &&
     attachment.item.kind === item.kind &&
     attachment.item.number === item.number;
@@ -361,6 +369,15 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
       />
     );
   }
+  if (composerWorkspaceAttachment.is(attachment)) {
+    return composerWorkspaceAttachment.renderPill({
+      attachment,
+      index,
+      disabled,
+      onOpen,
+      onRemove,
+    });
+  }
   return (
     <GithubAttachmentPill
       key={`${attachment.item.kind}:${attachment.item.number}`}
@@ -446,6 +463,7 @@ async function dispatchAgentMessageSend(args: DispatchAgentMessageSendArgs): Pro
     text,
     timestamp: new Date(),
     ...(wirePayload.images.length > 0 ? { images: wirePayload.images } : {}),
+    ...(wirePayload.attachments.length > 0 ? { attachments: wirePayload.attachments } : {}),
   };
   appendUserMessageToStream({ ...args, userMessage });
   const imagesData = await encodeImages(wirePayload.images);
@@ -459,9 +477,14 @@ async function dispatchAgentMessageSend(args: DispatchAgentMessageSendArgs): Pro
 function openComposerAttachment(
   attachment: ComposerAttachment,
   setLightboxMetadata: (metadata: AttachmentMetadata) => void,
+  openWorkspaceAttachment: (input: { attachment: ComposerAttachment }) => boolean,
 ): void {
   if (attachment.kind === "image") {
     setLightboxMetadata(attachment.metadata);
+    return;
+  }
+  if (composerWorkspaceAttachment.is(attachment)) {
+    openWorkspaceAttachment({ attachment });
     return;
   }
   void openExternalUrl(attachment.item.url);
@@ -596,10 +619,18 @@ function QueuedMessageRow({ item, onEdit, onSendNow }: QueuedMessageRowProps) {
         {item.text}
       </Text>
       <View style={styles.queueActions}>
-        <Pressable onPress={handleEdit} style={styles.queueActionButton}>
+        <Pressable
+          onPress={handleEdit}
+          style={styles.queueActionButton}
+          accessibilityLabel="Edit queued message"
+        >
           <ThemedPencil size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
         </Pressable>
-        <Pressable onPress={handleSendNow} style={QUEUE_SEND_BUTTON_STYLE}>
+        <Pressable
+          onPress={handleSendNow}
+          style={QUEUE_SEND_BUTTON_STYLE}
+          accessibilityLabel="Send queued message now"
+        >
           <ArrowUp size={ICON_SIZE.sm} color="white" />
         </Pressable>
       </View>
@@ -652,7 +683,7 @@ function ImageAttachmentPill({
 }
 
 interface GithubAttachmentPillProps {
-  attachment: Exclude<ComposerAttachment, { kind: "image" }>;
+  attachment: Extract<ComposerAttachment, { kind: "github_pr" | "github_issue" }>;
   index: number;
   disabled: boolean;
   onOpen: (attachment: ComposerAttachment) => void;
@@ -759,7 +790,9 @@ interface ComposerProps {
   blurOnSubmit?: boolean;
   value: string;
   onChangeText: (text: string) => void;
-  attachments: ComposerAttachment[];
+  attachments: UserComposerAttachment[];
+  workspaceAttachments?: readonly WorkspaceComposerAttachment[];
+  onOpenWorkspaceAttachment?: (attachment: WorkspaceComposerAttachment) => void;
   onChangeAttachments: (updater: AttachmentListUpdater) => void;
   cwd: string;
   clearDraft: (lifecycle: "sent" | "abandoned") => void;
@@ -820,9 +853,7 @@ function ComposerCancelButton({
   ) : (
     <Square size={buttonIconSize} color="white" fill="white" />
   );
-  const shortcutNode = agentInterruptKeys ? (
-    <Shortcut chord={agentInterruptKeys} style={styles.tooltipShortcut} />
-  ) : null;
+  const shortcutNode = agentInterruptKeys ? <Shortcut chord={agentInterruptKeys} /> : null;
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
       <TooltipTrigger
@@ -908,9 +939,7 @@ function ComposerVoiceModeButton({
   realtimeVoiceButtonStyle,
   voiceToggleKeys,
 }: ComposerVoiceModeButtonProps) {
-  const shortcutNode = voiceToggleKeys ? (
-    <Shortcut chord={voiceToggleKeys} style={styles.tooltipShortcut} />
-  ) : null;
+  const shortcutNode = voiceToggleKeys ? <Shortcut chord={voiceToggleKeys} /> : null;
   const renderTriggerContent = useCallback(
     ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => {
       if (isVoiceSwitching) {
@@ -957,6 +986,8 @@ export function Composer({
   value,
   onChangeText,
   attachments,
+  workspaceAttachments = [],
+  onOpenWorkspaceAttachment,
   onChangeAttachments,
   cwd,
   clearDraft,
@@ -1005,7 +1036,19 @@ export function Composer({
   const messagePlaceholder = resolveMessagePlaceholder(isDesktopWebBreakpoint);
   const userInput = value;
   const setUserInput = onChangeText;
-  const selectedAttachments = attachments;
+  const {
+    selectedAttachments,
+    buildOutgoingAttachments,
+    removeAttachment,
+    openAttachment,
+    clearSentAttachments,
+    completeSubmit,
+    resetSuppression,
+  } = composerWorkspaceAttachment.useBinding({
+    normalAttachments: attachments,
+    workspaceAttachments,
+    onOpenWorkspaceAttachment,
+  });
   const setSelectedAttachments = onChangeAttachments;
   const [cursorIndex, setCursorIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1162,8 +1205,18 @@ export function Composer({
 
       setUserInput("");
       setSelectedAttachments([]);
+      resetSuppression();
+      clearSentAttachments(queuedAttachments);
     },
-    [agentId, serverId, setQueuedMessages, setSelectedAttachments, setUserInput],
+    [
+      agentId,
+      clearSentAttachments,
+      resetSuppression,
+      serverId,
+      setQueuedMessages,
+      setSelectedAttachments,
+      setUserInput,
+    ],
   );
 
   const sendMessageWithContent = useCallback(
@@ -1172,7 +1225,7 @@ export function Composer({
       outgoingAttachments: ComposerAttachment[],
       forceSend?: boolean,
     ) => {
-      await submitAgentInput({
+      const result = await submitAgentInput({
         message: outgoingMessage,
         attachments: outgoingAttachments,
         hasExternalContent,
@@ -1192,7 +1245,7 @@ export function Composer({
         clearDraft,
         setUserInput,
         setAttachments: (nextAttachments) => {
-          setSelectedAttachments(nextAttachments);
+          setSelectedAttachments(composerWorkspaceAttachment.userAttachmentsOnly(nextAttachments));
         },
         setSendError,
         setIsProcessing,
@@ -1200,10 +1253,15 @@ export function Composer({
           console.error("[AgentInput] Failed to send message:", error);
         },
       });
+      completeSubmit({
+        result,
+        outgoingAttachments,
+      });
     },
     [
       allowEmptySubmit,
       clearDraft,
+      completeSubmit,
       hasExternalContent,
       isAgentRunning,
       queueMessage,
@@ -1219,9 +1277,13 @@ export function Composer({
       if (blurOnSubmit) {
         messageInputRef.current?.blur();
       }
-      void sendMessageWithContent(payload.text, payload.attachments, payload.forceSend);
+      void sendMessageWithContent(
+        payload.text,
+        buildOutgoingAttachments(attachments),
+        payload.forceSend,
+      );
     },
-    [blurOnSubmit, sendMessageWithContent],
+    [attachments, blurOnSubmit, buildOutgoingAttachments, sendMessageWithContent],
   );
 
   const handlePickImage = useCallback(async () => {
@@ -1232,14 +1294,24 @@ export function Composer({
 
   const handleRemoveAttachment = useCallback(
     (index: number) => {
+      const didRemoveWorkspaceAttachment = removeAttachment({
+        selectedAttachments,
+        index,
+      });
+      if (didRemoveWorkspaceAttachment) {
+        return;
+      }
       setSelectedAttachments((prev) => removeAttachmentAtIndex(prev, index));
     },
-    [setSelectedAttachments],
+    [removeAttachment, selectedAttachments, setSelectedAttachments],
   );
 
-  const handleOpenAttachment = useCallback((attachment: ComposerAttachment) => {
-    openComposerAttachment(attachment, setLightboxMetadata);
-  }, []);
+  const handleOpenAttachment = useCallback(
+    (attachment: ComposerAttachment) => {
+      openComposerAttachment(attachment, setLightboxMetadata, openAttachment);
+    },
+    [openAttachment],
+  );
 
   useEffect(() => {
     if (!isAgentRunning || !isConnected) {
@@ -1327,7 +1399,7 @@ export function Composer({
 
       updateQueue((current) => current.filter((q) => q.id !== id));
       setUserInput(item.text);
-      setSelectedAttachments(item.attachments);
+      setSelectedAttachments(composerWorkspaceAttachment.userAttachmentsOnly(item.attachments));
     },
     [queuedMessages, setSelectedAttachments, setUserInput, updateQueue],
   );
@@ -1353,9 +1425,9 @@ export function Composer({
 
   const handleQueue = useCallback(
     (payload: MessagePayload) => {
-      queueMessage(payload.text, payload.attachments);
+      queueMessage(payload.text, buildOutgoingAttachments(attachments));
     },
-    [queueMessage],
+    [attachments, buildOutgoingAttachments, queueMessage],
   );
 
   const hasSendableContent = userInput.trim().length > 0 || selectedAttachments.length > 0;
@@ -1408,7 +1480,6 @@ export function Composer({
     ],
   );
 
-  const isVoiceSwitchingValue = voice?.isVoiceSwitching ?? false;
   const rightContent = useMemo(
     () => (
       <ComposerRightControlsSlot
@@ -1420,7 +1491,7 @@ export function Composer({
         buttonIconSize={buttonIconSize}
         handleToggleRealtimeVoice={handleToggleRealtimeVoice}
         isConnected={isConnected}
-        isVoiceSwitching={isVoiceSwitchingValue}
+        isVoiceSwitching={isVoiceSwitching}
         realtimeVoiceButtonStyle={realtimeVoiceButtonStyle}
         voiceToggleKeys={voiceToggleKeys}
         cancelButton={cancelButton}
@@ -1436,7 +1507,7 @@ export function Composer({
       isConnected,
       isProcessing,
       isVoiceModeForAgent,
-      isVoiceSwitchingValue,
+      isVoiceSwitching,
       realtimeVoiceButtonStyle,
       voiceToggleKeys,
     ],
@@ -1798,10 +1869,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   tooltipText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.popoverForeground,
-  },
-  tooltipShortcut: {
-    backgroundColor: theme.colors.surface3,
-    borderColor: theme.colors.borderAccent,
   },
   buttonDisabled: {
     opacity: 0.5,

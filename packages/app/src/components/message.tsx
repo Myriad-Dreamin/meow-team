@@ -64,6 +64,7 @@ import { createMarkdownStyles } from "@/styles/markdown-styles";
 import { Fonts } from "@/constants/theme";
 import * as Clipboard from "expo-clipboard";
 import type { TodoEntry, UserMessageImageAttachment } from "@/types/stream";
+import type { AgentAttachment } from "@server/shared/messages";
 import type { ToolCallDetail } from "@server/server/agent/agent-sdk-types";
 import { buildToolCallDisplayModel } from "@/utils/tool-call-display";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
@@ -81,8 +82,10 @@ import { getMarkdownListMarker } from "@/utils/markdown-list";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
 import {
+  getAssistantImageLoadStateFromMetadata,
   getAssistantImageMetadata,
   setAssistantImageMetadata,
+  type AssistantImageLoadState,
 } from "@/utils/assistant-image-metadata";
 import { setAssistantMarkdownBlockHeight } from "@/utils/assistant-message-height-estimate";
 import { resolveAssistantImageSource } from "@/utils/assistant-image-source";
@@ -95,7 +98,7 @@ import { PlanCard } from "./plan-card";
 import { useToolCallSheet } from "./tool-call-sheet";
 import { ToolCallDetailsContent } from "./tool-call-details";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
-import { persistAttachmentFromBase64, persistAttachmentFromDataUrl } from "@/attachments/service";
+import { persistAttachmentFromBytes, persistAttachmentFromDataUrl } from "@/attachments/service";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
 export type { InlinePathTarget } from "@/utils/inline-path";
@@ -105,6 +108,7 @@ type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: un
 interface UserMessageProps {
   message: string;
   images?: UserMessageImageAttachment[];
+  attachments?: AgentAttachment[];
   timestamp: number;
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
@@ -318,7 +322,7 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     flexDirection: "row",
     justifyContent: "flex-end",
     paddingHorizontal: theme.spacing[2],
-    userSelect: isWeb ? "text" : "auto",
+    ...(isWeb ? { userSelect: "text" as const } : {}),
   },
   content: {
     alignItems: "flex-end",
@@ -354,6 +358,11 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     flexWrap: "wrap",
   },
+  attachmentPreviewContainer: {
+    flexDirection: "row",
+    gap: theme.spacing[2],
+    flexWrap: "wrap",
+  },
   imagePreviewSpacing: {
     marginBottom: theme.spacing[2],
   },
@@ -371,6 +380,19 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     width: 48,
     height: 48,
     backgroundColor: theme.colors.surface1,
+  },
+  structuredAttachmentPill: {
+    maxWidth: 220,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.borderAccent,
+    backgroundColor: theme.colors.surface1,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+  },
+  structuredAttachmentText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
   },
   copyButton: {
     alignSelf: "flex-end",
@@ -394,9 +416,25 @@ function UserMessageAttachmentThumbnail({ image }: { image: UserMessageImageAtta
   return <Image source={imageSource} style={userMessageStylesheet.imageThumbnail} />;
 }
 
+function getUserMessageAttachmentLabel(attachment: AgentAttachment): string {
+  switch (attachment.type) {
+    case "review": {
+      const count = attachment.comments.length;
+      return count === 1 ? "Review · 1 comment" : `Review · ${count} comments`;
+    }
+    case "github_pr":
+      return `PR #${attachment.number}`;
+    case "github_issue":
+      return `Issue #${attachment.number}`;
+    case "text":
+      return attachment.title ?? "Text attachment";
+  }
+}
+
 export const UserMessage = memo(function UserMessage({
   message,
   images = [],
+  attachments = [],
   timestamp: _timestamp,
   isFirstInGroup = true,
   isLastInGroup = true,
@@ -408,6 +446,7 @@ export const UserMessage = memo(function UserMessage({
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
   const hasText = message.trim().length > 0;
   const hasImages = images.length > 0;
+  const hasAttachments = attachments.length > 0;
   const showCopyButton = hasText && (isCompact || messageHovered || copyButtonHovered);
 
   const handleHoverIn = useCallback(() => setMessageHovered(true), []);
@@ -428,6 +467,13 @@ export const UserMessage = memo(function UserMessage({
   const imagePreviewContainerStyle = useMemo(
     () => [
       userMessageStylesheet.imagePreviewContainer,
+      hasText || hasAttachments ? userMessageStylesheet.imagePreviewSpacing : undefined,
+    ],
+    [hasAttachments, hasText],
+  );
+  const attachmentPreviewContainerStyle = useMemo(
+    () => [
+      userMessageStylesheet.attachmentPreviewContainer,
       hasText ? userMessageStylesheet.imagePreviewSpacing : undefined,
     ],
     [hasText],
@@ -455,6 +501,20 @@ export const UserMessage = memo(function UserMessage({
               {images.map((image) => (
                 <View key={image.id} style={userMessageStylesheet.imagePill}>
                   <UserMessageAttachmentThumbnail image={image} />
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {hasAttachments ? (
+            <View style={attachmentPreviewContainerStyle}>
+              {attachments.map((attachment, index) => (
+                <View
+                  key={`${attachment.type}:${"number" in attachment ? attachment.number : index}`}
+                  style={userMessageStylesheet.structuredAttachmentPill}
+                >
+                  <Text style={userMessageStylesheet.structuredAttachmentText} numberOfLines={1}>
+                    {getUserMessageAttachmentLabel(attachment)}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -493,7 +553,7 @@ export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
   container: {
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[3],
-    userSelect: isWeb ? "text" : "auto",
+    ...(isWeb ? { userSelect: "text" as const } : {}),
   },
   containerCompactTop: {
     paddingTop: 0,
@@ -567,17 +627,17 @@ const AssistantMarkdownResolvedImage = memo(function AssistantMarkdownResolvedIm
     () => getAssistantImageMetadata({ source, workspaceRoot, serverId }),
     [serverId, source, workspaceRoot],
   );
-  const [aspectRatio, setAspectRatio] = useState<number | null>(
-    cachedMetadata?.aspectRatio ?? null,
+  const [loadState, setLoadState] = useState<AssistantImageLoadState>(() =>
+    getAssistantImageLoadStateFromMetadata(cachedMetadata),
   );
 
   useEffect(() => {
     if (cachedMetadata) {
-      setAspectRatio(cachedMetadata.aspectRatio);
+      setLoadState(getAssistantImageLoadStateFromMetadata(cachedMetadata));
       return;
     }
 
-    setAspectRatio(null);
+    setLoadState({ status: "loading" });
     let cancelled = false;
 
     Image.getSize(
@@ -591,14 +651,17 @@ const AssistantMarkdownResolvedImage = memo(function AssistantMarkdownResolvedIm
             { source, workspaceRoot, serverId },
             { width, height },
           );
-          setAspectRatio(metadata?.aspectRatio ?? width / height);
+          setLoadState({
+            status: "ready",
+            aspectRatio: metadata?.aspectRatio ?? width / height,
+          });
         }
       },
       () => {
         if (cancelled) {
           return;
         }
-        setAspectRatio(null);
+        setLoadState({ status: "error" });
       },
     );
 
@@ -607,18 +670,40 @@ const AssistantMarkdownResolvedImage = memo(function AssistantMarkdownResolvedIm
     };
   }, [cachedMetadata, serverId, source, uri, workspaceRoot]);
 
+  const handleImageError = useCallback(() => {
+    setLoadState({ status: "error" });
+  }, []);
   const surfaceStyle = useMemo<StyleProp<ViewStyle>>(
     () => [
       assistantMessageStylesheet.imageSurface,
-      aspectRatio ? { aspectRatio } : { minHeight: ASSISTANT_IMAGE_MIN_HEIGHT },
+      loadState.status === "ready"
+        ? { aspectRatio: loadState.aspectRatio }
+        : { height: ASSISTANT_IMAGE_MIN_HEIGHT },
     ],
-    [aspectRatio],
+    [loadState],
   );
   const frameStyle = useMemo<StyleProp<ViewStyle>>(
     () => [assistantMessageStylesheet.imageFrame, containerStyle],
     [containerStyle],
   );
+  const stateSurfaceStyle = useMemo<StyleProp<ViewStyle>>(
+    () => [surfaceStyle, assistantMessageStylesheet.imageState],
+    [surfaceStyle],
+  );
   const imageSource = useMemo(() => ({ uri }), [uri]);
+
+  if (loadState.status !== "ready") {
+    return (
+      <View style={frameStyle}>
+        <View style={stateSurfaceStyle}>
+          {loadState.status === "loading" ? <ActivityIndicator size="small" /> : null}
+          {loadState.status === "error" ? (
+            <Text style={assistantMessageStylesheet.imageErrorText}>Image unavailable</Text>
+          ) : null}
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={frameStyle}>
@@ -628,6 +713,7 @@ const AssistantMarkdownResolvedImage = memo(function AssistantMarkdownResolvedIm
           style={assistantMessageStylesheet.image}
           resizeMode="contain"
           accessibilityLabel={alt}
+          onError={handleImageError}
         />
       </View>
     </View>
@@ -676,25 +762,21 @@ function AssistantMarkdownImage({
         return null;
       }
 
-      const payload = await client.exploreFileSystem(resolution.cwd, resolution.path, "file");
-      if (payload.error) {
-        throw new Error(payload.error);
-      }
-      const file = payload.file;
-      if (!file || file.kind !== "image" || !file.content) {
+      const file = await client.readFile(resolution.cwd, resolution.path);
+      if (file.kind !== "image") {
         throw new Error("Image preview unavailable.");
       }
 
-      return await persistAttachmentFromBase64({
+      return await persistAttachmentFromBytes({
         id: createPreviewAttachmentId({
-          mimeType: file.mimeType ?? "image/png",
+          mimeType: file.mime,
           path: file.path || resolution.path,
           size: file.size,
           modifiedAt: file.modifiedAt,
-          contentLength: file.content.length,
+          contentLength: file.bytes.byteLength,
         }),
-        base64: file.content,
-        mimeType: file.mimeType,
+        bytes: file.bytes,
+        mimeType: file.mime,
         fileName: getFileNameFromPath(file.path || resolution.path),
       });
     },
@@ -728,6 +810,7 @@ function AssistantMarkdownImage({
     () => [
       assistantMessageStylesheet.imageFrame,
       containerStyle,
+      { height: ASSISTANT_IMAGE_MIN_HEIGHT },
       assistantMessageStylesheet.imageState,
     ],
     [containerStyle],
@@ -1063,6 +1146,7 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
     flexShrink: 1,
     minWidth: 0,
     overflow: "hidden",
+    ...(isWeb ? { cursor: "auto" as const, userSelect: "text" as const } : {}),
   },
   pressableExpanded: {
     borderColor: theme.colors.border,
@@ -2887,6 +2971,7 @@ export const ToolCall = memo(function ToolCall({
       <PlanCard
         title="Plan"
         text={effectiveDetail.text}
+        testID="timeline-plan-card"
         disableOuterSpacing={disableOuterSpacing}
       />
     );

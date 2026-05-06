@@ -1,5 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
-import { loadConfig, resolvePaseoHome, DaemonClient } from "@getpaseo/server";
+import {
+  buildDaemonWebSocketUrl,
+  buildRelayWebSocketUrl,
+  loadConfig,
+  normalizeHostPort,
+  parseConnectionUri,
+  parseConnectionOfferFromUrl,
+  DaemonClient,
+  resolvePaseoHome,
+  shouldUseTlsForDefaultHostedRelay,
+  type ConnectionOffer,
+  type WebSocketLike,
+} from "@getpaseo/server";
 import path from "node:path";
 import { WebSocket } from "ws";
 import { getOrCreateCliClientId } from "./client-id.js";
@@ -36,6 +48,27 @@ export function normalizeDaemonHost(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) {
     return null;
+  }
+
+  if (trimmed.startsWith("tcp://")) {
+    try {
+      const parsed = parseConnectionUri(trimmed);
+      const endpoint = normalizeHostPort(
+        parsed.isIpv6 ? `[${parsed.host}]:${parsed.port}` : `${parsed.host}:${parsed.port}`,
+      );
+      const query = new URLSearchParams();
+      if (parsed.useTls) {
+        query.set("ssl", "true");
+      }
+      if (parsed.password) {
+        query.set("password", parsed.password);
+      }
+      const queryString = query.toString();
+      const suffix = queryString ? `?${queryString}` : "";
+      return `tcp://${endpoint}${suffix}`;
+    } catch {
+      return null;
+    }
   }
 
   if (
@@ -166,28 +199,40 @@ export function resolveDaemonTarget(host: string): DaemonTarget {
     };
   }
 
+  if (trimmed.startsWith("tcp://")) {
+    const parsed = parseConnectionUri(trimmed);
+    const endpoint = normalizeHostPort(
+      parsed.isIpv6 ? `[${parsed.host}]:${parsed.port}` : `${parsed.host}:${parsed.port}`,
+    );
+    return {
+      type: "tcp",
+      url: buildDaemonWebSocketUrl(endpoint, { useTls: parsed.useTls }),
+    };
+  }
+
   return {
     type: "tcp",
     url: `ws://${trimmed}/ws`,
   };
 }
 
+export function resolveDaemonPassword(host: string): string | undefined {
+  const trimmed = host.trim();
+  return trimmed.startsWith("tcp://") ? parseConnectionUri(trimmed).password : undefined;
+}
+
 /**
  * Create a WebSocket factory that works in Node.js
  */
 function createNodeWebSocketFactory() {
-  return (url: string, options?: { headers?: Record<string, string>; socketPath?: string }) => {
-    return new WebSocket(url, {
+  return (
+    url: string,
+    options?: { headers?: Record<string, string>; protocols?: string[]; socketPath?: string },
+  ): WebSocketLike => {
+    return new WebSocket(url, options?.protocols, {
       headers: options?.headers,
       ...(options?.socketPath ? { socketPath: options.socketPath } : {}),
-    }) as unknown as {
-      readyState: number;
-      send: (data: string | Uint8Array | ArrayBuffer) => void;
-      close: (code?: number, reason?: string) => void;
-      binaryType?: string;
-      on: (event: string, listener: (...args: unknown[]) => void) => void;
-      off: (event: string, listener: (...args: unknown[]) => void) => void;
-    };
+    }) as unknown as WebSocketLike;
   };
 }
 
@@ -197,6 +242,7 @@ function createNodeWebSocketFactory() {
  */
 async function tryConnectHost(
   host: string,
+  password: string | undefined,
   clientId: string,
   timeout: number,
   nodeWebSocketFactory: ReturnType<typeof createNodeWebSocketFactory>,
@@ -207,14 +253,19 @@ async function tryConnectHost(
     clientId,
     clientType: "cli",
     appVersion: resolveCliVersion(),
+    password,
     connectTimeoutMs: timeout,
-    webSocketFactory: (url: string, config?: { headers?: Record<string, string> }) =>
+    webSocketFactory: (
+      url: string,
+      config?: { headers?: Record<string, string>; protocols?: string[] },
+    ) =>
       nodeWebSocketFactory(url, {
         headers: config?.headers,
+        protocols: config?.protocols,
         ...(target.type === "ipc" ? { socketPath: target.socketPath } : {}),
       }),
     reconnect: { enabled: false },
-  } as unknown as ConstructorParameters<typeof DaemonClient>[0]);
+  });
 
   try {
     await client.connect();
@@ -225,11 +276,66 @@ async function tryConnectHost(
   }
 }
 
+async function connectViaRelayOffer(
+  offer: ConnectionOffer,
+  clientId: string,
+  timeout: number,
+  nodeWebSocketFactory: ReturnType<typeof createNodeWebSocketFactory>,
+): Promise<DaemonClient> {
+  const url = buildRelayWebSocketUrl({
+    endpoint: offer.relay.endpoint,
+    serverId: offer.serverId,
+    role: "client",
+    useTls: shouldUseTlsForDefaultHostedRelay(offer.relay.endpoint),
+  });
+
+  const client = new DaemonClient({
+    url,
+    clientId,
+    clientType: "cli",
+    appVersion: resolveCliVersion(),
+    connectTimeoutMs: timeout,
+    webSocketFactory: (
+      target: string,
+      config?: { headers?: Record<string, string>; protocols?: string[] },
+    ) => nodeWebSocketFactory(target, { headers: config?.headers, protocols: config?.protocols }),
+    e2ee: { enabled: true, daemonPublicKeyB64: offer.daemonPublicKeyB64 },
+    reconnect: { enabled: false },
+  });
+
+  try {
+    await client.connect();
+    return client;
+  } catch (error) {
+    await client.close().catch(() => {});
+    const message = error instanceof Error ? error.message : String(error);
+    const lastError = client.lastError ? ` (${client.lastError})` : "";
+    throw new Error(`Failed to connect via relay offer: ${message}${lastError}`, { cause: error });
+  }
+}
+
+function parseHostOfferOrNull(host: string | undefined): ConnectionOffer | null {
+  if (!host) return null;
+  try {
+    return parseConnectionOfferFromUrl(host);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid pairing offer URL: ${message}`, { cause: error });
+  }
+}
+
 export async function connectToDaemon(options?: ConnectOptions): Promise<DaemonClient> {
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
   const clientId = await getOrCreateCliClientId();
-  const hosts = resolveDaemonHostCandidates(options);
   const nodeWebSocketFactory = createNodeWebSocketFactory();
+
+  const explicitHost = options?.host ?? process.env.PASEO_HOST;
+  const offer = parseHostOfferOrNull(explicitHost);
+  if (offer) {
+    return connectViaRelayOffer(offer, clientId, timeout, nodeWebSocketFactory);
+  }
+
+  const hosts = resolveDaemonHostCandidates(options);
 
   async function tryNext(index: number, lastError: unknown): Promise<DaemonClient> {
     if (index >= hosts.length) {
@@ -237,8 +343,11 @@ export async function connectToDaemon(options?: ConnectOptions): Promise<DaemonC
       throw new Error(`Unable to connect to Paseo daemon via ${hosts.join(", ")}`);
     }
     const host = hosts[index] as string;
-    const result = await tryConnectHost(host, clientId, timeout, nodeWebSocketFactory);
-    if ("client" in result) return result.client;
+    const password = resolveDaemonPassword(host);
+    const result = await tryConnectHost(host, password, clientId, timeout, nodeWebSocketFactory);
+    if ("client" in result) {
+      return result.client;
+    }
     return tryNext(index + 1, result.error);
   }
 

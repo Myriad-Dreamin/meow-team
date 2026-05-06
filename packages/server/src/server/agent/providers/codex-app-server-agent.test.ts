@@ -30,6 +30,7 @@ interface CollaborationModeRecord {
 interface CodexSessionTestAccess {
   handleToolApprovalRequest(params: unknown): Promise<unknown>;
   handleNotification(method: string, params: unknown): void;
+  loadPersistedHistory(): Promise<void>;
   refreshResolvedCollaborationMode(): void;
   serviceTier: "fast" | null;
   planModeEnabled: boolean;
@@ -374,6 +375,59 @@ describe("Codex app-server provider", () => {
     );
   });
 
+  test("resolves Codex skill slash commands into app-server skill input", async () => {
+    const session = createSession();
+    const request = vi.fn(async (method: string) => {
+      if (method === "skills/list") {
+        return {
+          data: [
+            {
+              cwd: "/tmp/codex-question-test",
+              skills: [
+                {
+                  name: "paseo-implement",
+                  description: "Execute an existing Paseo plan.",
+                  path: "/tmp/skills/paseo-implement/SKILL.md",
+                },
+              ],
+              errors: [],
+            },
+          ],
+        };
+      }
+      if (method === "thread/loaded/list") {
+        return { data: ["test-thread"] };
+      }
+      if (method === "turn/start") {
+        return {};
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+
+    session.activeForegroundTurnId = null;
+    session.client = { request } as unknown as CodexClientLike;
+
+    await session.startTurn("/paseo-implement in a worktree, remember to use Claude for the UI");
+
+    const turnStartCall = request.mock.calls.find(([method]) => method === "turn/start");
+    expect(turnStartCall?.[1]).toEqual(
+      expect.objectContaining({
+        input: [
+          {
+            type: "skill",
+            name: "paseo-implement",
+            path: "/tmp/skills/paseo-implement/SKILL.md",
+          },
+          {
+            type: "text",
+            text: "in a worktree, remember to use Claude for the UI",
+            text_elements: [],
+          },
+        ],
+      }),
+    );
+  });
+
   test("maps image prompt blocks to Codex localImage input", async () => {
     const input = await codexAppServerTurnInputFromPrompt(
       [
@@ -412,7 +466,71 @@ describe("Codex app-server provider", () => {
     expect(input).toEqual([
       {
         type: "text",
+        text_elements: [],
         text: expect.stringContaining("GitHub PR #123: Fix race in worktree setup"),
+      },
+    ]);
+  });
+
+  test("passes Codex skill prompt blocks through to Codex app-server input", async () => {
+    const input = await codexAppServerTurnInputFromPrompt(
+      [
+        { type: "skill", name: "fix-build", path: "/tmp/skills/fix-build/SKILL.md" },
+        { type: "text", text: "keep this build moving" },
+      ],
+      logger,
+    );
+
+    expect(input).toEqual([
+      { type: "skill", name: "fix-build", path: "/tmp/skills/fix-build/SKILL.md" },
+      { type: "text", text: "keep this build moving", text_elements: [] },
+    ]);
+  });
+
+  test("separates Codex text prompts from rendered attachment text", async () => {
+    const input = await codexAppServerTurnInputFromPrompt(
+      [
+        { type: "text", text: "Please review this" },
+        {
+          type: "github_issue",
+          mimeType: "application/github-issue",
+          number: 456,
+          title: "Attachment spacing",
+          url: "https://github.com/getpaseo/paseo/issues/456",
+        },
+      ],
+      logger,
+    );
+
+    expect(input).toEqual([
+      { type: "text", text: "Please review this", text_elements: [] },
+      {
+        type: "text",
+        text: expect.stringMatching(/^\n\nGitHub Issue #456: Attachment spacing/),
+        text_elements: [],
+      },
+    ]);
+  });
+
+  test("does not prefix Codex attachment-only prompts with a blank line", async () => {
+    const input = await codexAppServerTurnInputFromPrompt(
+      [
+        {
+          type: "github_issue",
+          mimeType: "application/github-issue",
+          number: 456,
+          title: "Attachment spacing",
+          url: "https://github.com/getpaseo/paseo/issues/456",
+        },
+      ],
+      logger,
+    );
+
+    expect(input).toEqual([
+      {
+        type: "text",
+        text: expect.stringMatching(/^GitHub Issue #456: Attachment spacing/),
+        text_elements: [],
       },
     ]);
   });
@@ -614,6 +732,152 @@ describe("Codex app-server provider", () => {
     ]);
   });
 
+  test("converts Codex collab agent notifications through the normal timeline path", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/started", {
+      threadId: "test-thread",
+      item: {
+        type: "collabAgentToolCall",
+        id: "call-sub-agent-normal-path",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: "Inspect the stream path.",
+        receiverThreadIds: [],
+        agentsStates: {},
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "tool_call",
+          callId: "call-sub-agent-normal-path",
+          name: "Sub-agent",
+          status: "running",
+          error: null,
+          detail: {
+            type: "sub_agent",
+            subAgentType: "Sub-agent",
+            description: "Inspect the stream path.",
+            log: "",
+            actions: [],
+          },
+        },
+      },
+    ]);
+  });
+
+  test("folds child-thread Codex activity into the parent sub-agent tool call", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "collabAgentToolCall",
+        id: "call-sub-agent-child-activity",
+        tool: "spawnAgent",
+        status: "completed",
+        prompt: "Report findings.",
+        receiverThreadIds: ["child-thread-1"],
+        agentsStates: {
+          "child-thread-1": { status: "pendingInit", message: null },
+        },
+      },
+    });
+    asInternals(session).handleNotification("item/agentMessage/delta", {
+      threadId: "child-thread-1",
+      itemId: "child-message-1",
+      delta: "Found the path.",
+    });
+    asInternals(session).handleNotification("item/completed", {
+      threadId: "child-thread-1",
+      item: {
+        type: "agentMessage",
+        id: "child-message-1",
+        text: "Found the path.",
+      },
+    });
+    asInternals(session).handleNotification("turn/completed", {
+      threadId: "child-thread-1",
+      turn: { status: "completed" },
+    });
+
+    const timelineEvents = events.filter((event) => event.type === "timeline");
+    expect(timelineEvents).toHaveLength(4);
+    expect(timelineEvents.every((event) => event.item.type === "tool_call")).toBe(true);
+    const finalItem = timelineEvents.at(-1)?.item;
+    expect(finalItem).toMatchObject({
+      type: "tool_call",
+      callId: "call-sub-agent-child-activity",
+      name: "Sub-agent",
+      status: "completed",
+      detail: {
+        type: "sub_agent",
+        subAgentType: "Sub-agent",
+        description: "Report findings.",
+        log: "[Assistant] Found the path.",
+        actions: [],
+      },
+    });
+  });
+
+  test("loads Codex persisted history from the app-server thread", async () => {
+    const session = createSession();
+    const requests: Array<{ method: string; params: unknown }> = [];
+    session.client = {
+      request: vi.fn(async (method: string, params: unknown) => {
+        requests.push({ method, params });
+        if (method !== "thread/read") {
+          return {};
+        }
+        return {
+          thread: {
+            turns: [
+              {
+                items: [
+                  {
+                    type: "agentMessage",
+                    id: "message-history",
+                    text: "History loaded.",
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }),
+    };
+
+    await asInternals(session).loadPersistedHistory();
+
+    const history: AgentStreamEvent[] = [];
+    for await (const event of session.streamHistory()) {
+      history.push(event);
+    }
+
+    expect(requests.map((request) => [request.method, request.params])).toEqual([
+      ["thread/read", { threadId: "test-thread", includeTurns: true }],
+    ]);
+    expect(history).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        item: {
+          type: "assistant_message",
+          text: "History loaded.",
+        },
+      },
+    ]);
+  });
+
   test("maps question responses from headers back to question ids and completes the tool call", async () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
@@ -713,6 +977,14 @@ describe("Codex app-server provider", () => {
       turn: { status: "completed", error: null },
     });
 
+    expect(
+      events.some(
+        (event) =>
+          event.type === "timeline" &&
+          event.item.type === "tool_call" &&
+          event.item.detail.type === "plan",
+      ),
+    ).toBe(false);
     expect(events.at(-2)).toEqual({
       type: "permission_requested",
       provider: "codex",
@@ -744,6 +1016,51 @@ describe("Codex app-server provider", () => {
       provider: "codex",
       turnId: "test-turn",
       usage: undefined,
+    });
+  });
+
+  test("does not emit Codex plan thread items as timeline cards while plan approval is pending", () => {
+    const session = createSession({
+      featureValues: { plan_mode: true, fast_mode: true },
+    });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("turn/started", {
+      turn: { id: "turn-plan-thread-item" },
+    });
+    asInternals(session).handleNotification("item/completed", {
+      item: {
+        id: "plan-item-1",
+        type: "plan",
+        text: "- Inspect README\n- Add a short note",
+      },
+    });
+    asInternals(session).handleNotification("turn/completed", {
+      turn: { status: "completed", error: null },
+    });
+
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: "timeline",
+        item: expect.objectContaining({
+          type: "tool_call",
+          detail: expect.objectContaining({ type: "plan" }),
+        }),
+      }),
+    );
+    expect(events.at(-2)).toEqual({
+      type: "permission_requested",
+      provider: "codex",
+      turnId: "test-turn",
+      request: expect.objectContaining({
+        provider: "codex",
+        name: "CodexPlanApproval",
+        kind: "plan",
+        input: {
+          plan: "- Inspect README\n- Add a short note",
+        },
+      }),
     });
   });
 
@@ -791,6 +1108,211 @@ describe("Codex app-server provider", () => {
         contextWindowUsedTokens: 50000,
       },
     });
+  });
+
+  test("streams Codex assistant message deltas and does not replay completed text", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/agentMessage/delta", {
+      itemId: "assistant-item-1",
+      delta: "Hel",
+    });
+    asInternals(session).handleNotification("item/agentMessage/delta", {
+      itemId: "assistant-item-1",
+      delta: "lo",
+    });
+    asInternals(session).handleNotification("item/completed", {
+      item: {
+        id: "assistant-item-1",
+        type: "agentMessage",
+        text: "Hello",
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "assistant_message", text: "Hel" },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "assistant_message", text: "lo" },
+      },
+    ]);
+  });
+
+  test("emits only the missing assistant suffix when completed text extends streamed deltas", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/agentMessage/delta", {
+      itemId: "assistant-item-2",
+      delta: "Hel",
+    });
+    asInternals(session).handleNotification("item/agentMessage/delta", {
+      itemId: "assistant-item-2",
+      delta: "lo",
+    });
+    asInternals(session).handleNotification("item/completed", {
+      item: {
+        id: "assistant-item-2",
+        type: "agentMessage",
+        text: "Hello!",
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "assistant_message", text: "Hel" },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "assistant_message", text: "lo" },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "assistant_message", text: "!" },
+      },
+    ]);
+  });
+
+  test("emits a markdown divider when a new Codex assistant item starts after the previous one completed", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/agentMessage/delta", {
+      itemId: "assistant-item-3",
+      delta:
+        "I’m in the waiting phase now. The next read is intentionally delayed so we get meaningful CI state instead of churn.",
+    });
+    asInternals(session).handleNotification("item/completed", {
+      item: {
+        id: "assistant-item-3",
+        type: "agentMessage",
+        text: "I’m in the waiting phase now. The next read is intentionally delayed so we get meaningful CI state instead of churn.",
+      },
+    });
+    asInternals(session).handleNotification("item/agentMessage/delta", {
+      itemId: "assistant-item-4",
+      delta:
+        "CI is still cooking. I’m staying on the current run rather than jumping around, because the first red job will tell us exactly whether anything else needs work.",
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "assistant_message",
+          text: "I’m in the waiting phase now. The next read is intentionally delayed so we get meaningful CI state instead of churn.",
+        },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: {
+          type: "assistant_message",
+          text: "\n\n---\n\nCI is still cooking. I’m staying on the current run rather than jumping around, because the first red job will tell us exactly whether anything else needs work.",
+        },
+      },
+    ]);
+  });
+
+  test("streams Codex reasoning deltas and does not replay completed reasoning", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/reasoning/summaryTextDelta", {
+      itemId: "reasoning-item-1",
+      delta: "Think",
+    });
+    asInternals(session).handleNotification("item/reasoning/summaryTextDelta", {
+      itemId: "reasoning-item-1",
+      delta: "ing",
+    });
+    asInternals(session).handleNotification("item/completed", {
+      item: {
+        id: "reasoning-item-1",
+        type: "reasoning",
+        summary: ["Thinking"],
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "reasoning", text: "Think" },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "reasoning", text: "ing" },
+      },
+    ]);
+  });
+
+  test("emits only the missing reasoning suffix when completed reasoning extends streamed deltas", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/reasoning/summaryTextDelta", {
+      itemId: "reasoning-item-2",
+      delta: "Think",
+    });
+    asInternals(session).handleNotification("item/reasoning/summaryTextDelta", {
+      itemId: "reasoning-item-2",
+      delta: "ing",
+    });
+    asInternals(session).handleNotification("item/completed", {
+      item: {
+        id: "reasoning-item-2",
+        type: "reasoning",
+        summary: ["Thinking!"],
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "reasoning", text: "Think" },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "reasoning", text: "ing" },
+      },
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "test-turn",
+        item: { type: "reasoning", text: "!" },
+      },
+    ]);
   });
 
   test("approving a synthetic Codex plan permission disables plan mode, preserves fast mode, and returns follow-up prompt", async () => {

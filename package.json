@@ -1,6 +1,6 @@
 {
   "name": "paseo",
-  "version": "0.1.64",
+  "version": "0.1.65",
   "private": true,
   "description": "Paseo: voice-controlled development environment with OpenAI Realtime API",
   "keywords": [
@@ -54,6 +54,7 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "knip": "knip",
+<<<<<<< HEAD
     "start": "pnpm --filter @getpaseo/server run start",
     "android": "pnpm --filter @getpaseo/app run android",
     "android:development": "pnpm --filter @getpaseo/app run android:development",
@@ -70,6 +71,23 @@
     "cli": "pnpm exec tsx packages/cli/src/index.js",
     "cli:mfl": "pnpm --filter meow-flow exec node --conditions=source --import tsx src/index.ts",
     "version": "pnpm run version:sync-internal && pnpm run release:prepare && git add -A",
+=======
+    "start": "npm run start --workspace=@getpaseo/server",
+    "android": "npm run android --workspace=@getpaseo/app",
+    "android:development": "npm run android:development --workspace=@getpaseo/app",
+    "android:production": "npm run android:production --workspace=@getpaseo/app",
+    "android:release": "npm run android:production --workspace=@getpaseo/app",
+    "android:clear": "npm run android:clear --workspace=@getpaseo/app",
+    "android:clean": "npm run android:clean --workspace=@getpaseo/app",
+    "ios": "npm run ios --workspace=@getpaseo/app",
+    "web": "npm run web --workspace=@getpaseo/app",
+    "dev:desktop": "npm run dev --workspace=@getpaseo/desktop",
+    "dev:win:desktop": "npm run dev:win --workspace=@getpaseo/desktop",
+    "build:desktop": "npm run build:workspace-deps --workspace=@getpaseo/app && cd packages/app && cross-env PASEO_WEB_PLATFORM=electron npx expo export --platform web && cd ../.. && npm run build --workspace=@getpaseo/desktop --",
+    "db:query": "npm run db:query --workspace=@getpaseo/server --",
+    "cli": "npx tsx packages/cli/src/index.js",
+    "version": "npm run version:sync-internal && npm run release:prepare && git add -A",
+>>>>>>> v0.1.65
     "version:sync-internal": "node scripts/sync-workspace-versions.mjs",
     "release:prepare": "pnpm install --frozen-lockfile",
     "version:all:patch": "node scripts/set-release-version.mjs --mode patch",
@@ -97,6 +115,7 @@
     "@types/ws": "^8.5.14",
     "@typescript/native-preview": "7.0.0-dev.20260423.1",
     "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "get-port-cli": "^3.0.0",
     "js-yaml": "^4.1.1",
     "knip": "^5.82.1",

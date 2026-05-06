@@ -1,5 +1,5 @@
 import type { AgentProvider, ToolCallDetail } from "@server/server/agent/agent-sdk-types";
-import type { AgentStreamEventPayload } from "@server/shared/messages";
+import type { AgentAttachment, AgentStreamEventPayload } from "@server/shared/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { extractTaskEntriesFromToolCall } from "../utils/tool-call-parsers";
 import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
@@ -60,6 +60,7 @@ export interface UserMessageItem {
   text: string;
   timestamp: Date;
   images?: UserMessageImageAttachment[];
+  attachments?: AgentAttachment[];
 }
 
 export interface AssistantMessageItem {
@@ -988,6 +989,16 @@ export function applyStreamEvent(params: {
   // Check if we need to flush head before processing this event
   if (shouldFlushHead(nextHead, incomingKind)) {
     flushHead();
+  }
+
+  if (incomingKind === "assistant_message" && nextHead.length === 0) {
+    const tailAssistant = nextTail.at(-1);
+    if (tailAssistant?.kind === "assistant_message") {
+      nextTail = nextTail.slice(0, -1);
+      nextHead = [tailAssistant];
+      changedTail = true;
+      changedHead = true;
+    }
   }
 
   // For streamable kinds, apply to head

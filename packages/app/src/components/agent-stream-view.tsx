@@ -1,4 +1,4 @@
-import {
+import React, {
   forwardRef,
   memo,
   useCallback,
@@ -56,6 +56,8 @@ import type {
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
+import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
+import type { ToastApi } from "@/components/toast-host";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { ToolCallDetailsContent } from "./tool-call-details";
 import { QuestionFormCard } from "./question-form-card";
@@ -126,6 +128,12 @@ const getAssistantBlockSpacing = (params: {
   }
   return "default";
 };
+
+interface StreamItemBoundarySeams {
+  aboveItem?: StreamItem | null;
+  belowItem?: StreamItem | null;
+}
+
 export interface AgentStreamViewHandle {
   scrollToBottom(reason?: BottomAnchorLocalRequest["reason"]): void;
   prepareForViewportChange(): void;
@@ -139,12 +147,17 @@ export interface AgentStreamViewProps {
   pendingPermissions: Map<string, PendingPermission>;
   routeBottomAnchorRequest?: BottomAnchorRouteRequest | null;
   isAuthoritativeHistoryReady?: boolean;
+<<<<<<< HEAD
   onOpenWorkspaceFile?: (input: {
     directory?: string;
     filePath: string;
     lineStart?: number;
     columnStart?: number;
   }) => void;
+=======
+  toast?: ToastApi | null;
+  onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+>>>>>>> v0.1.65
 }
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
@@ -157,6 +170,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       pendingPermissions,
       routeBottomAnchorRequest = null,
       isAuthoritativeHistoryReady = true,
+      toast,
       onOpenWorkspaceFile,
     },
     ref,
@@ -196,6 +210,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       serverId: resolvedServerId,
       workspaceId: workspaceId ?? undefined,
       workspaceRoot,
+    });
+    const { isLoadingOlder, hasOlder, loadOlder } = useLoadOlderAgentHistory({
+      serverId: resolvedServerId,
+      agentId,
+      toast,
     });
     const openWorkspaceFile = useStableEvent(function openWorkspaceFile(input: {
       directory?: string;
@@ -305,6 +324,25 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         isMobileBreakpoint: isMobile,
       });
     }, [isMobile, streamHead, streamItems]);
+    const inlineWorkingIndicatorItemId = useMemo(() => {
+      if (agent.status !== "running") {
+        return null;
+      }
+      const footerItem = baseRenderModel.segments.liveHead.find((item, index, items) => {
+        if (item.kind !== "assistant_message") {
+          return false;
+        }
+        return (
+          getStreamNeighborItem({
+            strategy: streamRenderStrategy,
+            items,
+            index,
+            relation: "below",
+          }) === undefined
+        );
+      });
+      return footerItem?.id ?? null;
+    }, [agent.status, baseRenderModel.segments.liveHead, streamRenderStrategy]);
     useImperativeHandle(
       ref,
       () => ({
@@ -401,6 +439,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           <UserMessage
             message={item.text}
             images={item.images}
+            attachments={item.attachments}
             timestamp={item.timestamp.getTime()}
             isFirstInGroup={isFirstInGroup}
             isLastInGroup={isLastInGroup}
@@ -415,7 +454,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         item: Extract<StreamItem, { kind: "assistant_message" }>,
         index: number,
         items: StreamItem[],
-        seamAboveItem: StreamItem | null,
+        seams: StreamItemBoundarySeams,
       ) => {
         const aboveItem =
           getStreamNeighborItem({
@@ -424,14 +463,17 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             index,
             relation: "above",
           }) ??
-          seamAboveItem ??
+          seams.aboveItem ??
           undefined;
-        const belowItem = getStreamNeighborItem({
-          strategy: streamRenderStrategy,
-          items,
-          index,
-          relation: "below",
-        });
+        const belowItem =
+          getStreamNeighborItem({
+            strategy: streamRenderStrategy,
+            items,
+            index,
+            relation: "below",
+          }) ??
+          seams.belowItem ??
+          undefined;
         const spacing = getAssistantBlockSpacing({
           item,
           aboveItem,
@@ -538,14 +580,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         item: StreamItem,
         index: number,
         items: StreamItem[],
-        seamAboveItem: StreamItem | null = null,
+        seams: StreamItemBoundarySeams = {},
       ) => {
         switch (item.kind) {
           case "user_message":
-            return renderUserMessageItem(item, index, items, seamAboveItem);
+            return renderUserMessageItem(item, index, items, seams.aboveItem ?? null);
 
           case "assistant_message":
-            return renderAssistantMessageItem(item, index, items, seamAboveItem);
+            return renderAssistantMessageItem(item, index, items, seams);
 
           case "thought":
             return renderThoughtItem(item, index, items);
@@ -581,9 +623,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         item: StreamItem,
         index: number,
         items: StreamItem[],
-        seamAboveItem: StreamItem | null = null,
+        seams: StreamItemBoundarySeams = {},
       ) => {
-        const content = renderStreamItemContent(item, index, items, seamAboveItem);
+        const content = renderStreamItemContent(item, index, items, seams);
         if (!content) {
           return null;
         }
@@ -599,21 +641,31 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           item.kind === "assistant_message" &&
           (nextItem?.kind === "user_message" ||
             (nextItem === undefined && agent.status !== "running"));
+        const isRunningAssistantTurnFooter =
+          item.kind === "assistant_message" && item.id === inlineWorkingIndicatorItemId;
+        let footer: ReactNode = null;
+        if (isRunningAssistantTurnFooter) {
+          footer = <InlineWorkingIndicatorSlot />;
+        } else if (isEndOfAssistantTurn) {
+          footer = (
+            <TurnCopyButtonSlot strategy={streamRenderStrategy} items={items} startIndex={index} />
+          );
+        }
 
         return (
           <StreamItemWrapper gapBelow={gapBelow}>
             {content}
-            {isEndOfAssistantTurn ? (
-              <TurnCopyButtonSlot
-                strategy={streamRenderStrategy}
-                items={items}
-                startIndex={index}
-              />
-            ) : null}
+            {footer}
           </StreamItemWrapper>
         );
       },
-      [getGapBetween, renderStreamItemContent, agent.status, streamRenderStrategy],
+      [
+        getGapBetween,
+        renderStreamItemContent,
+        agent.status,
+        streamRenderStrategy,
+        inlineWorkingIndicatorItemId,
+      ],
     );
 
     const pendingPermissionItems = useMemo(
@@ -621,7 +673,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [pendingPermissions, agentId],
     );
 
-    const showWorkingIndicator = agent.status === "running";
+    const showAuxiliaryWorkingIndicator =
+      agent.status === "running" && inlineWorkingIndicatorItemId === null;
     const pendingPermissionsNode = useMemo(
       () =>
         pendingPermissionItems.length > 0 ? (
@@ -635,12 +688,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const workingIndicatorNode = useMemo(
       () =>
-        showWorkingIndicator ? (
-          <View style={stylesheet.bottomBarWrapper}>
+        showAuxiliaryWorkingIndicator ? (
+          <View style={stylesheet.bottomBarWrapper} testID="stream-working-indicator-auxiliary">
             <WorkingIndicator />
           </View>
         ) : null,
-      [showWorkingIndicator],
+      [showAuxiliaryWorkingIndicator],
     );
     const renderModel = useMemo<AgentStreamRenderModel>(() => {
       return {
@@ -682,6 +735,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const _liveHeadItems = renderModel.segments.liveHead;
     const { boundary, auxiliary } = renderModel;
     const lastHistoryItem = historyItems.at(-1) ?? null;
+    const firstLiveHeadItem = renderModel.segments.liveHead[0] ?? null;
 
     const historyIndexById = useMemo(() => {
       const indexById = new Map<string, number>();
@@ -697,9 +751,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         if (historyIndex === undefined) {
           return null;
         }
-        return renderStreamItem(item, historyIndex, historyItems);
+        const seamBelowItem = item.id === lastHistoryItem?.id ? firstLiveHeadItem : null;
+        return renderStreamItem(item, historyIndex, historyItems, {
+          belowItem: seamBelowItem,
+        });
       },
-      [historyIndexById, historyItems, renderStreamItem],
+      [firstLiveHeadItem, historyIndexById, historyItems, lastHistoryItem?.id, renderStreamItem],
     );
 
     const renderHistoryVirtualizedRow = useCallback<
@@ -711,7 +768,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const renderLiveHeadRow = useCallback<StreamSegmentRenderers["renderLiveHeadRow"]>(
       (item, index, items) =>
-        renderStreamItem(item, index, items, index === 0 ? lastHistoryItem : null),
+        renderStreamItem(item, index, items, {
+          aboveItem: index === 0 ? lastHistoryItem : null,
+        }),
       [lastHistoryItem, renderStreamItem],
     );
     const liveAuxiliaryHeaderStyle = useMemo(() => {
@@ -769,6 +828,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               routeBottomAnchorRequest,
               isAuthoritativeHistoryReady,
               onNearBottomChange: setIsNearBottom,
+              onNearHistoryStart: loadOlder,
+              isLoadingOlderHistory: isLoadingOlder,
+              hasOlderHistory: hasOlder,
               scrollEnabled: streamScrollEnabled,
               listStyle: stylesheet.list,
               baseListContentContainerStyle: stylesheet.listContentContainer,
@@ -803,7 +865,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 export const AgentStreamView = memo(AgentStreamViewComponent);
 AgentStreamView.displayName = "AgentStreamView";
 
-function WorkingIndicator() {
+function WorkingIndicator({ variant = "auxiliary" }: { variant?: "auxiliary" | "inline" }) {
   const progress = useSharedValue(0);
 
   useEffect(() => {
@@ -855,13 +917,26 @@ function WorkingIndicator() {
     [dotThreeStyle],
   );
 
+  const containerStyle =
+    variant === "inline"
+      ? stylesheet.inlineWorkingIndicatorFrame
+      : stylesheet.workingIndicatorBubble;
+
   return (
-    <View style={stylesheet.workingIndicatorBubble}>
+    <View style={containerStyle}>
       <View style={stylesheet.workingDotsRow}>
         <Animated.View style={dotOneCombinedStyle} />
         <Animated.View style={dotTwoCombinedStyle} />
         <Animated.View style={dotThreeCombinedStyle} />
       </View>
+    </View>
+  );
+}
+
+function InlineWorkingIndicatorSlot() {
+  return (
+    <View style={stylesheet.inlineTurnFooter} testID="turn-working-indicator">
+      <WorkingIndicator variant="inline" />
     </View>
   );
 }
@@ -1147,6 +1222,7 @@ function PermissionRequestCard({
         description={description}
         text={planMarkdown}
         footer={footer}
+        testID="permission-plan-card"
         disableOuterSpacing
       />
     );
@@ -1159,7 +1235,12 @@ function PermissionRequestCard({
       {description ? <Text style={permissionStyles.description}>{description}</Text> : null}
 
       {planMarkdown ? (
-        <PlanCard title="Proposed plan" text={planMarkdown} disableOuterSpacing />
+        <PlanCard
+          title="Proposed plan"
+          text={planMarkdown}
+          testID="permission-plan-card"
+          disableOuterSpacing
+        />
       ) : null}
 
       {!isPlanRequest ? (
@@ -1223,6 +1304,17 @@ const stylesheet = StyleSheet.create((theme) => ({
     paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[2],
     gap: theme.spacing[2],
+  },
+  inlineTurnFooter: {
+    alignSelf: "flex-start",
+    marginTop: theme.spacing[2],
+    padding: theme.spacing[2],
+    paddingTop: 0,
+  },
+  inlineWorkingIndicatorFrame: {
+    height: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
   workingIndicatorBubble: {
     flexDirection: "row",

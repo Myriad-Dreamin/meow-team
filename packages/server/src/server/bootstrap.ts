@@ -88,7 +88,8 @@ function formatListenTarget(listenTarget: ListenTarget | null): string | null {
 
 import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { createGitHubService } from "../services/github-service.js";
-import { createPaseoWorktree } from "./paseo-worktree-service.js";
+import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
+import { createPaseoWorktreeWorkflow } from "./worktree-session.js";
 import { createWorktreeCoreDeps } from "./worktree-core.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import type { OpenAiSpeechProviderConfig } from "./speech/providers/openai/config.js";
@@ -114,7 +115,8 @@ import { DaemonConfigStore } from "./daemon-config-store.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { archivePersistedWorkspaceRecord } from "./workspace-archive-service.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
-import { createTerminalManager, type TerminalManager } from "../terminal/terminal-manager.js";
+import type { TerminalManager } from "../terminal/terminal-manager.js";
+import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
 import { createConnectionOfferV2, encodeOfferToFragmentUrl } from "./connection-offer.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { startRelayTransport, type RelayTransportController } from "./relay-transport.js";
@@ -134,6 +136,7 @@ import { ScriptHealthMonitor } from "./script-health-monitor.js";
 import { createScriptStatusEmitter } from "./script-status-projection.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import { isHostnameAllowed, type HostnamesConfig } from "./hostnames.js";
+import { createRequireBearerMiddleware, type DaemonAuthConfig } from "./auth.js";
 
 type AgentMcpTransportMap = Map<string, StreamableHTTPServerTransport>;
 
@@ -189,6 +192,7 @@ export interface PaseoDaemonConfig {
   relayEndpoint?: string;
   relayPublicEndpoint?: string;
   appBaseUrl?: string;
+  auth?: DaemonAuthConfig;
   openai?: PaseoOpenAIConfig;
   speech?: PaseoSpeechConfig;
   voiceLlmProvider?: AgentProvider | null;
@@ -293,12 +297,6 @@ export async function createPaseoDaemon(
     });
   }
 
-  // Script proxy — intercepts requests for registered *.localhost hostnames
-  // and forwards them to the corresponding local script port. Placed after
-  // the host allowlist (*.localhost is already allowed) but before CORS and
-  // the rest of the routes so proxied requests skip unnecessary middleware.
-  app.use(createScriptProxyMiddleware({ routeStore: scriptRouteStore, logger }));
-
   // CORS - allow same-origin + configured origins
   const allowedOrigins = new Set([
     ...config.corsAllowedOrigins,
@@ -328,6 +326,17 @@ export async function createPaseoDaemon(
     }
     next();
   });
+
+  app.use(
+    createRequireBearerMiddleware(config.auth, (context) => {
+      logger.warn(context, "Rejected HTTP request with invalid daemon password");
+    }),
+  );
+
+  // Script proxy — intercepts requests for registered *.localhost hostnames
+  // and forwards them to the corresponding local script port. Placed after
+  // host/CORS/auth checks but before the rest of the routes.
+  app.use(createScriptProxyMiddleware({ routeStore: scriptRouteStore, logger }));
 
   // Serve static files from public directory
   app.use("/public", express.static(staticDir));
@@ -426,7 +435,7 @@ export async function createPaseoDaemon(
     paseoHome: config.paseoHome,
     logger,
   });
-  const terminalManager = createTerminalManager();
+  const terminalManager = createConfiguredTerminalManager();
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
@@ -519,11 +528,26 @@ export async function createPaseoDaemon(
         projectRegistry,
       });
     };
-    const emitWorkspaceUpdatesForMcpArchive = async (cwds: Iterable<string>) => {
-      const cwdList = Array.from(cwds);
+    const markWorkspaceArchivingForMcpArchive = (
+      workspaceIds: Iterable<string>,
+      archivingAt: string,
+    ) => {
+      const workspaceIdList = Array.from(workspaceIds);
+      for (const session of wsServer?.listActiveSessions() ?? []) {
+        session.markWorkspaceArchivingForExternalMutation(workspaceIdList, archivingAt);
+      }
+    };
+    const clearWorkspaceArchivingForMcpArchive = (workspaceIds: Iterable<string>) => {
+      const workspaceIdList = Array.from(workspaceIds);
+      for (const session of wsServer?.listActiveSessions() ?? []) {
+        session.clearWorkspaceArchivingForExternalMutation(workspaceIdList);
+      }
+    };
+    const emitWorkspaceUpdatesForMcpArchive = async (workspaceIds: Iterable<string>) => {
+      const workspaceIdList = Array.from(workspaceIds);
       await Promise.all(
         (wsServer?.listActiveSessions() ?? []).map((session) =>
-          session.emitWorkspaceUpdatesForExternalCwds(cwdList),
+          session.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIdList),
         ),
       );
     };
@@ -542,27 +566,59 @@ export async function createPaseoDaemon(
         github,
         workspaceGitService,
         archiveWorkspaceRecord: archiveWorkspaceRecordForMcp,
-        emitWorkspaceUpdatesForCwds: emitWorkspaceUpdatesForMcpArchive,
+        emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesForMcpArchive,
+        markWorkspaceArchiving: markWorkspaceArchivingForMcpArchive,
+        clearWorkspaceArchiving: clearWorkspaceArchivingForMcpArchive,
         emitSessionMessage: emitMcpArchiveSessionMessage,
         createPaseoWorktree: async (input, serviceOptions) => {
-          const coreDeps = createWorktreeCoreDeps(github);
-          const result = await createPaseoWorktree(input, {
-            ...coreDeps,
-            ...(serviceOptions?.resolveDefaultBranch
-              ? {
-                  resolveDefaultBranch: serviceOptions.resolveDefaultBranch,
-                }
-              : {}),
-            projectRegistry,
-            workspaceRegistry,
-            workspaceGitService,
-          });
-          await Promise.all(
-            wsServer
-              ?.listActiveSessions()
-              .map((session) => session.warmWorkspaceGitDataForWorkspace(result.workspace)) ?? [],
+          return createPaseoWorktreeWorkflow(
+            {
+              paseoHome: config.paseoHome,
+              createPaseoWorktree: async (workflowInput, workflowOptions) => {
+                const coreDeps = createWorktreeCoreDeps(github);
+                return createRegisteredPaseoWorktree(workflowInput, {
+                  ...coreDeps,
+                  ...(workflowOptions?.resolveDefaultBranch
+                    ? {
+                        resolveDefaultBranch: workflowOptions.resolveDefaultBranch,
+                      }
+                    : {}),
+                  projectRegistry,
+                  workspaceRegistry,
+                  workspaceGitService,
+                });
+              },
+              warmWorkspaceGitData: async (workspace) => {
+                await Promise.all(
+                  wsServer
+                    ?.listActiveSessions()
+                    .map((session) => session.warmWorkspaceGitDataForWorkspace(workspace)) ?? [],
+                );
+              },
+              emitWorkspaceUpdateForCwd: async (cwd, emitOptions) => {
+                await Promise.all(
+                  wsServer
+                    ?.listActiveSessions()
+                    .map((session) => session.emitWorkspaceUpdatesForExternalCwds([cwd])) ?? [],
+                );
+                void emitOptions;
+              },
+              cacheWorkspaceSetupSnapshot: () => {},
+              emit: emitMcpArchiveSessionMessage,
+              sessionLogger: logger,
+              terminalManager,
+              archiveWorkspaceRecord: archiveWorkspaceRecordForMcp,
+              scriptRouteStore,
+              scriptRuntimeStore,
+              getDaemonTcpPort: () =>
+                boundListenTarget?.type === "tcp" ? boundListenTarget.port : null,
+              getDaemonTcpHost: () =>
+                boundListenTarget?.type === "tcp" ? boundListenTarget.host : null,
+              onScriptsChanged: null,
+            },
+            input,
+            serviceOptions,
           );
-          return result;
         },
         paseoHome: config.paseoHome,
         callerAgentId,
@@ -723,15 +779,23 @@ export async function createPaseoDaemon(
               {
                 host: boundListenTarget.host,
                 port: boundListenTarget.port,
+                authRequired: !!config.auth?.password,
                 elapsed: elapsed(),
               },
               `Server listening on http://${boundListenTarget.host}:${boundListenTarget.port}`,
             );
           } else {
             logger.info(
-              { path: boundListenTarget.path, elapsed: elapsed() },
+              {
+                path: boundListenTarget.path,
+                authRequired: !!config.auth?.password,
+                elapsed: elapsed(),
+              },
               `Server listening on ${boundListenTarget.path}`,
             );
+          }
+          if (config.auth?.password) {
+            logger.info("Daemon password authentication enabled");
           }
 
           wsServer = new VoiceAssistantWebSocketServer(
@@ -745,6 +809,7 @@ export async function createPaseoDaemon(
             daemonConfigStore,
             mcpBaseUrl,
             { allowedOrigins, hostnames: configuredHostnames },
+            config.auth,
             speechService,
             terminalManager,
             {
@@ -850,6 +915,14 @@ export async function createPaseoDaemon(
     if (wsServer) {
       await wsServer.close();
     }
+    // Force-drop remaining sockets so httpServer.close() resolves promptly.
+    // We've already closed wsServer (which sent ws-layer close frames) and
+    // stopped every other service, so anything still attached is a TCP
+    // socket whose higher-level shutdown hasn't fully released it (e.g.
+    // upgraded WS sockets in the closing handshake, or HTTP keep-alive
+    // sockets in CLOSE_WAIT). closeIdleConnections() does not catch
+    // upgraded sockets, so we use closeAllConnections() here.
+    httpServer.closeAllConnections();
     await new Promise<void>((resolve) => {
       httpServer.close(() => resolve());
     });
