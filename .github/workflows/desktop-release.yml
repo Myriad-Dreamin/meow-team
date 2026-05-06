@@ -171,7 +171,7 @@ jobs:
             build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
           fi
 
-          pnpm --filter "$DESKTOP_WORKSPACE" run build -- --publish "$publish_mode" --mac --${{ matrix.electron_arch }} "${publish_args[@]}"
+          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
 
       - name: Upload manifest artifact
         if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
@@ -192,8 +192,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
+            .github/actions/setup-pnpm
             package.json
-            package-lock.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
             scripts
           ref: ${{ env.CHECKOUT_REF }}
 
@@ -202,16 +204,14 @@ jobs:
         run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: ./.github/actions/setup-pnpm
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
 
       - name: Install JS dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -307,7 +307,7 @@ jobs:
             build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
           fi
 
-          pnpm --filter "$DESKTOP_WORKSPACE" run build -- --publish "$publish_mode" --linux --x64 "${publish_args[@]}"
+          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
 
   publish-windows:
     needs: [create-release]
@@ -363,7 +363,7 @@ jobs:
         run: |
           $patchPath = (Get-Item "$env:GITHUB_WORKSPACE/scripts/metro-config-windows-loader-patch.cjs").FullName
           $env:NODE_OPTIONS = "--require=$patchPath"
-          npx expo export --platform web
+          pnpm exec expo export --platform web
         working-directory: packages/app
 
       - name: Build desktop release
@@ -383,4 +383,4 @@ jobs:
             build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
           fi
 
-          pnpm --filter "$DESKTOP_WORKSPACE" run build -- --publish "$publish_mode" --win --x64 "${publish_args[@]}"
+          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
