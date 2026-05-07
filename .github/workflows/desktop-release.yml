@@ -145,12 +145,6 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-<<<<<<< HEAD
-      - name: Build web app for desktop
-        run: pnpm --filter @getpaseo/app run build:web
-
-=======
->>>>>>> v0.1.65
       - name: Build desktop release
         shell: bash
         env:
@@ -167,11 +161,8 @@ jobs:
           build_args=(-- --publish never --mac --${{ matrix.electron_arch }})
           build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
           build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
-          npm run build:desktop "${build_args[@]}"
+          pnpm run build:desktop "${build_args[@]}"
 
-<<<<<<< HEAD
-          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
-=======
       - name: Upload desktop artifacts to release
         if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
         env:
@@ -189,7 +180,6 @@ jobs:
             exit 1
           fi
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
->>>>>>> v0.1.65
 
       - name: Upload manifest artifact
         if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
@@ -198,67 +188,6 @@ jobs:
           name: mac-manifest-${{ matrix.electron_arch }}
           path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/${{ env.RELEASE_CHANNEL }}-mac.yml
           retention-days: 1
-
-<<<<<<< HEAD
-  finalize-mac-manifest:
-    needs: [publish-macos]
-    if: ${{ needs.publish-macos.result == 'success' && (github.event_name != 'workflow_dispatch' || github.event.inputs.publish != 'false') }}
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            .github/actions/setup-pnpm
-            package.json
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            scripts
-          ref: ${{ env.CHECKOUT_REF }}
-
-      - name: Resolve release tag
-        shell: bash
-        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
-
-      - name: Setup Node
-        uses: ./.github/actions/setup-pnpm
-        with:
-          node-version: "22"
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@boudra"
-
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download manifest artifacts
-        if: env.IS_SMOKE_TAG != 'true'
-        uses: actions/download-artifact@v4
-        with:
-          pattern: mac-manifest-*
-
-      - name: Merge manifests
-        if: env.IS_SMOKE_TAG != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          manifest_name="${RELEASE_CHANNEL}-mac.yml"
-          node scripts/merge-mac-manifest.mjs \
-            "mac-manifest-arm64/${manifest_name}" \
-            "mac-manifest-x64/${manifest_name}" \
-            "${manifest_name}"
-
-      - name: Upload merged manifest to release
-        if: env.IS_SMOKE_TAG != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" "$RELEASE_CHANNEL-mac.yml" --clobber --repo "${{ github.repository }}"
-
-=======
->>>>>>> v0.1.65
   publish-linux:
     needs: [create-release]
     if: ${{ always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') && ((github.event_name == 'workflow_dispatch' && (github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux')) || (github.event_name == 'push' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'desktop-v') || startsWith(github.ref_name, 'desktop-linux-v')))) }}
@@ -305,12 +234,6 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-<<<<<<< HEAD
-      - name: Build web app for desktop
-        run: pnpm --filter @getpaseo/app run build:web
-
-=======
->>>>>>> v0.1.65
       - name: Install Linux smoke display
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
@@ -325,11 +248,8 @@ jobs:
           build_args=(-- --publish never --linux --x64)
           build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
           build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
-          npm run build:desktop "${build_args[@]}"
+          pnpm run build:desktop "${build_args[@]}"
 
-<<<<<<< HEAD
-          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
-=======
       - name: Upload desktop artifacts to release
         if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
         env:
@@ -355,7 +275,6 @@ jobs:
           name: linux-manifest
           path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/${{ env.RELEASE_CHANNEL }}-linux.yml
           retention-days: 1
->>>>>>> v0.1.65
 
   publish-windows:
     needs: [create-release]
@@ -403,20 +322,6 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-<<<<<<< HEAD
-      - name: Build workspace dependencies
-        run: pnpm --filter @getpaseo/app run build:workspace-deps
-
-      - name: Build web app for desktop
-        shell: pwsh
-        run: |
-          $patchPath = (Get-Item "$env:GITHUB_WORKSPACE/scripts/metro-config-windows-loader-patch.cjs").FullName
-          $env:NODE_OPTIONS = "--require=$patchPath"
-          pnpm exec expo export --platform web
-        working-directory: packages/app
-
-=======
->>>>>>> v0.1.65
       - name: Build desktop release
         shell: bash
         env:
@@ -428,11 +333,8 @@ jobs:
           build_args=(-- --publish never --win --x64 --arm64)
           build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
           build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
-          npm run build:desktop "${build_args[@]}"
+          pnpm run build:desktop "${build_args[@]}"
 
-<<<<<<< HEAD
-          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
-=======
       - name: Upload desktop artifacts to release
         if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
         env:
@@ -473,8 +375,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
+            .github/actions/setup-pnpm
             package.json
-            package-lock.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
             scripts
           ref: ${{ env.CHECKOUT_REF }}
 
@@ -483,16 +387,14 @@ jobs:
         run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: ./.github/actions/setup-pnpm
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
 
       - name: Install JS dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -574,4 +476,3 @@ jobs:
             }
           ' "${files[@]}"
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
->>>>>>> v0.1.65

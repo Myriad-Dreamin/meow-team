@@ -29,12 +29,7 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
         with:
-<<<<<<< HEAD
-          node-version: "20"
-=======
           node-version: "22"
-          cache: "npm"
->>>>>>> v0.1.65
 
       - name: Fetch origin/main (worktree tests)
         run: git fetch --no-tags origin main:refs/remotes/origin/main
