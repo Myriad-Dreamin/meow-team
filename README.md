@@ -210,5 +210,62 @@ For the current `MeowFlow` workflow and usage guidance, see [issue #93](https://
 
 `MeowFlow` builds on [Paseo][paseo] and [OpenSpec][openspec]. Paseo provides the agent runtime and orchestration surface, while OpenSpec provides the roadmap, spec, and task-oriented structure that this workflow relies on.
 
+```bash
+# Use handoff when you discuss something with an agent but want another one to implement.
+# I use this to plan with Claude and then handoff to Codex to implement.
+/paseo-handoff hand off the authentication fix to codex 5.4 in a worktree
+
+# Use loops when you have clear acceptance criteria (aka Ralph loops).
+/paseo-loop loop a codex agent to fix the backend tests, use sonnet to verify, max 10 iterations
+
+# Orchestrator teaches the agent how to create teams and manage them via a chat room.
+# Very opinionated and expects both Codex and Claude to work.
+/paseo-orchestrate spin up a team to implement the database refactor, use chat to coordinate. use claude to plan and codex to implement and review
+```
+
+## Development
+
+Quick monorepo package map:
+
+- `packages/server`: Paseo daemon (agent process orchestration, WebSocket API, MCP server)
+- `packages/app`: Expo client (iOS, Android, web)
+- `packages/cli`: `paseo` CLI for daemon and agent workflows
+- `packages/desktop`: Electron desktop app
+- `packages/relay`: Relay package for remote connectivity
+- `packages/website`: Marketing site and documentation (`paseo.sh`)
+
+Common commands:
+
+```bash
+# run all local dev services
+npm run dev
+
+# run individual surfaces
+npm run dev:server
+npm run dev:app
+npm run dev:desktop
+npm run dev:website
+
+# build the daemon
+npm run build:daemon
+
+# repo-wide checks
+npm run typecheck
+```
+
+<p align="center">
+  <a href="https://star-history.com/#getpaseo/paseo&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=getpaseo/paseo&type=Date&theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=getpaseo/paseo&type=Date">
+      <img src="https://api.star-history.com/svg?repos=getpaseo/paseo&type=Date" alt="Star history chart for getpaseo/paseo" width="600" style="max-width: 100%;">
+    </picture>
+  </a>
+</p>
+
+## License
+
+AGPL-3.0
+
 [paseo]: https://paseo.sh
 [openspec]: https://openspec.dev

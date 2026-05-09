@@ -1,6 +1,6 @@
 {
   "name": "@getpaseo/website",
-  "version": "0.1.64",
+  "version": "0.1.65",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,6 +20,9 @@
     "react": "^19.1.4",
     "react-dom": "^19.1.4",
     "react-markdown": "^10.1.0",
+    "rehype-autolink-headings": "^7.1.0",
+    "rehype-slug": "^6.0.0",
+    "unified": "^11.0.5",
     "wrangler": "^4.59.1"
   },
   "devDependencies": {

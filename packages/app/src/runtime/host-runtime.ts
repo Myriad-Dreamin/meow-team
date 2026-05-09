@@ -9,18 +9,24 @@ import {
 } from "@server/client/daemon-client";
 import {
   connectionFromListen,
+  hostHasConnection,
   normalizeStoredHostProfile,
   upsertHostConnectionInProfiles,
   registryHasConnection,
   type HostConnection,
   type HostProfile,
 } from "@/types/host-connection";
-import { decodeOfferFragmentPayload, normalizeHostPort } from "@/utils/daemon-endpoints";
+import {
+  buildDaemonWebSocketUrl,
+  buildRelayWebSocketUrl,
+  decodeOfferFragmentPayload,
+  normalizeHostPort,
+  shouldUseTlsForDefaultHostedRelay,
+} from "@/utils/daemon-endpoints";
 import { resolveAppVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@server/shared/connection-offer";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
-import { buildDaemonWebSocketUrl, buildRelayWebSocketUrl } from "@/utils/daemon-endpoints";
 import { getOrCreateClientId } from "@/utils/client-id";
 import {
   selectBestConnection,
@@ -462,13 +468,17 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
       if (connection.type === "directTcp") {
         return new DaemonClient({
           ...base,
-          url: buildDaemonWebSocketUrl(connection.endpoint),
+          url: buildDaemonWebSocketUrl(connection.endpoint, {
+            useTls: connection.useTls ?? false,
+          }),
+          ...(connection.password ? { password: connection.password } : {}),
         });
       }
       return new DaemonClient({
         ...base,
         url: buildRelayWebSocketUrl({
           endpoint: connection.relayEndpoint,
+          useTls: shouldUseTlsForDefaultHostedRelay(connection.relayEndpoint),
           serverId: host.serverId,
         }),
         e2ee: {
@@ -486,6 +496,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
 export class HostRuntimeController {
   private host: HostProfile;
   private deps: HostRuntimeControllerDeps;
+  private onReconcileServerId: ((oldId: string, newId: string) => void) | null;
   private connectionMachineState: HostRuntimeConnectionMachineState;
   private snapshot: HostRuntimeSnapshot;
   private listeners = new Set<() => void>();
@@ -503,9 +514,14 @@ export class HostRuntimeController {
   private probeRequestVersion = 0;
   private probeCycleInFlight: Promise<void> | null = null;
 
-  constructor(input: { host: HostProfile; deps?: HostRuntimeControllerDeps }) {
+  constructor(input: {
+    host: HostProfile;
+    deps?: HostRuntimeControllerDeps;
+    onReconcileServerId?: (oldId: string, newId: string) => void;
+  }) {
     this.host = input.host;
     this.deps = input.deps ?? createDefaultDeps();
+    this.onReconcileServerId = input.onReconcileServerId ?? null;
     this.connectionMachineState = {
       tag: "booting",
     };
@@ -846,10 +862,14 @@ export class HostRuntimeController {
                 connection,
               });
               if (serverId !== this.host.serverId) {
-                await client.close().catch(() => undefined);
-                throw new Error(
-                  `Connection resolved to ${serverId}, expected ${this.host.serverId}.`,
-                );
+                if (isPlaceholderServerId(this.host.serverId) && this.onReconcileServerId) {
+                  this.onReconcileServerId(this.host.serverId, serverId);
+                } else {
+                  await client.close().catch(() => undefined);
+                  throw new Error(
+                    `Connection resolved to ${serverId}, expected ${this.host.serverId}.`,
+                  );
+                }
               }
               connectedClient = client;
               shouldCloseClient = true;
@@ -894,7 +914,7 @@ export class HostRuntimeController {
   private updateSnapshot(patch: HostRuntimeSnapshotPatch): void {
     const preservedPatch: HostRuntimeSnapshotPatch = { ...patch };
     let hasChanged = this.host.serverId !== this.snapshot.serverId;
-    for (const key of Object.keys(patch) as Array<keyof HostRuntimeSnapshotPatch>) {
+    for (const key of Object.keys(patch) as (keyof HostRuntimeSnapshotPatch)[]) {
       const incomingValue = patch[key];
       if (equal(this.snapshot[key], incomingValue)) {
         setSnapshotPatchField(preservedPatch, key, this.snapshot[key]);
@@ -1132,6 +1152,14 @@ export class HostRuntimeController {
     }
   }
 
+  adoptReconciledServerId(newServerId: string): void {
+    this.host = { ...this.host, serverId: newServerId };
+    this.snapshot = { ...this.snapshot, serverId: newServerId };
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+
   private resolveClientId(): Promise<string> {
     if (!this.clientIdPromise) {
       this.clientIdPromise = this.deps.getClientId().then((value) => {
@@ -1144,9 +1172,31 @@ export class HostRuntimeController {
 }
 
 const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
-const DEFAULT_LOCALHOST_ENDPOINT = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim() || "localhost:6767";
+const LOCALHOST_FALLBACK_ENDPOINT = "localhost:6767";
 const DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS = 2500;
 const E2E_STORAGE_KEY = "@paseo:e2e";
+
+function readConfiguredLocalDaemonOverride(): string | null {
+  const value = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+function placeholderServerIdForEndpoint(endpoint: string): string {
+  return `local:${normalizeHostPort(endpoint)}`;
+}
+
+function isPlaceholderServerId(serverId: string): boolean {
+  return serverId.startsWith("local:");
+}
+
+function rekeyMap<V>(map: Map<string, V>, oldKey: string, newKey: string): void {
+  const value = map.get(oldKey);
+  if (value === undefined) {
+    return;
+  }
+  map.delete(oldKey);
+  map.set(newKey, value);
+}
 
 export class HostRuntimeStore {
   private controllers = new Map<string, HostRuntimeController>();
@@ -1193,6 +1243,11 @@ export class HostRuntimeStore {
   private async runBoot(): Promise<void> {
     await this.loadFromStorage();
 
+    const override = readConfiguredLocalDaemonOverride();
+    if (override) {
+      this.prunePlaceholderHostsForOtherEndpoints(override);
+    }
+
     let isE2E: string | null = null;
     try {
       isE2E = await AsyncStorage.getItem(E2E_STORAGE_KEY);
@@ -1203,8 +1258,14 @@ export class HostRuntimeStore {
       return;
     }
 
-    if (!shouldUseDesktopDaemon()) {
-      await this.bootstrapLocalhost();
+    if (shouldUseDesktopDaemon()) {
+      return;
+    }
+
+    if (override) {
+      this.bootstrapConfiguredOverride(override);
+    } else {
+      await this.bootstrapDefaultLocalhost();
     }
   }
 
@@ -1229,39 +1290,115 @@ export class HostRuntimeStore {
     }
   }
 
-  private async bootstrapLocalhost(): Promise<void> {
-    try {
-      const connection = connectionFromListen(DEFAULT_LOCALHOST_ENDPOINT);
-      if (!connection || registryHasConnection(this.hosts, connection)) {
-        return;
-      }
-
-      try {
-        const { client, serverId, hostname } = await connectToDaemon(connection, {
-          timeoutMs: DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS,
-        });
-
-        await this.upsertHostConnection({
-          serverId,
-          label: hostname ?? undefined,
-          connection,
-          existingClient: client,
-        });
-      } catch {
-        // Best-effort bootstrap only
-      }
-    } catch (error) {
-      console.warn("[HostRuntime] Failed to bootstrap host connections", error);
+  private async bootstrapDefaultLocalhost(): Promise<void> {
+    const connection = connectionFromListen(LOCALHOST_FALLBACK_ENDPOINT);
+    if (!connection || registryHasConnection(this.hosts, connection)) {
+      return;
     }
+
+    try {
+      const { client, serverId, hostname } = await connectToDaemon(connection, {
+        timeoutMs: DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS,
+      });
+
+      await this.upsertHostConnection({
+        serverId,
+        label: hostname ?? undefined,
+        connection,
+        existingClient: client,
+      });
+    } catch (error) {
+      console.warn("[HostRuntime] bootstrap probe failed", {
+        endpoint: LOCALHOST_FALLBACK_ENDPOINT,
+        error,
+      });
+    }
+  }
+
+  private bootstrapConfiguredOverride(endpoint: string): void {
+    const connection = connectionFromListen(endpoint);
+    if (!connection) {
+      return;
+    }
+    const placeholderId = placeholderServerIdForEndpoint(endpoint);
+    const staleHosts = this.hosts.filter(
+      (host) => host.serverId !== placeholderId && hostHasConnection(host, connection),
+    );
+    for (const staleHost of staleHosts) {
+      void this.removeConnection(staleHost.serverId, connection.id);
+    }
+    if (registryHasConnection(this.hosts, connection)) {
+      return;
+    }
+    void this.upsertHostConnection({
+      serverId: placeholderId,
+      connection,
+    });
+  }
+
+  private prunePlaceholderHostsForOtherEndpoints(currentEndpoint: string): void {
+    const expectedServerId = placeholderServerIdForEndpoint(currentEndpoint);
+    const remaining = this.hosts.filter((host) => {
+      if (!isPlaceholderServerId(host.serverId)) {
+        return true;
+      }
+      return host.serverId === expectedServerId;
+    });
+    if (remaining.length === this.hosts.length) {
+      return;
+    }
+    this.setHostsAndSync(remaining);
+    void this.persistHosts();
+  }
+
+  reconcileServerId(oldServerId: string, newServerId: string): void {
+    if (oldServerId === newServerId) {
+      return;
+    }
+    const controller = this.controllers.get(oldServerId);
+    if (!controller) {
+      return;
+    }
+    if (this.controllers.has(newServerId)) {
+      return;
+    }
+
+    rekeyMap(this.controllers, oldServerId, newServerId);
+    controller.adoptReconciledServerId(newServerId);
+
+    rekeyMap(this.lastConnectionStatusByServer, oldServerId, newServerId);
+    rekeyMap(this.agentDirectoryBootstrapInFlight, oldServerId, newServerId);
+
+    const listeners = this.serverListeners.get(oldServerId);
+    if (listeners) {
+      this.serverListeners.delete(oldServerId);
+      const merged = this.serverListeners.get(newServerId) ?? new Set<() => void>();
+      for (const listener of listeners) {
+        merged.add(listener);
+      }
+      this.serverListeners.set(newServerId, merged);
+    }
+
+    this.hosts = this.hosts.map((host) =>
+      host.serverId === oldServerId
+        ? { ...host, serverId: newServerId, updatedAt: new Date().toISOString() }
+        : host,
+    );
+    this.emitHostList();
+    this.emit(newServerId);
+    void this.persistHosts();
   }
 
   async upsertDirectConnection(input: {
     serverId: string;
     endpoint: string;
+    useTls?: boolean;
+    password?: string;
     label?: string;
     existingClient?: DaemonClient;
   }): Promise<HostProfile> {
     const endpoint = normalizeHostPort(input.endpoint);
+    const password = input.password?.trim();
     return this.upsertHostConnection({
       serverId: input.serverId,
       label: input.label,
@@ -1269,6 +1406,8 @@ export class HostRuntimeStore {
         id: `direct:${endpoint}`,
         type: "directTcp",
         endpoint,
+        useTls: input.useTls ?? false,
+        ...(password ? { password } : {}),
       },
       existingClient: input.existingClient,
     });
@@ -1480,6 +1619,7 @@ export class HostRuntimeStore {
       const controller = new HostRuntimeController({
         host,
         deps: this.deps,
+        onReconcileServerId: (oldId, newId) => this.reconcileServerId(oldId, newId),
       });
       this.controllers.set(host.serverId, controller);
       this.lastConnectionStatusByServer.set(
@@ -1838,6 +1978,8 @@ export interface HostMutations {
   upsertDirectConnection: (input: {
     serverId: string;
     endpoint: string;
+    useTls?: boolean;
+    password?: string;
     label?: string;
   }) => Promise<HostProfile>;
   upsertRelayConnection: (input: {

@@ -52,7 +52,6 @@ env:
   CHECKOUT_REF: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.checkout_ref || github.ref_name) || github.ref_name }}
   SHOULD_PUBLISH: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.publish != 'false' }}
   ROLLOUT_HOURS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.rollout_hours || '24' }}
-  DESKTOP_WORKSPACE: "@getpaseo/desktop"
   DESKTOP_PACKAGE_PATH: "packages/desktop"
 
 jobs:
@@ -146,9 +145,6 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-      - name: Build web app for desktop
-        run: pnpm --filter @getpaseo/app run build:web
-
       - name: Build desktop release
         shell: bash
         env:
@@ -162,16 +158,28 @@ jobs:
           PASEO_DESKTOP_SMOKE: "1"
         run: |
           set -euo pipefail
-          publish_mode="never"
-          build_args=(-- --publish "$publish_mode" --mac --${{ matrix.electron_arch }})
-          if [[ "$SHOULD_PUBLISH" == "true" && "$IS_SMOKE_TAG" != "true" ]]; then
-            publish_mode="always"
-            build_args=(-- --publish "$publish_mode" --mac --${{ matrix.electron_arch }})
-            build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
-            build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
-          fi
+          build_args=(-- --publish never --mac --${{ matrix.electron_arch }})
+          build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
+          build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          pnpm run build:desktop "${build_args[@]}"
 
-          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
+      - name: Upload desktop artifacts to release
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="${DESKTOP_PACKAGE_PATH}/release"
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find "$release_dir" -maxdepth 1 -type f ! -name '*.yml' -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in $release_dir"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
 
       - name: Upload manifest artifact
         if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
@@ -180,64 +188,6 @@ jobs:
           name: mac-manifest-${{ matrix.electron_arch }}
           path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/${{ env.RELEASE_CHANNEL }}-mac.yml
           retention-days: 1
-
-  finalize-mac-manifest:
-    needs: [publish-macos]
-    if: ${{ needs.publish-macos.result == 'success' && (github.event_name != 'workflow_dispatch' || github.event.inputs.publish != 'false') }}
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            .github/actions/setup-pnpm
-            package.json
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            scripts
-          ref: ${{ env.CHECKOUT_REF }}
-
-      - name: Resolve release tag
-        shell: bash
-        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
-
-      - name: Setup Node
-        uses: ./.github/actions/setup-pnpm
-        with:
-          node-version: "22"
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@boudra"
-
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download manifest artifacts
-        if: env.IS_SMOKE_TAG != 'true'
-        uses: actions/download-artifact@v4
-        with:
-          pattern: mac-manifest-*
-
-      - name: Merge manifests
-        if: env.IS_SMOKE_TAG != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          manifest_name="${RELEASE_CHANNEL}-mac.yml"
-          node scripts/merge-mac-manifest.mjs \
-            "mac-manifest-arm64/${manifest_name}" \
-            "mac-manifest-x64/${manifest_name}" \
-            "${manifest_name}"
-
-      - name: Upload merged manifest to release
-        if: env.IS_SMOKE_TAG != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" "$RELEASE_CHANNEL-mac.yml" --clobber --repo "${{ github.repository }}"
-
   publish-linux:
     needs: [create-release]
     if: ${{ always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') && ((github.event_name == 'workflow_dispatch' && (github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux')) || (github.event_name == 'push' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'desktop-v') || startsWith(github.ref_name, 'desktop-linux-v')))) }}
@@ -284,9 +234,6 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-      - name: Build web app for desktop
-        run: pnpm --filter @getpaseo/app run build:web
-
       - name: Install Linux smoke display
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
@@ -298,16 +245,36 @@ jobs:
           PASEO_DESKTOP_SMOKE: "1"
         run: |
           set -euo pipefail
-          publish_mode="never"
-          build_args=(-- --publish "$publish_mode" --linux --x64)
-          if [[ "$SHOULD_PUBLISH" == "true" && "$IS_SMOKE_TAG" != "true" ]]; then
-            publish_mode="always"
-            build_args=(-- --publish "$publish_mode" --linux --x64)
-            build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
-            build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
-          fi
+          build_args=(-- --publish never --linux --x64)
+          build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
+          build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          pnpm run build:desktop "${build_args[@]}"
 
-          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
+      - name: Upload desktop artifacts to release
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="${DESKTOP_PACKAGE_PATH}/release"
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find "$release_dir" -maxdepth 1 -type f ! -name '*.yml' -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in $release_dir"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+      - name: Upload manifest artifact
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-manifest
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/${{ env.RELEASE_CHANNEL }}-linux.yml
+          retention-days: 1
 
   publish-windows:
     needs: [create-release]
@@ -355,17 +322,6 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-      - name: Build workspace dependencies
-        run: pnpm --filter @getpaseo/app run build:workspace-deps
-
-      - name: Build web app for desktop
-        shell: pwsh
-        run: |
-          $patchPath = (Get-Item "$env:GITHUB_WORKSPACE/scripts/metro-config-windows-loader-patch.cjs").FullName
-          $env:NODE_OPTIONS = "--require=$patchPath"
-          pnpm exec expo export --platform web
-        working-directory: packages/app
-
       - name: Build desktop release
         shell: bash
         env:
@@ -374,13 +330,149 @@ jobs:
           PASEO_DESKTOP_SMOKE: "1"
         run: |
           set -euo pipefail
-          publish_mode="never"
-          build_args=(-- --publish "$publish_mode" --win --x64)
-          if [[ "$SHOULD_PUBLISH" == "true" && "$IS_SMOKE_TAG" != "true" ]]; then
-            publish_mode="always"
-            build_args=(-- --publish "$publish_mode" --win --x64)
-            build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
-            build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          build_args=(-- --publish never --win --x64 --arm64)
+          build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
+          build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          pnpm run build:desktop "${build_args[@]}"
+
+      - name: Upload desktop artifacts to release
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="${DESKTOP_PACKAGE_PATH}/release"
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find "$release_dir" -maxdepth 1 -type f ! -name '*.yml' -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in $release_dir"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+      - name: Upload manifest artifact
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-manifest
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/${{ env.RELEASE_CHANNEL }}.yml
+          retention-days: 1
+
+  finalize-rollout:
+    needs: [publish-macos, publish-linux, publish-windows]
+    if: ${{ always() && (needs.publish-macos.result == 'success' || needs.publish-macos.result == 'skipped') && (needs.publish-linux.result == 'success' || needs.publish-linux.result == 'skipped') && (needs.publish-windows.result == 'success' || needs.publish-windows.result == 'skipped') && (github.event_name != 'workflow_dispatch' || github.event.inputs.publish != 'false') }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    concurrency:
+      group: desktop-rollout-${{ github.event.inputs.tag || github.ref_name }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/actions/setup-pnpm
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            scripts
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release tag
+        shell: bash
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+
+      - name: Setup Node
+        uses: ./.github/actions/setup-pnpm
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download mac manifest artifacts
+        if: env.IS_SMOKE_TAG != 'true' && needs.publish-macos.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mac-manifest-*
+          path: release-manifests
+
+      - name: Download Linux manifest artifact
+        if: env.IS_SMOKE_TAG != 'true' && needs.publish-linux.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-manifest
+          path: release-manifests/linux-manifest
+
+      - name: Download Windows manifest artifact
+        if: env.IS_SMOKE_TAG != 'true' && needs.publish-windows.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-manifest
+          path: release-manifests/windows-manifest
+
+      - name: Assemble and upload stamped manifests
+        if: env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-manifests
+          manifests_dir="$PWD/final"
+          mkdir -p "$manifests_dir"
+
+          if [[ "${{ needs.publish-macos.result }}" == "success" ]]; then
+            manifest_name="${RELEASE_CHANNEL}-mac.yml"
+            node ../scripts/merge-mac-manifest.mjs \
+              "mac-manifest-arm64/${manifest_name}" \
+              "mac-manifest-x64/${manifest_name}" \
+              "$manifests_dir/${manifest_name}"
           fi
 
-          pnpm --filter "$DESKTOP_WORKSPACE" run build "${build_args[@]}"
+          if [[ "${{ needs.publish-linux.result }}" == "success" ]]; then
+            cp "linux-manifest/${RELEASE_CHANNEL}-linux.yml" "$manifests_dir/"
+          fi
+
+          if [[ "${{ needs.publish-windows.result }}" == "success" ]]; then
+            cp "windows-manifest/${RELEASE_CHANNEL}.yml" "$manifests_dir/"
+          fi
+
+          shopt -s nullglob
+          files=( "$manifests_dir"/*.yml )
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No manifest artifacts were available to publish"
+            exit 1
+          fi
+          timestamp="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+          node ../scripts/stamp-rollout.mjs --release-date "$timestamp" --rollout-hours "$ROLLOUT_HOURS" "${files[@]}"
+          ROLLOUT_HOURS_EXPECTED="$ROLLOUT_HOURS" RELEASE_DATE_EXPECTED="$timestamp" node -e '
+            const yaml = require("js-yaml");
+            const fs = require("fs");
+            const expectedHours = Number(process.env.ROLLOUT_HOURS_EXPECTED);
+            const expectedDate = process.env.RELEASE_DATE_EXPECTED;
+            if (!Number.isFinite(expectedHours) || expectedHours < 0) {
+              throw new Error(`expected non-negative rolloutHours, got ${process.env.ROLLOUT_HOURS_EXPECTED}`);
+            }
+            for (const f of process.argv.slice(1)) {
+              const m = yaml.load(fs.readFileSync(f, "utf8")) ?? {};
+              if (m.rolloutHours !== expectedHours) {
+                throw new Error(`${f}: rolloutHours=${m.rolloutHours}, expected ${expectedHours}`);
+              }
+              if (m.releaseDate !== expectedDate) {
+                throw new Error(`${f}: releaseDate=${m.releaseDate}, expected ${expectedDate}`);
+              }
+              if (typeof m.version !== "string" || m.version.length === 0) {
+                throw new Error(`${f}: missing or invalid version`);
+              }
+            }
+          ' "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"

@@ -1,8 +1,18 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "@react-navigation/native";
 import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter, type Href } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { DiffStat } from "@/components/diff-stat";
 import {
@@ -13,6 +23,7 @@ import {
   Copy,
   Ellipsis,
   EllipsisVertical,
+  Globe,
   PanelRight,
   RotateCw,
   Settings,
@@ -67,7 +78,13 @@ import {
   normalizeWorkspaceTabTarget,
   workspaceTabTargetsEqual,
 } from "@/utils/workspace-tab-identity";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import {
+  getHostRuntimeStore,
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+  useHostRuntimeSnapshot,
+  useHosts,
+} from "@/runtime/host-runtime";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
@@ -81,6 +98,8 @@ import { upsertTerminalListEntry } from "@/utils/terminal-list";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useStableEvent } from "@/hooks/use-stable-event";
+import { createWorkspaceBrowser, useBrowserStore } from "@/stores/browser-store";
+import { getDesktopHost } from "@/desktop/host";
 import { buildProviderCommand } from "@/utils/provider-command-templates";
 import { generateDraftId } from "@/stores/draft-keys";
 import {
@@ -106,9 +125,13 @@ import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-
 import { resolveWorkspaceFileCopyPath } from "@/utils/workspace-file-copy-path";
 import {
   resolveWorkspaceHeaderRenderState,
-  shouldRenderMissingWorkspaceDescriptor,
   type WorkspaceHeaderCheckoutState,
 } from "@/screens/workspace/workspace-header-source";
+import {
+  resolveWorkspaceRouteState,
+  type WorkspaceRouteState,
+} from "@/screens/workspace/workspace-route-state";
+import { renderWorkspaceRouteGate } from "@/screens/workspace/workspace-route-state-views";
 import {
   deriveWorkspaceAgentVisibility,
   workspaceAgentVisibilityEqual,
@@ -120,6 +143,7 @@ import {
   type WorkspacePaneContentModel,
 } from "@/screens/workspace/workspace-pane-content";
 import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
+import { WorkspaceFocusProvider } from "@/workspace/focus";
 import { shouldSeedEmptyWorkspaceDraft } from "@/screens/workspace/workspace-empty-draft-seed";
 import {
   buildBulkCloseConfirmationMessage,
@@ -129,8 +153,9 @@ import {
 import { findAdjacentPane } from "@/utils/split-navigation";
 import { isAbsolutePath } from "@/utils/path";
 import { useIsCompactFormFactor, supportsDesktopPaneSplits } from "@/constants/layout";
-import { isWeb, isNative } from "@/constants/platform";
+import { getIsElectron, isNative, isWeb } from "@/constants/platform";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
+import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
 
 const TERMINALS_QUERY_STALE_TIME = 5_000;
 const WORKSPACE_SETUP_AUTO_OPEN_WINDOW_MS = 30_000;
@@ -150,6 +175,7 @@ const ThemedCopyX = withUnistyles(CopyX);
 const ThemedX = withUnistyles(X);
 const ThemedSquarePen = withUnistyles(SquarePen);
 const ThemedSquareTerminal = withUnistyles(SquareTerminal);
+const ThemedGlobe = withUnistyles(Globe);
 const ThemedSettings = withUnistyles(Settings);
 const ThemedPanelRight = withUnistyles(PanelRight);
 const ThemedSourceControlPanelIcon = withUnistyles(SourceControlPanelIcon);
@@ -161,8 +187,10 @@ const sourceControlPanelStrokeWidth15 = { strokeWidth: 1.5 };
 
 const MENU_NEW_AGENT_ICON = <ThemedSquarePen size={16} uniProps={mutedColorMapping} />;
 const MENU_NEW_TERMINAL_ICON = <ThemedSquareTerminal size={16} uniProps={mutedColorMapping} />;
+const MENU_NEW_BROWSER_ICON = <ThemedGlobe size={16} uniProps={mutedColorMapping} />;
 const MENU_COPY_ICON = <ThemedCopy size={16} uniProps={mutedColorMapping} />;
 const MENU_SETTINGS_ICON = <ThemedSettings size={16} uniProps={mutedColorMapping} />;
+const GATED_WORKSPACE_HEADER_LEFT = <SidebarMenuToggle />;
 
 interface WorkspaceScreenProps {
   serverId: string;
@@ -200,6 +228,9 @@ function getFallbackTabOptionLabel(tab: WorkspaceTabDescriptor): string {
   if (tab.target.kind === "terminal") {
     return "Terminal";
   }
+  if (tab.target.kind === "browser") {
+    return "Browser";
+  }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").findLast(Boolean) ?? tab.target.path;
   }
@@ -218,6 +249,9 @@ function getFallbackTabOptionDescription(tab: WorkspaceTabDescriptor): string {
   }
   if (tab.target.kind === "terminal") {
     return "Terminal";
+  }
+  if (tab.target.kind === "browser") {
+    return "Browser";
   }
   return tab.target.path;
 }
@@ -731,14 +765,17 @@ interface WorkspaceHeaderMenuProps {
   normalizedWorkspaceId: string;
   currentBranchName: string | null;
   showWorkspaceSetup: boolean;
+  showCreateBrowserTab: boolean;
   isMobile: boolean;
   createTerminalDisabled: boolean;
   menuNewAgentIcon: ReactElement;
   menuNewTerminalIcon: ReactElement;
+  menuNewBrowserIcon: ReactElement;
   menuCopyIcon: ReactElement;
   menuSettingsIcon: ReactElement;
   onCreateDraftTab: () => void;
   onCreateTerminal: () => void;
+  onCreateBrowser: () => void;
   onCopyWorkspacePath: () => void;
   onCopyBranchName: () => void;
   onOpenSetupTab: () => void;
@@ -762,14 +799,17 @@ function WorkspaceHeaderMenu({
   normalizedWorkspaceId,
   currentBranchName,
   showWorkspaceSetup,
+  showCreateBrowserTab,
   isMobile,
   createTerminalDisabled,
   menuNewAgentIcon,
   menuNewTerminalIcon,
+  menuNewBrowserIcon,
   menuCopyIcon,
   menuSettingsIcon,
   onCreateDraftTab,
   onCreateTerminal,
+  onCreateBrowser,
   onCopyWorkspacePath,
   onCopyBranchName,
   onOpenSetupTab,
@@ -807,6 +847,15 @@ function WorkspaceHeaderMenu({
         >
           New terminal
         </DropdownMenuItem>
+        {showCreateBrowserTab ? (
+          <DropdownMenuItem
+            testID="workspace-header-new-browser"
+            leading={menuNewBrowserIcon}
+            onSelect={onCreateBrowser}
+          >
+            New browser tab
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem
           testID="workspace-header-copy-path"
           leading={menuCopyIcon}
@@ -851,14 +900,17 @@ interface WorkspaceHeaderTitleBarProps {
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   showWorkspaceSetup: boolean;
+  showCreateBrowserTab: boolean;
   isMobile: boolean;
   createTerminalDisabled: boolean;
   menuNewAgentIcon: ReactElement;
   menuNewTerminalIcon: ReactElement;
+  menuNewBrowserIcon: ReactElement;
   menuCopyIcon: ReactElement;
   menuSettingsIcon: ReactElement;
   onCreateDraftTab: () => void;
   onCreateTerminal: () => void;
+  onCreateBrowser: () => void;
   onCopyWorkspacePath: () => void;
   onCopyBranchName: () => void;
   onOpenSetupTab: () => void;
@@ -874,14 +926,17 @@ function WorkspaceHeaderTitleBar({
   normalizedServerId,
   normalizedWorkspaceId,
   showWorkspaceSetup,
+  showCreateBrowserTab,
   isMobile,
   createTerminalDisabled,
   menuNewAgentIcon,
   menuNewTerminalIcon,
+  menuNewBrowserIcon,
   menuCopyIcon,
   menuSettingsIcon,
   onCreateDraftTab,
   onCreateTerminal,
+  onCreateBrowser,
   onCopyWorkspacePath,
   onCopyBranchName,
   onOpenSetupTab,
@@ -916,14 +971,17 @@ function WorkspaceHeaderTitleBar({
         normalizedWorkspaceId={normalizedWorkspaceId}
         currentBranchName={currentBranchName}
         showWorkspaceSetup={showWorkspaceSetup}
+        showCreateBrowserTab={showCreateBrowserTab}
         isMobile={isMobile}
         createTerminalDisabled={createTerminalDisabled}
         menuNewAgentIcon={menuNewAgentIcon}
         menuNewTerminalIcon={menuNewTerminalIcon}
+        menuNewBrowserIcon={menuNewBrowserIcon}
         menuCopyIcon={menuCopyIcon}
         menuSettingsIcon={menuSettingsIcon}
         onCreateDraftTab={onCreateDraftTab}
         onCreateTerminal={onCreateTerminal}
+        onCreateBrowser={onCreateBrowser}
         onCopyWorkspacePath={onCopyWorkspacePath}
         onCopyBranchName={onCopyBranchName}
         onOpenSetupTab={onOpenSetupTab}
@@ -945,7 +1003,6 @@ function parsePaneDirection(actionId: string): PaneDirection | null {
 }
 
 interface RenderWorkspaceContentInput {
-  showMissingWorkspaceDescriptor: boolean;
   isMissingWorkspaceExecutionAuthority: boolean;
   activeTabDescriptor: WorkspaceTabDescriptor | null;
   hasHydratedAgents: boolean;
@@ -961,7 +1018,6 @@ interface RenderWorkspaceContentInput {
 
 function renderWorkspaceContent(input: RenderWorkspaceContentInput): React.ReactNode {
   const {
-    showMissingWorkspaceDescriptor,
     isMissingWorkspaceExecutionAuthority,
     activeTabDescriptor,
     hasHydratedAgents,
@@ -972,13 +1028,6 @@ function renderWorkspaceContent(input: RenderWorkspaceContentInput): React.React
     buildMobilePaneContentModel,
   } = input;
 
-  if (showMissingWorkspaceDescriptor) {
-    return (
-      <View style={styles.emptyState}>
-        <ThemedActivityIndicator uniProps={mutedColorMapping} />
-      </View>
-    );
-  }
   if (isMissingWorkspaceExecutionAuthority) {
     return (
       <View style={styles.emptyState}>
@@ -1126,6 +1175,170 @@ function removeTerminalFromPayload(terminalId: string) {
   };
 }
 
+function getHostDisplayName(host: { label?: string | null } | null, fallback: string): string {
+  const trimmed = host?.label?.trim();
+  return trimmed ? trimmed : fallback;
+}
+
+function useWorkspaceRouteActions(normalizedServerId: string): {
+  handleRetryHost: () => void;
+  handleManageHost: () => void;
+  handleDismissMissingWorkspace: () => void;
+} {
+  const router = useRouter();
+  const handleRetryHost = useCallback(() => {
+    if (!normalizedServerId) {
+      return;
+    }
+    void getHostRuntimeStore().runProbeCycleNow(normalizedServerId);
+  }, [normalizedServerId]);
+  const handleManageHost = useCallback(() => {
+    if (!normalizedServerId) {
+      return;
+    }
+    router.push(buildSettingsHostRoute(normalizedServerId) as Href);
+  }, [normalizedServerId, router]);
+  const handleDismissMissingWorkspace = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    if (normalizedServerId) {
+      router.replace(buildHostRootRoute(normalizedServerId) as Href);
+      return;
+    }
+    router.replace("/" as Href);
+  }, [normalizedServerId, router]);
+
+  return {
+    handleRetryHost,
+    handleManageHost,
+    handleDismissMissingWorkspace,
+  };
+}
+
+function useResolvedWorkspaceRouteState(input: {
+  serverId: string;
+  workspace: WorkspaceDescriptor | null;
+  hasHydratedWorkspaces: boolean;
+}): WorkspaceRouteState {
+  const hosts = useHosts();
+  const host = useMemo(
+    () => hosts.find((entry) => entry.serverId === input.serverId) ?? null,
+    [hosts, input.serverId],
+  );
+  const hostSnapshot = useHostRuntimeSnapshot(input.serverId);
+  const hostName = useMemo(() => getHostDisplayName(host, input.serverId), [host, input.serverId]);
+
+  return useMemo(
+    () =>
+      resolveWorkspaceRouteState({
+        hostName,
+        connectionStatus: hostSnapshot?.connectionStatus ?? "connecting",
+        lastError: hostSnapshot?.lastError ?? null,
+        workspace: input.workspace,
+        hasHydratedWorkspaces: input.hasHydratedWorkspaces,
+      }),
+    [
+      hostName,
+      hostSnapshot?.connectionStatus,
+      hostSnapshot?.lastError,
+      input.workspace,
+      input.hasHydratedWorkspaces,
+    ],
+  );
+}
+
+function WorkspaceScreenGateFrame({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <ScreenHeader left={GATED_WORKSPACE_HEADER_LEFT} />
+      <View style={styles.centerContent}>{children}</View>
+    </>
+  );
+}
+
+function renderWorkspaceScreenGateShell(input: {
+  gate: ReactNode;
+  workspaceKey: string | null;
+}): ReactElement | null {
+  if (!input.gate) {
+    return null;
+  }
+
+  return (
+    <WorkspaceFocusProvider workspaceKey={input.workspaceKey}>
+      <View style={containerWithWorkspaceBackgroundStyle}>
+        <View style={styles.threePaneRow}>
+          <View style={styles.centerColumn}>
+            <WorkspaceScreenGateFrame>{input.gate}</WorkspaceScreenGateFrame>
+          </View>
+        </View>
+      </View>
+    </WorkspaceFocusProvider>
+  );
+}
+
+function WorkspaceDocumentTitleEffectSlot({
+  tab,
+  serverId,
+  workspaceId,
+  isRouteFocused,
+}: {
+  tab: WorkspaceTabDescriptor | null;
+  serverId: string;
+  workspaceId: string;
+  isRouteFocused: boolean;
+}) {
+  if (!isRouteFocused || !isWeb || !tab) {
+    return null;
+  }
+
+  return (
+    <WorkspaceTabPresentationResolver tab={tab} serverId={serverId} workspaceId={workspaceId}>
+      {(presentation) => (
+        <WorkspaceDocumentTitleEffect
+          label={presentation.label}
+          titleState={presentation.titleState}
+        />
+      )}
+    </WorkspaceTabPresentationResolver>
+  );
+}
+
+function shouldShowWorkspaceScreenHeader(input: {
+  isFocusModeEnabled: boolean;
+  isMobile: boolean;
+}): boolean {
+  return !input.isFocusModeEnabled || input.isMobile;
+}
+
+function shouldShowWorkspaceExplorerSidebar(input: {
+  isRouteFocused: boolean;
+  isFocusModeEnabled: boolean;
+  isMobile: boolean;
+}): boolean {
+  return input.isRouteFocused && shouldShowWorkspaceScreenHeader(input);
+}
+
+function canCreateWorkspaceTerminal(input: {
+  isRouteFocused: boolean;
+  client: unknown;
+  isConnected: boolean;
+  workspaceDirectory: string | null;
+}): boolean {
+  return Boolean(
+    input.isRouteFocused && input.client && input.isConnected && input.workspaceDirectory,
+  );
+}
+
+function buildWorkspaceTerminalScopeKey(serverId: string, workspaceId: string): string | null {
+  if (!serverId || !workspaceId) {
+    return null;
+  }
+  return `${serverId}:${workspaceId}`;
+}
+
 function WorkspaceScreenContent({
   serverId,
   workspaceId,
@@ -1143,12 +1356,11 @@ function WorkspaceScreenContent({
     [workspaceId],
   );
   const workspaceDescriptor = useWorkspace(normalizedServerId, normalizedWorkspaceId);
+  const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
+    useWorkspaceRouteActions(normalizedServerId);
 
   const workspaceTerminalScopeKey = useMemo(
-    () =>
-      normalizedServerId && normalizedWorkspaceId
-        ? `${normalizedServerId}:${normalizedWorkspaceId}`
-        : null,
+    () => buildWorkspaceTerminalScopeKey(normalizedServerId, normalizedWorkspaceId),
     [normalizedServerId, normalizedWorkspaceId],
   );
   useWorkspaceTerminalSessionRetention({
@@ -1176,7 +1388,7 @@ function WorkspaceScreenContent({
     paneId?: string;
   } | null>(null);
   const canCreateTerminalNow = useMemo(
-    () => Boolean(isRouteFocused && client && isConnected && workspaceDirectory),
+    () => canCreateWorkspaceTerminal({ isRouteFocused, client, isConnected, workspaceDirectory }),
     [isRouteFocused, client, isConnected, workspaceDirectory],
   );
 
@@ -1325,7 +1537,7 @@ function WorkspaceScreenContent({
   }, [client, isConnected, isRouteFocused, queryClient, terminalsQueryKey, workspaceDirectory]);
 
   const isCheckoutQueryEnabled = useMemo(
-    () => Boolean(isRouteFocused && client && isConnected && workspaceDirectory),
+    () => canCreateWorkspaceTerminal({ isRouteFocused, client, isConnected, workspaceDirectory }),
     [isRouteFocused, client, isConnected, workspaceDirectory],
   );
   const checkoutQuery = useQuery({
@@ -1355,6 +1567,11 @@ function WorkspaceScreenContent({
   const hasHydratedAgents = useSessionStore(
     (state) => state.sessions[normalizedServerId]?.hasHydratedAgents ?? false,
   );
+  const workspaceRouteState = useResolvedWorkspaceRouteState({
+    serverId: normalizedServerId,
+    workspace: workspaceDescriptor,
+    hasHydratedWorkspaces,
+  });
   useEffect(() => {
     if (!pendingTerminalCreateInput) {
       return;
@@ -1574,6 +1791,11 @@ function WorkspaceScreenContent({
       if (input.target?.kind === "agent") {
         unpinWorkspaceAgent(persistenceKey, input.target.agentId);
         hideWorkspaceAgent(persistenceKey, input.target.agentId);
+      }
+      if (input.target?.kind === "browser") {
+        const { browserId } = input.target;
+        useBrowserStore.getState().removeBrowser(browserId);
+        void getDesktopHost()?.browser?.clearPartition?.(browserId);
       }
       closeWorkspaceTab(persistenceKey, normalizedTabId);
     },
@@ -1966,6 +2188,31 @@ function WorkspaceScreenContent({
     toast.show("Preparing workspace, opening terminal when ready...");
   });
 
+  const handleCreateBrowserTab = useCallback(
+    (input?: { paneId?: string }) => {
+      if (!persistenceKey || !getIsElectron()) {
+        return;
+      }
+      if (input?.paneId) {
+        focusWorkspacePane(persistenceKey, input.paneId);
+      }
+      const { browserId } = createWorkspaceBrowser();
+      openWorkspaceTabFocused(persistenceKey, { kind: "browser", browserId });
+    },
+    [focusWorkspacePane, openWorkspaceTabFocused, persistenceKey],
+  );
+
+  const handleOpenUrlInBrowserTab = useCallback(
+    (url: string) => {
+      if (!persistenceKey || !getIsElectron()) {
+        return;
+      }
+      const { browserId } = createWorkspaceBrowser({ initialUrl: url });
+      openWorkspaceTabFocused(persistenceKey, { kind: "browser", browserId });
+    },
+    [openWorkspaceTabFocused, persistenceKey],
+  );
+
   const handleSelectSwitcherTab = useCallback(
     (key: string) => {
       navigateToTabId(key);
@@ -2077,11 +2324,14 @@ function WorkspaceScreenContent({
   );
 
   const handleCloseDraftOrFileTab = useCallback(
-    function handleCloseDraftOrFileTab(tabId: string) {
-      setHoveredTabKey((current) => (current === tabId ? null : current));
-      setHoveredCloseTabKey((current) => (current === tabId ? null : current));
+    function handleCloseDraftOrFileTab(input: {
+      tabId: string;
+      target?: WorkspaceTabTarget | null;
+    }) {
+      setHoveredTabKey((current) => (current === input.tabId ? null : current));
+      setHoveredCloseTabKey((current) => (current === input.tabId ? null : current));
       if (persistenceKey) {
-        closeWorkspaceTabWithCleanup({ tabId });
+        closeWorkspaceTabWithCleanup({ tabId: input.tabId, target: input.target });
       }
     },
     [closeWorkspaceTabWithCleanup, persistenceKey],
@@ -2101,7 +2351,7 @@ function WorkspaceScreenContent({
         await handleCloseAgentTab({ tabId, agentId: tab.target.agentId });
         return;
       }
-      handleCloseDraftOrFileTab(tabId);
+      handleCloseDraftOrFileTab({ tabId, target: tab.target });
     },
     [allTabDescriptorsById, handleCloseAgentTab, handleCloseDraftOrFileTab, handleCloseTerminalTab],
   );
@@ -2609,12 +2859,7 @@ function WorkspaceScreenContent({
     },
     [buildPaneContentModel],
   );
-  const showMissingWorkspaceDescriptor = shouldRenderMissingWorkspaceDescriptor({
-    workspace: workspaceDescriptor,
-    hasHydratedWorkspaces,
-  });
   const content = renderWorkspaceContent({
-    showMissingWorkspaceDescriptor,
     isMissingWorkspaceExecutionAuthority,
     activeTabDescriptor,
     hasHydratedAgents,
@@ -2725,6 +2970,18 @@ function WorkspaceScreenContent({
   const menuNewTerminalIcon = MENU_NEW_TERMINAL_ICON;
   const menuCopyIcon = MENU_COPY_ICON;
   const menuSettingsIcon = MENU_SETTINGS_ICON;
+  const workspaceScreenGate = renderWorkspaceRouteGate({
+    state: workspaceRouteState,
+    actions: {
+      onRetryHost: handleRetryHost,
+      onManageHost: handleManageHost,
+      onDismissMissingWorkspace: handleDismissMissingWorkspace,
+    },
+  });
+  const gatedWorkspaceScreen = renderWorkspaceScreenGateShell({
+    gate: workspaceScreenGate,
+    workspaceKey: persistenceKey,
+  });
 
   const headerRight = useMemo(
     () => (
@@ -2737,6 +2994,7 @@ function WorkspaceScreenContent({
             liveTerminalIds={liveTerminalIds}
             onScriptTerminalStarted={handleScriptTerminalStarted}
             onViewTerminal={handleViewScriptTerminal}
+            onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
             hideLabels={showCompactButtonLabels}
           />
         ) : null}
@@ -2853,6 +3111,7 @@ function WorkspaceScreenContent({
       liveTerminalIds,
       handleScriptTerminalStarted,
       handleViewScriptTerminal,
+      handleOpenUrlInBrowserTab,
       showCompactButtonLabels,
       isGitCheckout,
       handleToggleExplorer,
@@ -2862,22 +3121,19 @@ function WorkspaceScreenContent({
     ],
   );
 
-  const documentTitleEffectTab = useMemo(
-    () => (isRouteFocused && isWeb ? activeTabDescriptor : null),
-    [isRouteFocused, activeTabDescriptor],
-  );
   const showScreenHeader = useMemo(
-    () => !isFocusModeEnabled || isMobile,
+    () => shouldShowWorkspaceScreenHeader({ isFocusModeEnabled, isMobile }),
     [isFocusModeEnabled, isMobile],
   );
   const showExplorerSidebar = useMemo(
-    () => isRouteFocused && (!isFocusModeEnabled || isMobile),
+    () => shouldShowWorkspaceExplorerSidebar({ isRouteFocused, isFocusModeEnabled, isMobile }),
     [isRouteFocused, isFocusModeEnabled, isMobile],
   );
   const createTerminalDisabled = useMemo(
     () => createTerminalMutation.isPending || pendingTerminalCreateInput !== null,
     [createTerminalMutation.isPending, pendingTerminalCreateInput],
   );
+  const showCreateBrowserTab = getIsElectron();
   const focusedPaneIdOrUndefined = useMemo(() => focusedPaneId ?? undefined, [focusedPaneId]);
   const desktopFocusModeEnabled = useMemo(
     () => isFocusModeEnabled && !isMobile,
@@ -2911,6 +3167,8 @@ function WorkspaceScreenContent({
         onCloseOtherTabs={handleCloseOtherTabsInPane}
         onCreateDraftTab={handleCreateDraftTab}
         onCreateTerminalTab={handleCreateTerminal}
+        onCreateBrowserTab={handleCreateBrowserTab}
+        showCreateBrowserTab={showCreateBrowserTab}
         buildPaneContentModel={buildDesktopPaneContentModel}
         onFocusPane={handleFocusPane}
         onSplitPane={handleSplitPane}
@@ -2944,6 +3202,8 @@ function WorkspaceScreenContent({
     handleCloseOtherTabsInPane,
     handleCreateDraftTab,
     handleCreateTerminal,
+    handleCreateBrowserTab,
+    showCreateBrowserTab,
     buildDesktopPaneContentModel,
     handleFocusPane,
     handleSplitPane,
@@ -2955,129 +3215,130 @@ function WorkspaceScreenContent({
   ]);
 
   return (
-    <View style={containerStyle}>
-      {documentTitleEffectTab ? (
-        <WorkspaceTabPresentationResolver
-          tab={documentTitleEffectTab}
-          serverId={normalizedServerId}
-          workspaceId={normalizedWorkspaceId}
-        >
-          {(presentation) => (
-            <WorkspaceDocumentTitleEffect
-              label={presentation.label}
-              titleState={presentation.titleState}
-            />
-          )}
-        </WorkspaceTabPresentationResolver>
-      ) : null}
-      <View style={styles.threePaneRow}>
-        <View style={styles.centerColumn}>
-          {showScreenHeader && (
-            <ScreenHeader
-              onRowLayout={onHeaderLayout}
-              left={
-                <>
-                  <SidebarMenuToggle />
-                  <WorkspaceHeaderTitleBar
-                    isLoading={isWorkspaceHeaderLoading}
-                    title={workspaceHeaderTitle}
-                    subtitle={workspaceHeaderSubtitle}
-                    showSubtitle={shouldShowWorkspaceHeaderSubtitle}
-                    currentBranchName={currentBranchName}
-                    isGitCheckout={isGitCheckout}
-                    normalizedServerId={normalizedServerId}
-                    normalizedWorkspaceId={normalizedWorkspaceId}
-                    showWorkspaceSetup={showWorkspaceSetup}
-                    isMobile={isMobile}
-                    createTerminalDisabled={createTerminalDisabled}
-                    menuNewAgentIcon={menuNewAgentIcon}
-                    menuNewTerminalIcon={menuNewTerminalIcon}
-                    menuCopyIcon={menuCopyIcon}
-                    menuSettingsIcon={menuSettingsIcon}
-                    onCreateDraftTab={handleCreateDraftTab}
-                    onCreateTerminal={handleCreateTerminal}
-                    onCopyWorkspacePath={handleCopyWorkspacePath}
-                    onCopyBranchName={handleCopyBranchName}
-                    onOpenSetupTab={handleOpenSetupTab}
-                  />
-                </>
-              }
-              right={headerRight}
-            />
-          )}
-
-          {isMobile ? (
-            <MobileWorkspaceTabSwitcher
-              tabs={tabs}
-              activeTabKey={activeTabKey}
-              activeTab={activeTabDescriptor}
-              tabSwitcherOptions={tabSwitcherOptions}
-              tabByKey={tabByKey}
-              normalizedServerId={normalizedServerId}
-              normalizedWorkspaceId={normalizedWorkspaceId}
-              onSelectSwitcherTab={handleSelectSwitcherTab}
-              onCopyResumeCommand={handleCopyResumeCommand}
-              onCopyAgentId={handleCopyAgentId}
-              onCopyFilePath={handleCopyFilePath}
-              onReloadAgent={handleReloadAgent}
-              onCloseTab={handleCloseTabById}
-              onCloseTabsAbove={handleCloseTabsToLeft}
-              onCloseTabsBelow={handleCloseTabsToRight}
-              onCloseOtherTabs={handleCloseOtherTabs}
-            />
-          ) : null}
-
-          {shouldRenderDesktopPaneFallback ? (
-            <WorkspaceDesktopTabsRow
-              paneId={focusedPaneIdOrUndefined}
-              isFocused={isRouteFocused}
-              tabs={desktopTabRowItems}
-              normalizedServerId={normalizedServerId}
-              normalizedWorkspaceId={normalizedWorkspaceId}
-              setHoveredTabKey={setHoveredTabKey}
-              setHoveredCloseTabKey={setHoveredCloseTabKey}
-              onNavigateTab={navigateToTabId}
-              onCloseTab={handleCloseTabById}
-              onCopyResumeCommand={handleCopyResumeCommand}
-              onCopyAgentId={handleCopyAgentId}
-              onCopyFilePath={handleCopyFilePath}
-              onReloadAgent={handleReloadAgent}
-              onCloseTabsToLeft={handleCloseTabsToLeft}
-              onCloseTabsToRight={handleCloseTabsToRight}
-              onCloseOtherTabs={handleCloseOtherTabs}
-              onCreateDraftTab={handleCreateDraftTab}
-              onCreateTerminalTab={handleCreateTerminal}
-              disableCreateTerminal={createTerminalMutation.isPending}
-              isWaitingOnTerminalReadiness={pendingTerminalCreateInput !== null}
-              onReorderTabs={handleReorderTabsInFocusedPane}
-              onSplitRight={noop}
-              onSplitDown={noop}
-              showPaneSplitActions={false}
-            />
-          ) : null}
-
-          <View style={styles.centerContent}>
-            {isMobile ? (
-              <GestureDetector gesture={explorerOpenGesture} touchAction="pan-y">
-                <View style={styles.content}>{content}</View>
-              </GestureDetector>
-            ) : (
-              <View style={styles.content}>{desktopContent}</View>
-            )}
-          </View>
-        </View>
-
-        {showExplorerSidebar && workspaceDirectory ? (
-          <ExplorerSidebar
+    gatedWorkspaceScreen ?? (
+      <WorkspaceFocusProvider workspaceKey={persistenceKey}>
+        <View style={containerStyle}>
+          <WorkspaceDocumentTitleEffectSlot
+            tab={activeTabDescriptor}
             serverId={normalizedServerId}
             workspaceId={normalizedWorkspaceId}
-            workspaceRoot={workspaceDirectory}
-            isGit={isGitCheckout}
-            onOpenFile={handleOpenFileFromExplorer}
+            isRouteFocused={isRouteFocused}
           />
-        ) : null}
-      </View>
-    </View>
+          <View style={styles.threePaneRow}>
+            <View style={styles.centerColumn}>
+              {showScreenHeader && (
+                <ScreenHeader
+                  onRowLayout={onHeaderLayout}
+                  left={
+                    <>
+                      <SidebarMenuToggle />
+                      <WorkspaceHeaderTitleBar
+                        isLoading={isWorkspaceHeaderLoading}
+                        title={workspaceHeaderTitle}
+                        subtitle={workspaceHeaderSubtitle}
+                        showSubtitle={shouldShowWorkspaceHeaderSubtitle}
+                        currentBranchName={currentBranchName}
+                        isGitCheckout={isGitCheckout}
+                        normalizedServerId={normalizedServerId}
+                        normalizedWorkspaceId={normalizedWorkspaceId}
+                        showWorkspaceSetup={showWorkspaceSetup}
+                        showCreateBrowserTab={showCreateBrowserTab}
+                        isMobile={isMobile}
+                        createTerminalDisabled={createTerminalDisabled}
+                        menuNewAgentIcon={menuNewAgentIcon}
+                        menuNewTerminalIcon={menuNewTerminalIcon}
+                        menuNewBrowserIcon={MENU_NEW_BROWSER_ICON}
+                        menuCopyIcon={menuCopyIcon}
+                        menuSettingsIcon={menuSettingsIcon}
+                        onCreateDraftTab={handleCreateDraftTab}
+                        onCreateTerminal={handleCreateTerminal}
+                        onCreateBrowser={handleCreateBrowserTab}
+                        onCopyWorkspacePath={handleCopyWorkspacePath}
+                        onCopyBranchName={handleCopyBranchName}
+                        onOpenSetupTab={handleOpenSetupTab}
+                      />
+                    </>
+                  }
+                  right={headerRight}
+                />
+              )}
+
+              {isMobile ? (
+                <MobileWorkspaceTabSwitcher
+                  tabs={tabs}
+                  activeTabKey={activeTabKey}
+                  activeTab={activeTabDescriptor}
+                  tabSwitcherOptions={tabSwitcherOptions}
+                  tabByKey={tabByKey}
+                  normalizedServerId={normalizedServerId}
+                  normalizedWorkspaceId={normalizedWorkspaceId}
+                  onSelectSwitcherTab={handleSelectSwitcherTab}
+                  onCopyResumeCommand={handleCopyResumeCommand}
+                  onCopyAgentId={handleCopyAgentId}
+                  onCopyFilePath={handleCopyFilePath}
+                  onReloadAgent={handleReloadAgent}
+                  onCloseTab={handleCloseTabById}
+                  onCloseTabsAbove={handleCloseTabsToLeft}
+                  onCloseTabsBelow={handleCloseTabsToRight}
+                  onCloseOtherTabs={handleCloseOtherTabs}
+                />
+              ) : null}
+
+              {shouldRenderDesktopPaneFallback ? (
+                <WorkspaceDesktopTabsRow
+                  paneId={focusedPaneIdOrUndefined}
+                  isFocused={isRouteFocused}
+                  tabs={desktopTabRowItems}
+                  normalizedServerId={normalizedServerId}
+                  normalizedWorkspaceId={normalizedWorkspaceId}
+                  setHoveredTabKey={setHoveredTabKey}
+                  setHoveredCloseTabKey={setHoveredCloseTabKey}
+                  onNavigateTab={navigateToTabId}
+                  onCloseTab={handleCloseTabById}
+                  onCopyResumeCommand={handleCopyResumeCommand}
+                  onCopyAgentId={handleCopyAgentId}
+                  onCopyFilePath={handleCopyFilePath}
+                  onReloadAgent={handleReloadAgent}
+                  onCloseTabsToLeft={handleCloseTabsToLeft}
+                  onCloseTabsToRight={handleCloseTabsToRight}
+                  onCloseOtherTabs={handleCloseOtherTabs}
+                  onCreateDraftTab={handleCreateDraftTab}
+                  onCreateTerminalTab={handleCreateTerminal}
+                  onCreateBrowserTab={handleCreateBrowserTab}
+                  showCreateBrowserTab={showCreateBrowserTab}
+                  disableCreateTerminal={createTerminalMutation.isPending}
+                  isWaitingOnTerminalReadiness={pendingTerminalCreateInput !== null}
+                  onReorderTabs={handleReorderTabsInFocusedPane}
+                  onSplitRight={noop}
+                  onSplitDown={noop}
+                  showPaneSplitActions={false}
+                />
+              ) : null}
+
+              <View style={styles.centerContent}>
+                {isMobile ? (
+                  <GestureDetector gesture={explorerOpenGesture} touchAction="pan-y">
+                    <View style={styles.content}>{content}</View>
+                  </GestureDetector>
+                ) : (
+                  <View style={styles.content}>{desktopContent}</View>
+                )}
+              </View>
+            </View>
+
+            {showExplorerSidebar && workspaceDirectory ? (
+              <ExplorerSidebar
+                serverId={normalizedServerId}
+                workspaceId={normalizedWorkspaceId}
+                workspaceRoot={workspaceDirectory}
+                isGit={isGitCheckout}
+                onOpenFile={handleOpenFileFromExplorer}
+              />
+            ) : null}
+          </View>
+        </View>
+      </WorkspaceFocusProvider>
+    )
   );
 }
 
@@ -3214,10 +3475,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
   },
-  newTabTooltipShortcut: {
-    backgroundColor: theme.colors.surface3,
-    borderColor: theme.colors.borderAccent,
-  },
+  newTabTooltipShortcut: {},
   explorerTooltipRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -3227,10 +3485,7 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     color: theme.colors.popoverForeground,
   },
-  explorerTooltipShortcut: {
-    backgroundColor: theme.colors.surface3,
-    borderColor: theme.colors.borderAccent,
-  },
+  explorerTooltipShortcut: {},
   mobileTabsRow: {
     backgroundColor: theme.colors.surface0,
     borderBottomWidth: theme.borderWidth[1],

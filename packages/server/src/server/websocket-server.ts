@@ -1,4 +1,4 @@
-import { WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { basename, join } from "path";
 import { hostname as getHostname } from "node:os";
@@ -26,7 +26,7 @@ import {
   type WSOutboundMessage,
   wrapSessionMessage,
 } from "./messages.js";
-import { asUint8Array, decodeTerminalStreamFrame } from "../shared/terminal-stream-protocol.js";
+import { asUint8Array, decodeTerminalStreamFrame } from "../shared/binary-frames/index.js";
 import type { HostnamesConfig } from "./hostnames.js";
 import { isHostnameAllowed } from "./hostnames.js";
 import { Session, type SessionLifecycleIntent, type SessionRuntimeMetrics } from "./session.js";
@@ -52,6 +52,14 @@ import {
   findLatestPermissionRequest,
 } from "../shared/agent-attention-notification.js";
 import { createGitHubService, type GitHubService } from "../services/github-service.js";
+import {
+  extractWsBearerProtocol,
+  extractWsBearerToken,
+  isBearerTokenValid,
+  type DaemonAuthConfig,
+} from "./auth.js";
+
+const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
 
 export interface ExternalSocketMetadata {
   transport: "relay";
@@ -256,6 +264,7 @@ interface SessionConnection {
   session: Session;
   clientId: string;
   appVersion: string | null;
+  clientCapabilities: Record<string, unknown> | null;
   connectionLogger: pino.Logger;
   sockets: Set<WebSocketLike>;
   externalDisconnectCleanupTimeout: ReturnType<typeof setTimeout> | null;
@@ -415,6 +424,7 @@ export class VoiceAssistantWebSocketServer {
     daemonConfigStore: DaemonConfigStore,
     mcpBaseUrl: string | null,
     wsConfig: WebSocketServerConfig,
+    auth?: DaemonAuthConfig,
     speech?: SpeechService | null,
     terminalManager?: TerminalManager | null,
     dictation?: {
@@ -527,7 +537,7 @@ export class VoiceAssistantWebSocketServer {
       });
     });
 
-    this.wss = this.createWebSocketServer(server, wsConfig);
+    this.wss = this.createWebSocketServer(server, wsConfig, auth);
     this.startRuntimeMetricsInterval();
 
     this.logger.info("WebSocket server initialized on /ws");
@@ -568,17 +578,20 @@ export class VoiceAssistantWebSocketServer {
   private createWebSocketServer(
     server: HTTPServer,
     wsConfig: WebSocketServerConfig,
+    auth: DaemonAuthConfig | undefined,
   ): WebSocketServer {
     const { allowedOrigins, hostnames } = wsConfig;
+    const password = auth?.password;
     const wss = new WebSocketServer({
       server,
       path: "/ws",
+      handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
       verifyClient: ({ req }, callback) => {
-        this.verifyWsClient(req, allowedOrigins, hostnames, callback);
+        this.verifyWsUpgrade(req, allowedOrigins, hostnames, callback);
       },
     });
     wss.on("connection", (ws, request) => {
-      void this.attachSocket(ws, request);
+      void this.attachAuthenticatedSocket(ws, request, password);
     });
     return wss;
   }
@@ -591,7 +604,7 @@ export class VoiceAssistantWebSocketServer {
     (runtimeMetricsInterval as unknown as { unref?: () => void }).unref?.();
   }
 
-  private verifyWsClient(
+  private verifyWsUpgrade(
     req: IncomingMessage,
     allowedOrigins: Set<string>,
     hostnames: HostnamesConfig | undefined,
@@ -621,6 +634,30 @@ export class VoiceAssistantWebSocketServer {
       this.logger.warn({ ...requestMetadata, origin }, "Rejected connection from origin");
       callback(false, 403, "Origin not allowed");
     }
+  }
+
+  private async attachAuthenticatedSocket(
+    ws: WebSocket,
+    request: IncomingMessage,
+    password: string | undefined,
+  ): Promise<void> {
+    if (password) {
+      const requestMetadata = extractSocketRequestMetadata(request);
+      const protocol = extractWsBearerProtocol(request.headers["sec-websocket-protocol"]);
+      const token = extractWsBearerToken(protocol);
+      const isAuthorized = isBearerTokenValid({ password, token });
+      if (!isAuthorized) {
+        const reason = token === null ? "Password required" : "Incorrect password";
+        this.logger.warn(
+          { ...requestMetadata, hasToken: token !== null },
+          "Rejected WebSocket connection with invalid daemon password",
+        );
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, reason);
+        return;
+      }
+    }
+
+    await this.attachSocket(ws, request);
   }
 
   public broadcast(message: WSOutboundMessage): void {
@@ -738,10 +775,17 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private sendToClient(ws: WebSocketLike, message: WSOutboundMessage): void {
-    // WebSocket.OPEN = 1
-    if (ws.readyState === 1) {
+    // WebSocket.OPEN = 1. The check is a fast path; the socket can still
+    // transition to closed between here and ws.send(), so guard the send too —
+    // a synchronous throw here would propagate as an uncaughtException.
+    if (ws.readyState !== 1) {
+      return;
+    }
+    try {
       ws.send(JSON.stringify(message));
       this.recordOutboundMessage(message, ws);
+    } catch (err) {
+      this.logger.warn({ err }, "ws_send_failed");
     }
   }
 
@@ -749,8 +793,12 @@ export class VoiceAssistantWebSocketServer {
     if (ws.readyState !== 1) {
       return;
     }
-    ws.send(frame);
-    this.recordOutboundBinaryFrame(ws);
+    try {
+      ws.send(frame);
+      this.recordOutboundBinaryFrame(ws);
+    } catch (err) {
+      this.logger.warn({ err }, "ws_send_binary_failed");
+    }
   }
 
   private sendToConnection(connection: SessionConnection, message: WSOutboundMessage): void {
@@ -827,14 +875,16 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike;
     clientId: string;
     appVersion: string | null;
+    clientCapabilities: Record<string, unknown> | null;
     connectionLogger: pino.Logger;
   }): SessionConnection {
-    const { ws, clientId, appVersion, connectionLogger } = params;
+    const { ws, clientId, appVersion, clientCapabilities, connectionLogger } = params;
     let connection: SessionConnection | null = null;
 
     const session = new Session({
       clientId,
       appVersion,
+      clientCapabilities,
       onMessage: (msg) => {
         if (!connection) {
           return;
@@ -911,6 +961,7 @@ export class VoiceAssistantWebSocketServer {
       session,
       clientId,
       appVersion,
+      clientCapabilities,
       connectionLogger,
       sockets: new Set([ws]),
       externalDisconnectCleanupTimeout: null,
@@ -980,6 +1031,14 @@ export class VoiceAssistantWebSocketServer {
         existing.appVersion = newAppVersion;
         existing.session.updateAppVersion(newAppVersion);
       }
+      const newClientCapabilities = message.capabilities ?? null;
+      if (
+        JSON.stringify(existing.clientCapabilities ?? null) !==
+        JSON.stringify(newClientCapabilities ?? null)
+      ) {
+        existing.clientCapabilities = newClientCapabilities;
+        existing.session.updateClientCapabilities(newClientCapabilities);
+      }
       existing.sockets.add(ws);
       this.sessions.set(ws, existing);
       this.sendToClient(ws, this.createServerInfoMessage());
@@ -1000,6 +1059,7 @@ export class VoiceAssistantWebSocketServer {
       ws,
       clientId,
       appVersion: message.appVersion ?? null,
+      clientCapabilities: message.capabilities ?? null,
       connectionLogger,
     });
     this.sessions.set(ws, connection);
@@ -1827,6 +1887,24 @@ function extractSocketRequestMetadata(request: unknown): SocketRequestMetadata {
     ...(userAgent ? { userAgent } : {}),
     ...(remoteAddress ? { remoteAddress } : {}),
   };
+}
+
+function selectWebSocketProtocol(
+  protocols: Set<string>,
+  password: string | undefined,
+): string | false {
+  if (!password) {
+    return protocols.values().next().value ?? false;
+  }
+
+  for (const protocol of protocols) {
+    const token = extractWsBearerToken(protocol);
+    if (token !== null) {
+      return protocol;
+    }
+  }
+
+  return false;
 }
 
 function stringifyCloseReason(reason: unknown): string | null {

@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.1.65 - 2026-05-03
+
+### Added
+
+- **In-app browser** — open a real web browser in any workspace to test your app. ([#670](https://github.com/getpaseo/paseo/pull/670) by [@jasonkneen](https://github.com/jasonkneen))
+- Inline review comments in the git diff pane. Tap a line number to start a comment. ([#530](https://github.com/getpaseo/paseo/pull/530))
+- Sub-agent activity is now shown for Codex, OpenCode, and Claude. ([#672](https://github.com/getpaseo/paseo/pull/672), [#658](https://github.com/getpaseo/paseo/pull/658) by [@thisisryanswift](https://github.com/thisisryanswift))
+- Pull and push your branch in one step from the git actions menu in the changes pane.
+- Resume existing agent sessions with `paseo import --provider <name> <id>`. ([#632](https://github.com/getpaseo/paseo/pull/632))
+- Password authentication and SSL support for daemon connections. ([#635](https://github.com/getpaseo/paseo/pull/635))
+- Connect to a daemon via relay using a pairing offer URL from the CLI. ([#639](https://github.com/getpaseo/paseo/pull/639))
+- **Windows:** Native ARM64 builds are now available.
+- Bundled Paseo skills now refresh automatically on desktop app launch.
+
+### Improved
+
+- Codex streaming feels more responsive — message boundaries are preserved and output arrives sooner.
+- Terminal sessions run in a dedicated worker process for better stability.
+- New worktree branch names are derived from your prompt and attachments instead of a generic placeholder.
+- Review comment UI is cleaner and easier to scan.
+- The daemon's `/api/status` endpoint is now protected by password auth when one is configured.
+
+### Fixed
+
+- **Apple Silicon Mac:** The desktop update pipeline now publishes manifests atomically, closing a race that could install the Intel build on Apple Silicon Macs and cause 100%+ renderer CPU usage. Affected users will self-heal — electron-updater's Rosetta detection migrates back to arm64 on the next update poll. ([#555](https://github.com/getpaseo/paseo/issues/555))
+- **Linux:** `.deb` and `.rpm` packages now show as `Paseo` in the dock and process list instead of `Paseo.bin`. `--no-sandbox` is now scoped to AppImage only, matching VS Code's sandbox handling. ([#602](https://github.com/getpaseo/paseo/issues/602))
+- **Windows:** Git diff commands no longer break on paths with special characters. ([#629](https://github.com/getpaseo/paseo/pull/629))
+- Cursor CLI and other ACP custom providers launch reliably. ([#628](https://github.com/getpaseo/paseo/pull/628))
+- Daemon stays up when WebSocket clients disconnect mid-stream, and crashes now write a fatal log entry instead of disappearing silently. ([#613](https://github.com/getpaseo/paseo/pull/613) by [@yuruiz](https://github.com/yuruiz))
+- Long agent timelines reconnect cleanly over the relay instead of looping through disconnects while catching up. ([#657](https://github.com/getpaseo/paseo/pull/657) by [@fireblue](https://github.com/fireblue))
+- Agent timelines refresh with smaller catch-up requests when you reopen an agent.
+- Terminal snapshots flush reliably before clients reconnect.
+- Workspace reconnects avoid unnecessary refresh work when the focused workspace is already current.
+- Voice dictation keeps recording when the agent tab loses focus.
+- OpenCode mode picker now lists agents available in every mode. ([#606](https://github.com/getpaseo/paseo/pull/606) by [@thisisryanswift](https://github.com/thisisryanswift))
+- Codex plan approval panels no longer duplicate.
+- Imported agents display the correct title immediately.
+- OpenCode surfaces invalid mode/model errors instead of hanging.
+- Archived worktrees stay hidden without flashing back into the list. ([#640](https://github.com/getpaseo/paseo/pull/640))
+- Web dropdown menus no longer resize unexpectedly.
+- The visible changes pane keeps in sync with the working tree diff.
+- Tool detail rows on the timeline are selectable again.
+- `paseo.json` parse errors in setup, teardown, and terminal actions now surface a clear error instead of failing silently.
+- Diff gutter line numbers were shifted one row out of alignment in some cases on web.
+- Streamed agent output reconciles cleanly when the timeline hydrates mid-turn. ([#663](https://github.com/getpaseo/paseo/pull/663))
+- Images in assistant messages show a loading spinner while they load and an "Image unavailable" fallback if they fail, instead of a blank space.
+- Isolated bottom sheet modals close and re-open without getting stuck.
+
 ## 0.1.64 - 2026-04-28
 
 ### Added
@@ -189,7 +237,7 @@
 
 ### Added
 
-- Provider profiles — define custom providers in your Paseo config that appear alongside built-ins. Override a built-in's binary, env, or models, or create entirely new providers. See the [configuration guide](https://github.com/getpaseo/paseo/blob/main/docs/CUSTOM-PROVIDERS.md).
+- Provider profiles — define custom providers in your Paseo config that appear alongside built-ins. Override a built-in's binary, env, or models, or create entirely new providers. See the [configuration guide](https://github.com/getpaseo/paseo/blob/main/docs/custom-providers.md).
 - ACP agent support — add any ACP-compatible agent to Paseo with `extends: "acp"` in your provider config. No code changes needed.
 - Choose provider and model when creating scheduled agents.
 - Max reasoning effort option for Opus 4.6 models.

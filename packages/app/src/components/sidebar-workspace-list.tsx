@@ -1462,7 +1462,7 @@ function WorkspaceRowWithMenu({
       : "idle",
   );
   const isWorktree = workspace.workspaceKind === "worktree";
-  const isArchiving = isWorktree ? archiveStatus === "pending" : isArchivingWorkspace;
+  const isArchiving = isWorktree ? workspace.archivingAt !== null : isArchivingWorkspace;
   const redirectAfterArchive = useCallback(() => {
     redirectIfArchivingActiveWorkspace({
       serverId: workspace.serverId,
@@ -2724,10 +2724,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
   },
-  projectActionTooltipShortcut: {
-    backgroundColor: theme.colors.surface3,
-    borderColor: theme.colors.borderAccent,
-  },
+  projectActionTooltipShortcut: {},
   workspaceRow: {
     minHeight: 36,
     marginBottom: theme.spacing[1],

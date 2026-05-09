@@ -244,15 +244,125 @@ function resolveSubAgentFallbackHeader(
 
 interface SubAgentDetailProps {
   log: string;
+  childSessionId: string | null | undefined;
   subAgentType: string | null | undefined;
   description: string | null | undefined;
   ds: DetailStyles;
 }
 
-function SubAgentDetailSection({ log, subAgentType, description, ds }: SubAgentDetailProps) {
-  const activityLog = log.replace(/^\n+/, "");
-  const hasLog = activityLog.length > 0;
+interface SubAgentActivityRow {
+  index: number;
+  toolName: string;
+  summary?: string;
+}
+
+interface ParsedSubAgentLog {
+  actions: SubAgentActivityRow[];
+  remainingLog: string;
+}
+
+function parseBracketedSubAgentLine(line: string, index: number): SubAgentActivityRow | null {
+  const match = line.match(/^\[([^\]]+)\](?:\s+(.*))?$/);
+  if (!match) {
+    return null;
+  }
+  const toolName = match[1]?.trim();
+  if (!toolName) {
+    return null;
+  }
+  const summary = match[2]?.trim();
+  return {
+    index,
+    toolName,
+    ...(summary ? { summary } : {}),
+  };
+}
+
+function parseSubAgentLog(log: string): ParsedSubAgentLog {
+  const actions: SubAgentActivityRow[] = [];
+  const remainingLines: string[] = [];
+  for (const line of log.replace(/^\n+/, "").split("\n")) {
+    const normalizedLine = line.trim();
+    if (!normalizedLine) {
+      continue;
+    }
+    const parsedAction = parseBracketedSubAgentLine(normalizedLine, actions.length + 1);
+    if (parsedAction) {
+      actions.push(parsedAction);
+    } else {
+      remainingLines.push(line);
+    }
+  }
+  return {
+    actions,
+    remainingLog: remainingLines.join("\n").replace(/^\n+/, ""),
+  };
+}
+
+function SubAgentActionRow({ action }: { action: SubAgentActivityRow }) {
+  return (
+    <View style={styles.subAgentActionRow}>
+      <Text selectable style={styles.subAgentActionTool}>
+        {formatSubAgentToolName(action.toolName)}
+      </Text>
+      {action.summary ? (
+        <Text selectable style={styles.subAgentActionSummary}>
+          {action.summary}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function formatSubAgentToolName(toolName: string): string {
+  const trimmed = toolName.trim();
+  if (!trimmed) {
+    return toolName;
+  }
+  return trimmed
+    .replace(/[._-]+/g, " ")
+    .split(" ")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => `${segment[0]?.toUpperCase() ?? ""}${segment.slice(1)}`)
+    .join(" ");
+}
+
+function SubAgentLogText({
+  activityLog,
+  fallbackHeader,
+  hasActions,
+}: {
+  activityLog: string;
+  fallbackHeader: string;
+  hasActions: boolean;
+}) {
+  if (activityLog.length > 0) {
+    return (
+      <Text selectable style={styles.scrollText}>
+        {activityLog}
+      </Text>
+    );
+  }
+  if (!hasActions) {
+    return (
+      <Text selectable style={styles.scrollText}>
+        {fallbackHeader}
+      </Text>
+    );
+  }
+  return null;
+}
+
+function SubAgentDetailSection({
+  log,
+  childSessionId,
+  subAgentType,
+  description,
+  ds,
+}: SubAgentDetailProps) {
+  const { actions, remainingLog } = useMemo(() => parseSubAgentLog(log), [log]);
   const fallbackHeader = resolveSubAgentFallbackHeader(subAgentType, description);
+  const hasActions = actions.length > 0;
   return (
     <View style={ds.sectionFillStyle}>
       <View style={ds.codeBlockFillStyle}>
@@ -270,9 +380,23 @@ function SubAgentDetailSection({ log, subAgentType, description, ds }: SubAgentD
             contentContainerStyle={styles.codeHorizontalContent}
           >
             <View style={styles.codeLine}>
-              <Text selectable style={styles.scrollText}>
-                {hasLog ? activityLog : fallbackHeader}
-              </Text>
+              {childSessionId ? (
+                <Text selectable style={styles.subAgentSessionText}>
+                  session {childSessionId}
+                </Text>
+              ) : null}
+              {hasActions ? (
+                <View style={styles.subAgentActions}>
+                  {actions.map((action) => (
+                    <SubAgentActionRow key={action.index} action={action} />
+                  ))}
+                </View>
+              ) : null}
+              <SubAgentLogText
+                activityLog={remainingLog}
+                fallbackHeader={fallbackHeader}
+                hasActions={hasActions}
+              />
             </View>
           </ScrollView>
         </ScrollView>
@@ -530,6 +654,7 @@ function buildDetailSections(
       <SubAgentDetailSection
         key="sub-agent"
         log={detail.log}
+        childSessionId={detail.childSessionId}
         subAgentType={detail.subAgentType}
         description={detail.description}
         ds={ds}
@@ -730,6 +855,34 @@ const styles = StyleSheet.create((theme) => {
     },
     shellPrompt: {
       color: theme.colors.foregroundMuted,
+    },
+    subAgentSessionText: {
+      fontFamily: Fonts.mono,
+      fontSize: theme.fontSize.xs,
+      color: theme.colors.foregroundMuted,
+      lineHeight: 18,
+      marginBottom: theme.spacing[2],
+    },
+    subAgentActions: {
+      gap: theme.spacing[1],
+      marginBottom: theme.spacing[2],
+    },
+    subAgentActionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing[2],
+    },
+    subAgentActionTool: {
+      fontFamily: Fonts.mono,
+      fontSize: theme.fontSize.xs,
+      color: theme.colors.foregroundMuted,
+      lineHeight: 18,
+    },
+    subAgentActionSummary: {
+      fontFamily: Fonts.mono,
+      fontSize: theme.fontSize.xs,
+      color: theme.colors.foreground,
+      lineHeight: 18,
     },
     jsonScroll: {
       borderWidth: theme.borderWidth[1],

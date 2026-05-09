@@ -6,6 +6,7 @@ import {
   useRef,
   memo,
   type ReactElement,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { useRouter } from "expo-router";
@@ -23,7 +24,7 @@ import {
   type FlatListProps,
   type StyleProp,
   type ViewStyle,
-  TextStyle,
+  type TextStyle,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -31,6 +32,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   AlignJustify,
   Archive,
+  ArrowDownUp,
   ChevronDown,
   Columns2,
   Download,
@@ -69,6 +71,7 @@ import { shouldAnchorHeaderBeforeCollapse } from "@/utils/git-diff-scroll";
 import {
   buildSplitDiffRows,
   buildUnifiedDiffLines,
+  type ReviewableDiffTarget,
   type SplitDiffDisplayLine,
   type SplitDiffRow,
 } from "@/utils/diff-layout";
@@ -96,6 +99,26 @@ import {
   hasVisibleDiffTokens,
 } from "@/utils/diff-rendering";
 import { isWeb, isNative } from "@/constants/platform";
+import {
+  buildWorkspaceAttachmentScopeKey,
+  useWorkspaceAttachmentsStore,
+} from "@/attachments/workspace-attachments-store";
+import {
+  buildReviewDraftScopeKey,
+  buildReviewDraftKey,
+  useActiveReviewDraftMode,
+  useReviewAttachmentSnapshot,
+  useSetActiveReviewDraftMode,
+  type ReviewDraftComment,
+  type ReviewDraftMode,
+  getInlineReviewThreadState,
+  getSplitInlineReviewThreadState,
+  InlineReviewGutterCell,
+  InlineReviewThread,
+  isInlineReviewEditorForTarget,
+  useInlineReviewController,
+  type InlineReviewActions,
+} from "@/review";
 
 export type { GitActionId, GitAction, GitActions } from "@/components/git-actions-policy";
 
@@ -204,6 +227,68 @@ interface DiffFileSectionProps {
   testID?: string;
 }
 
+const EMPTY_COMMENTS: readonly ReviewDraftComment[] = [];
+
+function noopStartComment(): void {}
+
+const DIFF_LINE_HOVER_STYLE = isWeb ? ({ cursor: "auto" } as const) : null;
+
+function LongPressableLine({
+  reviewTarget,
+  reviewActions,
+  onHoverChange,
+  hoverTargetKey,
+  onHoverTargetChange,
+  style,
+  children,
+}: {
+  reviewTarget: ReviewableDiffTarget | null | undefined;
+  reviewActions: InlineReviewActions | undefined;
+  onHoverChange?: (hovered: boolean) => void;
+  hoverTargetKey?: string | null;
+  onHoverTargetChange?: (key: string | null) => void;
+  style: StyleProp<ViewStyle>;
+  children: ReactNode;
+}) {
+  const onStartComment = reviewActions?.onStartComment;
+  const handlePress = useCallback(() => {
+    if (reviewTarget && onStartComment) {
+      onStartComment(reviewTarget);
+    }
+  }, [reviewTarget, onStartComment]);
+
+  const handleHoverIn = useCallback(() => {
+    onHoverChange?.(true);
+    if (hoverTargetKey) {
+      onHoverTargetChange?.(hoverTargetKey);
+    }
+  }, [hoverTargetKey, onHoverChange, onHoverTargetChange]);
+  const handleHoverOut = useCallback(() => {
+    onHoverChange?.(false);
+    if (hoverTargetKey) {
+      onHoverTargetChange?.(null);
+    }
+  }, [hoverTargetKey, onHoverChange, onHoverTargetChange]);
+  const hoverStyle = useMemo(() => [style, DIFF_LINE_HOVER_STYLE], [style]);
+
+  if (isWeb && (onHoverChange || onHoverTargetChange)) {
+    return (
+      <Pressable onHoverIn={handleHoverIn} onHoverOut={handleHoverOut} style={hoverStyle}>
+        {children}
+      </Pressable>
+    );
+  }
+
+  if (!isNative || !reviewTarget || !onStartComment) {
+    return <View style={style}>{children}</View>;
+  }
+  return (
+    <Pressable onPress={handlePress} style={style}>
+      {children}
+    </Pressable>
+  );
+}
+
 function lineTypeBackground(type: DiffLine["type"] | undefined | null) {
   if (!type) return styles.emptySplitCell;
   if (type === "add") return styles.addLineContainer;
@@ -216,14 +301,22 @@ function DiffGutterCell({
   lineNumber,
   type,
   gutterWidth,
+  reviewTarget,
+  reviewActions,
+  isLineHovered,
+  style,
 }: {
   lineNumber: number | null;
   type: DiffLine["type"] | undefined | null;
   gutterWidth: number;
+  reviewTarget?: ReviewableDiffTarget | null;
+  reviewActions?: InlineReviewActions;
+  isLineHovered?: boolean;
+  style?: StyleProp<ViewStyle>;
 }) {
   const containerStyle = useMemo(
-    () => [styles.gutterCell, lineTypeBackground(type), { width: gutterWidth }],
-    [type, gutterWidth],
+    () => [styles.gutterCell, lineTypeBackground(type), { width: gutterWidth }, style],
+    [type, gutterWidth, style],
   );
   const textStyle = useMemo(
     () => [
@@ -233,16 +326,49 @@ function DiffGutterCell({
     ],
     [type],
   );
+  const comments = useMemo(
+    () =>
+      reviewTarget
+        ? (reviewActions?.commentsByTarget.get(reviewTarget.key) ?? EMPTY_COMMENTS)
+        : EMPTY_COMMENTS,
+    [reviewTarget, reviewActions?.commentsByTarget],
+  );
+  const isEditorOpen = isInlineReviewEditorForTarget(reviewActions?.editor ?? null, reviewTarget);
+  const onStartComment = reviewActions?.onStartComment ?? noopStartComment;
+
   return (
-    <View style={containerStyle}>
+    <InlineReviewGutterCell
+      reviewTarget={reviewTarget}
+      comments={comments}
+      isEditorOpen={isEditorOpen}
+      isLineHovered={isLineHovered}
+      onStartComment={onStartComment}
+      style={containerStyle}
+    >
       <Text numberOfLines={1} style={textStyle}>
         {formatDiffGutterText(lineNumber)}
       </Text>
-    </View>
+    </InlineReviewGutterCell>
   );
 }
 
-function DiffTextLine({ line, wrapLines }: { line: DiffLine; wrapLines: boolean }) {
+function DiffTextLine({
+  line,
+  wrapLines,
+  reviewTarget,
+  reviewActions,
+  onHoverChange,
+  hoverTargetKey,
+  onHoverTargetChange,
+}: {
+  line: DiffLine;
+  wrapLines: boolean;
+  reviewTarget?: ReviewableDiffTarget | null;
+  reviewActions?: InlineReviewActions;
+  onHoverChange?: (hovered: boolean) => void;
+  hoverTargetKey?: string | null;
+  onHoverTargetChange?: (key: string | null) => void;
+}) {
   const visibleTokens = hasVisibleDiffTokens(line.tokens) ? line.tokens : null;
 
   const containerStyle = useMemo(
@@ -262,22 +388,37 @@ function DiffTextLine({ line, wrapLines }: { line: DiffLine; wrapLines: boolean 
   );
 
   return (
-    <View style={containerStyle}>
+    <LongPressableLine
+      reviewTarget={reviewTarget}
+      reviewActions={reviewActions}
+      onHoverChange={onHoverChange}
+      hoverTargetKey={hoverTargetKey}
+      onHoverTargetChange={onHoverTargetChange}
+      style={containerStyle}
+    >
       {line.type !== "header" && visibleTokens ? (
         <HighlightedText tokens={visibleTokens} wrapLines={wrapLines} />
       ) : (
         <Text style={textStyle}>{formatDiffContentText(line.content)}</Text>
       )}
-    </View>
+    </LongPressableLine>
   );
 }
 
 function SplitTextLine({
   line,
   wrapLines,
+  reviewActions,
+  onHoverChange,
+  hoverTargetKey,
+  onHoverTargetChange,
 }: {
   line: SplitDiffDisplayLine | null;
   wrapLines: boolean;
+  reviewActions?: InlineReviewActions;
+  onHoverChange?: (hovered: boolean) => void;
+  hoverTargetKey?: string | null;
+  onHoverTargetChange?: (key: string | null) => void;
 }) {
   const visibleTokens = line && hasVisibleDiffTokens(line.tokens) ? line.tokens : null;
 
@@ -298,13 +439,20 @@ function SplitTextLine({
   );
 
   return (
-    <View style={containerStyle}>
+    <LongPressableLine
+      reviewTarget={line?.reviewTarget}
+      reviewActions={reviewActions}
+      onHoverChange={onHoverChange}
+      hoverTargetKey={hoverTargetKey}
+      onHoverTargetChange={onHoverTargetChange}
+      style={containerStyle}
+    >
       {visibleTokens ? (
         <HighlightedText tokens={visibleTokens} wrapLines={wrapLines} />
       ) : (
         <Text style={textStyle}>{formatDiffContentText(line?.content)}</Text>
       )}
-    </View>
+    </LongPressableLine>
   );
 }
 
@@ -313,28 +461,21 @@ function DiffLineView({
   lineNumber,
   gutterWidth,
   wrapLines,
+  reviewTarget,
+  reviewActions,
 }: {
   line: DiffLine;
   lineNumber: number | null;
   gutterWidth: number;
   wrapLines: boolean;
+  reviewTarget?: ReviewableDiffTarget | null;
+  reviewActions?: InlineReviewActions;
 }) {
+  const [isLineHovered, setIsLineHovered] = useState(false);
   const visibleTokens = hasVisibleDiffTokens(line.tokens) ? line.tokens : null;
 
   const containerStyle = useMemo(
     () => [styles.diffLineContainer, lineTypeBackground(line.type)],
-    [line.type],
-  );
-  const gutterStyle = useMemo(
-    () => [styles.lineNumberGutter, { width: gutterWidth }],
-    [gutterWidth],
-  );
-  const gutterTextStyle = useMemo(
-    () => [
-      styles.lineNumberText,
-      line.type === "add" && styles.addLineNumberText,
-      line.type === "remove" && styles.removeLineNumberText,
-    ],
     [line.type],
   );
   const textStyle = useMemo(
@@ -350,18 +491,27 @@ function DiffLineView({
   );
 
   return (
-    <View style={containerStyle}>
-      <View style={gutterStyle}>
-        <Text numberOfLines={1} style={gutterTextStyle}>
-          {formatDiffGutterText(lineNumber)}
-        </Text>
-      </View>
+    <LongPressableLine
+      reviewTarget={reviewTarget}
+      reviewActions={reviewActions}
+      onHoverChange={setIsLineHovered}
+      style={containerStyle}
+    >
+      <DiffGutterCell
+        lineNumber={lineNumber}
+        type={line.type}
+        gutterWidth={gutterWidth}
+        reviewTarget={reviewTarget}
+        reviewActions={reviewActions}
+        isLineHovered={isLineHovered}
+        style={styles.lineNumberGutter}
+      />
       {line.type !== "header" && visibleTokens ? (
         <HighlightedText tokens={visibleTokens} wrapLines={wrapLines} />
       ) : (
         <Text style={textStyle}>{formatDiffContentText(line.content)}</Text>
       )}
-    </View>
+    </LongPressableLine>
   );
 }
 
@@ -369,27 +519,18 @@ function SplitDiffLine({
   line,
   gutterWidth,
   wrapLines,
+  reviewActions,
 }: {
   line: SplitDiffDisplayLine | null;
   gutterWidth: number;
   wrapLines: boolean;
+  reviewActions?: InlineReviewActions;
 }) {
+  const [isLineHovered, setIsLineHovered] = useState(false);
   const visibleTokens = line && hasVisibleDiffTokens(line.tokens) ? line.tokens : null;
 
   const containerStyle = useMemo(
     () => [styles.diffLineContainer, lineTypeBackground(line?.type)],
-    [line?.type],
-  );
-  const gutterStyle = useMemo(
-    () => [styles.lineNumberGutter, { width: gutterWidth }],
-    [gutterWidth],
-  );
-  const gutterTextStyle = useMemo(
-    () => [
-      styles.lineNumberText,
-      line?.type === "add" && styles.addLineNumberText,
-      line?.type === "remove" && styles.removeLineNumberText,
-    ],
     [line?.type],
   );
   const textStyle = useMemo(
@@ -405,16 +546,125 @@ function SplitDiffLine({
   );
 
   return (
-    <View style={containerStyle}>
-      <View style={gutterStyle}>
-        <Text numberOfLines={1} style={gutterTextStyle}>
-          {formatDiffGutterText(line?.lineNumber ?? null)}
-        </Text>
-      </View>
+    <LongPressableLine
+      reviewTarget={line?.reviewTarget}
+      reviewActions={reviewActions}
+      onHoverChange={setIsLineHovered}
+      style={containerStyle}
+    >
+      <DiffGutterCell
+        lineNumber={line?.lineNumber ?? null}
+        type={line?.type}
+        gutterWidth={gutterWidth}
+        reviewTarget={line?.reviewTarget}
+        reviewActions={reviewActions}
+        isLineHovered={isLineHovered}
+        style={styles.lineNumberGutter}
+      />
       {visibleTokens ? (
         <HighlightedText tokens={visibleTokens} wrapLines={wrapLines} />
       ) : (
         <Text style={textStyle}>{formatDiffContentText(line?.content)}</Text>
+      )}
+    </LongPressableLine>
+  );
+}
+
+function InlineReviewThreadContent({
+  reviewTarget,
+  reviewActions,
+  reservedHeight,
+  viewportWidth,
+  pinToViewport,
+}: {
+  reviewTarget: ReviewableDiffTarget | null | undefined;
+  reviewActions?: InlineReviewActions;
+  reservedHeight?: number;
+  viewportWidth?: number;
+  pinToViewport?: boolean;
+}) {
+  const threadState = getInlineReviewThreadState({ reviewTarget, reviewActions });
+  const height = reservedHeight ?? threadState?.height ?? 0;
+  const placeholderStyle = useMemo<ViewStyle>(() => ({ minHeight: height }), [height]);
+  if (height === 0) {
+    return null;
+  }
+  if (!reviewTarget || !reviewActions || !threadState) {
+    return <View style={placeholderStyle} />;
+  }
+
+  return (
+    <InlineReviewThread
+      reviewTarget={reviewTarget}
+      reviewActions={reviewActions}
+      height={height}
+      viewportWidth={viewportWidth}
+      pinToViewport={pinToViewport}
+      testID={`review-thread-${reviewTarget.key}`}
+    />
+  );
+}
+
+function InlineReviewGutterSpacer({
+  reviewTarget,
+  reviewActions,
+  gutterWidth,
+  reservedHeight,
+  style,
+}: {
+  reviewTarget: ReviewableDiffTarget | null | undefined;
+  reviewActions?: InlineReviewActions;
+  gutterWidth: number;
+  reservedHeight?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const threadState = getInlineReviewThreadState({ reviewTarget, reviewActions });
+  const height = reservedHeight ?? threadState?.height ?? 0;
+  const spacerStyle = useMemo<StyleProp<ViewStyle>>(
+    () => [styles.inlineReviewGutterSpacer, { width: gutterWidth, minHeight: height }, style],
+    [gutterWidth, height, style],
+  );
+  if (height === 0) {
+    return null;
+  }
+
+  return <View style={spacerStyle} />;
+}
+
+function InlineReviewRow({
+  reviewTarget,
+  reviewActions,
+  gutterWidth,
+  reservedHeight,
+}: {
+  reviewTarget: ReviewableDiffTarget | null | undefined;
+  reviewActions?: InlineReviewActions;
+  gutterWidth: number;
+  reservedHeight?: number;
+}) {
+  const threadState = getInlineReviewThreadState({ reviewTarget, reviewActions });
+  const height = reservedHeight ?? threadState?.height ?? 0;
+  const gutterSpacerStyle = useMemo<StyleProp<ViewStyle>>(
+    () => [styles.inlineReviewGutterSpacer, { width: gutterWidth }],
+    [gutterWidth],
+  );
+  const placeholderStyle = useMemo<ViewStyle>(() => ({ minHeight: height }), [height]);
+  if (height === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.inlineReviewRow}>
+      <View style={gutterSpacerStyle} />
+      {reviewTarget && reviewActions && threadState ? (
+        <InlineReviewThread
+          reviewTarget={reviewTarget}
+          reviewActions={reviewActions}
+          height={height}
+          testID={`review-thread-${reviewTarget.key}`}
+        />
+      ) : (
+        <View style={placeholderStyle} />
       )}
     </View>
   );
@@ -425,15 +675,18 @@ function SplitDiffColumn({
   side,
   gutterWidth,
   wrapLines,
+  reviewActions,
   showDivider = false,
 }: {
   rows: SplitDiffRow[];
   side: "left" | "right";
   gutterWidth: number;
   wrapLines: boolean;
+  reviewActions?: InlineReviewActions;
   showDivider?: boolean;
 }) {
   const [scrollWidth, setScrollWidth] = useState(0);
+  const [hoveredReviewTargetKey, setHoveredReviewTargetKey] = useState<string | null>(null);
 
   const wrapCellStyle = useMemo(
     () => [styles.splitCell, showDivider && styles.splitCellWithDivider],
@@ -462,13 +715,27 @@ function SplitDiffColumn({
                 </View>
               );
             }
+            const line = side === "left" ? row.left : row.right;
+            const reviewRowState = getSplitInlineReviewThreadState({
+              left: row.left?.reviewTarget,
+              right: row.right?.reviewTarget,
+              reviewActions,
+            });
             return (
-              <SplitDiffLine
-                key={key}
-                line={side === "left" ? row.left : row.right}
-                gutterWidth={gutterWidth}
-                wrapLines={wrapLines}
-              />
+              <View key={key}>
+                <SplitDiffLine
+                  line={line}
+                  gutterWidth={gutterWidth}
+                  wrapLines={wrapLines}
+                  reviewActions={reviewActions}
+                />
+                <InlineReviewRow
+                  reviewTarget={line?.reviewTarget}
+                  reviewActions={reviewActions}
+                  gutterWidth={gutterWidth}
+                  reservedHeight={reviewRowState?.height}
+                />
+              </View>
             );
           })}
         </View>
@@ -486,13 +753,31 @@ function SplitDiffColumn({
             );
           }
           const line = side === "left" ? row.left : row.right;
+          const reviewTargetKey = line?.reviewTarget?.key ?? null;
+          const reviewRowState = getSplitInlineReviewThreadState({
+            left: row.left?.reviewTarget,
+            right: row.right?.reviewTarget,
+            reviewActions,
+          });
           return (
-            <DiffGutterCell
-              key={key}
-              lineNumber={line?.lineNumber ?? null}
-              type={line?.type}
-              gutterWidth={gutterWidth}
-            />
+            <View key={key}>
+              <DiffGutterCell
+                lineNumber={line?.lineNumber ?? null}
+                type={line?.type}
+                gutterWidth={gutterWidth}
+                reviewTarget={line?.reviewTarget}
+                reviewActions={reviewActions}
+                isLineHovered={
+                  reviewTargetKey !== null && hoveredReviewTargetKey === reviewTargetKey
+                }
+              />
+              <InlineReviewGutterSpacer
+                reviewTarget={line?.reviewTarget}
+                reviewActions={reviewActions}
+                gutterWidth={gutterWidth}
+                reservedHeight={reviewRowState?.height}
+              />
+            </View>
           );
         })}
       </View>
@@ -511,12 +796,30 @@ function SplitDiffColumn({
                 </View>
               );
             }
+            const line = side === "left" ? row.left : row.right;
+            const reviewTargetKey = line?.reviewTarget?.key ?? null;
+            const reviewRowState = getSplitInlineReviewThreadState({
+              left: row.left?.reviewTarget,
+              right: row.right?.reviewTarget,
+              reviewActions,
+            });
             return (
-              <SplitTextLine
-                key={key}
-                line={side === "left" ? row.left : row.right}
-                wrapLines={false}
-              />
+              <View key={key}>
+                <SplitTextLine
+                  line={line}
+                  wrapLines={false}
+                  reviewActions={reviewActions}
+                  hoverTargetKey={reviewTargetKey}
+                  onHoverTargetChange={setHoveredReviewTargetKey}
+                />
+                <InlineReviewThreadContent
+                  reviewTarget={line?.reviewTarget}
+                  reviewActions={reviewActions}
+                  reservedHeight={reviewRowState?.height}
+                  viewportWidth={scrollWidth}
+                  pinToViewport
+                />
+              </View>
             );
           })}
         </View>
@@ -619,17 +922,20 @@ function DiffFileBody({
   file,
   layout,
   wrapLines,
+  reviewActions,
   onBodyHeightChange,
   testID,
 }: {
   file: ParsedDiffFile;
   layout: "unified" | "split";
   wrapLines: boolean;
+  reviewActions?: InlineReviewActions;
   onBodyHeightChange?: (file: ParsedDiffFile, height: number) => void;
   testID?: string;
 }) {
   const [scrollViewWidth, setScrollViewWidth] = useState(0);
   const [bodyWidth, setBodyWidth] = useState(0);
+  const [hoveredReviewTargetKey, setHoveredReviewTargetKey] = useState<string | null>(null);
   const { theme } = useUnistyles();
 
   const handleLayout = useCallback(
@@ -678,12 +984,14 @@ function DiffFileBody({
                 side="left"
                 gutterWidth={gutterWidth}
                 wrapLines={wrapLines}
+                reviewActions={reviewActions}
               />
               <SplitDiffColumn
                 rows={rows}
                 side="right"
                 gutterWidth={gutterWidth}
                 wrapLines={wrapLines}
+                reviewActions={reviewActions}
                 showDivider
               />
             </View>
@@ -696,30 +1004,51 @@ function DiffFileBody({
           return (
             <View style={styles.diffContent}>
               <View style={styles.linesContainer}>
-                {computedLines.map(({ line, lineNumber, key }) => (
-                  <DiffLineView
-                    key={key}
-                    line={line}
-                    lineNumber={lineNumber}
-                    gutterWidth={gutterWidth}
-                    wrapLines={wrapLines}
-                  />
+                {computedLines.map(({ line, lineNumber, key, reviewTarget }) => (
+                  <View key={key}>
+                    <DiffLineView
+                      line={line}
+                      lineNumber={lineNumber}
+                      gutterWidth={gutterWidth}
+                      wrapLines={wrapLines}
+                      reviewTarget={reviewTarget}
+                      reviewActions={reviewActions}
+                    />
+                    <InlineReviewRow
+                      reviewTarget={reviewTarget}
+                      reviewActions={reviewActions}
+                      gutterWidth={gutterWidth}
+                    />
+                  </View>
                 ))}
               </View>
             </View>
           );
         }
 
+        const textViewportWidth =
+          scrollViewWidth > 0 ? scrollViewWidth : Math.max(0, bodyWidth - gutterWidth);
         return (
           <View style={DIFF_CONTENT_ROW_STYLE}>
             <View style={styles.gutterColumn}>
-              {computedLines.map(({ line, lineNumber, key }) => (
-                <DiffGutterCell
-                  key={key}
-                  lineNumber={lineNumber}
-                  type={line.type}
-                  gutterWidth={gutterWidth}
-                />
+              {computedLines.map(({ line, lineNumber, key, reviewTarget }) => (
+                <View key={key}>
+                  <DiffGutterCell
+                    lineNumber={lineNumber}
+                    type={line.type}
+                    gutterWidth={gutterWidth}
+                    reviewTarget={reviewTarget}
+                    reviewActions={reviewActions}
+                    isLineHovered={
+                      reviewTarget?.key !== undefined && hoveredReviewTargetKey === reviewTarget.key
+                    }
+                  />
+                  <InlineReviewGutterSpacer
+                    reviewTarget={reviewTarget}
+                    reviewActions={reviewActions}
+                    gutterWidth={gutterWidth}
+                  />
+                </View>
               ))}
             </View>
             <DiffScroll
@@ -729,8 +1058,23 @@ function DiffFileBody({
               contentContainerStyle={styles.diffContentInner}
             >
               <View style={linesContainerRowStyle}>
-                {computedLines.map(({ line, key }) => (
-                  <DiffTextLine key={key} line={line} wrapLines={false} />
+                {computedLines.map(({ line, key, reviewTarget }) => (
+                  <View key={key}>
+                    <DiffTextLine
+                      line={line}
+                      wrapLines={false}
+                      reviewTarget={reviewTarget}
+                      reviewActions={reviewActions}
+                      hoverTargetKey={reviewTarget?.key ?? null}
+                      onHoverTargetChange={setHoveredReviewTargetKey}
+                    />
+                    <InlineReviewThreadContent
+                      reviewTarget={reviewTarget}
+                      reviewActions={reviewActions}
+                      viewportWidth={textViewportWidth}
+                      pinToViewport
+                    />
+                  </View>
                 ))}
               </View>
             </DiffScroll>
@@ -746,6 +1090,7 @@ interface GitDiffPaneProps {
   workspaceId?: string | null;
   cwd: string;
   hideHeaderRow?: boolean;
+  enabled?: boolean;
 }
 
 type PressableStyleFn = (
@@ -1070,6 +1415,7 @@ interface GitActionRunners {
   runCommit: (args: { serverId: string; cwd: string }) => Promise<void>;
   runPull: (args: { serverId: string; cwd: string }) => Promise<void>;
   runPush: (args: { serverId: string; cwd: string }) => Promise<void>;
+  runPullAndPush: (args: { serverId: string; cwd: string }) => Promise<void>;
   runCreatePr: (args: { serverId: string; cwd: string }) => Promise<void>;
   runMergeBranch: (args: { serverId: string; cwd: string; baseRef: string }) => Promise<void>;
   runMergeFromBase: (args: { serverId: string; cwd: string; baseRef: string }) => Promise<void>;
@@ -1098,6 +1444,7 @@ interface GitActionHandlers {
   handleCommit: () => void;
   handlePull: () => void;
   handlePush: () => void;
+  handlePullAndPush: () => void;
   handleCreatePr: () => void;
   handleMergeBranch: () => void;
   handleMergeFromBase: () => void;
@@ -1150,6 +1497,18 @@ function useGitActionHandlers({
       })
       .catch((err) => {
         toastActionError(err, "Failed to push");
+      });
+  }, [cwd, runners, serverId, toastActionError, toastActionSuccess]);
+
+  const handlePullAndPush = useCallback(() => {
+    void runners
+      .runPullAndPush({ serverId, cwd })
+      .then(() => {
+        toastActionSuccess("Pulled and pushed");
+        return;
+      })
+      .catch((err) => {
+        toastActionError(err, "Failed to pull and push");
       });
   }, [cwd, runners, serverId, toastActionError, toastActionSuccess]);
 
@@ -1232,6 +1591,7 @@ function useGitActionHandlers({
     handleCommit,
     handlePull,
     handlePush,
+    handlePullAndPush,
     handleCreatePr,
     handleMergeBranch,
     handleMergeFromBase,
@@ -1349,6 +1709,7 @@ function computeDisabledStates(
     commitDisabled: actionsDisabled || statuses.commitStatus === pending,
     pullDisabled: actionsDisabled || statuses.pullStatus === pending,
     pushDisabled: actionsDisabled || statuses.pushStatus === pending,
+    pullAndPushDisabled: actionsDisabled || statuses.pullAndPushStatus === pending,
     prDisabled: actionsDisabled || statuses.prCreateStatus === pending,
     mergeDisabled: actionsDisabled || statuses.mergeStatus === pending,
     mergeFromBaseDisabled: actionsDisabled || statuses.mergeFromBaseStatus === pending,
@@ -1392,6 +1753,7 @@ interface GitActionsStatusInputs {
   commitStatus: CheckoutGitActionStatus;
   pullStatus: CheckoutGitActionStatus;
   pushStatus: CheckoutGitActionStatus;
+  pullAndPushStatus: CheckoutGitActionStatus;
   prCreateStatus: CheckoutGitActionStatus;
   mergeStatus: CheckoutGitActionStatus;
   mergeFromBaseStatus: CheckoutGitActionStatus;
@@ -1402,6 +1764,7 @@ interface GitActionsDisabledInputs {
   commitDisabled: boolean;
   pullDisabled: boolean;
   pushDisabled: boolean;
+  pullAndPushDisabled: boolean;
   prDisabled: boolean;
   mergeDisabled: boolean;
   mergeFromBaseDisabled: boolean;
@@ -1461,6 +1824,12 @@ function buildGitActionsForPane({
         icon: <Upload size={16} color={iconColor} />,
         handler: handlers.handlePush,
       },
+      "pull-and-push": {
+        disabled: disabled.pullAndPushDisabled,
+        status: statuses.pullAndPushStatus,
+        icon: <ArrowDownUp size={16} color={iconColor} />,
+        handler: handlers.handlePullAndPush,
+      },
       pr: {
         disabled: disabled.prDisabled,
         status: policy.hasPullRequest ? "idle" : statuses.prCreateStatus,
@@ -1489,14 +1858,24 @@ function buildGitActionsForPane({
   });
 }
 
-export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDiffPaneProps) {
+function shouldEnableCheckoutDiff(input: { paneEnabled: boolean; isGit: boolean }): boolean {
+  return input.paneEnabled && input.isGit;
+}
+
+export function GitDiffPane({
+  serverId,
+  workspaceId,
+  cwd,
+  hideHeaderRow,
+  enabled,
+}: GitDiffPaneProps) {
   const { theme } = useUnistyles();
   const toast = useToast();
   const isMobile = useIsCompactFormFactor();
   const showDesktopWebScrollbar = isWeb && !isMobile;
   const canUseSplitLayout = isWeb && !isMobile;
   const router = useRouter();
-  const [diffModeOverride, setDiffModeOverride] = useState<"uncommitted" | "base" | null>(null);
+  const [diffModeOverride, setDiffModeOverride] = useState<ReviewDraftMode | null>(null);
   const [postShipArchiveSuggested, setPostShipArchiveSuggested] = useState(false);
   const [shipDefault, setShipDefault] = useState<"merge" | "pr">("merge");
   const { preferences: changesPreferences, updatePreferences: updateChangesPreferences } =
@@ -1519,13 +1898,8 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     void updateChangesPreferences({ hideWhitespace: !changesPreferences.hideWhitespace });
   }, [changesPreferences.hideWhitespace, updateChangesPreferences]);
 
-  const handleSelectUncommitted = useCallback(() => {
-    setDiffModeOverride("uncommitted");
-  }, []);
-
-  const handleSelectBase = useCallback(() => {
-    setDiffModeOverride("base");
-  }, []);
+  // handleSelectUncommitted/handleSelectBase are defined later, after reviewDraftScopeKey
+  // and setActiveReviewMode are available, so they can record the active review mode.
 
   const handleLayoutUnified = useCallback(() => {
     handleLayoutChange("unified");
@@ -1581,8 +1955,20 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   } = statusState;
 
   // Auto-select diff mode based on state: uncommitted when dirty, base when clean
-  const autoDiffMode = hasUncommittedChanges ? "uncommitted" : "base";
-  const diffMode = diffModeOverride ?? autoDiffMode;
+  const autoDiffMode: ReviewDraftMode = hasUncommittedChanges ? "uncommitted" : "base";
+  const reviewDraftScopeKey = useMemo(
+    () =>
+      buildReviewDraftScopeKey({
+        serverId,
+        workspaceId,
+        cwd,
+        baseRef,
+        ignoreWhitespace: changesPreferences.hideWhitespace,
+      }),
+    [baseRef, changesPreferences.hideWhitespace, cwd, serverId, workspaceId],
+  );
+  const activeReviewMode = useActiveReviewDraftMode({ scopeKey: reviewDraftScopeKey });
+  const diffMode = diffModeOverride ?? activeReviewMode ?? autoDiffMode;
 
   const {
     files,
@@ -1594,8 +1980,68 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     mode: diffMode,
     baseRef,
     ignoreWhitespace: changesPreferences.hideWhitespace,
-    enabled: isGit,
+    enabled: shouldEnableCheckoutDiff({ paneEnabled: enabled !== false, isGit }),
   });
+  const reviewDraftKey = useMemo(
+    () =>
+      buildReviewDraftKey({
+        serverId,
+        workspaceId,
+        cwd,
+        mode: diffMode,
+        baseRef,
+        ignoreWhitespace: changesPreferences.hideWhitespace,
+      }),
+    [baseRef, changesPreferences.hideWhitespace, cwd, diffMode, serverId, workspaceId],
+  );
+  const setActiveReviewMode = useSetActiveReviewDraftMode();
+
+  const handleSelectUncommitted = useCallback(() => {
+    setDiffModeOverride("uncommitted");
+    setActiveReviewMode({ scopeKey: reviewDraftScopeKey, mode: "uncommitted" });
+  }, [reviewDraftScopeKey, setActiveReviewMode]);
+
+  const handleSelectBase = useCallback(() => {
+    setDiffModeOverride("base");
+    setActiveReviewMode({ scopeKey: reviewDraftScopeKey, mode: "base" });
+  }, [reviewDraftScopeKey, setActiveReviewMode]);
+
+  const reviewActions = useInlineReviewController({
+    reviewDraftKey,
+  });
+  const reviewAttachment = useReviewAttachmentSnapshot({
+    key: reviewDraftKey,
+    diffFiles: files,
+    cwd,
+    mode: diffMode,
+    baseRef,
+  });
+  const workspaceAttachmentScopeKey = useMemo(
+    () => buildWorkspaceAttachmentScopeKey({ serverId, workspaceId, cwd }),
+    [cwd, serverId, workspaceId],
+  );
+  const setWorkspaceAttachments = useWorkspaceAttachmentsStore(
+    (state) => state.setWorkspaceAttachments,
+  );
+  const clearWorkspaceAttachments = useWorkspaceAttachmentsStore(
+    (state) => state.clearWorkspaceAttachments,
+  );
+
+  useEffect(() => {
+    setWorkspaceAttachments({
+      scopeKey: workspaceAttachmentScopeKey,
+      attachments: reviewAttachment ? [reviewAttachment] : [],
+    });
+
+    return () => {
+      clearWorkspaceAttachments({ scopeKey: workspaceAttachmentScopeKey });
+    };
+  }, [
+    clearWorkspaceAttachments,
+    reviewAttachment,
+    setWorkspaceAttachments,
+    workspaceAttachmentScopeKey,
+  ]);
   const {
     status: prStatus,
     githubFeaturesEnabled,
@@ -1868,6 +2314,9 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   const pushStatus = useCheckoutGitActionsStore((state) =>
     state.getStatus({ serverId, cwd, actionId: "push" }),
   );
+  const pullAndPushStatus = useCheckoutGitActionsStore((state) =>
+    state.getStatus({ serverId, cwd, actionId: "pull-and-push" }),
+  );
   const prCreateStatus = useCheckoutGitActionsStore((state) =>
     state.getStatus({ serverId, cwd, actionId: "create-pr" }),
   );
@@ -1884,6 +2333,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   const runCommit = useCheckoutGitActionsStore((state) => state.commit);
   const runPull = useCheckoutGitActionsStore((state) => state.pull);
   const runPush = useCheckoutGitActionsStore((state) => state.push);
+  const runPullAndPush = useCheckoutGitActionsStore((state) => state.pullAndPush);
   const runCreatePr = useCheckoutGitActionsStore((state) => state.createPr);
   const runMergeBranch = useCheckoutGitActionsStore((state) => state.mergeBranch);
   const runMergeFromBase = useCheckoutGitActionsStore((state) => state.mergeFromBase);
@@ -1927,6 +2377,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       runCommit,
       runPull,
       runPush,
+      runPullAndPush,
       runCreatePr,
       runMergeBranch,
       runMergeFromBase,
@@ -1939,6 +2390,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       runMergeBranch,
       runMergeFromBase,
       runPull,
+      runPullAndPush,
       runPush,
     ],
   );
@@ -1947,6 +2399,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     handleCommit,
     handlePull,
     handlePush,
+    handlePullAndPush,
     handleCreatePr,
     handleMergeBranch,
     handleMergeFromBase,
@@ -1983,6 +2436,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
           file={item.file}
           layout={effectiveLayout}
           wrapLines={wrapLines}
+          reviewActions={reviewActions}
           onBodyHeightChange={handleBodyHeightChange}
           testID={`diff-file-${item.fileIndex}-body`}
         />
@@ -1993,6 +2447,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       handleBodyHeightChange,
       handleHeaderHeightChange,
       handleToggleExpanded,
+      reviewActions,
       wrapLines,
     ],
   );
@@ -2032,8 +2487,14 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   );
 
   const flatExtraData = useMemo(
-    () => ({ expandedPathsArray, effectiveLayout, heightVersion, wrapLines }),
-    [expandedPathsArray, effectiveLayout, heightVersion, wrapLines],
+    () => ({
+      expandedPathsArray,
+      effectiveLayout,
+      heightVersion,
+      wrapLines,
+      reviewActions,
+    }),
+    [expandedPathsArray, effectiveLayout, heightVersion, wrapLines, reviewActions],
   );
 
   const hasChanges = files.length > 0;
@@ -2070,6 +2531,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       commitStatus,
       pullStatus,
       pushStatus,
+      pullAndPushStatus,
       prCreateStatus,
       mergeStatus,
       mergeFromBaseStatus,
@@ -2081,6 +2543,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       mergeFromBaseStatus,
       mergeStatus,
       prCreateStatus,
+      pullAndPushStatus,
       pullStatus,
       pushStatus,
     ],
@@ -2144,6 +2607,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       handleCommit,
       handlePull,
       handlePush,
+      handlePullAndPush,
       handleCreatePr,
       handleMergeBranch,
       handleMergeFromBase,
@@ -2158,6 +2622,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       handleMergeFromBase,
       handlePr,
       handlePull,
+      handlePullAndPush,
       handlePush,
     ],
   );
@@ -2602,11 +3067,28 @@ const styles = StyleSheet.create((theme) => ({
   },
   gutterColumn: {
     backgroundColor: theme.colors.surface1,
+    zIndex: 4,
+    elevation: 4,
+    overflow: "visible",
   },
   gutterCell: {
     borderRightWidth: theme.borderWidth[1],
     borderRightColor: theme.colors.border,
     justifyContent: "flex-start",
+    zIndex: 4,
+    elevation: 4,
+    overflow: "visible",
+  },
+  inlineReviewRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    backgroundColor: theme.colors.surface1,
+  },
+  inlineReviewGutterSpacer: {
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    flexShrink: 0,
   },
   textLineContainer: {
     flexDirection: "row",
@@ -2643,6 +3125,7 @@ const styles = StyleSheet.create((theme) => ({
   diffLineContainer: {
     flexDirection: "row",
     alignItems: "stretch",
+    overflow: "visible",
   },
   lineNumberGutter: {
     borderRightWidth: theme.borderWidth[1],
@@ -2650,8 +3133,12 @@ const styles = StyleSheet.create((theme) => ({
     marginRight: theme.spacing[2],
     alignSelf: "stretch",
     justifyContent: "flex-start",
+    zIndex: 4,
+    elevation: 4,
+    overflow: "visible",
   },
   lineNumberText: {
+    width: "100%",
     textAlign: "right",
     paddingRight: theme.spacing[2],
     fontSize: theme.fontSize.xs,

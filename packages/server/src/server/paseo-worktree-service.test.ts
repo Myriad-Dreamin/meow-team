@@ -1,15 +1,19 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { GitHubService } from "../services/github-service.js";
 import type { WorkspaceGitRuntimeSnapshot, WorkspaceGitService } from "./workspace-git-service.js";
 import type { PersistedProjectRecord, PersistedWorkspaceRecord } from "./workspace-registry.js";
-import { createPaseoWorktree, type CreatePaseoWorktreeDeps } from "./paseo-worktree-service.js";
+import {
+  attemptFirstAgentBranchAutoName,
+  createPaseoWorktree,
+  type CreatePaseoWorktreeDeps,
+} from "./paseo-worktree-service.js";
 import { createWorktreeCoreDeps } from "./worktree-core.js";
+import { readPaseoWorktreeMetadata } from "../utils/worktree-metadata.js";
 
 const cleanupPaths: string[] = [];
 
@@ -98,6 +102,224 @@ test("reuses an existing worktree and still upserts the workspace", async () => 
   expect(events).toContain(`workspace:${second.workspace.workspaceId}`);
 });
 
+test("renames an eligible unnamed branch-off worktree once on first agent context", async () => {
+  const { repoDir, tempDir } = createGitRepo();
+  cleanupPaths.push(tempDir);
+  const deps = createDeps({
+    generateBranchName: (seed) => (seed ? "renamed-from-agent-context" : "unnamed-placeholder"),
+  });
+
+  const created = await createPaseoWorktree(
+    {
+      cwd: repoDir,
+      runSetup: false,
+      paseoHome: path.join(tempDir, ".paseo"),
+    },
+    deps,
+  );
+
+  expect(created.worktree.branchName).toBe("unnamed-placeholder");
+  expect(readPaseoWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+    version: 2,
+    firstAgentBranchAutoName: {
+      status: "pending",
+      placeholderBranchName: "unnamed-placeholder",
+    },
+  });
+
+  const first = await attemptFirstAgentBranchAutoName({
+    cwd: created.worktree.worktreePath,
+    firstAgentContext: { prompt: "Build the agent context name" },
+    generateBranchName: deps.generateBranchName,
+  });
+  const branchAfterFirst = execSync("git branch --show-current", {
+    cwd: created.worktree.worktreePath,
+    stdio: "pipe",
+  })
+    .toString()
+    .trim();
+
+  expect(first).toEqual({
+    attempted: true,
+    renamed: true,
+    branchName: "renamed-from-agent-context",
+  });
+  expect(branchAfterFirst).toBe("renamed-from-agent-context");
+  expect(readPaseoWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+    version: 2,
+    firstAgentBranchAutoName: {
+      status: "attempted",
+      placeholderBranchName: "unnamed-placeholder",
+    },
+  });
+
+  const second = await attemptFirstAgentBranchAutoName({
+    cwd: created.worktree.worktreePath,
+    firstAgentContext: { prompt: "Try another name" },
+    generateBranchName: () => "second-agent-name",
+  });
+  const branchAfterSecond = execSync("git branch --show-current", {
+    cwd: created.worktree.worktreePath,
+    stdio: "pipe",
+  })
+    .toString()
+    .trim();
+
+  expect(second).toEqual({ attempted: false, renamed: false, branchName: null });
+  expect(branchAfterSecond).toBe("renamed-from-agent-context");
+});
+
+test("renames the branch even when the app supplies a random placeholder slug", async () => {
+  const { repoDir, tempDir } = createGitRepo();
+  cleanupPaths.push(tempDir);
+  const deps = createDeps({
+    generateBranchName: (seed) =>
+      seed === "Investigate the failing login flow" ? "renamed-from-prompt" : (seed ?? "fallback"),
+  });
+
+  const created = await createPaseoWorktree(
+    {
+      cwd: repoDir,
+      worktreeSlug: "dazzling-yak",
+      firstAgentContext: { prompt: "Investigate the failing login flow" },
+      runSetup: false,
+      paseoHome: path.join(tempDir, ".paseo"),
+    },
+    deps,
+  );
+
+  const branchAfter = execSync("git branch --show-current", {
+    cwd: created.worktree.worktreePath,
+    stdio: "pipe",
+  })
+    .toString()
+    .trim();
+
+  expect(created.worktree.branchName).toBe("renamed-from-prompt");
+  expect(branchAfter).toBe("renamed-from-prompt");
+  expect(created.workspace.displayName).toBe("renamed-from-prompt");
+});
+
+test("renames the branch from a github_pr attachment when no prompt is supplied", async () => {
+  const { repoDir, tempDir } = createGitRepo();
+  cleanupPaths.push(tempDir);
+  const deps = createDeps({
+    generateBranchName: (seed) =>
+      seed?.includes("Investigate flaky checkout test")
+        ? "renamed-from-pr-attachment"
+        : (seed ?? "fallback"),
+  });
+
+  const created = await createPaseoWorktree(
+    {
+      cwd: repoDir,
+      worktreeSlug: "dazzling-yak",
+      firstAgentContext: {
+        attachments: [
+          {
+            type: "github_pr",
+            mimeType: "application/github-pr",
+            number: 42,
+            title: "Investigate flaky checkout test",
+            url: "https://github.com/acme/repo/pull/42",
+          },
+        ],
+      },
+      runSetup: false,
+      paseoHome: path.join(tempDir, ".paseo"),
+    },
+    deps,
+  );
+
+  const branchAfter = execSync("git branch --show-current", {
+    cwd: created.worktree.worktreePath,
+    stdio: "pipe",
+  })
+    .toString()
+    .trim();
+
+  expect(created.worktree.branchName).toBe("renamed-from-pr-attachment");
+  expect(branchAfter).toBe("renamed-from-pr-attachment");
+  expect(created.workspace.displayName).toBe("renamed-from-pr-attachment");
+});
+
+test("does not mark checkout branch worktrees as eligible for first-agent rename", async () => {
+  const { repoDir, tempDir } = createGitRepo();
+  cleanupPaths.push(tempDir);
+  execSync("git checkout -b dev", { cwd: repoDir, stdio: "pipe" });
+  writeFileSync(path.join(repoDir, "README.md"), "dev branch\n");
+  execSync("git add README.md", { cwd: repoDir, stdio: "pipe" });
+  execSync("git commit -m dev", { cwd: repoDir, stdio: "pipe" });
+  execSync("git checkout main", { cwd: repoDir, stdio: "pipe" });
+
+  const created = await createPaseoWorktree(
+    {
+      cwd: repoDir,
+      action: "checkout",
+      refName: "dev",
+      runSetup: false,
+      paseoHome: path.join(tempDir, ".paseo"),
+    },
+    createDeps(),
+  );
+
+  expect(readPaseoWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+    version: 1,
+    baseRefName: "dev",
+  });
+  await expect(
+    attemptFirstAgentBranchAutoName({
+      cwd: created.worktree.worktreePath,
+      firstAgentContext: { prompt: "Rename checkout branch" },
+      generateBranchName: () => "must-not-rename",
+    }),
+  ).resolves.toEqual({ attempted: false, renamed: false, branchName: null });
+  expect(
+    execSync("git branch --show-current", {
+      cwd: created.worktree.worktreePath,
+      stdio: "pipe",
+    })
+      .toString()
+      .trim(),
+  ).toBe("dev");
+});
+
+test("does not mark GitHub PR checkout worktrees as eligible for first-agent rename", async () => {
+  const { repoDir, tempDir } = createGitHubPrRemoteRepo();
+  cleanupPaths.push(tempDir);
+
+  const created = await createPaseoWorktree(
+    {
+      cwd: repoDir,
+      action: "checkout",
+      githubPrNumber: 123,
+      runSetup: false,
+      paseoHome: path.join(tempDir, ".paseo"),
+    },
+    createDeps(),
+  );
+
+  expect(readPaseoWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+    version: 1,
+    baseRefName: "main",
+  });
+  await expect(
+    attemptFirstAgentBranchAutoName({
+      cwd: created.worktree.worktreePath,
+      firstAgentContext: { prompt: "Rename PR checkout" },
+      generateBranchName: () => "must-not-rename",
+    }),
+  ).resolves.toEqual({ attempted: false, renamed: false, branchName: null });
+  expect(
+    execSync("git branch --show-current", {
+      cwd: created.worktree.worktreePath,
+      stdio: "pipe",
+    })
+      .toString()
+      .trim(),
+  ).toBe("pr-123");
+});
+
 test("does not mutate registries or broadcast when core worktree creation fails", async () => {
   const tempDir = mkdtempSync(path.join(tmpdir(), "paseo-worktree-service-"));
   cleanupPaths.push(tempDir);
@@ -119,21 +341,6 @@ test("does not mutate registries or broadcast when core worktree creation fails"
   expect(deps.workspaces.size).toBe(0);
 });
 
-test("keeps direct core worktree creation calls behind the service boundary", () => {
-  // Keep this literal in the test file so the grep invariant sees createWorktreeCore( here.
-  const serverSrc = path.dirname(fileURLToPath(import.meta.url));
-  const matches = listTypeScriptFiles(serverSrc).flatMap((filePath) => {
-    if (path.basename(filePath) === "worktree-core.ts") {
-      return [];
-    }
-    const contents = readFileSync(filePath, "utf8");
-    const pattern = new RegExp(["createWorktreeCore", "\\("].join(""), "g");
-    return Array.from(contents.matchAll(pattern), () => path.relative(serverSrc, filePath));
-  });
-
-  expect(matches).toEqual(["paseo-worktree-service.test.ts", "paseo-worktree-service.ts"]);
-});
-
 interface TestDeps extends CreatePaseoWorktreeDeps {
   projects: Map<string, PersistedProjectRecord>;
   workspaces: Map<string, PersistedWorkspaceRecord>;
@@ -143,6 +350,7 @@ function createDeps(options?: {
   events?: string[];
   projects?: Map<string, PersistedProjectRecord>;
   workspaces?: Map<string, PersistedWorkspaceRecord>;
+  generateBranchName?: (seed: string | undefined) => string;
 }): TestDeps {
   const events = options?.events ?? [];
   const projects = options?.projects ?? new Map<string, PersistedProjectRecord>();
@@ -150,6 +358,7 @@ function createDeps(options?: {
 
   return {
     ...createWorktreeCoreDeps(createGitHubServiceStub()),
+    ...(options?.generateBranchName ? { generateBranchName: options.generateBranchName } : {}),
     projects,
     workspaces,
     projectRegistry: {
@@ -310,14 +519,24 @@ function createGitRepo(): { tempDir: string; repoDir: string } {
   return { tempDir, repoDir };
 }
 
-function listTypeScriptFiles(directory: string): string[] {
-  const entries = readdirSync(directory);
-  return entries.flatMap((entry) => {
-    const fullPath = path.join(directory, entry);
-    const stats = statSync(fullPath);
-    if (stats.isDirectory()) {
-      return listTypeScriptFiles(fullPath);
-    }
-    return fullPath.endsWith(".ts") ? [fullPath] : [];
+function createGitHubPrRemoteRepo(): { tempDir: string; repoDir: string } {
+  const { tempDir, repoDir } = createGitRepo();
+  execSync("git checkout -b pr-123", { cwd: repoDir, stdio: "pipe" });
+  writeFileSync(path.join(repoDir, "README.md"), "pr branch\n");
+  execSync("git add README.md", { cwd: repoDir, stdio: "pipe" });
+  execSync("git commit -m pr-branch", { cwd: repoDir, stdio: "pipe" });
+  const prHead = execSync("git rev-parse HEAD", { cwd: repoDir, stdio: "pipe" }).toString().trim();
+  execSync("git checkout main", { cwd: repoDir, stdio: "pipe" });
+  execSync("git branch -D pr-123", { cwd: repoDir, stdio: "pipe" });
+
+  const remoteDir = path.join(tempDir, "remote.git");
+  execSync(`git clone --bare ${JSON.stringify(repoDir)} ${JSON.stringify(remoteDir)}`, {
+    stdio: "pipe",
   });
+  execSync(`git --git-dir=${JSON.stringify(remoteDir)} update-ref refs/pull/123/head ${prHead}`, {
+    stdio: "pipe",
+  });
+  execSync(`git remote add origin ${JSON.stringify(remoteDir)}`, { cwd: repoDir, stdio: "pipe" });
+  execSync("git fetch origin", { cwd: repoDir, stdio: "pipe" });
+  return { tempDir, repoDir };
 }

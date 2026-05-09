@@ -1,115 +1,76 @@
----
-title: Android Setup
-outline: deep
----
+# Android
 
-# Android setup
+## App variants
 
-This repo also supports a repo-local Android dependency install under
-`build/deps`, adapted from the local-install shape in the referenced gist while
-keeping everything inside the workspace instead of writing to `/opt`. The
-Android app now ships as a pure Kotlin/WebView client, so APK packaging does
-not require the Android NDK or `cargo-ndk`.
+Controlled by `APP_VARIANT` in `packages/app/app.config.js` (vanilla Expo, no custom Gradle plugin):
 
-## Install repo-local Android build dependencies
+| Variant       | App name    | Package ID       |
+| ------------- | ----------- | ---------------- |
+| `production`  | Paseo       | `sh.paseo`       |
+| `development` | Paseo Debug | `sh.paseo.debug` |
 
-Run:
+EAS profiles: `development`, `production`, and `production-apk` in `packages/app/eas.json`.
 
-```bash
-pnpm android:install-deps
-```
+`development` uses Android `debug`.
 
-That installer downloads Android command-line tools, Gradle, and Temurin JDK 17
-into `build/deps`, installs:
+## Local build + install
 
-- `platform-tools`
-- `platforms;android-35`
-- `build-tools;35.0.0`
-
-and creates these repo-local tool paths:
-
-- `build/deps/android-sdk`
-- `build/deps/jdk-17`
-- `build/deps/gradle-8.9`
-
-It also keeps package-manager state inside the repo with:
-
-- `build/deps/android-user-home`
-- `build/deps/gradle-user-home`
-
-The helper scripts prefer those repo-local paths automatically when you run the
-Android commands from the project root.
-
-The repo doctor also recognizes:
-
-- `ANDROID_SDK_ROOT`
-- `ANDROID_HOME`
-- repo-local path `build/deps/android-sdk`
-- default Linux SDK location `~/Android/Sdk`
-
-For Java and Gradle packaging tools, the repo prefers:
-
-- `JAVA_HOME`
-- repo-local path `build/deps/jdk-17`
-- `MEOW_TEAM_ANDROID_GRADLE`
-- repo-local path `build/deps/gradle-8.9/bin/gradle`
-- `gradle` on `PATH`
-
-## Verify the toolchain
-
-Run:
+From repo root:
 
 ```bash
-pnpm android:doctor
+npm run android:development    # Debug build
+npm run android:production     # Release build
+npm run android:clear          # Remove generated Android project
 ```
 
-The doctor checks:
-
-- Java 17+ runtime and compiler
-- Android SDK discovery
-- Gradle availability for APK packaging
-
-## Build and install the APK
-
-Build the Android app with:
+Or from `packages/app`:
 
 ```bash
-pnpm android:assemble
+# Debug
+APP_VARIANT=development npx expo prebuild --platform android --non-interactive
+APP_VARIANT=development npx expo run:android --variant=debug
+
+# Release
+APP_VARIANT=production npx expo prebuild --platform android --non-interactive
+APP_VARIANT=production npx expo run:android --variant=release
+
+# Clear generated Android project
+rm -rf android
 ```
 
-The build script prefers the repo-local JDK 17 and Gradle install automatically
-and prints the generated APK path when the build succeeds. The default debug APK
-is written under:
-
-- `projects/meow-team-apk/android/app/build/outputs/apk/debug/meow-team.apk`
-
-Install it onto a connected device or emulator with:
+## Screenshots
 
 ```bash
-pnpm android:install
+adb exec-out screencap -p > screenshot.png
 ```
 
-## Local backend URL
+## Cloud build + submit (EAS)
 
-The app now stays on the configuration screen on first launch until a backend
-URL is saved.
+Stable tag pushes like `v0.1.0` trigger:
 
-Saving a backend URL also starts Android background monitoring. The app keeps a
-low-priority ongoing system notification visible while that monitoring service
-is active, which lets approval and failure alerts continue while the app is
-backgrounded or the device is locked. You can stop that monitoring from the
-ongoing notification and restart it the next time you save a backend URL.
+- `packages/app/.eas/workflows/release-mobile.yml` on Expo servers (iOS + Android build + submit)
+- `.github/workflows/android-apk-release.yml` on GitHub Actions (APK asset on GitHub Release)
 
-For the Android emulator, use `http://10.0.2.2:3000` as the backend URL when
-the Next.js app is running locally with `pnpm dev`.
+Beta tags like `v0.1.1-beta.1` only trigger the GitHub APK workflow. They publish a GitHub prerelease APK for testing and do not submit to the stores.
 
-For a physical device, use your computer's LAN IP and port instead, for
-example `http://192.168.1.10:3000`.
-
-You can also preconfigure the backend URL when launching the app from `adb`:
+### Useful commands
 
 ```bash
-adb shell am start \
-  -n team.meow.android/.MainActivity \
-  --es backend_url http://192.168.1.10:3000
+cd packages/app
+
+# List recent workflow runs
+npx eas workflow:runs --workflow release-mobile.yml --limit 10
+
+# Inspect a run
+npx eas workflow:view <run-id>
+
+# Stream logs for a failed job
+npx eas workflow:logs <job-id> --non-interactive --all-steps
 ```
+
+## Meow Team Android shell
+
+This repo also contains an Android shell project under
+[`projects/meow-team-apk`](../projects/meow-team-apk/README.md). That README
+covers the repo-local SDK/JDK/Gradle install flow, APK packaging, and the
+backend URL + background monitoring behavior used by that shell app.

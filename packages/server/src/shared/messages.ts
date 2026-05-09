@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLIENT_CAPS } from "./client-capabilities.js";
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
 import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "../server/agent/agent-title-limits.js";
 import { AgentProviderSchema } from "../server/agent/provider-manifest.js";
@@ -412,14 +413,20 @@ const ToolCallDetailPayloadSchema: z.ZodType<ToolCallDetail, z.ZodTypeDef, unkno
       type: z.literal("sub_agent"),
       subAgentType: z.string().optional(),
       description: z.string().optional(),
+      childSessionId: z.string().optional(),
       log: z.string(),
-      actions: z.array(
-        z.object({
-          index: z.number().int().positive(),
-          toolName: z.string(),
-          summary: z.string().optional(),
-        }),
-      ),
+      // Compat cruft for clients <= 0.1.65-beta.3 that required this field. Producers still
+      // emit `[]`; nothing reads it. Drop the field (and the `[]` emissions) once those
+      // clients are no longer in the field.
+      actions: z
+        .array(
+          z.object({
+            index: z.number().int().positive(),
+            toolName: z.string(),
+            summary: z.string().optional(),
+          }),
+        )
+        .optional(),
     }),
     z.object({
       type: z.literal("plain_text"),
@@ -733,9 +740,46 @@ export const GitHubIssueAttachmentSchema = z.object({
   body: z.string().nullable().optional(),
 });
 
+export const TextAttachmentSchema = z.object({
+  type: z.literal("text"),
+  mimeType: z.literal("text/plain"),
+  title: z.string().nullable().optional(),
+  text: z.string(),
+});
+
+export const ReviewAttachmentContextLineSchema = z.object({
+  oldLineNumber: z.number().int().positive().nullable(),
+  newLineNumber: z.number().int().positive().nullable(),
+  type: z.enum(["add", "remove", "context"]),
+  content: z.string(),
+});
+
+export const ReviewAttachmentCommentSchema = z.object({
+  filePath: z.string(),
+  side: z.enum(["old", "new"]),
+  lineNumber: z.number().int().positive(),
+  body: z.string(),
+  context: z.object({
+    hunkHeader: z.string(),
+    targetLine: ReviewAttachmentContextLineSchema,
+    lines: z.array(ReviewAttachmentContextLineSchema),
+  }),
+});
+
+export const ReviewAttachmentSchema = z.object({
+  type: z.literal("review"),
+  mimeType: z.literal("application/paseo-review"),
+  cwd: z.string(),
+  mode: z.enum(["uncommitted", "base"]),
+  baseRef: z.string().nullable().optional(),
+  comments: z.array(ReviewAttachmentCommentSchema),
+});
+
 export const AgentAttachmentSchema = z.discriminatedUnion("type", [
   GitHubPrAttachmentSchema,
   GitHubIssueAttachmentSchema,
+  TextAttachmentSchema,
+  ReviewAttachmentSchema,
 ]);
 
 function normalizeAgentAttachments(input: unknown): AgentAttachment[] {
@@ -1010,6 +1054,15 @@ export const ResumeAgentRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+export const ImportAgentRequestMessageSchema = z.object({
+  type: z.literal("import_agent_request"),
+  provider: AgentProviderSchema,
+  sessionId: z.string(),
+  cwd: z.string().optional(),
+  labels: z.record(z.string()).optional(),
+  requestId: z.string(),
+});
+
 export const RefreshAgentRequestMessageSchema = z.object({
   type: z.literal("refresh_agent_request"),
   agentId: z.string(),
@@ -1057,14 +1110,16 @@ export const SetAgentModeRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+const AgentActionResponsePayloadSchema = z.object({
+  requestId: z.string(),
+  agentId: z.string(),
+  accepted: z.boolean(),
+  error: z.string().nullable(),
+});
+
 export const SetAgentModeResponseMessageSchema = z.object({
   type: z.literal("set_agent_mode_response"),
-  payload: z.object({
-    requestId: z.string(),
-    agentId: z.string(),
-    accepted: z.boolean(),
-    error: z.string().nullable(),
-  }),
+  payload: AgentActionResponsePayloadSchema,
 });
 
 export const SetAgentModelRequestMessageSchema = z.object({
@@ -1076,12 +1131,7 @@ export const SetAgentModelRequestMessageSchema = z.object({
 
 export const SetAgentModelResponseMessageSchema = z.object({
   type: z.literal("set_agent_model_response"),
-  payload: z.object({
-    requestId: z.string(),
-    agentId: z.string(),
-    accepted: z.boolean(),
-    error: z.string().nullable(),
-  }),
+  payload: AgentActionResponsePayloadSchema,
 });
 
 export const SetAgentThinkingRequestMessageSchema = z.object({
@@ -1093,12 +1143,7 @@ export const SetAgentThinkingRequestMessageSchema = z.object({
 
 export const SetAgentThinkingResponseMessageSchema = z.object({
   type: z.literal("set_agent_thinking_response"),
-  payload: z.object({
-    requestId: z.string(),
-    agentId: z.string(),
-    accepted: z.boolean(),
-    error: z.string().nullable(),
-  }),
+  payload: AgentActionResponsePayloadSchema,
 });
 
 export const SetAgentFeatureRequestMessageSchema = z.object({
@@ -1111,22 +1156,12 @@ export const SetAgentFeatureRequestMessageSchema = z.object({
 
 export const SetAgentFeatureResponseMessageSchema = z.object({
   type: z.literal("set_agent_feature_response"),
-  payload: z.object({
-    requestId: z.string(),
-    agentId: z.string(),
-    accepted: z.boolean(),
-    error: z.string().nullable(),
-  }),
+  payload: AgentActionResponsePayloadSchema,
 });
 
 export const UpdateAgentResponseMessageSchema = z.object({
   type: z.literal("update_agent_response"),
-  payload: z.object({
-    requestId: z.string(),
-    agentId: z.string(),
-    accepted: z.boolean(),
-    error: z.string().nullable(),
-  }),
+  payload: AgentActionResponsePayloadSchema,
 });
 
 export const SetVoiceModeResponseMessageSchema = z.object({
@@ -1343,11 +1378,18 @@ export const PaseoWorktreeArchiveRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const FirstAgentContextSchema = z.object({
+  prompt: z.string().optional(),
+  attachments: AgentAttachmentsSchema,
+});
+
 export const CreatePaseoWorktreeRequestSchema = z.object({
   type: z.literal("create_paseo_worktree_request"),
   cwd: z.string(),
   worktreeSlug: z.string().optional(),
-  attachments: AgentAttachmentsSchema,
+  nameContext: z.string().optional(),
+  attachments: AgentAttachmentsSchema.optional(),
+  firstAgentContext: FirstAgentContextSchema.optional(),
   refName: z.string().min(1).optional(),
   action: z.enum(["branch-off", "checkout"]).optional(),
   githubPrNumber: z.number().int().positive().optional(),
@@ -1476,6 +1518,7 @@ export const FileExplorerRequestSchema = z.object({
   path: z.string().optional(),
   mode: z.enum(["list", "file"]),
   requestId: z.string(),
+  acceptBinary: z.boolean().optional(),
 });
 
 export const ProjectIconRequestSchema = z.object({
@@ -1652,6 +1695,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   RefreshProvidersSnapshotRequestMessageSchema,
   ProviderDiagnosticRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
+  ImportAgentRequestMessageSchema,
   RefreshAgentRequestMessageSchema,
   CancelAgentRequestMessageSchema,
   ShutdownServerRequestMessageSchema,
@@ -2136,6 +2180,7 @@ export const WorkspaceDescriptorPayloadSchema = z
     // COMPAT(workspaces): keep legacy directory workspace kind parseable.
     workspaceKind: z.enum(["directory", "local_checkout", "checkout", "worktree"]),
     name: z.string(),
+    archivingAt: z.string().nullable().optional().default(null),
     status: WorkspaceStateBucketSchema,
     activityAt: z.string().nullable(),
     diffStat: z
@@ -2358,7 +2403,7 @@ export const AgentTimelineEntryPayloadSchema = z.object({
   seqStart: z.number().int().nonnegative(),
   seqEnd: z.number().int().nonnegative(),
   sourceSeqRanges: z.array(AgentTimelineSeqRangeSchema),
-  collapsed: z.array(z.enum(["assistant_merge", "tool_lifecycle"])),
+  collapsed: z.array(z.enum(["assistant_merge", "reasoning_merge", "tool_lifecycle"])),
 });
 
 export const FetchAgentTimelineResponseMessageSchema = z.object({
@@ -3461,6 +3506,8 @@ export type DictationStreamFinishMessage = z.infer<typeof DictationStreamFinishM
 export type DictationStreamCancelMessage = z.infer<typeof DictationStreamCancelMessageSchema>;
 export type CreateAgentRequestMessage = z.infer<typeof CreateAgentRequestMessageSchema>;
 export type AgentAttachment = z.infer<typeof AgentAttachmentSchema>;
+export type FirstAgentContext = z.infer<typeof FirstAgentContextSchema>;
+export type ReviewAttachment = z.infer<typeof ReviewAttachmentSchema>;
 export type ListProviderModelsRequestMessage = z.infer<
   typeof ListProviderModelsRequestMessageSchema
 >;
@@ -3629,6 +3676,7 @@ export const WSHelloMessageSchema = z.object({
     .object({
       voice: z.boolean().optional(),
       pushNotifications: z.boolean().optional(),
+      [CLIENT_CAPS.reasoningMergeEnum]: z.boolean().optional(),
     })
     .passthrough()
     .optional(),

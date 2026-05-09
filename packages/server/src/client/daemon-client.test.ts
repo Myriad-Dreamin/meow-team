@@ -1,5 +1,6 @@
 import { afterEach, expect, expectTypeOf, test, vi } from "vitest";
 import { DaemonClient, type DaemonTransport } from "./daemon-client";
+import { encodeFileTransferFrame, FileTransferOpcode } from "../shared/binary-frames/index.js";
 import {
   asUint8Array,
   decodeTerminalResizePayload,
@@ -12,6 +13,9 @@ import {
 expectTypeOf<"getGitDiff" extends keyof DaemonClient ? true : false>().toEqualTypeOf<false>();
 expectTypeOf<
   "getHighlightedDiff" extends keyof DaemonClient ? true : false
+>().toEqualTypeOf<false>();
+expectTypeOf<
+  "exploreFileSystem" extends keyof DaemonClient ? true : false
 >().toEqualTypeOf<false>();
 
 function createMockLogger() {
@@ -56,10 +60,12 @@ function createMockTransport() {
   return {
     transport,
     sent,
-    triggerOpen: () => {
+    triggerOpen: (options?: { preserveSent?: boolean }) => {
       onOpen();
-      // Ignore HELLO handshake payloads in assertions.
-      sent.length = 0;
+      if (!options?.preserveSent) {
+        // Ignore HELLO handshake payloads in assertions.
+        sent.length = 0;
+      }
       onMessage(
         JSON.stringify({
           type: "session",
@@ -184,6 +190,61 @@ test("dedupes in-flight checkout status requests per agentId", async () => {
   });
 });
 
+test("passes password as HTTP bearer header and WebSocket subprotocol", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const transportFactory = vi.fn(() => mock.transport);
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    password: "shared-secret",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  expect(transportFactory).toHaveBeenCalledWith({
+    url: "ws://test",
+    headers: { Authorization: "Bearer shared-secret" },
+    protocols: ["paseo.bearer.shared-secret"],
+  });
+});
+
+test("advertises reasoning_merge_enum in hello", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ preserveSent: true });
+  await connectPromise;
+
+  expect(mock.sent).toHaveLength(1);
+  expect(JSON.parse(mock.sent[0] as string)).toEqual({
+    type: "hello",
+    clientId: "clsk_unit_test",
+    clientType: "cli",
+    protocolVersion: 1,
+    capabilities: {
+      reasoning_merge_enum: true,
+    },
+  });
+});
+
 test("does not reconnect after close when ensureConnected is called", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();
@@ -207,6 +268,209 @@ test("does not reconnect after close when ensureConnected is called", async () =
 
   client.ensureConnected();
   expect(client.getConnectionState().status).toBe("disposed");
+});
+
+test("listDirectory sends a list file explorer request and returns directory entries", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const responsePromise = client.listDirectory("/tmp/project", "src", "req-list");
+
+  expect(JSON.parse(String(mock.sent[0]))).toEqual({
+    type: "session",
+    message: {
+      type: "file_explorer_request",
+      cwd: "/tmp/project",
+      path: "src",
+      mode: "list",
+      requestId: "req-list",
+    },
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "file_explorer_response",
+      payload: {
+        cwd: "/tmp/project",
+        path: "src",
+        mode: "list",
+        directory: {
+          path: "src",
+          entries: [
+            {
+              name: "index.ts",
+              path: "src/index.ts",
+              kind: "file",
+              size: 12,
+              modifiedAt: "2026-05-02T00:00:00.000Z",
+            },
+          ],
+        },
+        file: null,
+        error: null,
+        requestId: "req-list",
+      },
+    }),
+  );
+
+  await expect(responsePromise).resolves.toEqual({
+    path: "src",
+    entries: [
+      {
+        name: "index.ts",
+        path: "src/index.ts",
+        kind: "file",
+        size: 12,
+        modifiedAt: "2026-05-02T00:00:00.000Z",
+      },
+    ],
+  });
+});
+
+test("readFile hides legacy base64 behind bytes", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const responsePromise = client.readFile("/tmp/project", "logo.png", "req-file");
+
+  expect(JSON.parse(String(mock.sent[0]))).toEqual({
+    type: "session",
+    message: {
+      type: "file_explorer_request",
+      cwd: "/tmp/project",
+      path: "logo.png",
+      mode: "file",
+      acceptBinary: true,
+      requestId: "req-file",
+    },
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "file_explorer_response",
+      payload: {
+        cwd: "/tmp/project",
+        path: "logo.png",
+        mode: "file",
+        directory: null,
+        file: {
+          path: "logo.png",
+          kind: "image",
+          encoding: "base64",
+          content: "aGVsbG8=",
+          mimeType: "image/png",
+          size: 5,
+          modifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        error: null,
+        requestId: "req-file",
+      },
+    }),
+  );
+
+  const result = await responsePromise;
+  expect(result).toMatchObject({
+    mime: "image/png",
+    size: 5,
+    path: "logo.png",
+    kind: "image",
+    modifiedAt: "2026-05-02T00:00:00.000Z",
+  });
+  expect(new TextDecoder().decode(result.bytes)).toBe("hello");
+});
+
+test("readFile resolves from binary file frames when the daemon supports them", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const responsePromise = client.readFile("/tmp/project", "logo.png", "req-binary");
+
+  expect(JSON.parse(String(mock.sent[0]))).toEqual({
+    type: "session",
+    message: {
+      type: "file_explorer_request",
+      cwd: "/tmp/project",
+      path: "logo.png",
+      mode: "file",
+      acceptBinary: true,
+      requestId: "req-binary",
+    },
+  });
+
+  mock.triggerMessage(
+    encodeFileTransferFrame({
+      opcode: FileTransferOpcode.FileBegin,
+      requestId: "req-binary",
+      metadata: {
+        mime: "image/png",
+        size: 5,
+        encoding: "binary",
+        modifiedAt: "2026-05-02T00:00:00.000Z",
+      },
+    }),
+  );
+  mock.triggerMessage(
+    encodeFileTransferFrame({
+      opcode: FileTransferOpcode.FileChunk,
+      requestId: "req-binary",
+      payload: new TextEncoder().encode("hello"),
+    }),
+  );
+  mock.triggerMessage(
+    encodeFileTransferFrame({
+      opcode: FileTransferOpcode.FileEnd,
+      requestId: "req-binary",
+    }),
+  );
+
+  const result = await responsePromise;
+  expect(result).toMatchObject({
+    mime: "image/png",
+    size: 5,
+    path: "logo.png",
+    kind: "image",
+    modifiedAt: "2026-05-02T00:00:00.000Z",
+  });
+  expect(new TextDecoder().decode(result.bytes)).toBe("hello");
 });
 
 test("normalizes workspace_setup_progress into a workspace-scoped daemon event", async () => {
@@ -536,7 +800,7 @@ test("omitting create_agent_request worktree base-ref fields preserves legacy wi
   await expect(createPromise).rejects.toThrow("legacy git shape sentinel");
 });
 
-test("sends structured attachments with create_paseo_worktree_request", async () => {
+test("sends structured first-agent context attachments with create_paseo_worktree_request", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -556,15 +820,17 @@ test("sends structured attachments with create_paseo_worktree_request", async ()
   const createPromise = client.createPaseoWorktree({
     cwd: "/tmp/project",
     worktreeSlug: "review-pr-123",
-    attachments: [
-      {
-        type: "github_pr",
-        mimeType: "application/github-pr",
-        number: 123,
-        title: "Fix race in worktree setup",
-        url: "https://github.com/getpaseo/paseo/pull/123",
-      },
-    ],
+    firstAgentContext: {
+      attachments: [
+        {
+          type: "github_pr",
+          mimeType: "application/github-pr",
+          number: 123,
+          title: "Fix race in worktree setup",
+          url: "https://github.com/getpaseo/paseo/pull/123",
+        },
+      ],
+    },
   });
 
   expect(mock.sent).toHaveLength(1);
@@ -573,10 +839,12 @@ test("sends structured attachments with create_paseo_worktree_request", async ()
     message: {
       type: "create_paseo_worktree_request";
       requestId: string;
-      attachments: Array<{ type: string; mimeType: string; number: number }>;
+      firstAgentContext: {
+        attachments: Array<{ type: string; mimeType: string; number: number }>;
+      };
     };
   };
-  expect(request.message.attachments).toEqual([
+  expect(request.message.firstAgentContext.attachments).toEqual([
     {
       type: "github_pr",
       mimeType: "application/github-pr",

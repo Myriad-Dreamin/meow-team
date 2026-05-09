@@ -1,5 +1,7 @@
 import type { AgentAttachment } from "../../shared/messages.js";
 
+const REVIEW_LINE_MARKERS = { add: "+", remove: "-", context: " " } as const;
+
 export function renderPromptAttachmentAsText(attachment: AgentAttachment): string {
   switch (attachment.type) {
     case "github_pr": {
@@ -22,19 +24,59 @@ export function renderPromptAttachmentAsText(attachment: AgentAttachment): strin
       }
       return lines.join("\n");
     }
+    case "text": {
+      return attachment.text;
+    }
+    case "review": {
+      const lines = [`Paseo review attachment (${attachment.mode})`, `CWD: ${attachment.cwd}`];
+      if (attachment.baseRef) {
+        lines.push(`Base: ${attachment.baseRef}`);
+      }
+      attachment.comments.forEach((comment, index) => {
+        lines.push(
+          "",
+          `Comment ${index + 1}: ${comment.filePath}:${comment.side}:${comment.lineNumber}`,
+          comment.body,
+          comment.context.hunkHeader,
+        );
+        const target = comment.context.targetLine;
+        for (const line of comment.context.lines) {
+          const isTarget =
+            line.oldLineNumber === target.oldLineNumber &&
+            line.newLineNumber === target.newLineNumber &&
+            line.type === target.type &&
+            line.content === target.content;
+          const prefix = isTarget ? "> " : "  ";
+          const oldLn = padLineNumber(line.oldLineNumber);
+          const newLn = padLineNumber(line.newLineNumber);
+          lines.push(`${prefix}${oldLn} ${newLn} ${REVIEW_LINE_MARKERS[line.type]}${line.content}`);
+        }
+      });
+      return lines.join("\n");
+    }
   }
 }
 
-export function findGitHubPrAttachment(
-  attachments: readonly AgentAttachment[] | undefined,
-): Extract<AgentAttachment, { type: "github_pr" }> | null {
-  if (!attachments) {
-    return null;
+function padLineNumber(lineNumber: number | null): string {
+  return (lineNumber?.toString() ?? "-").padStart(2);
+}
+
+export function buildAgentBranchNameSeed(
+  firstAgentContext: { prompt?: string; attachments?: readonly AgentAttachment[] } | undefined,
+): string | undefined {
+  if (!firstAgentContext) {
+    return undefined;
   }
-  return (
-    attachments.find(
-      (attachment): attachment is Extract<AgentAttachment, { type: "github_pr" }> =>
-        attachment.type === "github_pr",
-    ) ?? null
-  );
+  const parts: string[] = [];
+  const prompt = firstAgentContext.prompt?.trim();
+  if (prompt) {
+    parts.push(prompt);
+  }
+  for (const attachment of firstAgentContext.attachments ?? []) {
+    const rendered = renderPromptAttachmentAsText(attachment).trim();
+    if (rendered) {
+      parts.push(rendered);
+    }
+  }
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
 }

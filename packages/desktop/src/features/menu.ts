@@ -1,4 +1,8 @@
-import { app, Menu, BrowserWindow, ipcMain } from "electron";
+import { app, Menu, BrowserWindow, ipcMain, webContents } from "electron";
+import {
+  getActivePaseoBrowserWebContents,
+  getPaseoBrowserIdForWebContents,
+} from "./browser-webviews.js";
 
 interface ShowContextMenuInput {
   kind?: "terminal";
@@ -12,6 +16,37 @@ function withBrowserWindow(
     const win = baseWin instanceof BrowserWindow ? baseWin : BrowserWindow.getFocusedWindow();
     if (win) callback(win);
   };
+}
+
+function getFocusedPaseoBrowserWebContents(): Electron.WebContents | null {
+  const focusedContents = webContents.getFocusedWebContents();
+  return getPaseoBrowserIdForWebContents(focusedContents) ? focusedContents : null;
+}
+
+function getReloadTargetBrowserWebContents(): Electron.WebContents | null {
+  return getFocusedPaseoBrowserWebContents() ?? getActivePaseoBrowserWebContents();
+}
+
+function reloadFocusedContentsOrWindow(win: BrowserWindow, options?: { ignoreCache?: boolean }) {
+  const browserContents = getReloadTargetBrowserWebContents();
+  if (browserContents) {
+    if (options?.ignoreCache) {
+      browserContents.reloadIgnoringCache();
+      return;
+    }
+    if (browserContents.isLoadingMainFrame()) {
+      browserContents.stop();
+      return;
+    }
+    browserContents.reload();
+    return;
+  }
+
+  if (options?.ignoreCache) {
+    win.webContents.reloadIgnoringCache();
+    return;
+  }
+  win.webContents.reload();
 }
 
 export function setupApplicationMenu(): void {
@@ -73,8 +108,20 @@ export function setupApplicationMenu(): void {
           }),
         },
         { type: "separator" },
-        { role: "reload" },
-        { role: "forceReload" },
+        {
+          label: "Reload",
+          accelerator: "CmdOrCtrl+R",
+          click: withBrowserWindow((win) => {
+            reloadFocusedContentsOrWindow(win);
+          }),
+        },
+        {
+          label: "Force Reload",
+          accelerator: "CmdOrCtrl+Shift+R",
+          click: withBrowserWindow((win) => {
+            reloadFocusedContentsOrWindow(win, { ignoreCache: true });
+          }),
+        },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "togglefullscreen" },

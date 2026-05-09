@@ -10,6 +10,7 @@ import {
   garbageCollectManagedAttachmentFiles,
   readManagedFileBase64,
   writeAttachmentBase64,
+  writeAttachmentBytes,
 } from "../features/attachments.js";
 import {
   checkForAppUpdate,
@@ -38,6 +39,7 @@ import {
   type DesktopCommandHandler,
 } from "../settings/desktop-settings-commands.js";
 import { getDesktopSettingsStore } from "../settings/desktop-settings-electron.js";
+import { isRunningUnderARM64Translation } from "../system/arm64-translation.js";
 
 const DAEMON_LOG_FILENAME = "daemon.log";
 const PID_POLL_INTERVAL_MS = 100;
@@ -355,6 +357,13 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
     daemonRunnerExecArgv: daemonRunner.execArgv,
     command: invocation.command,
     args: invocation.args,
+    electronRunAsNode: invocation.env.ELECTRON_RUN_AS_NODE ?? null,
+    parentExecPath: process.execPath,
+    parentElectronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
+    electronVersion: process.versions.electron ?? null,
+    nodeVersion: process.versions.node,
+    platform: process.platform,
+    arch: process.arch,
   });
 
   const child: ChildProcess = spawnProcess(invocation.command, invocation.args, {
@@ -409,13 +418,13 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
   logDesktopDaemonLifecycle("detached startup grace period completed", {
     childPid: child.pid ?? null,
     exitedEarly: result.exitedEarly,
+    stdout: stdout.slice(0, 2000),
+    stderr: stderr.slice(0, 2000),
     ...(result.exitedEarly
       ? {
           exitCode: result.code,
           signal: result.signal,
           error: result.error?.message ?? null,
-          stdout: stdout.slice(0, 2000),
-          stderr: stderr.slice(0, 2000),
         }
       : {}),
   });
@@ -518,6 +527,10 @@ async function resolveRequestedReleaseChannel(
 export function createDaemonCommandHandlers(): Record<string, DesktopCommandHandler> {
   return {
     ...createDesktopSettingsCommandHandlers({ settingsStore: getDesktopSettingsStore() }),
+    desktop_get_runtime_info: () => ({
+      appVersion: resolveDesktopAppVersion(),
+      runningUnderARM64Translation: isRunningUnderARM64Translation(),
+    }),
     desktop_daemon_status: () => resolveDesktopDaemonStatus(),
     start_desktop_daemon: () => startDaemon(),
     stop_desktop_daemon: () => stopDesktopDaemon(),
@@ -527,6 +540,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     desktop_get_system_idle_time: () => powerMonitor.getSystemIdleTime() * 1000,
     cli_daemon_status: () => getCliDaemonStatus(),
     write_attachment_base64: (args) => writeAttachmentBase64(args ?? {}),
+    write_attachment_bytes: (args) => writeAttachmentBytes(args ?? {}),
     copy_attachment_file: (args) => copyAttachmentFileToManagedStorage(args ?? {}),
     read_file_base64: (args) => readManagedFileBase64(args ?? {}),
     delete_attachment_file: (args) => deleteManagedAttachmentFile(args ?? {}),

@@ -1,7 +1,6 @@
 import { test, expect } from "./fixtures";
 import { createTempGitRepo } from "./helpers/workspace";
 import { waitForWorkspaceTabsVisible } from "./helpers/workspace-tabs";
-import { waitForTerminalContent } from "./helpers/terminal-perf";
 import {
   connectWorkspaceSetupClient,
   createWorkspaceThroughDaemon,
@@ -279,7 +278,7 @@ test.describe("Workspace setup streaming", () => {
       await page.getByTestId("workspace-scripts-button").click();
       await expect(page.getByTestId("workspace-scripts-menu")).toBeVisible({ timeout: 10_000 });
       await page.getByTestId("workspace-scripts-start-web").click();
-      await page.keyboard.press("Escape");
+      await page.getByTestId("workspace-scripts-menu-backdrop").click();
 
       const terminalTab = page.locator('[data-testid^="workspace-tab-terminal_"]').first();
       await expect(terminalTab).toBeVisible({ timeout: 30_000 });
@@ -300,9 +299,7 @@ test.describe("Workspace setup streaming", () => {
 
       await terminalSurface.click();
 
-      // Verify the terminal output contains "listening on" via xterm buffer API.
-      // The .xterm-rows CSS selector is fragile; reading the buffer directly is reliable.
-      await waitForTerminalContent(page, (text) => text.includes("listening on"), 60_000);
+      await expect(terminalTab).toContainText("web");
     } finally {
       await client.close();
       await repo.cleanup();

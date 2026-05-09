@@ -7,14 +7,17 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { CheckoutPrStatusSchema } from "../shared/messages.js";
 import type { WorkspaceDescriptorPayload } from "../shared/messages.js";
+import { decodeFileTransferFrame, FileTransferOpcode } from "../shared/binary-frames/index.js";
 import { normalizeCheckoutPrStatusPayload, Session } from "./session.js";
 import type {
   AgentClient,
   AgentMode,
   AgentModelDefinition,
+  AgentTimelineItem,
   ListModesOptions,
   ListModelsOptions,
 } from "./agent/agent-sdk-types.js";
+import type { ManagedAgent } from "./agent/agent-manager.js";
 import type { ProviderDefinition } from "./agent/provider-registry.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import type { SessionOptions } from "./session.js";
@@ -27,6 +30,7 @@ interface SessionHandlerInternals {
   handleCheckoutPullRequest(params: unknown): Promise<unknown>;
   handleCheckoutPushRequest(params: unknown): Promise<unknown>;
   handleCheckoutStatusRequest(params: unknown): Promise<unknown>;
+  handleImportAgentRequest(params: unknown): Promise<unknown>;
   describeWorkspaceRecord(...args: unknown[]): Promise<WorkspaceDescriptorPayload>;
   describeWorkspaceRecordWithGitData(...args: unknown[]): Promise<WorkspaceDescriptorPayload>;
   handleValidateBranchRequest(params: unknown): Promise<unknown>;
@@ -42,6 +46,17 @@ interface SessionHandlerInternals {
 
 function asSessionInternals(session: Session): SessionHandlerInternals {
   return session as unknown as SessionHandlerInternals;
+}
+
+function createBinaryMessageHandler(
+  binaryMessages: Uint8Array[] | undefined,
+): ((frame: Uint8Array) => void) | undefined {
+  if (!binaryMessages) {
+    return undefined;
+  }
+  return (frame) => {
+    binaryMessages.push(frame);
+  };
 }
 
 const checkoutGitMocks = vi.hoisted(() => ({
@@ -62,6 +77,10 @@ const checkoutGitMocks = vi.hoisted(() => ({
 
 const agentResponseMocks = vi.hoisted(() => ({
   generateStructuredAgentResponseWithFallback: vi.fn(),
+}));
+
+const agentMetadataMocks = vi.hoisted(() => ({
+  scheduleAgentMetadataGeneration: vi.fn(),
 }));
 
 const spawnMocks = vi.hoisted(() => ({
@@ -174,6 +193,14 @@ vi.mock("./agent/agent-response-loop.js", async (importOriginal) => {
   };
 });
 
+vi.mock("./agent/agent-metadata-generator.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./agent/agent-metadata-generator.js")>();
+  return {
+    ...actual,
+    scheduleAgentMetadataGeneration: agentMetadataMocks.scheduleAgentMetadataGeneration,
+  };
+});
+
 vi.mock("./worktree-bootstrap.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./worktree-bootstrap.js")>();
   return {
@@ -182,7 +209,7 @@ vi.mock("./worktree-bootstrap.js", async (importOriginal) => {
   };
 });
 
-function createSessionForTest(options?: {
+interface SessionForTestOptions {
   github?: {
     invalidate: ReturnType<typeof vi.fn>;
     isAuthenticated?: ReturnType<typeof vi.fn>;
@@ -210,17 +237,20 @@ function createSessionForTest(options?: {
   getDaemonTcpHost?: () => string | null;
   providerSnapshotManager?: ProviderSnapshotManager;
   messages?: unknown[];
-}): Session {
+  binaryMessages?: Uint8Array[];
+}
+
+function createSessionForTest(options: SessionForTestOptions = {}): Session {
   const logger = pino({ level: "silent" });
-  const github = options?.github ?? {
+  const github = options.github ?? {
     invalidate: vi.fn(),
     searchIssuesAndPrs: vi.fn(),
     createPullRequest: vi.fn(),
   };
-  const checkoutDiffManager = options?.checkoutDiffManager ?? {
+  const checkoutDiffManager = options.checkoutDiffManager ?? {
     scheduleRefreshForCwd: vi.fn(),
   };
-  const workspaceGitService = options?.workspaceGitService ?? {
+  const workspaceGitService = options.workspaceGitService ?? {
     getCheckoutDiff: vi.fn(),
     getSnapshot: vi.fn(),
     suggestBranchesForCwd: vi.fn(),
@@ -231,11 +261,12 @@ function createSessionForTest(options?: {
     resolveRepoRemoteUrl: vi.fn(),
     getWorkspaceGitMetadata: vi.fn(),
   };
-  const messages = options?.messages ?? [];
+  const messages = options.messages ?? [];
 
   return new Session({
     clientId: "test-client",
     onMessage: (message) => messages.push(message),
+    onBinaryMessage: createBinaryMessageHandler(options.binaryMessages),
     logger,
     downloadTokenStore: {} as unknown as SessionOptions["downloadTokenStore"],
     pushTokenStore: {} as unknown as SessionOptions["pushTokenStore"],
@@ -247,7 +278,7 @@ function createSessionForTest(options?: {
     agentStorage: {
       list: vi.fn().mockResolvedValue([]),
     } as unknown as SessionOptions["agentStorage"],
-    projectRegistry: (options?.projectRegistry ?? {
+    projectRegistry: (options.projectRegistry ?? {
       list: vi.fn().mockResolvedValue([]),
       get: vi.fn(),
       upsert: vi.fn(),
@@ -256,7 +287,7 @@ function createSessionForTest(options?: {
       initialize: vi.fn(),
       existsOnDisk: vi.fn(),
     }) as unknown as SessionOptions["projectRegistry"],
-    workspaceRegistry: (options?.workspaceRegistry ?? {
+    workspaceRegistry: (options.workspaceRegistry ?? {
       get: vi.fn(),
       list: vi.fn().mockResolvedValue([]),
     }) as unknown as SessionOptions["workspaceRegistry"],
@@ -275,14 +306,111 @@ function createSessionForTest(options?: {
     } as unknown as SessionOptions["daemonConfigStore"],
     stt: null,
     tts: null,
-    terminalManager: (options?.terminalManager ?? null) as SessionOptions["terminalManager"],
-    providerSnapshotManager: options?.providerSnapshotManager,
-    scriptRouteStore: options?.scriptRouteStore as SessionOptions["scriptRouteStore"],
-    scriptRuntimeStore: options?.scriptRuntimeStore as SessionOptions["scriptRuntimeStore"],
-    getDaemonTcpPort: options?.getDaemonTcpPort,
-    getDaemonTcpHost: options?.getDaemonTcpHost,
+    terminalManager: (options.terminalManager ?? null) as SessionOptions["terminalManager"],
+    providerSnapshotManager: options.providerSnapshotManager,
+    scriptRouteStore: options.scriptRouteStore as SessionOptions["scriptRouteStore"],
+    scriptRuntimeStore: options.scriptRuntimeStore as SessionOptions["scriptRuntimeStore"],
+    getDaemonTcpPort: options.getDaemonTcpPort,
+    getDaemonTcpHost: options.getDaemonTcpHost,
   });
 }
+
+describe("file explorer binary responses", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeRoot(): string {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "file-explorer-session-test-")));
+    tempDirs.push(root);
+    return root;
+  }
+
+  test("old clients get legacy JSON file content from a new daemon", async () => {
+    const cwd = makeRoot();
+    writeFileSync(join(cwd, "logo.png"), "hello");
+    const messages: unknown[] = [];
+    const binaryMessages: Uint8Array[] = [];
+    const session = createSessionForTest({ messages, binaryMessages });
+
+    await session.handleMessage({
+      type: "file_explorer_request",
+      cwd,
+      path: "logo.png",
+      mode: "file",
+      requestId: "req-old-client",
+    });
+
+    expect(binaryMessages).toEqual([]);
+    expect(messages).toEqual([
+      {
+        type: "file_explorer_response",
+        payload: expect.objectContaining({
+          cwd,
+          path: "logo.png",
+          mode: "file",
+          directory: null,
+          error: null,
+          requestId: "req-old-client",
+          file: expect.objectContaining({
+            kind: "image",
+            encoding: "base64",
+            content: "aGVsbG8=",
+            mimeType: "image/png",
+            size: 5,
+          }),
+        }),
+      },
+    ]);
+  });
+
+  test("new clients get binary file frames without legacy JSON content", async () => {
+    const cwd = makeRoot();
+    writeFileSync(join(cwd, "logo.png"), "hello");
+    const messages: unknown[] = [];
+    const binaryMessages: Uint8Array[] = [];
+    const session = createSessionForTest({ messages, binaryMessages });
+
+    await session.handleMessage({
+      type: "file_explorer_request",
+      cwd,
+      path: "logo.png",
+      mode: "file",
+      requestId: "req-new-client",
+      acceptBinary: true,
+    });
+
+    expect(messages).toEqual([]);
+    expect(binaryMessages).toHaveLength(3);
+
+    const frames = binaryMessages.map((frame) => decodeFileTransferFrame(frame));
+    expect(frames[0]).toEqual({
+      opcode: FileTransferOpcode.FileBegin,
+      requestId: "req-new-client",
+      metadata: {
+        mime: "image/png",
+        size: 5,
+        encoding: "binary",
+        modifiedAt: expect.any(String),
+      },
+      payload: new Uint8Array(),
+    });
+    expect(frames[1]).toEqual({
+      opcode: FileTransferOpcode.FileChunk,
+      requestId: "req-new-client",
+      payload: new TextEncoder().encode("hello"),
+    });
+    expect(frames[2]).toEqual({
+      opcode: FileTransferOpcode.FileEnd,
+      requestId: "req-new-client",
+      payload: new Uint8Array(),
+    });
+  });
+});
 
 function createProjectRecord(rootPath: string, archivedAt: string | null = null) {
   return {
@@ -574,6 +702,87 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+describe("session agent import", () => {
+  test("sets a provisional title and schedules auto-title generation from the first hydrated user message", async () => {
+    const messages: unknown[] = [];
+    const cwd = "/tmp/imported-agent";
+    const timeline: AgentTimelineItem[] = [
+      { type: "user_message", text: "Investigate flaky checkout status\n\ninclude logs" },
+      { type: "assistant_message", text: "I will inspect the checkout flow." },
+    ];
+    const snapshot = {
+      id: "00000000-0000-4000-8000-000000000632",
+      provider: "codex",
+      cwd,
+      capabilities: TEST_CAPABILITIES,
+      config: { provider: "codex", cwd },
+      createdAt: new Date("2026-04-30T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-30T00:00:00.000Z"),
+      availableModes: [],
+      currentModeId: null,
+      pendingPermissions: new Map(),
+      bufferedPermissionResolutions: new Map(),
+      inFlightPermissionResponses: new Set(),
+      pendingReplacement: false,
+      persistence: {
+        provider: "codex",
+        sessionId: "thread-imported",
+        nativeHandle: "thread-imported",
+        metadata: { provider: "codex", cwd },
+      },
+      historyPrimed: true,
+      lastUserMessageAt: null,
+      attention: { requiresAttention: false },
+      foregroundTurnWaiters: new Set(),
+      finalizedForegroundTurnIds: new Set(),
+      unsubscribeSession: null,
+      internal: false,
+      labels: {},
+      lifecycle: "closed",
+      session: null,
+      activeForegroundTurnId: null,
+    } satisfies ManagedAgent;
+    const agentManager = {
+      listAgents: vi.fn(() => []),
+      subscribe: vi.fn(() => () => {}),
+      findPersistedAgent: vi.fn().mockResolvedValue(null),
+      resumeAgentFromPersistence: vi.fn().mockResolvedValue(snapshot),
+      hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
+      getTimeline: vi.fn().mockReturnValue(timeline),
+      setTitle: vi.fn().mockResolvedValue(undefined),
+      notifyAgentState: vi.fn(),
+    };
+    const agentStorage = {
+      list: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue(null),
+    };
+    const session = createSessionForTest({ messages });
+    Object.assign(session, { agentManager, agentStorage });
+
+    await asSessionInternals(session).handleImportAgentRequest({
+      type: "import_agent_request",
+      provider: "codex",
+      sessionId: "thread-imported",
+      cwd,
+      requestId: "import-thread",
+    });
+
+    expect(agentManager.setTitle).toHaveBeenCalledWith(
+      snapshot.id,
+      "Investigate flaky checkout status",
+    );
+    expect(agentMetadataMocks.scheduleAgentMetadataGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentManager,
+        agentId: snapshot.id,
+        cwd,
+        initialPrompt: "Investigate flaky checkout status\n\ninclude logs",
+        explicitTitle: null,
+      }),
+    );
+  });
 });
 
 describe("session PR status payload normalization", () => {

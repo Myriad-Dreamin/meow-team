@@ -46,8 +46,10 @@ import {
   type ProviderRuntimeSettings,
 } from "../provider-launch-config.js";
 import { findExecutable, isCommandAvailable } from "../../../utils/executable.js";
+import { terminateProcessTree } from "../../../utils/process-tree.js";
 import { withTimeout } from "../../../utils/promise-timeout.js";
 import { spawnProcess } from "../../../utils/spawn.js";
+import { buildToolCallDisplayModel } from "../../../shared/tool-call-display.js";
 import { mapOpencodeToolCall } from "./opencode/tool-call-mapper.js";
 import {
   formatDiagnosticStatus,
@@ -56,6 +58,7 @@ import {
   resolveBinaryVersion,
   toDiagnosticErrorMessage,
 } from "./diagnostic-utils.js";
+import { runProviderTurn } from "./provider-runner.js";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 
 const OPENCODE_CAPABILITIES: AgentCapabilityFlags = {
@@ -77,14 +80,14 @@ const DEFAULT_MODES: AgentMode[] = [
     description: "Allows edits and tool execution for implementation work",
   },
   {
-    id: OPENCODE_FULL_ACCESS_MODE_ID,
-    label: "Full Access",
-    description: "Automatically approves all tool permission prompts for the session",
-  },
-  {
     id: "plan",
     label: "Plan",
     description: "Read-only planning mode that avoids file edits",
+  },
+  {
+    id: OPENCODE_FULL_ACCESS_MODE_ID,
+    label: "Full Access",
+    description: "Automatically approves all tool permission prompts for the session",
   },
 ];
 
@@ -107,6 +110,8 @@ type OpenCodeMcpConfig =
 
 const MCP_ALREADY_PRESENT_ERROR_TOKENS = ["already", "exists", "connected"] as const;
 const OPENCODE_PROVIDER_LIST_TIMEOUT_MS = 30_000;
+const OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000;
+const OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS = 1_000;
 const OPENCODE_HANDLED_BUILTIN_SLASH_COMMANDS: AgentSlashCommand[] = [
   { name: "compact", description: "Compact the current session", argumentHint: "" },
   { name: "summarize", description: "Compact the current session", argumentHint: "" },
@@ -424,6 +429,10 @@ function resolveOpenCodeRuntimeAgentId(modeId: string | null | undefined): strin
     : normalizedModeId;
 }
 
+function isSelectableOpenCodeAgent(agent: { mode?: string; hidden?: boolean }): boolean {
+  return (agent.mode === "primary" || agent.mode === "all") && agent.hidden !== true;
+}
+
 function mergeOpenCodeModes(discoveredModes: AgentMode[]): AgentMode[] {
   const modesById = new Map(DEFAULT_MODES.map((mode) => [mode.id, mode]));
   for (const mode of discoveredModes) {
@@ -698,20 +707,20 @@ function buildOpenCodePromptParts(
       output.push({ type: "text", text: part.text });
       continue;
     }
-    if (part.type === "github_pr" || part.type === "github_issue") {
-      output.push({ type: "text", text: renderPromptAttachmentAsText(part) });
+    if (part.type === "image") {
+      attachmentOrdinal += 1;
+      const normalized = toOpenCodeDataUrl(part.mimeType, part.data);
+      output.push({
+        type: "file",
+        mime: normalized.mimeType,
+        filename: `attachment-${attachmentOrdinal}.${getOpenCodeAttachmentExtension(
+          normalized.mimeType,
+        )}`,
+        url: normalized.url,
+      });
       continue;
     }
-    attachmentOrdinal += 1;
-    const normalized = toOpenCodeDataUrl(part.mimeType, part.data);
-    output.push({
-      type: "file",
-      mime: normalized.mimeType,
-      filename: `attachment-${attachmentOrdinal}.${getOpenCodeAttachmentExtension(
-        normalized.mimeType,
-      )}`,
-      url: normalized.url,
-    });
+    output.push({ type: "text", text: renderPromptAttachmentAsText(part) });
   }
   return output;
 }
@@ -728,6 +737,10 @@ export const __openCodeInternals = {
   reconcileOpenCodeSessionClose,
   resolveOpenCodeModelLookupKeyFromAssistantMessage,
   resolveOpenCodeSelectedModelContextWindow,
+  isSelectableOpenCodeAgent,
+  get OpenCodeAgentSession() {
+    return OpenCodeAgentSession;
+  },
 };
 
 export class OpenCodeServerManager {
@@ -878,6 +891,7 @@ export class OpenCodeServerManager {
         launchPrefix.command,
         [...launchPrefix.args, "serve", "--port", String(port)],
         {
+          detached: process.platform !== "win32",
           stdio: ["ignore", "pipe", "pipe"],
           ...createProviderEnvSpec({ runtimeSettings: this.runtimeSettings }),
         },
@@ -980,24 +994,22 @@ export class OpenCodeServerManager {
     if (server.process.killed) {
       return;
     }
-    await new Promise<void>((resolve) => {
-      let pendingResolve: (() => void) | null = resolve;
-      const settle = () => {
-        if (!pendingResolve) return;
-        const fn = pendingResolve;
-        pendingResolve = null;
-        fn();
-      };
-      const timeout = setTimeout(() => {
-        server.process.kill("SIGKILL");
-        settle();
-      }, 5000);
-      server.process.on("exit", () => {
-        clearTimeout(timeout);
-        settle();
-      });
-      server.process.kill("SIGTERM");
+    const result = await terminateProcessTree(server.process, {
+      gracefulTimeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
+      forceTimeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
+      onForceSignal: () => {
+        this.logger.warn(
+          { timeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS },
+          "OpenCode server did not exit after SIGTERM; sending SIGKILL",
+        );
+      },
     });
+    if (result === "kill-timeout") {
+      this.logger.warn(
+        { timeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS },
+        "OpenCode server did not report exit after SIGKILL",
+      );
+    }
   }
 }
 
@@ -1188,16 +1200,14 @@ export class OpenCodeAgentClient implements AgentClient {
         return DEFAULT_MODES;
       }
 
-      const discovered = response.data
-        .filter((agent) => agent.mode === "primary" && agent.hidden !== true)
-        .map((agent) => ({
-          id: agent.name,
-          label: agent.name.charAt(0).toUpperCase() + agent.name.slice(1),
-          description:
-            typeof agent.description === "string" && agent.description.trim().length > 0
-              ? agent.description.trim()
-              : DEFAULT_MODES.find((mode) => mode.id === agent.name)?.description,
-        }));
+      const discovered = response.data.filter(isSelectableOpenCodeAgent).map((agent) => ({
+        id: agent.name,
+        label: agent.name.charAt(0).toUpperCase() + agent.name.slice(1),
+        description:
+          typeof agent.description === "string" && agent.description.trim().length > 0
+            ? agent.description.trim()
+            : DEFAULT_MODES.find((mode) => mode.id === agent.name)?.description,
+      }));
 
       return mergeOpenCodeModes(discovered);
     } finally {
@@ -1306,15 +1316,42 @@ export class OpenCodeAgentClient implements AgentClient {
 
 export interface OpenCodeEventTranslationState {
   sessionId: string;
+  cwd?: string;
   messageRoles: Map<string, OpenCodeMessageRole>;
   accumulatedUsage: AgentUsage;
   streamedPartKeys: Set<string>;
   emittedStructuredMessageIds: Set<string>;
   /** Tracks the type of each part by ID, learned from message.part.updated events. */
   partTypes: Map<string, string>;
+  subAgentsByCallId?: Map<string, OpenCodeSubAgentActivityState>;
+  subAgentCallIdByChildSessionId?: Map<string, string>;
+  pendingChildToolPartsBySessionId?: Map<string, OpenCodeToolPartEventPart[]>;
   modelContextWindowsByModelKey?: ReadonlyMap<string, number>;
   onAssistantModelContextWindowResolved?: (contextWindowMaxTokens: number) => void;
 }
+
+type OpenCodeToolPartEventPart = Extract<
+  Extract<OpenCodeEvent, { type: "message.part.updated" }>["properties"]["part"],
+  { type: "tool" }
+>;
+
+interface OpenCodeSubAgentActionEntry {
+  index: number;
+  key: string;
+  toolName: string;
+  summary?: string;
+}
+
+interface OpenCodeSubAgentActivityState {
+  toolCall: ToolCallTimelineItem;
+  actions: OpenCodeSubAgentActionEntry[];
+  actionIndexByKey: Map<string, number>;
+  nextActionIndex: number;
+  childSessionId?: string;
+}
+
+const MAX_OPENCODE_SUB_AGENT_ACTIONS = 200;
+const MAX_OPENCODE_PENDING_CHILD_TOOL_PARTS = 200;
 
 function stringifyStructuredAssistantMessage(value: unknown): string | null {
   if (value === undefined) {
@@ -1558,6 +1595,264 @@ function resetOpenCodeTurnTrackingState(state: OpenCodeEventTranslationState): v
   state.partTypes.clear();
 }
 
+function getOpenCodeSubAgentMaps(state: OpenCodeEventTranslationState): {
+  byCallId: Map<string, OpenCodeSubAgentActivityState>;
+  callIdByChildSessionId: Map<string, string>;
+  pendingChildToolPartsBySessionId: Map<string, OpenCodeToolPartEventPart[]>;
+} {
+  state.subAgentsByCallId ??= new Map();
+  state.subAgentCallIdByChildSessionId ??= new Map();
+  state.pendingChildToolPartsBySessionId ??= new Map();
+  return {
+    byCallId: state.subAgentsByCallId,
+    callIdByChildSessionId: state.subAgentCallIdByChildSessionId,
+    pendingChildToolPartsBySessionId: state.pendingChildToolPartsBySessionId,
+  };
+}
+
+function getOpenCodeSubAgentState(
+  callId: string,
+  state: OpenCodeEventTranslationState,
+  toolCall: ToolCallTimelineItem,
+): OpenCodeSubAgentActivityState {
+  const maps = getOpenCodeSubAgentMaps(state);
+  const existing = maps.byCallId.get(callId);
+  if (existing) {
+    existing.toolCall = toolCall;
+    return existing;
+  }
+
+  const created: OpenCodeSubAgentActivityState = {
+    toolCall,
+    actions: [],
+    actionIndexByKey: new Map(),
+    nextActionIndex: 1,
+  };
+  maps.byCallId.set(callId, created);
+  return created;
+}
+
+function linkOpenCodeSubAgentChildSession(
+  activity: OpenCodeSubAgentActivityState,
+  childSessionId: string,
+  state: OpenCodeEventTranslationState,
+): void {
+  activity.childSessionId = childSessionId;
+  const maps = getOpenCodeSubAgentMaps(state);
+  maps.callIdByChildSessionId.set(childSessionId, activity.toolCall.callId);
+}
+
+function buildOpenCodeSubAgentLog(
+  detail: Extract<ToolCallDetail, { type: "sub_agent" }>,
+  activity: OpenCodeSubAgentActivityState,
+): string {
+  const actionLog = activity.actions
+    .map((action) =>
+      action.summary ? `[${action.toolName}] ${action.summary}` : `[${action.toolName}]`,
+    )
+    .join("\n");
+  const parts = [actionLog, detail.log].filter((part) => part.trim().length > 0);
+  return parts.join("\n\n");
+}
+
+function buildOpenCodeSubAgentTimelineItem(
+  activity: OpenCodeSubAgentActivityState,
+): ToolCallTimelineItem {
+  const toolCall = activity.toolCall;
+  if (toolCall.detail.type !== "sub_agent") {
+    return toolCall;
+  }
+  const childSessionId = activity.childSessionId ?? toolCall.detail.childSessionId;
+  return {
+    ...toolCall,
+    detail: {
+      ...toolCall.detail,
+      ...(childSessionId ? { childSessionId } : {}),
+      log: buildOpenCodeSubAgentLog(toolCall.detail, activity),
+    },
+  };
+}
+
+function registerOpenCodeSubAgentToolCall(
+  item: ToolCallTimelineItem,
+  state: OpenCodeEventTranslationState,
+): ToolCallTimelineItem {
+  if (item.detail.type !== "sub_agent") {
+    return item;
+  }
+  const activity = getOpenCodeSubAgentState(item.callId, state, item);
+  if (item.detail.childSessionId) {
+    linkOpenCodeSubAgentChildSession(activity, item.detail.childSessionId, state);
+  }
+  return buildOpenCodeSubAgentTimelineItem(activity);
+}
+
+function bufferOpenCodeSubAgentChildToolPart(
+  part: OpenCodeToolPartEventPart,
+  state: OpenCodeEventTranslationState,
+): void {
+  const maps = getOpenCodeSubAgentMaps(state);
+  if (maps.byCallId.size === 0) {
+    return;
+  }
+  const totalPending = [...maps.pendingChildToolPartsBySessionId.values()].reduce(
+    (total, parts) => total + parts.length,
+    0,
+  );
+  if (totalPending >= MAX_OPENCODE_PENDING_CHILD_TOOL_PARTS) {
+    return;
+  }
+  const pending = maps.pendingChildToolPartsBySessionId.get(part.sessionID) ?? [];
+  pending.push(part);
+  maps.pendingChildToolPartsBySessionId.set(part.sessionID, pending);
+}
+
+function flushOpenCodeSubAgentChildToolParts(
+  childSessionId: string,
+  state: OpenCodeEventTranslationState,
+  events: AgentStreamEvent[],
+): void {
+  const maps = getOpenCodeSubAgentMaps(state);
+  const pending = maps.pendingChildToolPartsBySessionId.get(childSessionId);
+  if (!pending || pending.length === 0) {
+    return;
+  }
+  maps.pendingChildToolPartsBySessionId.delete(childSessionId);
+  for (const part of pending) {
+    appendOpenCodeSubAgentChildToolPart(part, state, events);
+  }
+}
+
+function findOnlyOpenCodeSubAgentWaitingForChild(
+  state: OpenCodeEventTranslationState,
+): OpenCodeSubAgentActivityState | null {
+  const maps = getOpenCodeSubAgentMaps(state);
+  const candidates = [...maps.byCallId.values()].filter(
+    (activity) =>
+      activity.toolCall.status === "running" &&
+      activity.toolCall.detail.type === "sub_agent" &&
+      !activity.childSessionId,
+  );
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
+}
+
+function summarizeOpenCodeSubAgentAction(
+  item: ToolCallTimelineItem,
+  cwd: string | undefined,
+): string | undefined {
+  const display = buildToolCallDisplayModel({
+    name: item.name,
+    status: item.status,
+    error: item.error,
+    metadata: item.metadata,
+    detail: item.detail,
+    cwd,
+  });
+  return display.summary ?? display.errorText;
+}
+
+function appendOpenCodeSubAgentAction(
+  activity: OpenCodeSubAgentActivityState,
+  item: ToolCallTimelineItem,
+  cwd: string | undefined,
+): boolean {
+  const key = item.callId || `${item.name}:${activity.actions.length}`;
+  const existingIndex = activity.actionIndexByKey.get(key);
+  const summary = summarizeOpenCodeSubAgentAction(item, cwd);
+
+  if (existingIndex !== undefined) {
+    const action = activity.actions[existingIndex];
+    if (!action) {
+      return false;
+    }
+    const changed = action.toolName !== item.name || action.summary !== summary;
+    action.toolName = item.name;
+    if (summary) {
+      action.summary = summary;
+    } else {
+      delete action.summary;
+    }
+    return changed;
+  }
+
+  if (activity.actions.length >= MAX_OPENCODE_SUB_AGENT_ACTIONS) {
+    return false;
+  }
+
+  activity.actionIndexByKey.set(key, activity.actions.length);
+  activity.actions.push({
+    index: activity.nextActionIndex,
+    key,
+    toolName: item.name,
+    ...(summary ? { summary } : {}),
+  });
+  activity.nextActionIndex += 1;
+  return true;
+}
+
+function appendOpenCodeToolCallTimelineItem(
+  item: ToolCallTimelineItem,
+  state: OpenCodeEventTranslationState,
+  events: AgentStreamEvent[],
+): void {
+  const timelineItem = registerOpenCodeSubAgentToolCall(item, state);
+  events.push({
+    type: "timeline",
+    provider: "opencode",
+    item: timelineItem,
+  });
+  if (timelineItem.detail.type === "sub_agent" && timelineItem.detail.childSessionId) {
+    flushOpenCodeSubAgentChildToolParts(timelineItem.detail.childSessionId, state, events);
+  }
+}
+
+function appendOpenCodeSubAgentChildSessionLinked(
+  childSessionId: string,
+  state: OpenCodeEventTranslationState,
+  events: AgentStreamEvent[],
+): void {
+  const activity = findOnlyOpenCodeSubAgentWaitingForChild(state);
+  if (!activity) {
+    return;
+  }
+  linkOpenCodeSubAgentChildSession(activity, childSessionId, state);
+  events.push({
+    type: "timeline",
+    provider: "opencode",
+    item: buildOpenCodeSubAgentTimelineItem(activity),
+  });
+  flushOpenCodeSubAgentChildToolParts(childSessionId, state, events);
+}
+
+function appendOpenCodeSubAgentChildToolPart(
+  part: OpenCodeToolPartEventPart,
+  state: OpenCodeEventTranslationState,
+  events: AgentStreamEvent[],
+): void {
+  const maps = getOpenCodeSubAgentMaps(state);
+  const parentCallId = maps.callIdByChildSessionId.get(part.sessionID);
+  if (!parentCallId) {
+    bufferOpenCodeSubAgentChildToolPart(part, state);
+    return;
+  }
+  const activity = maps.byCallId.get(parentCallId);
+  if (!activity) {
+    return;
+  }
+  const parsedToolPart = OpencodeToolPartToTimelineItemSchema.safeParse(part);
+  if (!parsedToolPart.success || !parsedToolPart.data) {
+    return;
+  }
+  if (!appendOpenCodeSubAgentAction(activity, parsedToolPart.data, state.cwd)) {
+    return;
+  }
+  events.push({
+    type: "timeline",
+    provider: "opencode",
+    item: buildOpenCodeSubAgentTimelineItem(activity),
+  });
+}
+
 function appendOpenCodeSessionCreatedOrUpdated(
   event: Extract<OpenCodeEvent, { type: "session.created" | "session.updated" }>,
   state: OpenCodeEventTranslationState,
@@ -1569,6 +1864,13 @@ function appendOpenCodeSessionCreatedOrUpdated(
       sessionId: state.sessionId,
       provider: "opencode",
     });
+    return;
+  }
+
+  const info = readOpenCodeRecord(event.properties.info);
+  const parentSessionId = readNonEmptyString(info?.parentID) ?? readNonEmptyString(info?.parentId);
+  if (parentSessionId === state.sessionId) {
+    appendOpenCodeSubAgentChildSessionLinked(event.properties.info.id, state, events);
   }
 }
 
@@ -1614,6 +1916,9 @@ function appendOpenCodeMessagePartUpdated(
 ): void {
   const part = event.properties.part;
   if (part.sessionID !== state.sessionId) {
+    if (part.type === "tool") {
+      appendOpenCodeSubAgentChildToolPart(part, state, events);
+    }
     return;
   }
   const messageRole = state.messageRoles.get(part.messageID);
@@ -1630,7 +1935,7 @@ function appendOpenCodeMessagePartUpdated(
   if (part.type === "tool") {
     const parsedToolPart = OpencodeToolPartToTimelineItemSchema.safeParse(part);
     if (parsedToolPart.success && parsedToolPart.data) {
-      events.push({ type: "timeline", provider: "opencode", item: parsedToolPart.data });
+      appendOpenCodeToolCallTimelineItem(parsedToolPart.data, state, events);
     }
     return;
   }
@@ -1864,6 +2169,22 @@ function appendOpenCodeSessionStatus(
   // "retry" and "busy" are transient — no terminal event.
 }
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 class OpenCodeAgentSession implements AgentSession {
   readonly provider = "opencode" as const;
   readonly capabilities = OPENCODE_CAPABILITIES;
@@ -1892,6 +2213,9 @@ class OpenCodeAgentSession implements AgentSession {
   private nextTurnOrdinal = 0;
   private activeForegroundTurnId: string | null = null;
   private readonly runningToolCalls = new Map<string, ToolCallTimelineItem>();
+  private subAgentsByCallId = new Map<string, OpenCodeSubAgentActivityState>();
+  private subAgentCallIdByChildSessionId = new Map<string, string>();
+  private pendingChildToolPartsBySessionId = new Map<string, OpenCodeToolPartEventPart[]>();
   private selectedModelContextWindowMaxTokens: number | undefined;
   private releaseServer: (() => void) | null;
   constructor(
@@ -1945,76 +2269,13 @@ class OpenCodeAgentSession implements AgentSession {
   }
 
   async run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult> {
-    const timeline: AgentTimelineItem[] = [];
-    let finalText = "";
-    let usage: AgentUsage | undefined;
-    let turnId: string | null = null;
-    const bufferedEvents: AgentStreamEvent[] = [];
-    let settled = false;
-    let resolveCompletion!: () => void;
-    let rejectCompletion!: (error: Error) => void;
-
-    const processEvent = (event: AgentStreamEvent) => {
-      if (settled) {
-        return;
-      }
-      const eventTurnId = (event as { turnId?: string }).turnId;
-      if (turnId && eventTurnId && eventTurnId !== turnId) {
-        return;
-      }
-      if (event.type === "timeline") {
-        timeline.push(event.item);
-        if (event.item.type === "assistant_message") {
-          finalText = event.item.text;
-        }
-        return;
-      }
-      if (event.type === "turn_completed") {
-        usage = event.usage;
-        settled = true;
-        resolveCompletion();
-        return;
-      }
-      if (event.type === "turn_failed") {
-        settled = true;
-        rejectCompletion(new Error(event.error));
-        return;
-      }
-      if (event.type === "turn_canceled") {
-        settled = true;
-        resolveCompletion();
-      }
-    };
-
-    const completion = new Promise<void>((resolve, reject) => {
-      resolveCompletion = resolve;
-      rejectCompletion = reject;
+    return runProviderTurn({
+      prompt,
+      runOptions: options,
+      startTurn: (p, o) => this.startTurn(p, o),
+      subscribe: (callback) => this.subscribe(callback),
+      getSessionId: () => this.sessionId,
     });
-    const unsubscribe = this.subscribe((event) => {
-      if (!turnId) {
-        bufferedEvents.push(event);
-        return;
-      }
-      processEvent(event);
-    });
-
-    try {
-      const result = await this.startTurn(prompt, options);
-      turnId = result.turnId;
-      for (const event of bufferedEvents) {
-        processEvent(event);
-      }
-      await completion;
-    } finally {
-      unsubscribe();
-    }
-
-    return {
-      sessionId: this.sessionId,
-      finalText,
-      usage,
-      timeline,
-    };
   }
 
   async interrupt(): Promise<void> {
@@ -2042,6 +2303,9 @@ class OpenCodeAgentSession implements AgentSession {
     }
 
     this.runningToolCalls.clear();
+    this.subAgentsByCallId.clear();
+    this.subAgentCallIdByChildSessionId.clear();
+    this.pendingChildToolPartsBySessionId.clear();
     const turnAbortController = new AbortController();
     this.abortController = turnAbortController;
     await this.ensureMcpServersConfigured();
@@ -2056,6 +2320,20 @@ class OpenCodeAgentSession implements AgentSession {
 
     const turnId = this.createTurnId();
     this.activeForegroundTurnId = turnId;
+
+    // OpenCode's /event SSE endpoint does NOT replay past events. If we send
+    // the prompt before our reader is connected, terminal events fired early
+    // by the server (e.g. session.error / session.idle for invalid model or
+    // mode) are missed and the turn hangs forever. Wait for the subscription
+    // to be established before sending anything.
+    const subscriptionReady = createDeferred<void>();
+    void this.consumeEventStream(turnId, turnAbortController, subscriptionReady);
+    try {
+      await subscriptionReady.promise;
+    } catch {
+      // consumeEventStream already finished the turn with the subscription error.
+      return { turnId };
+    }
 
     const slashCommand = await this.resolveSlashCommandInvocation(prompt);
     if (slashCommand) {
@@ -2096,8 +2374,6 @@ class OpenCodeAgentSession implements AgentSession {
           });
         return { turnId };
       }
-
-      void this.consumeEventStream(turnId, turnAbortController);
 
       // command() blocks until the server finishes processing. OpenCode's SSE
       // endpoint does NOT replay past events, so if the command completes before
@@ -2159,27 +2435,28 @@ class OpenCodeAgentSession implements AgentSession {
           );
         });
     } else {
-      void this.consumeEventStream(turnId, turnAbortController);
-
-      void this.client.session
-        .promptAsync({
-          sessionID: this.sessionId,
-          directory: this.config.cwd,
-          parts,
-          ...(options?.outputSchema
-            ? {
-                format: {
-                  type: "json_schema" as const,
-                  schema: options.outputSchema as Record<string, unknown>,
-                },
-              }
-            : {}),
-          ...(this.config.systemPrompt ? { system: this.config.systemPrompt } : {}),
-          ...(model ? { model } : {}),
-          ...(effectiveMode ? { agent: effectiveMode } : {}),
-          ...(effectiveVariant ? { variant: effectiveVariant } : {}),
-        })
-        .then((promptResponse) => {
+      // Wrap in an async IIFE so a synchronous throw from promptAsync (e.g.
+      // SDK input validation) is caught alongside async rejections. A plain
+      // `.then().catch()` chain would let a sync throw escape unhandled.
+      void (async () => {
+        try {
+          const promptResponse = await this.client.session.promptAsync({
+            sessionID: this.sessionId,
+            directory: this.config.cwd,
+            parts,
+            ...(options?.outputSchema
+              ? {
+                  format: {
+                    type: "json_schema" as const,
+                    schema: options.outputSchema as Record<string, unknown>,
+                  },
+                }
+              : {}),
+            ...(this.config.systemPrompt ? { system: this.config.systemPrompt } : {}),
+            ...(model ? { model } : {}),
+            ...(effectiveMode ? { agent: effectiveMode } : {}),
+            ...(effectiveVariant ? { variant: effectiveVariant } : {}),
+          });
           if (promptResponse.error) {
             this.finishForegroundTurn(
               {
@@ -2190,9 +2467,7 @@ class OpenCodeAgentSession implements AgentSession {
               turnId,
             );
           }
-          return;
-        })
-        .catch((error) => {
+        } catch (error) {
           this.finishForegroundTurn(
             {
               type: "turn_failed",
@@ -2201,7 +2476,8 @@ class OpenCodeAgentSession implements AgentSession {
             },
             turnId,
           );
-        });
+        }
+      })();
     }
 
     return { turnId };
@@ -2217,12 +2493,14 @@ class OpenCodeAgentSession implements AgentSession {
   private async consumeEventStream(
     turnId: string,
     turnAbortController: AbortController,
+    subscriptionReady?: Deferred<void>,
   ): Promise<void> {
     try {
       const result = await this.client.event.subscribe(
         { directory: this.config.cwd },
         { signal: turnAbortController.signal, sseMaxRetryAttempts: 0 },
       );
+      subscriptionReady?.resolve();
 
       for await (const event of result.stream) {
         if (turnAbortController.signal.aborted || this.activeForegroundTurnId !== turnId) {
@@ -2257,6 +2535,7 @@ class OpenCodeAgentSession implements AgentSession {
         );
       }
     } catch (error) {
+      subscriptionReady?.reject(error);
       if (!turnAbortController.signal.aborted && this.activeForegroundTurnId === turnId) {
         this.finishForegroundTurn(
           {
@@ -2313,6 +2592,7 @@ class OpenCodeAgentSession implements AgentSession {
 
   private synthesizeInterruptedToolCalls(turnId: string): void {
     for (const item of this.runningToolCalls.values()) {
+      const error = { message: "Tool execution aborted" };
       this.notifySubscribers(
         {
           type: "timeline",
@@ -2320,7 +2600,16 @@ class OpenCodeAgentSession implements AgentSession {
           item: {
             ...item,
             status: "failed",
-            error: { message: "Tool execution aborted" },
+            error,
+            detail:
+              item.detail.type === "sub_agent"
+                ? {
+                    ...item.detail,
+                    log: [item.detail.log, error.message]
+                      .filter((entry) => entry.trim().length > 0)
+                      .join("\n"),
+                  }
+                : item.detail,
           },
         },
         turnId,
@@ -2426,16 +2715,14 @@ class OpenCodeAgentSession implements AgentSession {
     });
     const agents = response.error || !response.data ? [] : response.data;
 
-    const discoveredModes = agents
-      .filter((agent) => agent.mode === "primary" && agent.hidden !== true)
-      .map((agent) => ({
-        id: agent.name,
-        label: agent.name.charAt(0).toUpperCase() + agent.name.slice(1),
-        description:
-          typeof agent.description === "string" && agent.description.trim().length > 0
-            ? agent.description.trim()
-            : DEFAULT_MODES.find((mode) => mode.id === agent.name)?.description,
-      }));
+    const discoveredModes = agents.filter(isSelectableOpenCodeAgent).map((agent) => ({
+      id: agent.name,
+      label: agent.name.charAt(0).toUpperCase() + agent.name.slice(1),
+      description:
+        typeof agent.description === "string" && agent.description.trim().length > 0
+          ? agent.description.trim()
+          : DEFAULT_MODES.find((mode) => mode.id === agent.name)?.description,
+    }));
 
     this.availableModesCache = mergeOpenCodeModes(discoveredModes);
     return this.availableModesCache;
@@ -2673,11 +2960,15 @@ class OpenCodeAgentSession implements AgentSession {
   private async translateEvent(event: OpenCodeEvent): Promise<AgentStreamEvent[]> {
     const translated = translateOpenCodeEvent(event, {
       sessionId: this.sessionId,
+      cwd: this.config.cwd,
       messageRoles: this.messageRoles,
       accumulatedUsage: this.accumulatedUsage,
       streamedPartKeys: this.streamedPartKeys,
       emittedStructuredMessageIds: this.emittedStructuredMessageIds,
       partTypes: this.partTypes,
+      subAgentsByCallId: this.subAgentsByCallId,
+      subAgentCallIdByChildSessionId: this.subAgentCallIdByChildSessionId,
+      pendingChildToolPartsBySessionId: this.pendingChildToolPartsBySessionId,
       modelContextWindowsByModelKey: this.modelContextWindowsByModelKey,
       onAssistantModelContextWindowResolved: (contextWindowMaxTokens) => {
         this.accumulatedUsage.contextWindowMaxTokens = contextWindowMaxTokens;
