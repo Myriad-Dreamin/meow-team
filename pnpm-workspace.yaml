@@ -11,3 +11,5 @@ packages:
   - "packages/cli"
 linkWorkspacePackages: true
 preferWorkspacePackages: true
+onlyBuiltDependencies:
+  - electron
