@@ -1,4 +1,4 @@
-import { buildHostWorkspaceRoute } from "@/utils/host-routes";
+import { buildHostAgentDetailRoute, buildHostWorkspaceRoute } from "@/utils/host-routes";
 import type { WebSocketRoute } from "@playwright/test";
 import { expect, test, type Page } from "./fixtures";
 import { gotoAppShell } from "./helpers/app";
@@ -133,12 +133,19 @@ test.describe("Workspace navigation regression", () => {
     const daemonGate = await installDaemonWebSocketGate(page, daemonPort);
 
     const workspaceClient = await connectNewWorkspaceDaemonClient();
+    const archiveClient = await connectArchiveTabDaemonClient();
     const workspaceIds = new Set<string>();
+    const agentIds: string[] = [];
     const repo = await createTempGitRepo("workspace-reconnect-");
 
     try {
       const workspace = await openProjectViaDaemon(workspaceClient, repo.path);
       workspaceIds.add(workspace.workspaceId);
+      const agent = await createIdleAgent(archiveClient, {
+        cwd: repo.path,
+        title: `workspace-reconnect-${Date.now()}`,
+      });
+      agentIds.push(agent.id);
 
       await gotoAppShell(page);
       await waitForSidebarHydration(page);
@@ -152,6 +159,20 @@ test.describe("Workspace navigation regression", () => {
         subtitle: workspace.projectDisplayName,
       });
       await expect(page.getByTestId("workspace-tabs-row")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible({
+        timeout: 30_000,
+      });
+
+      await page.goto(buildHostAgentDetailRoute(serverId, agent.id, workspace.workspaceId));
+      await page.waitForURL(
+        (url) => url.pathname.includes("/workspace/") && !url.searchParams.has("open"),
+        { timeout: 60_000 },
+      );
+      await waitForWorkspaceTabsVisible(page);
+      await expectWorkspaceTabVisible(page, agent.id);
+      await expect(
+        page.getByTestId(`workspace-tab-agent_${agent.id}`).filter({ visible: true }).first(),
+      ).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
       await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible({
         timeout: 30_000,
       });
@@ -184,9 +205,13 @@ test.describe("Workspace navigation regression", () => {
       await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible();
     } finally {
       daemonGate.restore();
+      for (const agentId of agentIds) {
+        await archiveAgentFromDaemon(archiveClient, agentId).catch(() => undefined);
+      }
       for (const workspaceId of workspaceIds) {
         await archiveLocalWorkspaceFromDaemon(workspaceClient, workspaceId).catch(() => undefined);
       }
+      await archiveClient.close().catch(() => undefined);
       await workspaceClient.close().catch(() => undefined);
       await repo.cleanup();
     }

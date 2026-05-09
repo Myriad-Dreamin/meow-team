@@ -53,7 +53,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ExplorerSidebar } from "@/components/explorer-sidebar";
 import { SplitContainer } from "@/components/split-container";
-import { ToastViewport, useToastHost } from "@/components/toast-host";
 import { SourceControlPanelIcon } from "@/components/icons/source-control-panel-icon";
 import { WorkspaceGitActions } from "@/screens/workspace/workspace-git-actions";
 import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
@@ -1305,40 +1304,6 @@ function WorkspaceDocumentTitleEffectSlot({
       )}
     </WorkspaceTabPresentationResolver>
   );
-}
-
-function shouldShowWorkspaceReconnectToast(input: {
-  routeState: WorkspaceRouteState;
-  activeTab: WorkspaceTabDescriptor | null;
-}): boolean {
-  if (input.routeState.kind !== "reconnecting" || !input.activeTab) {
-    return false;
-  }
-  return input.activeTab.target.kind !== "agent";
-}
-
-function WorkspaceReconnectToast({
-  routeState,
-  activeTab,
-}: {
-  routeState: WorkspaceRouteState;
-  activeTab: WorkspaceTabDescriptor | null;
-}) {
-  const { api, toast, dismiss } = useToastHost();
-  const isVisible = shouldShowWorkspaceReconnectToast({ routeState, activeTab });
-
-  useEffect(() => {
-    if (!isVisible) {
-      dismiss();
-      return;
-    }
-    api.show("Reconnecting...", {
-      durationMs: null,
-      testID: "agent-reconnecting-toast",
-    });
-  }, [api, dismiss, isVisible]);
-
-  return <ToastViewport toast={toast} onDismiss={dismiss} placement="panel" />;
 }
 
 function shouldShowWorkspaceScreenHeader(input: {
@@ -3253,10 +3218,6 @@ function WorkspaceScreenContent({
     gatedWorkspaceScreen ?? (
       <WorkspaceFocusProvider workspaceKey={persistenceKey}>
         <View style={containerStyle}>
-          <WorkspaceReconnectToast
-            routeState={workspaceRouteState}
-            activeTab={activeTabDescriptor}
-          />
           <WorkspaceDocumentTitleEffectSlot
             tab={activeTabDescriptor}
             serverId={normalizedServerId}
