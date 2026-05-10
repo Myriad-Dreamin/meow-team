@@ -2,6 +2,7 @@ import type {
   AgentPermissionAction,
   AgentCapabilityFlags,
   AgentClient,
+  AgentCreateSessionOptions,
   AgentFeature,
   AgentLaunchContext,
   AgentMode,
@@ -2617,6 +2618,7 @@ class CodexAppServerAgentSession implements AgentSession {
     logger: Logger,
     private readonly spawnAppServer: () => Promise<ChildProcessWithoutNullStreams>,
     private readonly deps: CodexAppServerAgentDeps = {},
+    private readonly ephemeral: boolean = false,
   ) {
     this.logger = logger.child({ module: "agent", provider: CODEX_PROVIDER });
     if (config.modeId === undefined) {
@@ -3489,6 +3491,7 @@ class CodexAppServerAgentSession implements AgentSession {
         ? { developerInstructions: this.config.systemPrompt.trim() }
         : {}),
       ...(innerConfig ? { config: innerConfig } : {}),
+      ...(this.ephemeral ? { ephemeral: true } : {}),
     })) as CodexThreadStartResponse;
     const threadId = response?.thread?.id;
     if (!threadId) {
@@ -4469,6 +4472,7 @@ export class CodexAppServerAgentClient implements AgentClient {
   async createSession(
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,
+    options?: AgentCreateSessionOptions,
   ): Promise<AgentSession> {
     const sessionConfig: AgentSessionConfig = { ...config, provider: CODEX_PROVIDER };
     const session = new CodexAppServerAgentSession(
@@ -4477,6 +4481,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       this.logger,
       () => this.spawnAppServer(launchContext?.env),
       this.deps,
+      options?.persistSession === false,
     );
     await session.connect();
     return session;
