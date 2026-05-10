@@ -614,7 +614,11 @@ function startDaemon(args: DaemonSpawnArgs): ChildProcess {
   const { enabled, openAiUsable, localModelsDir } = args.dictation;
   const tsxImportSpecifier = resolveTsxImportSpecifier(serverDir);
 
+<<<<<<< HEAD
   const child = spawn(process.execPath, ["--import", tsxImportSpecifier, "src/server/index.ts"], {
+=======
+  const child = spawn(tsxBin, ["scripts/supervisor-entrypoint.ts", "--dev"], {
+>>>>>>> v0.1.69
     cwd: serverDir,
     env: {
       ...process.env,
