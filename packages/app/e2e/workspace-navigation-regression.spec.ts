@@ -141,11 +141,6 @@ test.describe("Workspace navigation regression", () => {
     try {
       const workspace = await openProjectViaDaemon(workspaceClient, repo.path);
       workspaceIds.add(workspace.workspaceId);
-      const agent = await createIdleAgent(archiveClient, {
-        cwd: repo.path,
-        title: `workspace-reconnect-${Date.now()}`,
-      });
-      agentIds.push(agent.id);
 
       const agent = await createIdleAgent(archiveClient, {
         cwd: repo.path,
