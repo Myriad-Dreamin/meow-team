@@ -149,6 +149,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build highlight dependency
+        run: npm run build --workspace=@getpaseo/highlight
+
+      - name: Build relay dependency
+        run: npm run build --workspace=@getpaseo/relay
+
+      - name: Build server dependency
+        run: npm run build --workspace=@getpaseo/server
+
       - name: Run desktop tests
         run: pnpm --filter @getpaseo/desktop run test
 

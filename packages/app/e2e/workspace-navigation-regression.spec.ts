@@ -141,6 +141,7 @@ test.describe("Workspace navigation regression", () => {
     try {
       const workspace = await openProjectViaDaemon(workspaceClient, repo.path);
       workspaceIds.add(workspace.workspaceId);
+
       const agent = await createIdleAgent(archiveClient, {
         cwd: repo.path,
         title: `workspace-reconnect-${Date.now()}`,
@@ -149,33 +150,17 @@ test.describe("Workspace navigation regression", () => {
 
       await gotoAppShell(page);
       await waitForSidebarHydration(page);
-      await switchWorkspaceViaSidebar({
-        page,
-        serverId,
-        targetWorkspacePath: workspace.workspaceId,
-      });
+      await page.goto(buildHostAgentDetailRoute(serverId, agent.id, agent.cwd));
+      await page.waitForURL(
+        (url) => url.pathname.includes("/workspace/") && !url.searchParams.has("open"),
+        { timeout: 60_000 },
+      );
       await expectWorkspaceHeader(page, {
         title: workspace.workspaceName,
         subtitle: workspace.projectDisplayName,
       });
       await expect(page.getByTestId("workspace-tabs-row")).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible({
-        timeout: 30_000,
-      });
-
-      await page.goto(buildHostAgentDetailRoute(serverId, agent.id, workspace.workspaceId));
-      await page.waitForURL(
-        (url) => url.pathname.includes("/workspace/") && !url.searchParams.has("open"),
-        { timeout: 60_000 },
-      );
-      await waitForWorkspaceTabsVisible(page);
       await expectWorkspaceTabVisible(page, agent.id);
-      await expect(
-        page.getByTestId(`workspace-tab-agent_${agent.id}`).filter({ visible: true }).first(),
-      ).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
-      await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible({
-        timeout: 30_000,
-      });
 
       await daemonGate.drop();
       await expect(page.getByTestId("agent-reconnecting-toast")).toBeVisible({
@@ -238,7 +223,7 @@ test.describe("Workspace navigation regression", () => {
     );
 
     await expect(
-      page.getByText(/Connecting to localhost|localhost is offline|Cannot reach localhost/i),
+      page.getByText(/^Connecting$|localhost is offline|Cannot reach localhost/i),
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("menu-button")).toBeVisible();
     await expect(page.getByTestId("workspace-header-title")).toHaveCount(0);

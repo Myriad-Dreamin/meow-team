@@ -55,6 +55,42 @@ describe("startHostRuntimeBootstrap", () => {
     expect(daemonStartService.start).not.toHaveBeenCalled();
   });
 
+  it("skips daemon-start when the startup gate resolves false", async () => {
+    const store = createFakeStore();
+    const daemonStartService = createFakeDaemonStartService();
+
+    startHostRuntimeBootstrap({
+      store,
+      daemonStartService,
+      shouldStartDaemon: async () => false,
+    });
+    await Promise.resolve();
+
+    expect(store.boot).toHaveBeenCalledTimes(1);
+    expect(daemonStartService.start).not.toHaveBeenCalled();
+  });
+
+  it("surfaces gate rejection to onGateError without starting the daemon", async () => {
+    const store = createFakeStore();
+    const daemonStartService = createFakeDaemonStartService();
+    const onGateError = vi.fn();
+
+    startHostRuntimeBootstrap({
+      store,
+      daemonStartService,
+      shouldStartDaemon: async () => {
+        throw new Error("settings file unreadable");
+      },
+      onGateError,
+    });
+    await vi.waitFor(() => {
+      expect(onGateError).toHaveBeenCalledTimes(1);
+    });
+
+    expect(daemonStartService.start).not.toHaveBeenCalled();
+    expect(onGateError).toHaveBeenCalledWith(expect.stringContaining("settings file unreadable"));
+  });
+
   it("does not await the daemon-start promise", () => {
     const store = createFakeStore();
     let resolveStart: ((value: { ok: true }) => void) | undefined;
