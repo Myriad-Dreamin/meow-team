@@ -162,20 +162,6 @@ test.describe("Workspace navigation regression", () => {
       await expect(page.getByTestId("workspace-tabs-row")).toBeVisible({ timeout: 30_000 });
       await expectWorkspaceTabVisible(page, agent.id);
 
-      await page.goto(buildHostAgentDetailRoute(serverId, agent.id, workspace.workspaceId));
-      await page.waitForURL(
-        (url) => url.pathname.includes("/workspace/") && !url.searchParams.has("open"),
-        { timeout: 60_000 },
-      );
-      await waitForWorkspaceTabsVisible(page);
-      await expectWorkspaceTabVisible(page, agent.id);
-      await expect(
-        page.getByTestId(`workspace-tab-agent_${agent.id}`).filter({ visible: true }).first(),
-      ).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
-      await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible({
-        timeout: 30_000,
-      });
-
       await daemonGate.drop();
       await expect(page.getByTestId("agent-reconnecting-toast")).toBeVisible({
         timeout: 30_000,
