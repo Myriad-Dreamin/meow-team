@@ -21,12 +21,21 @@ export async function expectWorkspaceListed(page: Page, name: string): Promise<v
 }
 
 export async function openMobileAgentSidebar(page: Page): Promise<void> {
-  await page.getByTestId("menu-button").click();
+  await page.getByRole("button", { name: "Open menu" }).click();
 }
 
-// force=true: the overlay covers the button when the mobile sidebar is open.
 export async function closeMobileAgentSidebar(page: Page): Promise<void> {
-  await page.getByTestId("menu-button").click({ force: true });
+  const sidebar = page.getByTestId("sidebar-sessions");
+  const box = await sidebar.boundingBox();
+  if (!box) {
+    throw new Error("Mobile sidebar is not visible");
+  }
+
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width - 8, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 8, y, { steps: 10 });
+  await page.mouse.up();
 }
 
 // The mobile sidebar panel animates via translateX; toBeInViewport reflects the rendered position.
