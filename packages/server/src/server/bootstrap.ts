@@ -126,6 +126,7 @@ import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
 } from "./agent/provider-launch-config.js";
+import type { PersistedConfig } from "./persisted-config.js";
 import {
   ScriptRouteStore,
   createScriptProxyMiddleware,
@@ -201,6 +202,7 @@ export interface PaseoDaemonConfig {
   downloadTokenTtlMs?: number;
   agentProviderSettings?: AgentProviderRuntimeSettingsMap;
   providerOverrides?: Record<string, ProviderOverride>;
+  log?: PersistedConfig["log"];
   onLifecycleIntent?: (intent: DaemonLifecycleIntent) => void;
 }
 
@@ -839,16 +841,6 @@ export async function createPaseoDaemon(
             workspaceGitService,
             github,
           );
-
-          if (typeof process.send === "function" && process.env.PASEO_SUPERVISED === "1") {
-            process.send({
-              type: "paseo:ready",
-              listen:
-                boundListenTarget.type === "tcp"
-                  ? `${boundListenTarget.host}:${boundListenTarget.port}`
-                  : boundListenTarget.path,
-            });
-          }
 
           if (relayEnabled) {
             const offer = await createConnectionOfferV2({

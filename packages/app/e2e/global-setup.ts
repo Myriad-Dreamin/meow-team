@@ -612,9 +612,13 @@ interface DaemonSpawnArgs {
 function startDaemon(args: DaemonSpawnArgs): ChildProcess {
   const serverDir = path.resolve(__dirname, "../../..", "packages/server");
   const { enabled, openAiUsable, localModelsDir } = args.dictation;
-  const tsxImportSpecifier = resolveTsxImportSpecifier(serverDir);
+  const tsxBin = path.resolve(
+    serverDir,
+    "../../node_modules/.bin",
+    process.platform === "win32" ? "tsx.cmd" : "tsx",
+  );
 
-  const child = spawn(process.execPath, ["--import", tsxImportSpecifier, "src/server/index.ts"], {
+  const child = spawn(tsxBin, ["scripts/supervisor-entrypoint.ts", "--dev"], {
     cwd: serverDir,
     env: {
       ...process.env,

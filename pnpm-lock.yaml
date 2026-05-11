@@ -44,6 +44,9 @@ importers:
       playwright:
         specifier: ^1.56.1
         version: 1.58.2
+      tsx:
+        specifier: ^4.6.0
+        version: 4.21.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -331,7 +334,7 @@ importers:
         specifier: ^1.0.0
         version: 1.1.0
       '@getpaseo/server':
-        specifier: 0.1.68
+        specifier: 0.1.69
         version: link:../server
       chalk:
         specifier: ^5.3.0
@@ -565,10 +568,10 @@ importers:
         specifier: ^0.2.11
         version: 0.2.71(zod@3.25.76)
       '@getpaseo/highlight':
-        specifier: 0.1.68
+        specifier: 0.1.69
         version: link:../highlight
       '@getpaseo/relay':
-        specifier: 0.1.68
+        specifier: 0.1.69
         version: link:../relay
       '@isaacs/ttlcache':
         specifier: ^2.1.4
@@ -2776,15 +2779,18 @@ packages:
   '@mariozechner/pi-agent-core@0.70.6':
     resolution: {integrity: sha512-PovJZJqhY4ajgTJRUcLzfWKnlQuJHxHW3T030CafR9LYeLmOHi/HGS8DbCdRgSJNbnoIG+kl67/7++9DKZ2+sg==}
     engines: {node: '>=20.0.0'}
+    deprecated: please use @earendil-works/pi-agent-core instead going forward
 
   '@mariozechner/pi-ai@0.70.6':
     resolution: {integrity: sha512-LVAadu0Y+hb7Bj7EDiLsx6AuGxHlxDq0euLzyqX698i9qt0BW6a+oQSUIZQz4rJwExF18OvyL7ygJ5781ojrIQ==}
     engines: {node: '>=20.0.0'}
+    deprecated: please use @earendil-works/pi-ai instead going forward
     hasBin: true
 
   '@mariozechner/pi-coding-agent@0.70.6':
     resolution: {integrity: sha512-S4hUZghBeHPqsL6+DNg/TbGLziSh5+/mEHPVlYq5y6ImirWXhISLdLCnyZUW83OblKWihmG7unhJXiHQTH82mQ==}
     engines: {node: '>=20.6.0'}
+    deprecated: please use @earendil-works/pi-coding-agent instead going forward
     hasBin: true
 
   '@mariozechner/pi-tui@0.70.6':
@@ -17263,7 +17269,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 2.0.0
-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@25.6.0)(@vitest/browser@3.2.4)(@vitest/ui@3.2.4)(jiti@2.6.1)(jsdom@20.0.3)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@20.19.37)(@vitest/browser@3.2.4)(@vitest/ui@3.2.4)(jiti@2.6.1)(jsdom@20.0.3)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
 
   '@vitest/utils@3.2.4':
     dependencies:
