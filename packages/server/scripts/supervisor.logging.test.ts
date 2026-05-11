@@ -89,10 +89,9 @@ describe("supervisor durable logging", () => {
   test("writes supervised worker stdout and stderr to daemon.log", async () => {
     const result = await runSupervisorFixture({
       workerSource: `
-        const { writeSync } = await import("node:fs");
-        writeSync(1, '{"level":30,"msg":"worker-json-stdout"}\\n');
-        writeSync(2, '{"level":50,"msg":"worker-json-stderr"}\\n');
-        process.exitCode = 0;
+        process.stdout.write('{"level":30,"msg":"worker-json-stdout"}\\n');
+        process.stderr.write('{"level":50,"msg":"worker-json-stderr"}\\n');
+        process.exit(0);
       `,
     });
 
@@ -107,10 +106,9 @@ describe("supervisor durable logging", () => {
   test("preserves raw non-JSON stdout and stderr lines", async () => {
     const result = await runSupervisorFixture({
       workerSource: `
-        const { writeSync } = await import("node:fs");
-        writeSync(1, 'raw stdout line\\n');
-        writeSync(2, 'raw stderr line\\n');
-        process.exitCode = 0;
+        process.stdout.write('raw stdout line\\n');
+        process.stderr.write('raw stderr line\\n');
+        process.exit(0);
       `,
     });
 
