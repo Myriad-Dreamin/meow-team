@@ -24,7 +24,7 @@ export interface PaneFocusContextValue {
   isWorkspaceFocused: boolean;
   isPaneFocused: boolean;
   isInteractive: boolean;
-  focusPane(): void;
+  focusPane: () => void;
 }
 
 const PaneContext = createContext<PaneContextValue | null>(null);

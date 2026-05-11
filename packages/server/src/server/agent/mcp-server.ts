@@ -39,7 +39,6 @@ import { scheduleAgentMetadataGeneration } from "./agent-metadata-generator.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "../voice-types.js";
 import { expandUserPath, isSameOrDescendantPath, resolvePathFromBase } from "../path-utils.js";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
-import { captureTerminalLines } from "../../terminal/terminal-capture.js";
 import type {
   AgentWorktreeSetupContinuation,
   CreatePaseoWorktreeSetupContinuationInput,
@@ -49,6 +48,8 @@ import type {
 import type { ScheduleService } from "../schedule/service.js";
 import { ScheduleSummarySchema, StoredScheduleSchema } from "../schedule/types.js";
 import type { ProviderDefinition } from "./provider-registry.js";
+import { getAgentProviderDefinition } from "./provider-manifest.js";
+import { resolveAndValidateCreateAgentMode } from "./create-agent-mode.js";
 import { resolveSnapshotCwd } from "./provider-snapshot-manager.js";
 import {
   AgentModelSchema,
@@ -168,9 +169,7 @@ function resolveRegisteredProviderIds(
   agentManager: AgentManager,
   providerRegistry: Record<AgentProvider, ProviderDefinition> | null | undefined,
 ): AgentProvider[] {
-  return providerRegistry
-    ? (Object.keys(providerRegistry) as AgentProvider[])
-    : agentManager.getRegisteredProviderIds();
+  return providerRegistry ? Object.keys(providerRegistry) : agentManager.getRegisteredProviderIds();
 }
 
 interface ProviderSummary {
@@ -239,7 +238,7 @@ function resolveScheduleProviderAndModel(params: {
   const providerInput = params.provider?.trim() || params.defaultProvider;
   const slashIndex = providerInput.indexOf("/");
   if (slashIndex === -1) {
-    return { provider: providerInput as AgentProvider };
+    return { provider: providerInput };
   }
 
   const provider = providerInput.slice(0, slashIndex).trim();
@@ -249,7 +248,7 @@ function resolveScheduleProviderAndModel(params: {
   }
 
   return {
-    provider: provider as AgentProvider,
+    provider: provider,
     model,
   };
 }
@@ -447,7 +446,7 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
 
     const resolvedProviderModel = resolveScheduleProviderAndModel({
       provider: params?.provider,
-      defaultProvider: params.provider as AgentProvider,
+      defaultProvider: params.provider,
     });
     return {
       type: "new-agent" as const,
@@ -494,6 +493,12 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
       .trim()
       .min(1, "initialPrompt is required")
       .describe("Required first task to run immediately after creation."),
+    mode: z
+      .string()
+      .optional()
+      .describe(
+        "Optional session mode for the new agent. Required when the new agent uses a different provider than the caller agent.",
+      ),
     background: z
       .boolean()
       .optional()
@@ -630,6 +635,18 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
     setupContinuation: AgentWorktreeSetupContinuation | undefined;
   }
 
+  const getAvailableModeIds = (provider: AgentProvider): string[] | undefined => {
+    const fromRegistry = providerRegistry?.[provider];
+    if (fromRegistry) {
+      return fromRegistry.modes.map((mode) => mode.id);
+    }
+    try {
+      return getAgentProviderDefinition(provider).modes.map((mode) => mode.id);
+    } catch {
+      return undefined;
+    }
+  };
+
   const resolveCallerCreateAgentArgs = (
     args: unknown,
     parentAgentId: string,
@@ -647,10 +664,12 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
       lockedCwd: callerContext?.lockedCwd,
       allowCustomCwd: callerContext?.allowCustomCwd ?? true,
     });
-    const parentMode = parentAgent.currentModeId;
-    const resolvedMode = parentMode
-      ? mapModeAcrossProviders(parentMode, parentAgent.provider, provider)
-      : undefined;
+    const resolvedMode = resolveAndValidateCreateAgentMode({
+      requestedMode: callerArgs.mode,
+      targetProvider: provider,
+      parent: { provider: parentAgent.provider, modeId: parentAgent.currentModeId },
+      availableModes: getAvailableModeIds(provider),
+    });
     return {
       provider,
       initialPrompt: callerArgs.initialPrompt,
@@ -672,6 +691,12 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
     const topLevelArgs = topLevelCreateAgentArgsSchema.parse(args);
     const resolvedProviderModel = resolveRequiredProviderModel(topLevelArgs.provider);
     const { cwd, mode, worktreeName, baseBranch, refName, action, githubPrNumber } = topLevelArgs;
+    const resolvedMode = resolveAndValidateCreateAgentMode({
+      requestedMode: mode,
+      targetProvider: resolvedProviderModel.provider,
+      parent: null,
+      availableModes: getAvailableModeIds(resolvedProviderModel.provider),
+    });
     let resolvedCwd = expandUserPath(cwd);
     let setupContinuation: AgentWorktreeSetupContinuation | undefined;
 
@@ -727,7 +752,7 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
       labels: topLevelArgs.labels,
       notifyOnFinish: topLevelArgs.notifyOnFinish ?? false,
       resolvedCwd,
-      resolvedMode: mode,
+      resolvedMode,
       setupContinuation,
     };
   };
@@ -1407,12 +1432,11 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
         throw new Error("Terminal manager is not configured");
       }
 
-      const terminal = terminalManager.getTerminal(terminalId);
-      if (!terminal) {
+      if (!terminalManager.getTerminal(terminalId)) {
         throw new Error(`Terminal ${terminalId} not found`);
       }
 
-      const capture = captureTerminalLines(terminal, {
+      const capture = await terminalManager.captureTerminal(terminalId, {
         start: scrollback ? 0 : start,
         end,
         stripAnsi,
@@ -2078,6 +2102,8 @@ function mcpCreateWorktreeInput(
       return {
         input: { ...base, action: "checkout", githubPrNumber: target.prNumber },
       };
+    default:
+      throw new Error("unreachable");
   }
 }
 

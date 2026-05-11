@@ -13,6 +13,8 @@ out/
 .env.local
 .env.test.local
 .env*.local
+.dev.vars
+**/.dev.vars
 
 # Logs
 *.log
@@ -65,6 +67,7 @@ CLAUDE.local.md
 .paseo-workspaces/
 .wrangler/
 **/.wrangler/
+**/.tanstack/
 
 # Local agent/tooling artifacts (do not commit)
 PLAN.md

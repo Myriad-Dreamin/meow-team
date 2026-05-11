@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   Alert,
@@ -78,13 +78,12 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import {
   buildHostOpenProjectRoute,
-  buildHostWorkspaceRoute,
   buildProjectsSettingsRoute,
   buildSettingsHostRoute,
   buildSettingsSectionRoute,
   type SettingsSectionSlug,
 } from "@/utils/host-routes";
-import { getLastNavigationWorkspaceRouteSelection } from "@/stores/navigation-active-workspace-store";
+import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -746,16 +745,19 @@ function SettingsSidebar({
       ) : null}
       <View style={sidebarStyles.list}>
         {items.map((item) => (
-          <SidebarSectionButton
-            key={item.id}
-            itemId={item.id}
-            label={item.label}
-            icon={item.icon}
-            isSelected={selectedSectionId === item.id}
-            onSelect={onSelectSection}
-          />
+          <Fragment key={item.id}>
+            <SidebarSectionButton
+              itemId={item.id}
+              label={item.label}
+              icon={item.icon}
+              isSelected={selectedSectionId === item.id}
+              onSelect={onSelectSection}
+            />
+            {item.id === "general" ? (
+              <SidebarProjectsButton isSelected={isProjectsSelected} onSelect={onSelectProjects} />
+            ) : null}
+          </Fragment>
         ))}
-        <SidebarProjectsButton isSelected={isProjectsSelected} onSelect={onSelectProjects} />
       </View>
       <SidebarSeparator />
       <View style={sidebarStyles.list}>
@@ -961,11 +963,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
   }, [router]);
 
   const handleBackToWorkspace = useCallback(() => {
-    const lastWorkspaceRoute = getLastNavigationWorkspaceRouteSelection();
-    if (lastWorkspaceRoute) {
-      router.replace(
-        buildHostWorkspaceRoute(lastWorkspaceRoute.serverId, lastWorkspaceRoute.workspaceId),
-      );
+    if (navigateToLastWorkspace()) {
       return;
     }
     if (anyOnlineServerId) {

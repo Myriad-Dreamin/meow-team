@@ -37,6 +37,9 @@ jobs:
       - name: Install server dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Claude Code CLI for provider tests
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Build highlight dependency
         run: pnpm --filter @getpaseo/highlight run build
 

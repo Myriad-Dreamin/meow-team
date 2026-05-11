@@ -228,8 +228,7 @@ export function ComboboxItem({
   const itemPressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.comboboxItem,
-      Boolean(hovered) &&
-        (elevated ? styles.comboboxItemHoveredElevated : styles.comboboxItemHovered),
+      hovered && (elevated ? styles.comboboxItemHoveredElevated : styles.comboboxItemHovered),
       pressed && (elevated ? styles.comboboxItemPressedElevated : styles.comboboxItemPressed),
       active && styles.comboboxItemActive,
       disabled && styles.comboboxItemDisabled,
@@ -488,7 +487,7 @@ function handleDesktopEnterKey(input: DesktopKeyHandlerInput) {
   if (input.orderedVisibleOptions.length === 0) return;
   const { activeIndex, orderedVisibleOptions } = input;
   const index = activeIndex >= 0 && activeIndex < orderedVisibleOptions.length ? activeIndex : 0;
-  input.handleSelect(orderedVisibleOptions[index]!.id);
+  input.handleSelect(orderedVisibleOptions[index].id);
 }
 
 interface FloatingSizeSetters {

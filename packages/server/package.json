@@ -1,6 +1,6 @@
 {
   "name": "@getpaseo/server",
-  "version": "0.1.69",
+  "version": "0.1.70",
   "description": "Paseo backend server",
   "files": [
     "dist/server",
@@ -57,9 +57,9 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.17.1",
-    "@anthropic-ai/claude-agent-sdk": "^0.2.11",
-    "@getpaseo/highlight": "0.1.69",
-    "@getpaseo/relay": "0.1.69",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.133",
+    "@getpaseo/highlight": "0.1.70",
+    "@getpaseo/relay": "0.1.70",
     "@isaacs/ttlcache": "^2.1.4",
     "@mariozechner/pi-agent-core": "^0.70.2",
     "@mariozechner/pi-ai": "^0.70.2",
@@ -87,6 +87,7 @@
     "sherpa-onnx": "1.12.28",
     "sherpa-onnx-node": "1.12.28",
     "strip-ansi": "^7.1.2",
+    "tree-kill": "^1.2.2",
     "uuid": "^9.0.1",
     "which": "^5.0.0",
     "ws": "^8.14.2",

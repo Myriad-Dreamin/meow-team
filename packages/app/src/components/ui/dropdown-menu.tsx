@@ -86,7 +86,7 @@ function useControllableOpenState({
 }): [boolean, (next: boolean) => void] {
   const [internalOpen, setInternalOpen] = useState(Boolean(defaultOpen));
   const isControlled = typeof open === "boolean";
-  const value = isControlled ? Boolean(open) : internalOpen;
+  const value = isControlled ? open : internalOpen;
   const setValue = useCallback(
     (next: boolean) => {
       if (!isControlled) setInternalOpen(next);
@@ -315,7 +315,7 @@ export function DropdownMenuTrigger({
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => {
       if (typeof style === "function") {
-        return style({ pressed, hovered: Boolean(hovered), open: ctx.open });
+        return style({ pressed, hovered, open: ctx.open });
       }
       return style;
     },
@@ -324,7 +324,7 @@ export function DropdownMenuTrigger({
 
   const renderChildren = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => {
-      const state: TriggerState = { pressed, hovered: Boolean(hovered), open: ctx.open };
+      const state: TriggerState = { pressed, hovered, open: ctx.open };
       return typeof children === "function" ? children(state) : children;
     },
     [children, ctx.open],
@@ -445,7 +445,7 @@ export function DropdownMenuContent({
       setTriggerRect(null);
       setContentSize(null);
       setPosition(null);
-      return;
+      return undefined;
     }
 
     // Capture status bar height synchronously before async measurement.
@@ -454,8 +454,8 @@ export function DropdownMenuContent({
     const statusBarHeight = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
     let cancelled = false;
 
-    measureElement(triggerRef.current).then((rect) => {
-      if (cancelled) return;
+    void measureElement(triggerRef.current).then((rect) => {
+      if (cancelled) return undefined;
       // On Android with statusBarTranslucent, measureInWindow returns coordinates
       // relative to below the status bar, but Modal content starts from screen top.
       // Add status bar height to align coordinate systems (same as react-native-popover-view).
@@ -463,7 +463,7 @@ export function DropdownMenuContent({
         ...rect,
         y: rect.y + statusBarHeight,
       });
-      return;
+      return undefined;
     });
 
     return () => {
@@ -748,12 +748,12 @@ export function DropdownMenuItem({
       return [
         styles.item,
         selectedStyle,
-        selected && (Boolean(hovered) || pressed) && selectedVariant !== "accent"
+        selected && (hovered || pressed) && selectedVariant !== "accent"
           ? styles.itemSelectedInteractive
           : null,
         isDisabled ? styles.itemDisabled : null,
         muted && !isDisabled ? styles.itemMuted : null,
-        Boolean(hovered) && !pressed && !isDisabled ? styles.itemHovered : null,
+        hovered && !pressed && !isDisabled ? styles.itemHovered : null,
         pressed && !isDisabled ? styles.itemPressed : null,
       ];
     },

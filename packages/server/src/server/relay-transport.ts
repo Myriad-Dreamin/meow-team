@@ -8,16 +8,14 @@ import {
   type Transport as RelayTransport,
   type KeyPair,
 } from "@getpaseo/relay/e2ee";
-import {
-  buildRelayWebSocketUrl,
-  shouldUseTlsForDefaultHostedRelay,
-} from "../shared/daemon-endpoints.js";
+import { buildRelayWebSocketUrl } from "../shared/daemon-endpoints.js";
 import type { ExternalSocketMetadata } from "./websocket-server.js";
 
 interface RelayTransportOptions {
   logger: pino.Logger;
   attachSocket: (ws: RelaySocketLike, metadata?: ExternalSocketMetadata) => Promise<void>;
   relayEndpoint: string; // "host:port"
+  relayUseTls: boolean;
   serverId: string;
   daemonKeyPair?: KeyPair;
 }
@@ -57,6 +55,10 @@ function normalizeRelaySendPayload(data: string | Uint8Array | ArrayBuffer): str
   return String(data);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function tryParseControlMessage(raw: unknown): ControlMessage | null {
   try {
     let text: string;
@@ -67,8 +69,8 @@ function tryParseControlMessage(raw: unknown): ControlMessage | null {
     } else {
       text = String(raw);
     }
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== "object") return null;
+    const parsed = JSON.parse(text);
+    if (!isRecord(parsed)) return null;
     if (parsed.type === "ping") return { type: "ping" };
     if (parsed.type === "pong") return { type: "pong" };
     if (parsed.type === "sync" && Array.isArray(parsed.connectionIds)) {
@@ -101,6 +103,7 @@ export function startRelayTransport({
   logger,
   attachSocket,
   relayEndpoint,
+  relayUseTls,
   serverId,
   daemonKeyPair,
 }: RelayTransportOptions): RelayTransportController {
@@ -154,7 +157,7 @@ export function startRelayTransport({
     const connectionId = ++controlConnectionSeq;
     const url = buildRelayWebSocketUrl({
       endpoint: relayEndpoint,
-      useTls: shouldUseTlsForDefaultHostedRelay(relayEndpoint),
+      useTls: relayUseTls,
       serverId,
       role: "server",
     });
@@ -330,7 +333,7 @@ export function startRelayTransport({
 
     const url = buildRelayWebSocketUrl({
       endpoint: relayEndpoint,
-      useTls: shouldUseTlsForDefaultHostedRelay(relayEndpoint),
+      useTls: relayUseTls,
       serverId,
       role: "server",
       connectionId,

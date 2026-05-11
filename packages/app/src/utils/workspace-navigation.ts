@@ -1,10 +1,4 @@
-import { router, type Href } from "expo-router";
-import { isNative } from "@/constants/platform";
-import {
-  activateNavigationWorkspaceSelection,
-  getLastNavigationWorkspaceRouteSelection,
-  overrideNextNavigationWorkspaceRouteSelection,
-} from "@/stores/navigation-active-workspace-store";
+import { navigateToWorkspace } from "@/hooks/use-workspace-navigation";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { generateDraftId } from "@/stores/draft-keys";
 import {
@@ -21,7 +15,7 @@ interface PrepareWorkspaceTabInput {
 }
 
 interface NavigateToPreparedWorkspaceTabInput extends PrepareWorkspaceTabInput {
-  navigationMethod?: "navigate" | "replace";
+  currentPathname?: string | null;
 }
 
 function getPreparedTarget(target: WorkspaceTabTarget): WorkspaceTabTarget {
@@ -50,24 +44,8 @@ export function prepareWorkspaceTab(input: PrepareWorkspaceTabInput) {
 
 export function navigateToPreparedWorkspaceTab(input: NavigateToPreparedWorkspaceTabInput): string {
   const route = prepareWorkspaceTab(input);
-  if (input.navigationMethod === "replace") {
-    const canReturnToWorkspaceShell =
-      isNative && getLastNavigationWorkspaceRouteSelection() !== null && router.canGoBack();
-    if (canReturnToWorkspaceShell) {
-      const nextSelection = {
-        serverId: input.serverId,
-        workspaceId: input.workspaceId,
-      };
-      overrideNextNavigationWorkspaceRouteSelection(nextSelection);
-      router.back();
-      setTimeout(() => {
-        activateNavigationWorkspaceSelection(nextSelection);
-      }, 0);
-      return route;
-    }
-    router.replace(route as Href);
-  } else {
-    router.navigate(route as Href);
-  }
+  navigateToWorkspace(input.serverId, input.workspaceId, {
+    currentPathname: input.currentPathname,
+  });
   return route;
 }

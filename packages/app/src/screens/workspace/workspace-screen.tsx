@@ -67,6 +67,8 @@ import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-stor
 import {
   buildWorkspaceTabPersistenceKey,
   collectAllTabs,
+  getFocusedBrowserId,
+  type WorkspaceLayout,
   useWorkspaceLayoutStore,
   useWorkspaceLayoutStoreHydrated,
 } from "@/stores/workspace-layout-store";
@@ -216,6 +218,24 @@ function decodeSegment(value: string): string {
   } catch {
     return value;
   }
+}
+
+function useSyncWorkspaceActiveBrowser(input: {
+  workspaceLayout: WorkspaceLayout | null;
+  isRouteFocused: boolean;
+}) {
+  const focusedBrowserId = useMemo(
+    () => getFocusedBrowserId(input.workspaceLayout),
+    [input.workspaceLayout],
+  );
+  const desktopActiveBrowserId = input.isRouteFocused ? focusedBrowserId : null;
+
+  useEffect(() => {
+    if (!getIsElectron()) {
+      return;
+    }
+    void getDesktopHost()?.browser?.setWorkspaceActiveBrowser?.(desktopActiveBrowserId);
+  }, [desktopActiveBrowserId]);
 }
 
 function getFallbackTabOptionLabel(tab: WorkspaceTabDescriptor): string {
@@ -1550,7 +1570,7 @@ function WorkspaceScreenContent({
       if (!client || !workspaceDirectory) {
         throw new Error("Host is not connected");
       }
-      return (await client.getCheckoutStatus(workspaceDirectory)) as CheckoutStatusPayload;
+      return await client.getCheckoutStatus(workspaceDirectory);
     },
     staleTime: Infinity,
     refetchOnMount: false,
@@ -1714,6 +1734,7 @@ function WorkspaceScreenContent({
     () => (workspaceLayout ? collectAllTabs(workspaceLayout.root) : EMPTY_UI_TABS),
     [workspaceLayout],
   );
+  useSyncWorkspaceActiveBrowser({ workspaceLayout, isRouteFocused });
   const openWorkspaceTabFocused = useWorkspaceLayoutStore((state) => state.openTabFocused);
   const openWorkspaceTabInBackground = useWorkspaceLayoutStore(
     (state) => state.openTabInBackground,

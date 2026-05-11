@@ -23,6 +23,7 @@ import {
   createDefaultLayout,
   findPaneById,
   findPaneContainingTab,
+  getFocusedBrowserId,
   getTreeDepth,
   insertSplit,
   removePaneFromTree,
@@ -35,10 +36,10 @@ import {
 const SERVER_ID = "server-1";
 const WORKSPACE_ID = "ws-main";
 
-function createTab(tabId: string): WorkspaceTab {
+function createTab(tabId: string, target?: WorkspaceTab["target"]): WorkspaceTab {
   return {
     tabId,
-    target: { kind: "draft", draftId: tabId },
+    target: target ?? { kind: "draft", draftId: tabId },
     createdAt: 1,
   };
 }
@@ -47,8 +48,9 @@ function createPane(input: {
   id: string;
   tabIds: string[];
   focusedTabId?: string | null;
+  targetsByTabId?: Record<string, WorkspaceTab["target"]>;
 }): SplitNode {
-  const tabs = input.tabIds.map((tabId) => createTab(tabId));
+  const tabs = input.tabIds.map((tabId) => createTab(tabId, input.targetsByTabId?.[tabId]));
   return {
     kind: "pane",
     pane: {
@@ -115,6 +117,53 @@ describe("workspace-layout-store helpers", () => {
       "tab-d",
     ]);
   });
+
+  it("derives the focused browser id from the focused pane active tab", () => {
+    const root: SplitNode = {
+      kind: "group",
+      group: {
+        id: "group-root",
+        direction: "horizontal",
+        sizes: [0.5, 0.5],
+        children: [
+          createPane({
+            id: "left",
+            tabIds: ["agent-a", "browser-a"],
+            focusedTabId: "browser-a",
+            targetsByTabId: {
+              "agent-a": { kind: "agent", agentId: "agent-a" },
+              "browser-a": { kind: "browser", browserId: "browser-a-id" },
+            },
+          }),
+          createPane({
+            id: "right",
+            tabIds: ["browser-b"],
+            focusedTabId: "browser-b",
+            targetsByTabId: {
+              "browser-b": { kind: "browser", browserId: "browser-b-id" },
+            },
+          }),
+        ],
+      },
+    };
+
+    expect(getFocusedBrowserId({ root, focusedPaneId: "left" })).toBe("browser-a-id");
+    expect(getFocusedBrowserId({ root, focusedPaneId: "right" })).toBe("browser-b-id");
+  });
+
+  it("returns null when the focused pane active tab is not a browser", () => {
+    const root = createPane({
+      id: "main",
+      tabIds: ["browser-a", "agent-a"],
+      focusedTabId: "agent-a",
+      targetsByTabId: {
+        "browser-a": { kind: "browser", browserId: "browser-a-id" },
+        "agent-a": { kind: "agent", agentId: "agent-a" },
+      },
+    });
+
+    expect(getFocusedBrowserId({ root, focusedPaneId: "main" })).toBeNull();
+  });
 });
 
 describe("workspace-layout-store tree transforms", () => {
@@ -142,7 +191,7 @@ describe("workspace-layout-store tree transforms", () => {
 
     const nextRoot = insertSplit(root, "right", "tab-c", "right");
     const nextGroup = expectGroup(nextRoot);
-    const nestedGroup = expectGroup(nextGroup.group.children[1]!);
+    const nestedGroup = expectGroup(nextGroup.group.children[1]);
 
     expect(nextGroup.group.direction).toBe("horizontal");
     expect(nextGroup.group.children).toHaveLength(2);
@@ -259,7 +308,7 @@ describe("workspace-layout-store actions", () => {
       kind: "file",
       path: "/repo/worktree/b.ts",
     });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(firstTabId).toBe("file_/repo/worktree/a.ts");
     expect(secondTabId).toBe("file_/repo/worktree/b.ts");
@@ -308,7 +357,7 @@ describe("workspace-layout-store actions", () => {
       kind: "setup",
       workspaceId: "ws-main",
     });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     const pane = findPaneById(layout.root, "main")!;
 
     expect(agentTabId).toBe("agent_agent-1");
@@ -334,7 +383,7 @@ describe("workspace-layout-store actions", () => {
       kind: "file",
       path: "/repo/worktree/a.ts",
     });
-    const layoutAfter = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layoutAfter = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     const pane = findPaneById(layoutAfter.root, "main")!;
 
     expect(duplicateTabId).toBe(firstTabId);
@@ -408,7 +457,7 @@ describe("workspace-layout-store actions", () => {
 
     const firstTabId = store.openTabFocused(workspaceKey, { kind: "draft", draftId: "draft-1" });
     const secondTabId = store.openTabFocused(workspaceKey, { kind: "draft", draftId: "draft-2" });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(firstTabId).toBe("draft-1");
     expect(secondTabId).toBe("draft-2");
@@ -444,14 +493,14 @@ describe("workspace-layout-store actions", () => {
       kind: "draft",
       draftId: "draft-split",
     });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(newPaneId).toBe("pane_77777777-7777-7777-7777-777777777777");
     expect(draftTabId).toBe("draft-split");
     expect(layout.focusedPaneId).toBe(newPaneId);
     expect(findPaneById(layout.root, "main")?.tabIds).toEqual(["file_/repo/worktree/a.ts"]);
-    expect(findPaneById(layout.root, newPaneId!)?.tabIds).toEqual([draftTabId!]);
-    expect(findPaneById(layout.root, newPaneId!)?.focusedTabId).toBe(draftTabId);
+    expect(findPaneById(layout.root, newPaneId)?.tabIds).toEqual([draftTabId!]);
+    expect(findPaneById(layout.root, newPaneId)?.focusedTabId).toBe(draftTabId);
   });
 
   it("focusTab moves workspace focus to the pane containing the tab", () => {
@@ -476,14 +525,14 @@ describe("workspace-layout-store actions", () => {
     });
 
     store.focusTab(workspaceKey, fileTabId!);
-    let layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    let layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     expect(layout.focusedPaneId).toBe("main");
 
     store.focusTab(workspaceKey, terminalTabId!);
     layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
     expect(splitPaneId).toBe("pane_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     expect(layout.focusedPaneId).toBe(splitPaneId);
-    expect(findPaneById(layout.root, splitPaneId!)?.focusedTabId).toBe(terminalTabId);
+    expect(findPaneById(layout.root, splitPaneId)?.focusedTabId).toBe(terminalTabId);
   });
 
   it("convertDraftToAgent replaces the draft tab with a canonical agent tab in the same pane", () => {
@@ -502,8 +551,8 @@ describe("workspace-layout-store actions", () => {
     });
 
     const nextTabId = store.convertDraftToAgent(workspaceKey, secondTabId!, "agent-1");
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
-    const splitPane = findPaneById(layout.root, splitPaneId!);
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    const splitPane = findPaneById(layout.root, splitPaneId);
     const convertedTab = collectAllTabs(layout.root).find((tab) => tab.tabId === nextTabId);
 
     expect(splitPaneId).toBe("pane_12121212-1212-1212-1212-121212121212");
@@ -529,7 +578,7 @@ describe("workspace-layout-store actions", () => {
       kind: "file",
       path: "/repo/worktree/retargeted.ts",
     });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(draftTabId).toBe("draft-retarget");
     expect(nextTabId).toBe(draftTabId);
@@ -569,7 +618,7 @@ describe("workspace-layout-store actions", () => {
       kind: "file",
       path: "/repo/worktree/existing.ts",
     });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(existingFileTabId).toBe("file_/repo/worktree/existing.ts");
     expect(draftTabId).toBe("draft-dup");
@@ -604,7 +653,7 @@ describe("workspace-layout-store actions", () => {
       kind: "agent",
       agentId: "agent-1",
     });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(firstAgentTabId).toBe(firstDraftTabId);
     expect(nextTabId).toBe(firstDraftTabId);
@@ -636,7 +685,7 @@ describe("workspace-layout-store actions", () => {
     });
 
     store.reorderTabs(workspaceKey, [thirdTabId!, firstTabId!]);
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(findPaneById(layout.root, "main")).toEqual({
       id: "main",
@@ -691,11 +740,11 @@ describe("workspace-layout-store actions", () => {
     store.moveTabToPane(workspaceKey, fourthTabId!, splitPaneId!);
     store.focusPane(workspaceKey, "main");
     store.reorderTabsInPane(workspaceKey, splitPaneId!, [fourthTabId!, thirdTabId!]);
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(splitPaneId).toBe("pane_34343434-3434-3434-3434-343434343434");
     expect(layout.focusedPaneId).toBe("main");
-    expect(findPaneById(layout.root, splitPaneId!)).toEqual({
+    expect(findPaneById(layout.root, splitPaneId)).toEqual({
       id: splitPaneId,
       tabIds: [fourthTabId!, thirdTabId!],
       focusedTabId: fourthTabId,
@@ -733,7 +782,7 @@ describe("workspace-layout-store actions", () => {
     });
 
     store.focusPane(workspaceKey, "main");
-    let layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    let layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     expect(layout.focusedPaneId).toBe("main");
 
     store.focusPane(workspaceKey, splitPaneId!);
@@ -762,7 +811,7 @@ describe("workspace-layout-store actions", () => {
     });
 
     store.closeTab(workspaceKey, secondTabId!);
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(splitPaneId).toBe("pane_cccccccc-cccc-cccc-cccc-cccccccccccc");
     expect(layout.focusedPaneId).toBe("main");
@@ -810,7 +859,7 @@ describe("workspace-layout-store actions", () => {
       position: "bottom",
     });
 
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     expect(pane1).toBe("pane_11111111-1111-1111-1111-111111111111");
     expect(pane2).toBe("pane_33333333-3333-3333-3333-333333333333");
     expect(pane3).toBe("pane_55555555-5555-5555-5555-555555555555");
@@ -840,11 +889,11 @@ describe("workspace-layout-store actions", () => {
     });
 
     store.moveTabToPane(workspaceKey, leftTabId!, splitPaneId!);
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(layout.focusedPaneId).toBe(splitPaneId);
     expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual([splitPaneId!]);
-    expect(findPaneById(layout.root, splitPaneId!)?.tabIds).toEqual([
+    expect(findPaneById(layout.root, splitPaneId)?.tabIds).toEqual([
       "file_/repo/worktree/b.ts",
       "file_/repo/worktree/a.ts",
     ]);
@@ -880,7 +929,7 @@ describe("workspace-layout-store actions", () => {
     });
 
     store.closeTab(workspaceKey, secondTabId!);
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     const rootGroup = expectGroup(layout.root);
 
     expect(paneBId).toBe("pane_78787878-7878-7878-7878-787878787878");
@@ -938,7 +987,7 @@ describe("workspace-layout-store actions", () => {
       kind: "file",
       path: "/repo/worktree/b.ts",
     });
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(splitPaneId).toBe("pane_abababab-abab-abab-abab-abababababab");
     expect(duplicateTabId).toBe(secondTabId);
@@ -974,14 +1023,14 @@ describe("workspace-layout-store actions", () => {
       position: "right",
     });
 
-    const splitRoot = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!.root;
+    const splitRoot = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey].root;
     const splitGroup = expectGroup(splitRoot);
-    const nestedGroup = expectGroup(splitGroup.group.children[1]!);
+    const nestedGroup = expectGroup(splitGroup.group.children[1]);
     store.resizeSplit(workspaceKey, nestedGroup.group.id, [0.01, 0.99]);
 
-    const resizedRoot = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!.root;
+    const resizedRoot = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey].root;
     const resizedGroup = expectGroup(resizedRoot);
-    const resizedNestedGroup = expectGroup(resizedGroup.group.children[1]!);
+    const resizedNestedGroup = expectGroup(resizedGroup.group.children[1]);
     const total = resizedNestedGroup.group.sizes.reduce((sum, size) => sum + size, 0);
 
     expect(rightPaneId).toBe("pane_eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
@@ -997,7 +1046,7 @@ describe("workspace-layout-store actions", () => {
 
     const tabId = store.openTabFocused(workspaceKey, { kind: "draft", draftId: "draft-1" });
     store.closeTab(workspaceKey, tabId!);
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(layout).toEqual(createDefaultLayout());
   });
@@ -1093,7 +1142,7 @@ describe("workspace-layout-store actions", () => {
     });
 
     const nextTabId = store.convertDraftToAgent(workspaceKey, draftTabId!, "agent-1");
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(splitPaneId).toBe("pane_67676767-6767-6767-6767-676767676767");
     expect(nextTabId).toBe("agent_agent-1");
@@ -1157,7 +1206,7 @@ describe("workspace-layout-store actions", () => {
       hasActivePendingDraftCreate: false,
     });
 
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     const tabs = collectAllTabs(layout.root);
 
     expect(tabs.map((tab) => tab.tabId)).toEqual([
@@ -1217,7 +1266,7 @@ describe("workspace-layout-store actions", () => {
     });
 
     const tabs = useWorkspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey);
-    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     expect(tabs.map((tab) => tab.tabId)).toEqual(["terminal_term-script", "terminal_term-manual"]);
     expect(findPaneById(layout.root, layout.focusedPaneId)?.focusedTabId).toBe(scriptTabId);
   });

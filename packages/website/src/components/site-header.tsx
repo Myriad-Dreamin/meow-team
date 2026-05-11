@@ -29,6 +29,12 @@ export function SiteHeader() {
           Changelog
         </a>
         <a
+          href="/cloud"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Cloud
+        </a>
+        <a
           href="/download"
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
@@ -42,7 +48,7 @@ export function SiteHeader() {
           className="text-muted-foreground hover:text-foreground transition-colors inline-flex items-center"
         >
           <svg
-            role="img"
+            aria-hidden="true"
             xmlns="http://www.w3.org/2000/svg"
             width="18"
             height="18"
@@ -56,7 +62,7 @@ export function SiteHeader() {
           href="https://github.com/getpaseo/paseo"
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="GitHub"
+          aria-label={stars ? `GitHub, ${stars} stars` : "GitHub"}
           className="text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1.5"
         >
           <svg

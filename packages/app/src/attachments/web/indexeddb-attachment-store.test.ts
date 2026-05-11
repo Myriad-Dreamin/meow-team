@@ -3,8 +3,8 @@ import { createIndexedDbAttachmentStore } from "./indexeddb-attachment-store";
 
 type Listener = () => void;
 
-class FakeRequest<T = unknown> {
-  result!: T;
+class FakeRequest {
+  result!: unknown;
   error: Error | null = null;
   private listeners = new Map<string, Listener[]>();
 
@@ -22,9 +22,9 @@ class FakeRequest<T = unknown> {
 class FakeObjectStore {
   constructor(private readonly onPut: (record: unknown) => void) {}
 
-  put(record: unknown): FakeRequest<unknown> {
+  put(record: unknown): FakeRequest {
     this.onPut(record);
-    const request = new FakeRequest<unknown>();
+    const request = new FakeRequest();
     queueMicrotask(() => request.emit("success"));
     return request;
   }
@@ -70,7 +70,7 @@ describe("indexeddb attachment store", () => {
           const store = new FakeObjectStore((record) => {
             storedRecord = record;
           });
-          const request = new FakeRequest<FakeDatabase>();
+          const request = new FakeRequest();
           request.result = new FakeDatabase(store);
           queueMicrotask(() => request.emit("success"));
           return request;

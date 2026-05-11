@@ -198,9 +198,14 @@ export function buildRelayWebSocketUrl(params: {
   return url.toString();
 }
 
+/**
+ * @deprecated Migration fallback for stored relay connections/offers that predate
+ * explicit relay useTls. Delete after two release cycles.
+ */
 export function shouldUseTlsForDefaultHostedRelay(endpoint: string): boolean {
   try {
-    return normalizeHostPort(endpoint) === DEFAULT_RELAY_ENDPOINT;
+    const { port } = parseHostPort(endpoint);
+    return port === 443;
   } catch {
     return false;
   }

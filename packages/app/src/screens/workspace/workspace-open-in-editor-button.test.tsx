@@ -110,6 +110,10 @@ vi.mock("@/hooks/use-checkout-status-query", () => ({
   useCheckoutStatusQuery: () => checkoutStatusState.current,
 }));
 
+vi.mock("@/hooks/use-is-local-daemon", () => ({
+  useIsLocalDaemon: () => true,
+}));
+
 vi.mock("@/utils/open-external-url", () => ({
   openExternalUrl: openExternalUrlMock,
 }));

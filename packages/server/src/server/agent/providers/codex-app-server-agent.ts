@@ -30,9 +30,10 @@ import type {
 import type { Logger } from "pino";
 import { homedir } from "node:os";
 
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Dirent } from "node:fs";
+import * as fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -51,10 +52,14 @@ import {
   type ProviderRuntimeSettings,
 } from "../provider-launch-config.js";
 import { findExecutable, isCommandAvailable } from "../../../utils/executable.js";
-import { terminateProcessTree } from "../../../utils/process-tree.js";
+import { terminateWithTreeKill } from "../../../utils/tree-kill.js";
 import { spawnProcess } from "../../../utils/spawn.js";
 import { extractCodexTerminalSessionId, nonEmptyString } from "./tool-call-mapper-utils.js";
 import { buildCodexFeatures, codexModelSupportsFastMode } from "./codex-feature-definitions.js";
+import {
+  renderProviderImageOutputAsAssistantMarkdown,
+  type ProviderImageOutput,
+} from "./provider-image-output.js";
 import {
   formatDiagnosticStatus,
   formatProviderDiagnostic,
@@ -65,6 +70,18 @@ import {
 import { runProviderTurn } from "./provider-runner.js";
 import type { WorkspaceGitService } from "../../workspace-git-service.js";
 
+function assertChildWithPipes(
+  child: ChildProcess,
+): asserts child is ChildProcessWithoutNullStreams {
+  if (!child.stdin || !child.stdout || !child.stderr) {
+    throw new Error("Child process did not expose stdio pipes");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 const DEFAULT_TIMEOUT_MS = 14 * 24 * 60 * 60 * 1000;
 const TURN_START_TIMEOUT_MS = 90 * 1000;
 const INTERRUPT_TIMEOUT_MS = 2_000;
@@ -73,8 +90,60 @@ const APP_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS = 1_000;
 const CODEX_PROVIDER = "codex" as const;
 const CODEX_IMAGE_ATTACHMENT_DIR = "paseo-attachments";
 const ASSISTANT_MESSAGE_BOUNDARY_MARKDOWN = "\n\n---\n\n";
+const CODEX_TOOL_THREAD_ITEM_TYPES = new Set([
+  "commandExecution",
+  "fileChange",
+  "mcpToolCall",
+  "webSearch",
+  "collabAgentToolCall",
+]);
 const CODEX_PLAN_IMPLEMENTATION_PROMPT_PREFIX =
   "The user approved the plan. Implement it now. Do not restate or revise the plan unless blocked.";
+
+// Codex's experimental `goals` feature ships in 0.128.0+. Older binaries reject
+// `--enable goals` at launch, so we gate by version and silently skip the flag
+// (and the /goal slash command) when the binary is too old.
+const CODEX_GOALS_MIN_VERSION: readonly [number, number, number] = [0, 128, 0];
+
+function parseCodexVersion(versionOutput: string): [number, number, number] | null {
+  const match = versionOutput.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function codexVersionAtLeast(
+  versionOutput: string,
+  min: readonly [number, number, number],
+): boolean {
+  const parsed = parseCodexVersion(versionOutput);
+  if (!parsed) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (parsed[i] > min[i]) return true;
+    if (parsed[i] < min[i]) return false;
+  }
+  return true;
+}
+
+type GoalSubcommand =
+  | { kind: "set"; objective: string }
+  | { kind: "pause" }
+  | { kind: "resume" }
+  | { kind: "clear" }
+  | { kind: "usage" };
+
+function parseGoalSubcommand(args: string | undefined): GoalSubcommand {
+  const trimmed = (args ?? "").trim();
+  if (!trimmed) return { kind: "usage" };
+  const lower = trimmed.toLowerCase();
+  if (lower === "pause") return { kind: "pause" };
+  if (lower === "resume") return { kind: "resume" };
+  if (lower === "clear") return { kind: "clear" };
+  return { kind: "set", objective: trimmed };
+}
+
+function formatOutOfBandStatusMessage(text: string): string {
+  return `${text.replace(/\n+$/u, "")}\n\n`;
+}
 
 const CODEX_APP_SERVER_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: true,
@@ -289,14 +358,14 @@ function tokenizeCommandArgs(args: string): string[] {
   let current = "";
   let quote: "'" | '"' | null = null;
   for (let i = 0; i < args.length; i += 1) {
-    const ch = args[i]!;
+    const ch = args[i];
     if (quote) {
       if (ch === quote) {
         quote = null;
         continue;
       }
       if (ch === "\\" && i + 1 < args.length) {
-        const next = args[i + 1]!;
+        const next = args[i + 1];
         if (next === quote || next === "\\" || next === "n" || next === "t") {
           i += 1;
           current += decodeEscapedChar(next);
@@ -541,6 +610,10 @@ function toCodexMcpConfig(config: McpServerConfig): CodexMcpServerConfig {
         url: config.url,
         http_headers: config.headers,
       };
+    default: {
+      const _exhaustive = config as { type: never };
+      throw new Error(`Unsupported MCP config type: ${String(_exhaustive.type)}`);
+    }
   }
 }
 interface JsonRpcRequest {
@@ -560,7 +633,25 @@ interface JsonRpcNotification {
   params?: unknown;
 }
 
-type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
+function isJsonRpcResponse(msg: unknown): msg is JsonRpcResponse {
+  if (!isRecord(msg)) return false;
+  if (typeof msg.id !== "number") return false;
+  return msg.result !== undefined || !!msg.error;
+}
+
+function isJsonRpcRequest(msg: unknown): msg is JsonRpcRequest {
+  if (!isRecord(msg)) return false;
+  return typeof msg.id === "number" && typeof msg.method === "string";
+}
+
+function isJsonRpcNotification(msg: unknown): msg is JsonRpcNotification {
+  if (!isRecord(msg)) return false;
+  return typeof msg.method === "string" && typeof msg.id !== "number";
+}
+
+function toObjectRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -568,7 +659,7 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
-type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
+type RequestHandler = (params: unknown) => unknown;
 
 type NotificationHandler = (method: string, params: unknown) => void;
 
@@ -588,13 +679,28 @@ interface CodexModel {
   supportedReasoningEfforts?: CodexReasoningEffortEntry[];
 }
 
-interface CodexModelListResponse {
-  data?: CodexModel[];
-}
-
-interface CodexThreadStartResponse {
-  thread?: { id?: string };
-}
+const CodexModelListResponseSchema = z.object({
+  data: z
+    .array(
+      z.object({
+        id: z.string(),
+        displayName: z.string().optional(),
+        description: z.string().optional(),
+        isDefault: z.boolean().optional(),
+        model: z.string().optional(),
+        defaultReasoningEffort: z.string().optional(),
+        supportedReasoningEfforts: z
+          .array(
+            z.object({
+              reasoningEffort: z.string().optional(),
+              description: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .optional(),
+});
 
 class CodexAppServerClient {
   private readonly rl: readline.Interface;
@@ -697,7 +803,7 @@ class CodexAppServerClient {
     } catch {
       // ignore
     }
-    const result = await terminateProcessTree(this.child, {
+    const result = await terminateWithTreeKill(this.child, {
       gracefulTimeoutMs: APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
       forceTimeoutMs: APP_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
       onForceSignal: () => {
@@ -717,32 +823,30 @@ class CodexAppServerClient {
 
   private async handleLine(line: string): Promise<void> {
     if (!line.trim()) return;
-    let msg: JsonRpcMessage;
-    try {
-      msg = JSON.parse(line);
-    } catch (error) {
-      this.logger.warn({ error, line }, "Failed to parse Codex app-server JSON");
+    const raw: unknown = JSON.parse(line);
+    if (!isRecord(raw)) {
+      this.logger.warn({ line }, "Parsed JSON is not an object");
       return;
     }
 
-    if (typeof (msg as JsonRpcResponse).id === "number") {
-      const id = (msg as JsonRpcResponse).id;
-      if ((msg as JsonRpcResponse).result !== undefined || (msg as JsonRpcResponse).error) {
+    if (isJsonRpcResponse(raw)) {
+      const id = raw.id;
+      if (raw.result !== undefined || raw.error) {
         const pending = this.pending.get(id);
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pending.delete(id);
-        if ((msg as JsonRpcResponse).error) {
-          pending.reject(new Error((msg as JsonRpcResponse).error?.message ?? "Unknown error"));
+        if (raw.error) {
+          pending.reject(new Error(raw.error.message ?? "Unknown error"));
         } else {
-          pending.resolve((msg as JsonRpcResponse).result);
+          pending.resolve(raw.result);
         }
         return;
       }
 
       // Server-initiated request
-      if (typeof (msg as JsonRpcRequest).method === "string") {
-        const request = msg as JsonRpcRequest;
+      if (isJsonRpcRequest(raw)) {
+        const request = raw;
         const handler = this.requestHandlers.get(request.method);
         try {
           const result = handler ? await handler(request.params) : {};
@@ -757,38 +861,26 @@ class CodexAppServerClient {
       }
     }
 
-    if (typeof (msg as JsonRpcNotification).method === "string") {
-      const notification = msg as JsonRpcNotification;
-      this.notificationHandler?.(notification.method, notification.params);
+    if (isJsonRpcNotification(raw)) {
+      this.notificationHandler?.(raw.method, raw.params);
     }
   }
 }
 
 function toAgentUsage(tokenUsage: unknown): AgentUsage | undefined {
-  if (!tokenUsage || typeof tokenUsage !== "object") return undefined;
-  const usage = tokenUsage as {
-    model_context_window?: number;
-    modelContextWindow?: number;
-    last?: {
-      inputTokens?: number;
-      cachedInputTokens?: number;
-      outputTokens?: number;
-      total_tokens?: number;
-      totalTokens?: number;
-    };
-  };
+  const usage = toObjectRecord(tokenUsage);
+  if (!usage) return undefined;
+  const last = toObjectRecord(usage.last);
   const contextWindowMaxTokens = firstPositiveFiniteNumber(
     usage.model_context_window,
     usage.modelContextWindow,
   );
-  const contextWindowUsedTokens = firstPositiveFiniteNumber(
-    usage.last?.total_tokens,
-    usage.last?.totalTokens,
-  );
+  const contextWindowUsedTokens = firstPositiveFiniteNumber(last?.total_tokens, last?.totalTokens);
   return {
-    inputTokens: usage.last?.inputTokens,
-    cachedInputTokens: usage.last?.cachedInputTokens,
-    outputTokens: usage.last?.outputTokens,
+    inputTokens: typeof last?.inputTokens === "number" ? last.inputTokens : undefined,
+    cachedInputTokens:
+      typeof last?.cachedInputTokens === "number" ? last.cachedInputTokens : undefined,
+    outputTokens: typeof last?.outputTokens === "number" ? last.outputTokens : undefined,
     ...(contextWindowMaxTokens !== undefined ? { contextWindowMaxTokens } : {}),
     ...(contextWindowUsedTokens !== undefined ? { contextWindowUsedTokens } : {}),
   };
@@ -798,11 +890,12 @@ function extractUserText(content: unknown): string | null {
   if (!Array.isArray(content)) return null;
   const parts: string[] = [];
   for (const item of content) {
-    if (item && typeof item === "object") {
-      const obj = item as { type?: string; text?: string };
-      if (obj.type === "text" && typeof obj.text === "string") {
-        parts.push(obj.text);
-      }
+    const record = toObjectRecord(item);
+    if (!record) {
+      continue;
+    }
+    if (record.type === "text" && typeof record.text === "string") {
+      parts.push(record.text);
     }
   }
   return parts.length > 0 ? parts.join("\n") : null;
@@ -919,10 +1012,10 @@ function normalizeCodexQuestionPrompts(raw: unknown): CodexQuestionPrompt[] {
   }
   const questions: CodexQuestionPrompt[] = [];
   for (const item of raw) {
-    if (!item || typeof item !== "object") {
+    const record = toObjectRecord(item);
+    if (!record) {
       continue;
     }
-    const record = item as Record<string, unknown>;
     const id = nonEmptyString(record.id);
     const header = nonEmptyString(record.header);
     const question = nonEmptyString(record.question);
@@ -931,10 +1024,10 @@ function normalizeCodexQuestionPrompts(raw: unknown): CodexQuestionPrompt[] {
     }
     const options = Array.isArray(record.options)
       ? record.options.flatMap((option): CodexQuestionOption[] => {
-          if (!option || typeof option !== "object") {
+          const optionRecord = toObjectRecord(option);
+          if (!optionRecord) {
             return [];
           }
-          const optionRecord = option as Record<string, unknown>;
           const label = nonEmptyString(optionRecord.label);
           if (!label) {
             return [];
@@ -1045,13 +1138,9 @@ function mapCodexQuestionResponseByHeader(params: {
   if (params.response.behavior !== "allow") {
     return null;
   }
-  const answersRecord =
-    params.response.updatedInput && typeof params.response.updatedInput === "object"
-      ? ((params.response.updatedInput as Record<string, unknown>).answers as
-          | Record<string, unknown>
-          | undefined)
-      : undefined;
-  if (!answersRecord || typeof answersRecord !== "object") {
+  const updatedInputRecord = toObjectRecord(params.response.updatedInput);
+  const answersRecord = toObjectRecord(updatedInputRecord?.answers);
+  if (!answersRecord) {
     return null;
   }
 
@@ -1086,10 +1175,10 @@ interface CodexPatchFileChange {
 }
 
 function extractPatchLikeText(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") {
+  const record = toObjectRecord(value);
+  if (!record) {
     return undefined;
   }
-  const record = value as Record<string, unknown>;
   const candidates = [
     record.diff,
     record.patch,
@@ -1129,6 +1218,10 @@ function normalizeCodexThreadItemType(rawType: string | undefined): string | und
       return "webSearch";
     case "CollabAgentToolCall":
       return "collabAgentToolCall";
+    case "ImageView":
+      return "imageView";
+    case "ImageGeneration":
+      return "imageGeneration";
     default:
       return rawType;
   }
@@ -1194,10 +1287,10 @@ function parseCodexPatchChanges(changes: unknown): CodexPatchFileChange[] {
   if (Array.isArray(changes)) {
     return changes
       .map((entry): CodexPatchFileChange | null => {
-        if (!entry || typeof entry !== "object") {
+        const record = toObjectRecord(entry);
+        if (!record) {
           return null;
         }
-        const record = entry as Record<string, unknown>;
         const pathValue = resolvePathFromRecord(record);
         if (!pathValue) {
           return null;
@@ -1214,7 +1307,10 @@ function parseCodexPatchChanges(changes: unknown): CodexPatchFileChange[] {
       .filter((entry): entry is CodexPatchFileChange => entry !== null);
   }
 
-  const recordChanges = changes as Record<string, unknown>;
+  const recordChanges = toObjectRecord(changes);
+  if (!recordChanges) {
+    return [];
+  }
   const directPathValue = resolvePathFromRecord(recordChanges);
   if (directPathValue) {
     return [
@@ -1468,12 +1564,90 @@ function mapCodexThreadUserMessageItem(
   return { type: "user_message", text };
 }
 
+function firstStringField(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+): string | null {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function codexImageOutputFromResult(result: unknown): ProviderImageOutput | null {
+  if (typeof result === "string") {
+    const trimmed = result.trim();
+    if (
+      trimmed.toLowerCase().startsWith("data:image/") ||
+      (/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) && trimmed.length > 64)
+    ) {
+      return { data: trimmed };
+    }
+    return { url: trimmed };
+  }
+  const resultRecord = toObjectRecord(result);
+  if (!resultRecord) {
+    return null;
+  }
+  return {
+    path: firstStringField(resultRecord, ["path", "savedPath", "saved_path"]),
+    url: firstStringField(resultRecord, ["url"]),
+    data: firstStringField(resultRecord, ["data"]),
+    mimeType: firstStringField(resultRecord, ["mimeType", "mime_type"]),
+  };
+}
+
+function writeImageAttachmentSync(mimeType: string, data: string): string {
+  const attachmentsDir = path.join(os.tmpdir(), CODEX_IMAGE_ATTACHMENT_DIR);
+  fsSync.mkdirSync(attachmentsDir, { recursive: true });
+  const normalized = normalizeImageData(mimeType, data);
+  const extension = getImageExtension(normalized.mimeType);
+  const filename = `${randomUUID()}.${extension}`;
+  const filePath = path.join(attachmentsDir, filename);
+  fsSync.writeFileSync(filePath, Buffer.from(normalized.data, "base64"));
+  return filePath;
+}
+
+function materializeCodexImageOutput(image: { data: string; mimeType: string | null }): {
+  path: string;
+} {
+  return {
+    path: writeImageAttachmentSync(image.mimeType ?? "image/png", image.data),
+  };
+}
+
+function mapCodexThreadImageItem(
+  normalizedType: string,
+  normalizedItem: Record<string, unknown>,
+): AgentTimelineItem | null {
+  if (normalizedType === "imageView") {
+    return renderProviderImageOutputAsAssistantMarkdown({
+      path: firstStringField(normalizedItem, ["path"]),
+    });
+  }
+
+  const savedPath = firstStringField(normalizedItem, ["savedPath", "saved_path"]);
+  const result = codexImageOutputFromResult(normalizedItem.result);
+  return renderProviderImageOutputAsAssistantMarkdown(
+    {
+      path: savedPath ?? result?.path ?? null,
+      url: result?.url ?? null,
+      data: result?.data ?? null,
+      mimeType: result?.mimeType ?? null,
+    },
+    { materialize: materializeCodexImageOutput },
+  );
+}
+
 function threadItemToTimeline(
   item: unknown,
   options?: { includeUserMessage?: boolean; cwd?: string | null },
 ): AgentTimelineItem | null {
-  if (!item || typeof item !== "object") return null;
-  const itemRecord = item as Record<string, unknown>;
+  const itemRecord = toObjectRecord(item);
+  if (!itemRecord) return null;
   const includeUserMessage = options?.includeUserMessage ?? true;
   const cwd = options?.cwd ?? null;
   const normalizedType = normalizeCodexThreadItemType(
@@ -1483,6 +1657,13 @@ function threadItemToTimeline(
     normalizedType && normalizedType !== itemRecord.type
       ? { ...itemRecord, type: normalizedType }
       : itemRecord;
+
+  if (normalizedType === "imageView" || normalizedType === "imageGeneration") {
+    return mapCodexThreadImageItem(normalizedType, normalizedItem);
+  }
+  if (normalizedType && CODEX_TOOL_THREAD_ITEM_TYPES.has(normalizedType)) {
+    return mapCodexToolCallFromThreadItem(normalizedItem, { cwd });
+  }
 
   switch (normalizedType) {
     case "userMessage":
@@ -1496,12 +1677,6 @@ function threadItemToTimeline(
       return mapCodexThreadPlanItem(normalizedItem);
     case "reasoning":
       return mapCodexThreadReasoningItem(normalizedItem);
-    case "commandExecution":
-    case "fileChange":
-    case "mcpToolCall":
-    case "webSearch":
-    case "collabAgentToolCall":
-      return mapCodexToolCallFromThreadItem(normalizedItem, { cwd });
     default:
       return null;
   }
@@ -2397,17 +2572,14 @@ async function readCodexConfiguredDefaults(
 ): Promise<CodexConfiguredDefaults> {
   let savedConfigDefaults: CodexConfiguredDefaults = {};
   try {
-    const response = (await client.request("getUserSavedConfig", {})) as {
-      config?: {
-        model?: string | null;
-        modelReasoningEffort?: string | null;
-      };
-    };
+    const response = toObjectRecord(await client.request("getUserSavedConfig", {}));
+    const config = toObjectRecord(response?.config);
+    const modelValue = typeof config?.model === "string" ? config.model : undefined;
+    const thinkingOptionValue =
+      typeof config?.modelReasoningEffort === "string" ? config.modelReasoningEffort : null;
     savedConfigDefaults = {
-      model: normalizeCodexModelId(response?.config?.model),
-      thinkingOptionId: normalizeCodexThinkingOptionId(
-        response?.config?.modelReasoningEffort ?? null,
-      ),
+      model: normalizeCodexModelId(modelValue),
+      thinkingOptionId: normalizeCodexThinkingOptionId(thinkingOptionValue),
     };
   } catch (error) {
     logger.debug({ error }, "Failed to read Codex saved config defaults");
@@ -2419,17 +2591,14 @@ async function readCodexConfiguredDefaults(
 
   let configReadDefaults: CodexConfiguredDefaults = {};
   try {
-    const response = (await client.request("config/read", {})) as {
-      config?: {
-        model?: string | null;
-        model_reasoning_effort?: string | null;
-      };
-    };
+    const response = toObjectRecord(await client.request("config/read", {}));
+    const config = toObjectRecord(response?.config);
+    const modelValue = typeof config?.model === "string" ? config.model : undefined;
+    const thinkingOptionValue =
+      typeof config?.model_reasoning_effort === "string" ? config.model_reasoning_effort : null;
     configReadDefaults = {
-      model: normalizeCodexModelId(response?.config?.model),
-      thinkingOptionId: normalizeCodexThinkingOptionId(
-        response?.config?.model_reasoning_effort ?? null,
-      ),
+      model: normalizeCodexModelId(modelValue),
+      thinkingOptionId: normalizeCodexThinkingOptionId(thinkingOptionValue),
     };
   } catch (error) {
     logger.debug({ error }, "Failed to read Codex config defaults");
@@ -2619,6 +2788,7 @@ class CodexAppServerAgentSession implements AgentSession {
     private readonly spawnAppServer: () => Promise<ChildProcessWithoutNullStreams>,
     private readonly deps: CodexAppServerAgentDeps = {},
     private readonly ephemeral: boolean = false,
+    private readonly goalsEnabled: boolean = false,
   ) {
     this.logger = logger.child({ module: "agent", provider: CODEX_PROVIDER });
     if (config.modeId === undefined) {
@@ -2678,19 +2848,22 @@ class CodexAppServerAgentSession implements AgentSession {
   private async loadCollaborationModes(): Promise<void> {
     if (!this.client) return;
     try {
-      const response = (await this.client.request("collaborationMode/list", {})) as {
-        data?: Array<Record<string, unknown>>;
-      };
+      const response = toObjectRecord(await this.client.request("collaborationMode/list", {}));
       const data = Array.isArray(response?.data) ? response.data : [];
-      this.collaborationModes = data.map((entry) => ({
-        name: typeof entry.name === "string" ? entry.name : "",
-        mode: typeof entry.mode === "string" ? entry.mode : null,
-        model: typeof entry.model === "string" ? entry.model : null,
-        reasoning_effort:
-          typeof entry.reasoning_effort === "string" ? entry.reasoning_effort : null,
-        developer_instructions:
-          typeof entry.developer_instructions === "string" ? entry.developer_instructions : null,
-      }));
+      this.collaborationModes = data.map((entry) => {
+        const record = toObjectRecord(entry);
+        return {
+          name: typeof record?.name === "string" ? record.name : "",
+          mode: typeof record?.mode === "string" ? record.mode : null,
+          model: typeof record?.model === "string" ? record.model : null,
+          reasoning_effort:
+            typeof record?.reasoning_effort === "string" ? record.reasoning_effort : null,
+          developer_instructions:
+            typeof record?.developer_instructions === "string"
+              ? record.developer_instructions
+              : null,
+        };
+      });
     } catch (error) {
       this.logger.trace({ error }, "Failed to load collaboration modes");
       this.collaborationModes = [];
@@ -2701,24 +2874,27 @@ class CodexAppServerAgentSession implements AgentSession {
   private async loadSkills(): Promise<void> {
     if (!this.client) return;
     try {
-      const response = (await this.client.request("skills/list", {
-        cwd: [this.config.cwd],
-      })) as { data?: Array<Record<string, unknown>> };
+      const response = toObjectRecord(
+        await this.client.request("skills/list", {
+          cwd: [this.config.cwd],
+        }),
+      );
       const entries = Array.isArray(response?.data) ? response.data : [];
       const skillsByName = new Map<string, { name: string; description: string; path: string }>();
       for (const entry of entries) {
-        const list = Array.isArray(entry.skills)
-          ? (entry.skills as Array<Record<string, unknown>>)
-          : [];
+        const entryRecord = toObjectRecord(entry);
+        const list = Array.isArray(entryRecord?.skills) ? entryRecord.skills : [];
         for (const skill of list) {
-          if (typeof skill?.name !== "string" || typeof skill?.path !== "string") continue;
-          if (skillsByName.has(skill.name)) {
+          const skillRecord = toObjectRecord(skill);
+          if (typeof skillRecord?.name !== "string" || typeof skillRecord?.path !== "string")
+            continue;
+          if (skillsByName.has(skillRecord.name)) {
             continue;
           }
-          skillsByName.set(skill.name, {
-            name: skill.name,
-            description: resolveSkillDescription(skill),
-            path: skill.path,
+          skillsByName.set(skillRecord.name, {
+            name: skillRecord.name,
+            description: resolveSkillDescription(skillRecord),
+            path: skillRecord.path,
           });
         }
       }
@@ -2901,7 +3077,7 @@ class CodexAppServerAgentSession implements AgentSession {
   private async ensureThreadLoaded(): Promise<void> {
     if (!this.client || !this.currentThreadId) return;
     try {
-      const loaded = (await this.client.request("thread/loaded/list", {})) as { data?: string[] };
+      const loaded = toObjectRecord(await this.client.request("thread/loaded/list", {}));
       const ids = Array.isArray(loaded?.data) ? loaded.data : [];
       if (ids.includes(this.currentThreadId)) {
         return;
@@ -3418,13 +3594,92 @@ class CodexAppServerAgentSession implements AgentSession {
       appServerSkills.length === 0
         ? await listCodexSkills(this.config.cwd, this.deps.workspaceGitService)
         : [];
+    const builtin: AgentSlashCommand[] = [];
+    if (this.goalsEnabled) {
+      builtin.push({
+        name: "goal",
+        description: "Set, pause, resume, or clear the agent's goal",
+        argumentHint: "[<objective>|pause|resume|clear]",
+      });
+    }
     const commandsByName = new Map<string, AgentSlashCommand>();
-    for (const command of [...appServerSkills, ...fallbackSkills, ...prompts]) {
+    for (const command of [...builtin, ...appServerSkills, ...fallbackSkills, ...prompts]) {
       if (!commandsByName.has(command.name)) {
         commandsByName.set(command.name, command);
       }
     }
     return Array.from(commandsByName.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  tryHandleOutOfBand(
+    prompt: AgentPromptInput,
+  ): { run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void> } | null {
+    if (!this.goalsEnabled) return null;
+    if (typeof prompt !== "string") return null;
+    const parsed = this.parseSlashCommandInput(prompt);
+    if (!parsed || parsed.commandName !== "goal") return null;
+
+    const subcommand = parseGoalSubcommand(parsed.args);
+    return {
+      run: async ({ emit }) => {
+        const text = formatOutOfBandStatusMessage(await this.executeGoalSubcommand(subcommand));
+        emit({
+          type: "timeline",
+          provider: CODEX_PROVIDER,
+          item: { type: "assistant_message", text },
+        });
+      },
+    };
+  }
+
+  private async executeGoalSubcommand(subcommand: GoalSubcommand): Promise<string> {
+    if (subcommand.kind === "usage") {
+      return "Usage: /goal <objective>|pause|resume|clear";
+    }
+    try {
+      await this.connect();
+      if (this.currentThreadId) {
+        await this.ensureThreadLoaded();
+      } else {
+        await this.ensureThread();
+      }
+      if (!this.client || !this.currentThreadId) {
+        throw new Error("Codex thread is not available");
+      }
+      switch (subcommand.kind) {
+        case "set": {
+          await this.client.request("thread/goal/set", {
+            threadId: this.currentThreadId,
+            objective: subcommand.objective,
+            status: "active",
+          });
+          return `Goal set: ${subcommand.objective}`;
+        }
+        case "pause": {
+          await this.client.request("thread/goal/set", {
+            threadId: this.currentThreadId,
+            status: "paused",
+          });
+          return "Goal paused.";
+        }
+        case "resume": {
+          await this.client.request("thread/goal/set", {
+            threadId: this.currentThreadId,
+            status: "active",
+          });
+          return "Goal resumed.";
+        }
+        case "clear": {
+          await this.client.request("thread/goal/clear", {
+            threadId: this.currentThreadId,
+          });
+          return "Goal cleared.";
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      return `Failed to update goal: ${message}`;
+    }
   }
 
   private async resolveModelAndThinking(): Promise<{
@@ -3448,8 +3703,21 @@ class CodexAppServerAgentSession implements AgentSession {
     }
 
     if (!model || !thinkingOptionId) {
-      const modelResponse = (await this.client.request("model/list", {})) as CodexModelListResponse;
-      const models = modelResponse?.data ?? [];
+      const modelResponse = toObjectRecord(await this.client.request("model/list", {}));
+      const modelData = Array.isArray(modelResponse?.data) ? modelResponse.data : [];
+      const models = modelData
+        .map((m) => {
+          const record = toObjectRecord(m);
+          return {
+            id: typeof record?.id === "string" ? record.id : "",
+            isDefault: !!record?.isDefault,
+            defaultReasoningEffort:
+              typeof record?.defaultReasoningEffort === "string"
+                ? record.defaultReasoningEffort
+                : undefined,
+          };
+        })
+        .filter((m) => m.id);
       const defaultModel = models.find((m) => m.isDefault) ?? models[0];
       if (!defaultModel) {
         throw new Error("No models available from Codex app-server");
@@ -3482,7 +3750,7 @@ class CodexAppServerAgentSession implements AgentSession {
     const approvalPolicy = this.config.approvalPolicy ?? preset.approvalPolicy;
     const sandbox = this.config.sandboxMode ?? preset.sandbox;
     const innerConfig = this.buildCodexInnerConfig();
-    const response = (await this.client.request("thread/start", {
+    const rawResponse = await this.client.request("thread/start", {
       model,
       cwd: this.config.cwd ?? null,
       approvalPolicy,
@@ -3492,8 +3760,10 @@ class CodexAppServerAgentSession implements AgentSession {
         : {}),
       ...(innerConfig ? { config: innerConfig } : {}),
       ...(this.ephemeral ? { ephemeral: true } : {}),
-    })) as CodexThreadStartResponse;
-    const threadId = response?.thread?.id;
+    });
+    const response = toObjectRecord(rawResponse);
+    const threadRecord = toObjectRecord(response?.thread);
+    const threadId = typeof threadRecord?.id === "string" ? threadRecord.id : undefined;
     if (!threadId) {
       throw new Error("Codex app-server did not return thread id");
     }
@@ -4306,14 +4576,16 @@ class CodexAppServerAgentSession implements AgentSession {
   }
 
   private handleCommandApprovalRequest(params: unknown): Promise<unknown> {
-    const parsed = params as {
-      itemId: string;
-      threadId: string;
-      turnId: string;
-      command?: string | null;
-      cwd?: string | null;
-      reason?: string | null;
-    };
+    const parsed = z
+      .object({
+        itemId: z.string(),
+        threadId: z.string(),
+        turnId: z.string(),
+        command: z.string().nullable().optional(),
+        cwd: z.string().nullable().optional(),
+        reason: z.string().nullable().optional(),
+      })
+      .parse(params);
     const commandPreview = mapCodexExecNotificationToToolCall({
       callId: parsed.itemId,
       command: parsed.command,
@@ -4355,12 +4627,14 @@ class CodexAppServerAgentSession implements AgentSession {
   }
 
   private handleFileChangeApprovalRequest(params: unknown): Promise<unknown> {
-    const parsed = params as {
-      itemId: string;
-      threadId: string;
-      turnId: string;
-      reason?: string | null;
-    };
+    const parsed = z
+      .object({
+        itemId: z.string(),
+        threadId: z.string(),
+        turnId: z.string(),
+        reason: z.string().nullable().optional(),
+      })
+      .parse(params);
     const requestId = `permission-${parsed.itemId}`;
     const request: AgentPermissionRequest = {
       id: requestId,
@@ -4390,12 +4664,14 @@ class CodexAppServerAgentSession implements AgentSession {
   }
 
   private handleToolApprovalRequest(params: unknown): Promise<unknown> {
-    const parsed = params as {
-      itemId: string;
-      threadId: string;
-      turnId: string;
-      questions: unknown[];
-    };
+    const parsed = z
+      .object({
+        itemId: z.string(),
+        threadId: z.string(),
+        turnId: z.string(),
+        questions: z.array(z.unknown()),
+      })
+      .parse(params);
     const requestId = `permission-${parsed.itemId}`;
     const questions = normalizeCodexQuestionPrompts(parsed.questions);
     const request: AgentPermissionRequest = {
@@ -4442,6 +4718,7 @@ class CodexAppServerAgentSession implements AgentSession {
 export class CodexAppServerAgentClient implements AgentClient {
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
+  private goalsEnabledPromise: Promise<boolean> | null = null;
 
   constructor(
     private readonly logger: Logger,
@@ -4449,24 +4726,50 @@ export class CodexAppServerAgentClient implements AgentClient {
     private readonly deps: CodexAppServerAgentDeps = {},
   ) {}
 
+  private resolveGoalsEnabled(): Promise<boolean> {
+    if (!this.goalsEnabledPromise) {
+      this.goalsEnabledPromise = (async () => {
+        try {
+          const launchPrefix = await resolveCodexLaunchPrefix(this.runtimeSettings);
+          const versionOutput = await resolveBinaryVersion(launchPrefix.command);
+          const enabled = codexVersionAtLeast(versionOutput, CODEX_GOALS_MIN_VERSION);
+          this.logger.trace({ versionOutput, enabled }, "Resolved codex goals feature gate");
+          return enabled;
+        } catch (error) {
+          this.logger.warn({ err: error }, "Failed to probe codex version for goals gate");
+          return false;
+        }
+      })();
+    }
+    return this.goalsEnabledPromise;
+  }
+
   private async spawnAppServer(
     launchEnv?: Record<string, string>,
+    options?: { goalsEnabled?: boolean },
   ): Promise<ChildProcessWithoutNullStreams> {
     const launchPrefix = await resolveCodexLaunchPrefix(this.runtimeSettings);
+    const args = [...launchPrefix.args, "app-server"];
+    if (options?.goalsEnabled) {
+      args.push("--enable", "goals");
+    }
     this.logger.trace(
       {
         launchPrefix,
+        goalsEnabled: options?.goalsEnabled === true,
       },
       "Spawning Codex app server",
     );
-    return spawnProcess(launchPrefix.command, [...launchPrefix.args, "app-server"], {
+    const child = spawnProcess(launchPrefix.command, args, {
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
       ...createProviderEnvSpec({
         runtimeSettings: this.runtimeSettings,
         overlays: [launchEnv],
       }),
-    }) as ChildProcessWithoutNullStreams;
+    });
+    assertChildWithPipes(child);
+    return child;
   }
 
   async createSession(
@@ -4475,13 +4778,15 @@ export class CodexAppServerAgentClient implements AgentClient {
     options?: AgentCreateSessionOptions,
   ): Promise<AgentSession> {
     const sessionConfig: AgentSessionConfig = { ...config, provider: CODEX_PROVIDER };
+    const goalsEnabled = await this.resolveGoalsEnabled();
     const session = new CodexAppServerAgentSession(
       sessionConfig,
       null,
       this.logger,
-      () => this.spawnAppServer(launchContext?.env),
+      () => this.spawnAppServer(launchContext?.env, { goalsEnabled }),
       this.deps,
       options?.persistSession === false,
+      goalsEnabled,
     );
     await session.connect();
     return session;
@@ -4492,19 +4797,22 @@ export class CodexAppServerAgentClient implements AgentClient {
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
-    const storedConfig = (handle.metadata ?? {}) as unknown as AgentSessionConfig;
+    const storedConfig = (handle.metadata ?? {}) as Partial<AgentSessionConfig>;
     const merged: AgentSessionConfig = {
       ...storedConfig,
       ...overrides,
       provider: CODEX_PROVIDER,
       cwd: overrides?.cwd ?? storedConfig.cwd ?? process.cwd(),
     };
+    const goalsEnabled = await this.resolveGoalsEnabled();
     const session = new CodexAppServerAgentSession(
       merged,
       handle,
       this.logger,
-      () => this.spawnAppServer(launchContext?.env),
+      () => this.spawnAppServer(launchContext?.env, { goalsEnabled }),
       this.deps,
+      false,
+      goalsEnabled,
     );
     await session.connect();
     return session;
@@ -4521,9 +4829,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       client.notify("initialized", {});
 
       const limit = options?.limit ?? 20;
-      const response = (await client.request("thread/list", { limit })) as {
-        data?: Array<Record<string, unknown>>;
-      };
+      const response = toObjectRecord(await client.request("thread/list", { limit }));
       const threads = Array.isArray(response?.data) ? response.data : [];
       const descriptors: PersistedAgentDescriptor[] = await Promise.all(
         threads.slice(0, limit).map(async (thread) => {
@@ -4585,8 +4891,9 @@ export class CodexAppServerAgentClient implements AgentClient {
       await client.request("initialize", buildCodexAppServerInitializeParams());
       client.notify("initialized", {});
 
-      const response = (await client.request("model/list", {})) as CodexModelListResponse;
-      const models = Array.isArray(response?.data) ? response.data : [];
+      const rawResponse = await client.request("model/list", {});
+      const parsedResponse = CodexModelListResponseSchema.safeParse(rawResponse);
+      const models = parsedResponse.success ? (parsedResponse.data.data ?? []) : [];
       const configuredDefaults = await readCodexConfiguredDefaults(client, this.logger);
       const configuredDefaultModelId = configuredDefaults.model;
       const configuredDefaultThinkingOptionId = configuredDefaults.thinkingOptionId;

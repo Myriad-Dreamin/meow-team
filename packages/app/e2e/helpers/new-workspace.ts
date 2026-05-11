@@ -202,10 +202,43 @@ export async function expectStartingRefPickerTriggerPr(
   page: Page,
   input: { number: number; title: string; headRef: string },
 ): Promise<void> {
-  const trigger = page.getByTestId("new-workspace-ref-picker-trigger");
+  const trigger = page.getByRole("button", { name: "Starting ref" });
   await expect(trigger).toContainText(`#${input.number}`);
   await expect(trigger).toContainText(input.title);
   await expect(trigger).not.toContainText(input.headRef);
+}
+
+export async function openBranchPicker(page: Page): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Starting ref" });
+  await expect(trigger).toBeVisible({ timeout: 30_000 });
+  await trigger.click();
+}
+
+export async function selectPickerOptionByKeyboard(page: Page, label: string): Promise<void> {
+  const searchInput = page.getByPlaceholder("Search branches and PRs");
+  await expect(searchInput).toBeVisible({ timeout: 30_000 });
+  await page.keyboard.type(label);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+}
+
+export async function closeBranchPicker(page: Page): Promise<void> {
+  await page.keyboard.press("Escape");
+}
+
+export async function expectPickerOpen(page: Page): Promise<void> {
+  await expect(page.getByTestId("combobox-desktop-container")).toBeVisible({ timeout: 30_000 });
+}
+
+export async function expectPickerClosed(page: Page): Promise<void> {
+  await expect(page.getByTestId("combobox-desktop-container")).not.toBeVisible({
+    timeout: 30_000,
+  });
+}
+
+export async function expectPickerSelected(page: Page, label: string): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Starting ref" });
+  await expect(trigger).toContainText(label);
 }
 
 export async function expectComposerGithubAttachmentPill(
@@ -249,4 +282,111 @@ export async function assertNewWorkspaceSidebarAndHeader(
   });
 
   return { workspaceId };
+}
+
+type WebSocketMessage = string | Buffer;
+
+function parseWebSocketJson(message: WebSocketMessage): unknown {
+  const rawMessage = typeof message === "string" ? message : message.toString("utf8");
+  try {
+    return JSON.parse(rawMessage);
+  } catch {
+    return null;
+  }
+}
+
+function getSessionMessage(message: WebSocketMessage): Record<string, unknown> | null {
+  const envelope = parseWebSocketJson(message);
+  if (!envelope || typeof envelope !== "object") {
+    return null;
+  }
+  const maybeEnvelope = envelope as { type?: unknown; message?: unknown };
+  if (maybeEnvelope.type !== "session" || !maybeEnvelope.message) {
+    return null;
+  }
+  if (typeof maybeEnvelope.message !== "object") {
+    return null;
+  }
+  return maybeEnvelope.message as Record<string, unknown>;
+}
+
+function getStringField(input: Record<string, unknown>, key: string): string | null {
+  const value = input[key];
+  return typeof value === "string" ? value : null;
+}
+
+export interface AgentCreatedDelayControl {
+  release(): void;
+  waitForCreateRequest(): Promise<void>;
+  waitForDelayedCreatedStatus(): Promise<void>;
+}
+
+export async function delayBrowserAgentCreatedStatus(
+  page: Page,
+): Promise<AgentCreatedDelayControl> {
+  const daemonPort = process.env.E2E_DAEMON_PORT;
+  if (!daemonPort) {
+    throw new Error("E2E_DAEMON_PORT is not set.");
+  }
+
+  const daemonPortPattern = new RegExp(`:${daemonPort.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+  const createRequestIds = new Set<string>();
+  const delayedForwards: Array<() => void> = [];
+  let releaseRequested = false;
+  let resolveCreateRequest: (() => void) | null = null;
+  let resolveDelayedCreatedStatus: (() => void) | null = null;
+  const createRequestSeen = new Promise<void>((resolve) => {
+    resolveCreateRequest = resolve;
+  });
+  const delayedCreatedStatusSeen = new Promise<void>((resolve) => {
+    resolveDelayedCreatedStatus = resolve;
+  });
+
+  await page.routeWebSocket(daemonPortPattern, (ws) => {
+    const server = ws.connectToServer();
+
+    ws.onMessage((message) => {
+      const sessionMessage = getSessionMessage(message);
+      if (sessionMessage?.type === "create_agent_request") {
+        const requestId = getStringField(sessionMessage, "requestId");
+        if (requestId) {
+          createRequestIds.add(requestId);
+          resolveCreateRequest?.();
+        }
+      }
+      server.send(message);
+    });
+
+    server.onMessage((message) => {
+      const sessionMessage = getSessionMessage(message);
+      const payload =
+        sessionMessage?.type === "status" && typeof sessionMessage.payload === "object"
+          ? (sessionMessage.payload as Record<string, unknown>)
+          : null;
+      const requestId = payload ? getStringField(payload, "requestId") : null;
+
+      if (payload?.status === "agent_created" && requestId && createRequestIds.has(requestId)) {
+        resolveDelayedCreatedStatus?.();
+        if (releaseRequested) {
+          ws.send(message);
+          return;
+        }
+        delayedForwards.push(() => ws.send(message));
+        return;
+      }
+
+      ws.send(message);
+    });
+  });
+
+  return {
+    release() {
+      releaseRequested = true;
+      for (const forward of delayedForwards.splice(0)) {
+        forward();
+      }
+    },
+    waitForCreateRequest: () => createRequestSeen,
+    waitForDelayedCreatedStatus: () => delayedCreatedStatusSeen,
+  };
 }

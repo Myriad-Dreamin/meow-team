@@ -9,6 +9,9 @@ import {
   decrypt,
 } from "./crypto.js";
 
+// This live test uses the hosted relay's real TLS endpoint. Self-hosted relay TLS
+// opt-in is covered at URL-building/integration level so the local E2E does not
+// need to provision trusted certificates.
 const RELAY_BASE_URL = "wss://relay.paseo.sh";
 
 async function withRetry<T>(
@@ -104,17 +107,14 @@ describe("Live relay (relay.paseo.sh) E2E", () => {
         )}&role=client&connectionId=${encodeURIComponent(connectionId)}&v=2`;
 
         // === Key setup ===
-        const daemonKeyPair = await generateKeyPair();
-        const daemonPubKeyB64 = await exportPublicKey(daemonKeyPair.publicKey);
+        const daemonKeyPair = generateKeyPair();
+        const daemonPubKeyB64 = exportPublicKey(daemonKeyPair.publicKey);
 
-        const clientKeyPair = await generateKeyPair();
-        const clientPubKeyB64 = await exportPublicKey(clientKeyPair.publicKey);
+        const clientKeyPair = generateKeyPair();
+        const clientPubKeyB64 = exportPublicKey(clientKeyPair.publicKey);
 
-        const daemonPubKeyOnClient = await importPublicKey(daemonPubKeyB64);
-        const clientSharedKey = await deriveSharedKey(
-          clientKeyPair.secretKey,
-          daemonPubKeyOnClient,
-        );
+        const daemonPubKeyOnClient = importPublicKey(daemonPubKeyB64);
+        const clientSharedKey = deriveSharedKey(clientKeyPair.secretKey, daemonPubKeyOnClient);
 
         // === Connect ===
         const daemonControlWs = new WebSocket(serverControlUrl);
@@ -149,15 +149,12 @@ describe("Live relay (relay.paseo.sh) E2E", () => {
           expect(hello.type).toBe("hello");
           expect(typeof hello.key).toBe("string");
 
-          const clientPubKeyOnDaemon = await importPublicKey(hello.key!);
-          const daemonSharedKey = await deriveSharedKey(
-            daemonKeyPair.secretKey,
-            clientPubKeyOnDaemon,
-          );
+          const clientPubKeyOnDaemon = importPublicKey(hello.key!);
+          const daemonSharedKey = deriveSharedKey(daemonKeyPair.secretKey, clientPubKeyOnDaemon);
 
           // === Encrypted exchange ===
           const plaintextFromClient = "hello-from-client";
-          const ciphertextFromClient = await encrypt(clientSharedKey, plaintextFromClient);
+          const ciphertextFromClient = encrypt(clientSharedKey, plaintextFromClient);
           clientWs.send(Buffer.from(ciphertextFromClient));
 
           const daemonReceivedCiphertext = await waitForOnceMessage(
@@ -166,7 +163,7 @@ describe("Live relay (relay.paseo.sh) E2E", () => {
             "Timed out waiting for encrypted message",
           );
 
-          const decryptedOnDaemon = await decrypt(
+          const decryptedOnDaemon = decrypt(
             daemonSharedKey,
             daemonReceivedCiphertext.buffer.slice(
               daemonReceivedCiphertext.byteOffset,
@@ -176,8 +173,8 @@ describe("Live relay (relay.paseo.sh) E2E", () => {
           expect(decryptedOnDaemon).toBe(plaintextFromClient);
 
           const plaintextFromDaemon = "hello-from-daemon";
-          const ciphertextFromDaemon = await encrypt(daemonSharedKey, plaintextFromDaemon);
-          daemonWs!.send(Buffer.from(ciphertextFromDaemon));
+          const ciphertextFromDaemon = encrypt(daemonSharedKey, plaintextFromDaemon);
+          daemonWs.send(Buffer.from(ciphertextFromDaemon));
 
           const clientReceivedCiphertext = await waitForOnceMessage(
             clientWs,
@@ -185,7 +182,7 @@ describe("Live relay (relay.paseo.sh) E2E", () => {
             "Timed out waiting for encrypted response",
           );
 
-          const decryptedOnClient = await decrypt(
+          const decryptedOnClient = decrypt(
             clientSharedKey,
             clientReceivedCiphertext.buffer.slice(
               clientReceivedCiphertext.byteOffset,
