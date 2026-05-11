@@ -1,5 +1,5 @@
 import { fork, spawn, type ChildProcess } from "child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeSync } from "node:fs";
 import path from "node:path";
 import { createStream as createRotatingFileStream } from "rotating-file-stream";
 
@@ -108,9 +108,33 @@ export function runSupervisor(options: SupervisorOptions): void {
   let shuttingDown = false;
   let exiting = false;
   const logStream = createSupervisorLogStream(options.logFile);
+  const pendingProcessWrites = new Set<Promise<void>>();
 
   const writeDurableChunk = (chunk: string | Buffer): void => {
     logStream?.write(chunk);
+  };
+
+  const writeProcessChunk = (stream: NodeJS.WriteStream, chunk: string | Buffer): void => {
+    if (typeof stream.fd === "number") {
+      try {
+        if (typeof chunk === "string") {
+          writeSync(stream.fd, chunk);
+        } else {
+          writeSync(stream.fd, chunk, 0, chunk.length);
+        }
+      } catch {
+        // Forwarding to console stdio is best-effort; durable file logging still records output.
+      }
+      return;
+    }
+
+    const pending = new Promise<void>((resolve) => {
+      stream.write(chunk, () => resolve());
+    });
+    pendingProcessWrites.add(pending);
+    pending.finally(() => {
+      pendingProcessWrites.delete(pending);
+    });
   };
 
   const writeLifecycleLog = (message: string, fields: Record<string, unknown> = {}): void => {
@@ -127,8 +151,12 @@ export function runSupervisor(options: SupervisorOptions): void {
   };
 
   const log = (message: string): void => {
-    process.stderr.write(`[${options.name}] ${message}\n`);
+    writeProcessChunk(process.stderr, `[${options.name}] ${message}\n`);
     writeLifecycleLog(message);
+  };
+
+  const flushProcessWrites = async (): Promise<void> => {
+    await Promise.allSettled(Array.from(pendingProcessWrites));
   };
 
   const closeLogStream = (): Promise<void> =>
@@ -150,9 +178,10 @@ export function runSupervisor(options: SupervisorOptions): void {
         const message = error instanceof Error ? error.message : String(error);
         log(`Supervisor exit cleanup failed: ${message}`);
       })
+      .then(flushProcessWrites)
       .then(closeLogStream)
       .finally(() => {
-        process.exit(code);
+        process.exitCode = code;
       });
   };
 
@@ -184,12 +213,12 @@ export function runSupervisor(options: SupervisorOptions): void {
     }
 
     child.stdout?.on("data", (chunk: Buffer) => {
-      process.stdout.write(chunk);
+      writeProcessChunk(process.stdout, chunk);
       writeDurableChunk(chunk);
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
-      process.stderr.write(chunk);
+      writeProcessChunk(process.stderr, chunk);
       writeDurableChunk(chunk);
     });
 
@@ -285,7 +314,7 @@ export function runSupervisor(options: SupervisorOptions): void {
   process.on("SIGINT", () => forwardSignal("SIGINT"));
   process.on("SIGTERM", () => forwardSignal("SIGTERM"));
 
-  process.stdout.write(`[${options.name}] ${options.startupMessage}\n`);
+  writeProcessChunk(process.stdout, `[${options.name}] ${options.startupMessage}\n`);
   writeLifecycleLog(options.startupMessage);
   spawnWorker();
 }
