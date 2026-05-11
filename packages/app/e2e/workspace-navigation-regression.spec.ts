@@ -1,7 +1,7 @@
 import { buildHostAgentDetailRoute, buildHostWorkspaceRoute } from "@/utils/host-routes";
 import type { WebSocketRoute } from "@playwright/test";
 import { expect, test, type Page } from "./fixtures";
-import { gotoAppShell } from "./helpers/app";
+import { gotoAppShell, openSettings } from "./helpers/app";
 import {
   archiveAgentFromDaemon,
   connectArchiveTabDaemonClient,
@@ -15,18 +15,28 @@ import {
   connectNewWorkspaceDaemonClient,
   openProjectViaDaemon,
 } from "./helpers/new-workspace";
+import { expectComposerVisible } from "./helpers/composer";
 import { createTempGitRepo } from "./helpers/workspace";
 import {
   getVisibleWorkspaceAgentTabIds,
   expectOnlyWorkspaceAgentTabsVisible,
   waitForWorkspaceTabsVisible,
+  expectWorkspaceTabsAbsent,
 } from "./helpers/workspace-tabs";
 import {
   expectSidebarWorkspaceSelected,
   expectWorkspaceHeader,
+  expectWorkspaceHeaderAbsent,
+  expectMenuButtonVisible,
+  expectHostConnectingOrOffline,
+  expectReconnectingToastVisible,
+  expectReconnectingToastGone,
   switchWorkspaceViaSidebar,
   waitForSidebarHydration,
+  workspaceDeckEntryLocator,
+  expectWorkspaceDeckEntryCount,
 } from "./helpers/workspace-ui";
+import { clickSettingsBackToWorkspace } from "./helpers/settings";
 
 const LOADING_WORKSPACE_TEXT_PATTERN = /Loading workspace/i;
 
@@ -60,6 +70,22 @@ async function expectNoLoadingWorkspacePane(
 
     await page.waitForTimeout(100);
   }
+}
+
+async function expectNoLoadingPane(page: Page): Promise<void> {
+  await expect(page.getByText(LOADING_WORKSPACE_TEXT_PATTERN)).toHaveCount(0);
+}
+
+async function getVisibleDraftTabCount(page: Page): Promise<number> {
+  return page.locator('[data-testid^="workspace-tab-draft"]').filter({ visible: true }).count();
+}
+
+async function closeFirstVisibleDraftTab(page: Page): Promise<void> {
+  const closeButton = page.locator('[data-testid^="workspace-draft-close-"]').filter({
+    visible: true,
+  });
+  await expect(closeButton.first()).toBeVisible({ timeout: 30_000 });
+  await closeButton.first().click();
 }
 
 async function installDaemonWebSocketGate(page: Page, daemonPort: string) {
@@ -120,6 +146,25 @@ async function installDaemonWebSocketGate(page: Page, daemonPort: string) {
 test.describe("Workspace navigation regression", () => {
   test.describe.configure({ timeout: 240_000 });
 
+  test("keeps one replacement draft after returning from settings and closing the last tab", async ({
+    page,
+    withWorkspace,
+  }) => {
+    const workspace = await withWorkspace({ prefix: "workspace-settings-back-tab-" });
+
+    await workspace.navigateTo();
+    await expect.poll(() => getVisibleDraftTabCount(page), { timeout: 30_000 }).toBe(1);
+
+    await openSettings(page);
+    await clickSettingsBackToWorkspace(page);
+    await expect(page).toHaveURL(/\/workspace\//, { timeout: 30_000 });
+    await expect.poll(() => getVisibleDraftTabCount(page), { timeout: 30_000 }).toBe(1);
+
+    await closeFirstVisibleDraftTab(page);
+
+    await expect.poll(() => getVisibleDraftTabCount(page), { timeout: 30_000 }).toBe(1);
+  });
+
   test("keeps the workspace rendered while reconnecting to the host", async ({ page }) => {
     const serverId = process.env.E2E_SERVER_ID;
     const daemonPort = process.env.E2E_DAEMON_PORT;
@@ -159,35 +204,31 @@ test.describe("Workspace navigation regression", () => {
         title: workspace.workspaceName,
         subtitle: workspace.projectDisplayName,
       });
-      await expect(page.getByTestId("workspace-tabs-row")).toBeVisible({ timeout: 30_000 });
+      await waitForWorkspaceTabsVisible(page);
       await expectWorkspaceTabVisible(page, agent.id);
 
       await daemonGate.drop();
-      await expect(page.getByTestId("agent-reconnecting-toast")).toBeVisible({
-        timeout: 30_000,
-      });
+      await expectReconnectingToastVisible(page);
       await expectWorkspaceHeader(page, {
         title: workspace.workspaceName,
         subtitle: workspace.projectDisplayName,
       });
-      await expect(page.getByTestId("workspace-tabs-row")).toBeVisible();
-      await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible();
-      await expect(page.getByText(LOADING_WORKSPACE_TEXT_PATTERN)).toHaveCount(0);
+      await waitForWorkspaceTabsVisible(page);
+      await expectComposerVisible(page);
+      await expectNoLoadingPane(page);
 
       const monitorReconnect = expectNoLoadingWorkspacePane(page, {
         label: "host reconnect",
       });
       daemonGate.restore();
-      await expect(page.getByTestId("agent-reconnecting-toast")).toHaveCount(0, {
-        timeout: 30_000,
-      });
+      await expectReconnectingToastGone(page);
       await monitorReconnect;
       await expectWorkspaceHeader(page, {
         title: workspace.workspaceName,
         subtitle: workspace.projectDisplayName,
       });
-      await expect(page.getByTestId("workspace-tabs-row")).toBeVisible();
-      await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible();
+      await waitForWorkspaceTabsVisible(page);
+      await expectComposerVisible(page);
     } finally {
       daemonGate.restore();
       for (const agentId of agentIds) {
@@ -222,17 +263,54 @@ test.describe("Workspace navigation regression", () => {
       `/h/${encodeURIComponent(serverId)}/workspace/${encodeURIComponent("/tmp/paseo-missing-workspace")}`,
     );
 
-    await expect(
-      page.getByText(/^Connecting$|localhost is offline|Cannot reach localhost/i),
-    ).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("menu-button")).toBeVisible();
-    await expect(page.getByTestId("workspace-header-title")).toHaveCount(0);
-    await expect(page.getByTestId("workspace-tabs-row")).toHaveCount(0);
-
-    const settingsButton = page.locator('[data-testid="sidebar-settings"]:visible').first();
-    await expect(settingsButton).toBeVisible({ timeout: 30_000 });
-    await settingsButton.click();
+    await expectHostConnectingOrOffline(page);
+    await expectMenuButtonVisible(page);
+    await expectWorkspaceHeaderAbsent(page);
+    await expectWorkspaceTabsAbsent(page);
+    await openSettings(page);
     await expect(page).toHaveURL(/\/settings\/general$/);
+  });
+
+  test("cold workspace URL keeps sidebar workspace navigation functional", async ({ page }) => {
+    const serverId = process.env.E2E_SERVER_ID;
+    if (!serverId) {
+      throw new Error("E2E_SERVER_ID is not set.");
+    }
+
+    const workspaceClient = await connectNewWorkspaceDaemonClient();
+    const workspaceIds = new Set<string>();
+    const firstRepo = await createTempGitRepo("workspace-cold-url-a-");
+    const secondRepo = await createTempGitRepo("workspace-cold-url-b-");
+
+    try {
+      const firstWorkspace = await openProjectViaDaemon(workspaceClient, firstRepo.path);
+      const secondWorkspace = await openProjectViaDaemon(workspaceClient, secondRepo.path);
+      workspaceIds.add(firstWorkspace.workspaceId);
+      workspaceIds.add(secondWorkspace.workspaceId);
+
+      await page.goto(buildHostWorkspaceRoute(serverId, firstWorkspace.workspaceId));
+      await waitForSidebarHydration(page);
+      await expect(page).toHaveURL(buildHostWorkspaceRoute(serverId, firstWorkspace.workspaceId), {
+        timeout: 30_000,
+      });
+
+      const secondRow = page.getByTestId(
+        `sidebar-workspace-row-${serverId}:${secondWorkspace.workspaceId}`,
+      );
+      await expect(secondRow).toBeVisible({ timeout: 30_000 });
+      await secondRow.click();
+
+      await expect(page).toHaveURL(buildHostWorkspaceRoute(serverId, secondWorkspace.workspaceId), {
+        timeout: 30_000,
+      });
+    } finally {
+      for (const workspaceId of workspaceIds) {
+        await archiveLocalWorkspaceFromDaemon(workspaceClient, workspaceId).catch(() => undefined);
+      }
+      await workspaceClient.close().catch(() => undefined);
+      await secondRepo.cleanup();
+      await firstRepo.cleanup();
+    }
   });
 
   test("sidebar navigation and reload keep workspace selection and tabs aligned", async ({
@@ -270,6 +348,13 @@ test.describe("Workspace navigation regression", () => {
       await waitForSidebarHydration(page);
       await openWorkspaceWithAgents(page, [firstAgent, secondAgent]);
 
+      const firstDeckEntry = workspaceDeckEntryLocator(page, serverId, firstWorkspace.workspaceId);
+      const secondDeckEntry = workspaceDeckEntryLocator(
+        page,
+        serverId,
+        secondWorkspace.workspaceId,
+      );
+
       await switchWorkspaceViaSidebar({
         page,
         serverId,
@@ -300,13 +385,6 @@ test.describe("Workspace navigation regression", () => {
       await expect(getVisibleWorkspaceAgentTabIds(page)).resolves.toEqual([
         `workspace-tab-agent_${firstAgent.id}`,
       ]);
-
-      const firstDeckEntry = page.getByTestId(
-        `workspace-deck-entry-${serverId}:${firstWorkspace.workspaceId}`,
-      );
-      const secondDeckEntry = page.getByTestId(
-        `workspace-deck-entry-${serverId}:${secondWorkspace.workspaceId}`,
-      );
       await expect(firstDeckEntry).toBeVisible({ timeout: 30_000 });
 
       await switchWorkspaceViaSidebar({
@@ -342,7 +420,7 @@ test.describe("Workspace navigation regression", () => {
       await expect(firstDeckEntry).toBeAttached();
       await expect(firstDeckEntry).toBeHidden();
       await expect(secondDeckEntry).toBeVisible({ timeout: 30_000 });
-      await expect(page.locator('[data-testid^="workspace-deck-entry-"]')).toHaveCount(2);
+      await expectWorkspaceDeckEntryCount(page, 2);
 
       await page.evaluate(
         ({ agentId, serverId: targetServerId }) => {
@@ -371,7 +449,7 @@ test.describe("Workspace navigation regression", () => {
       await expectOnlyWorkspaceAgentTabsVisible(page, [secondAgent.id]);
       await expect(firstDeckEntry).toBeAttached();
       await expect(firstDeckEntry).toBeHidden();
-      await expect(page.locator('[data-testid^="workspace-deck-entry-"]')).toHaveCount(2);
+      await expectWorkspaceDeckEntryCount(page, 2);
 
       await switchWorkspaceViaSidebar({
         page,
@@ -385,7 +463,7 @@ test.describe("Workspace navigation regression", () => {
       await expect(firstDeckEntry).toBeVisible({ timeout: 30_000 });
       await expect(secondDeckEntry).toBeAttached();
       await expect(secondDeckEntry).toBeHidden();
-      await expect(page.locator('[data-testid^="workspace-deck-entry-"]')).toHaveCount(2);
+      await expectWorkspaceDeckEntryCount(page, 2);
 
       await page.reload();
       await waitForSidebarHydration(page);

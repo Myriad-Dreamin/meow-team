@@ -47,9 +47,9 @@ import {
   type ProviderRuntimeSettings,
 } from "../provider-launch-config.js";
 import { findExecutable, isCommandAvailable } from "../../../utils/executable.js";
-import { terminateProcessTree } from "../../../utils/process-tree.js";
+import { terminateWithTreeKill } from "../../../utils/tree-kill.js";
 import { withTimeout } from "../../../utils/promise-timeout.js";
-import { spawnProcess } from "../../../utils/spawn.js";
+import { execCommand, spawnProcess } from "../../../utils/spawn.js";
 import { buildToolCallDisplayModel } from "../../../shared/tool-call-display.js";
 import { mapOpencodeToolCall } from "./opencode/tool-call-mapper.js";
 import {
@@ -117,18 +117,6 @@ const OPENCODE_HANDLED_BUILTIN_SLASH_COMMANDS: AgentSlashCommand[] = [
   { name: "compact", description: "Compact the current session", argumentHint: "" },
   { name: "summarize", description: "Compact the current session", argumentHint: "" },
 ];
-const OPENCODE_FATAL_RETRY_MESSAGE_TOKENS = [
-  "insufficient balance",
-  "no resource package",
-  "please recharge",
-  "invalid api key",
-  "unauthorized",
-  "authentication",
-  "model not found",
-  "unknown model",
-  "does not exist",
-  "unsupported model",
-] as const;
 const OPENCODE_HEADERS_TIMEOUT_TOKENS = [
   "headers timeout",
   "headers timeout error",
@@ -327,14 +315,6 @@ async function reconcileOpenCodeSessionClose(params: {
       "Failed to archive OpenCode session during close",
     );
   }
-}
-
-function isFatalOpenCodeRetryMessage(message: string | null | undefined): boolean {
-  const normalized = typeof message === "string" ? message.trim().toLowerCase() : "";
-  if (!normalized) {
-    return false;
-  }
-  return OPENCODE_FATAL_RETRY_MESSAGE_TOKENS.some((token) => normalized.includes(token));
 }
 
 function isOpenCodeHeadersTimeoutFailure(error: unknown): boolean {
@@ -995,7 +975,7 @@ export class OpenCodeServerManager {
     if (server.process.killed) {
       return;
     }
-    const result = await terminateProcessTree(server.process, {
+    const result = await terminateWithTreeKill(server.process, {
       gracefulTimeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
       forceTimeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
       onForceSignal: () => {
@@ -1248,6 +1228,20 @@ export class OpenCodeAgentClient implements AgentClient {
         serverStatus = `Unavailable (${toDiagnosticErrorMessage(error)})`;
       }
 
+      let authValue = "Not checked";
+      if (resolvedBinary) {
+        try {
+          const { stdout, stderr } = await execCommand(resolvedBinary, ["auth", "list"], {
+            ...createProviderEnvSpec(),
+            timeout: 5_000,
+          });
+          const text = (stdout.trim() || stderr.trim()).trim();
+          authValue = text ? `\n    ${text.replace(/\n/g, "\n    ")}` : "(empty)";
+        } catch (error) {
+          authValue = `Error - ${toDiagnosticErrorMessage(error)}`;
+        }
+      }
+
       if (available) {
         try {
           const models = await this.listModels({ cwd: homedir(), force: false });
@@ -1283,6 +1277,7 @@ export class OpenCodeAgentClient implements AgentClient {
             value: resolvedBinary ? await resolveBinaryVersion(resolvedBinary) : "unknown",
           },
           { label: "Server", value: serverStatus },
+          { label: "Auth", value: authValue },
           { label: "Models", value: modelsValue },
           { label: "Status", value: status },
         ]),
@@ -2161,15 +2156,24 @@ function appendOpenCodeSessionStatus(
     events.push({ type: "turn_completed", provider: "opencode", usage: undefined });
     return;
   }
-  if (status.type === "retry" && isFatalOpenCodeRetryMessage(status.message)) {
-    resetOpenCodeTurnTrackingState(state);
+  if (status.type === "retry") {
+    // Mirror what opencode's TUI shows: retry attempts are visible activity, not
+    // terminal. opencode itself never gives up — it backs off and tries again
+    // forever. If we silently swallow these the user sees a spinner with no
+    // explanation. Forwarding as a timeline error item is a no-op for old
+    // clients (the schema already supports it).
+    const message = typeof status.message === "string" ? status.message.trim() : "";
+    const text = message
+      ? `Provider retry (attempt ${status.attempt}): ${message}`
+      : `Provider retry (attempt ${status.attempt})`;
     events.push({
-      type: "turn_failed",
+      type: "timeline",
       provider: "opencode",
-      error: toDiagnosticErrorMessage(status.message),
+      item: { type: "error", message: text },
     });
+    return;
   }
-  // "retry" and "busy" are transient — no terminal event.
+  // "busy" is transient — no terminal event, no surfaced activity.
 }
 
 interface Deferred<T> {

@@ -86,7 +86,7 @@ export function resolveRequiredProviderModel(
   }
 
   return {
-    provider: provider as AgentProvider,
+    provider: provider,
     model,
   };
 }
@@ -174,7 +174,13 @@ export function startAgentRun(
   prompt: AgentPromptInput,
   logger: Logger,
   options?: StartAgentRunOptions,
-): void {
+): { outOfBand: boolean } {
+  // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
+  // in-flight turn — replaceAgentRun would interrupt the running turn. The
+  // intercept lives at this layer so it covers every prompt entrypoint.
+  if (agentManager.tryRunOutOfBand(agentId, prompt)) {
+    return { outOfBand: true };
+  }
   const shouldReplace = Boolean(options?.replaceRunning && agentManager.hasInFlightRun(agentId));
   const runOptions = options?.runOptions;
   const iterator = shouldReplace
@@ -189,6 +195,7 @@ export function startAgentRun(
       logger.error({ err: error, agentId }, "Agent stream failed");
     }
   })();
+  return { outOfBand: false };
 }
 
 /**
@@ -237,7 +244,9 @@ export interface SendPromptToAgentParams {
  * Every surface that sends a prompt to an agent (Session/WS, MCP, CLI-through-MCP)
  * MUST go through this so behavior can never drift between them.
  */
-export async function sendPromptToAgent(params: SendPromptToAgentParams): Promise<void> {
+export async function sendPromptToAgent(
+  params: SendPromptToAgentParams,
+): Promise<{ outOfBand: boolean }> {
   const {
     agentManager,
     agentStorage,
@@ -271,7 +280,7 @@ export async function sendPromptToAgent(params: SendPromptToAgentParams): Promis
     logger.error({ err: error, agentId }, "Failed to record user message");
   }
 
-  startAgentRun(agentManager, agentId, prompt, logger, {
+  return startAgentRun(agentManager, agentId, prompt, logger, {
     replaceRunning: true,
     runOptions,
   });
@@ -327,11 +336,11 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
           return;
         }
         if (event.agent.lifecycle === "error") {
-          notify("errored");
+          void notify("errored");
           return;
         }
         if (event.agent.lifecycle === "idle" && hasSeenRunning) {
-          notify("finished");
+          void notify("finished");
           return;
         }
         if (event.agent.lifecycle === "closed") {
@@ -343,7 +352,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
       }
 
       if (event.event.type === "permission_requested") {
-        notify("needs permission");
+        void notify("needs permission");
       }
     },
     { agentId: childAgentId, replayState: false },
@@ -362,7 +371,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   if (childSnapshot.lifecycle === "running") {
     hasSeenRunning = true;
   } else if (childSnapshot.lifecycle === "error") {
-    notify("errored");
+    void notify("errored");
   }
 }
 

@@ -1,22 +1,29 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { buildHostWorkspaceRoute } from "@/utils/host-routes";
-import { expect, test, type Page } from "./fixtures";
+import { expect, test } from "./fixtures";
 import { gotoAppShell } from "./helpers/app";
 import {
   archiveWorkspaceFromDaemon,
   archiveLocalWorkspaceFromDaemon,
   assertNewWorkspaceSidebarAndHeader,
   clickNewWorkspaceButton,
+  closeBranchPicker,
   connectNewWorkspaceDaemonClient,
   createWorktreeViaDaemon,
+  delayBrowserAgentCreatedStatus,
   expectComposerGithubAttachmentPill,
+  expectPickerClosed,
+  expectPickerOpen,
+  expectPickerSelected,
   expectStartingRefPickerTriggerPr,
+  openBranchPicker,
   openNewWorkspaceComposer,
-  openStartingRefPicker,
   openProjectViaDaemon,
+  openStartingRefPicker,
   selectBranchInPicker,
   selectGitHubPrInPicker,
+  selectPickerOptionByKeyboard,
 } from "./helpers/new-workspace";
 import { createTempGitRepo, readWorktreeBranchInfo } from "./helpers/workspace";
 import {
@@ -27,108 +34,6 @@ import {
   waitForWorkspaceInSidebar,
   workspaceLabelFromPath,
 } from "./helpers/workspace-ui";
-
-type WebSocketMessage = string | Buffer;
-
-function parseWebSocketJson(message: WebSocketMessage): unknown {
-  const rawMessage = typeof message === "string" ? message : message.toString("utf8");
-  try {
-    return JSON.parse(rawMessage);
-  } catch {
-    return null;
-  }
-}
-
-function getSessionMessage(message: WebSocketMessage): Record<string, unknown> | null {
-  const envelope = parseWebSocketJson(message);
-  if (!envelope || typeof envelope !== "object") {
-    return null;
-  }
-
-  const maybeEnvelope = envelope as { type?: unknown; message?: unknown };
-  if (maybeEnvelope.type !== "session" || !maybeEnvelope.message) {
-    return null;
-  }
-  if (typeof maybeEnvelope.message !== "object") {
-    return null;
-  }
-
-  return maybeEnvelope.message as Record<string, unknown>;
-}
-
-function getStringField(input: Record<string, unknown>, key: string): string | null {
-  const value = input[key];
-  return typeof value === "string" ? value : null;
-}
-
-async function delayBrowserAgentCreatedStatus(page: Page) {
-  const daemonPort = process.env.E2E_DAEMON_PORT;
-  if (!daemonPort) {
-    throw new Error("E2E_DAEMON_PORT is not set.");
-  }
-
-  const daemonPortPattern = new RegExp(`:${daemonPort.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-  const createRequestIds = new Set<string>();
-  const delayedForwards: Array<() => void> = [];
-  let releaseRequested = false;
-  let resolveCreateRequest: (() => void) | null = null;
-  let resolveDelayedCreatedStatus: (() => void) | null = null;
-  const createRequestSeen = new Promise<void>((resolve) => {
-    resolveCreateRequest = resolve;
-  });
-  const delayedCreatedStatusSeen = new Promise<void>((resolve) => {
-    resolveDelayedCreatedStatus = resolve;
-  });
-
-  await page.routeWebSocket(daemonPortPattern, (ws) => {
-    const server = ws.connectToServer();
-
-    ws.onMessage((message) => {
-      const sessionMessage = getSessionMessage(message);
-      if (sessionMessage?.type === "create_agent_request") {
-        const requestId = getStringField(sessionMessage, "requestId");
-        if (requestId) {
-          createRequestIds.add(requestId);
-          resolveCreateRequest?.();
-        }
-      }
-      server.send(message);
-    });
-
-    server.onMessage((message) => {
-      const sessionMessage = getSessionMessage(message);
-      const payload =
-        sessionMessage?.type === "status" && typeof sessionMessage.payload === "object"
-          ? (sessionMessage.payload as Record<string, unknown>)
-          : null;
-      const requestId = payload ? getStringField(payload, "requestId") : null;
-
-      if (payload?.status === "agent_created" && requestId && createRequestIds.has(requestId)) {
-        resolveDelayedCreatedStatus?.();
-        if (releaseRequested) {
-          ws.send(message);
-          return;
-        }
-
-        delayedForwards.push(() => ws.send(message));
-        return;
-      }
-
-      ws.send(message);
-    });
-  });
-
-  return {
-    release() {
-      releaseRequested = true;
-      for (const forward of delayedForwards.splice(0)) {
-        forward();
-      }
-    },
-    waitForCreateRequest: () => createRequestSeen,
-    waitForDelayedCreatedStatus: () => delayedCreatedStatusSeen,
-  };
-}
 
 test.describe("New workspace flow", () => {
   let client: Awaited<ReturnType<typeof connectNewWorkspaceDaemonClient>>;
@@ -500,6 +405,55 @@ test.describe("New workspace flow", () => {
       expect(branchInfo.currentBranch).toBe(path.basename(createdWorkspace.workspaceId));
       expect(branchInfo.hasAncestor(tempRepo.branchHeads.main)).toBe(true);
       expect(branchInfo.hasAncestor(tempRepo.branchHeads.dev)).toBe(true);
+    } finally {
+      await tempRepo.cleanup();
+    }
+  });
+
+  test("branch picker opens via keyboard, navigates options, and selects on Enter", async ({
+    page,
+  }) => {
+    const tempRepo = await createTempGitRepo("picker-keyboard-", { branches: ["main", "dev"] });
+
+    try {
+      const openedProject = await openProjectViaDaemon(client, tempRepo.path);
+      localWorkspaceIds.add(openedProject.workspaceId);
+
+      await gotoAppShell(page);
+      await waitForSidebarHydration(page);
+      await openNewWorkspaceComposer(page, {
+        projectKey: openedProject.projectKey,
+        projectDisplayName: openedProject.projectDisplayName,
+      });
+
+      await openBranchPicker(page);
+      await expectPickerOpen(page);
+      await selectPickerOptionByKeyboard(page, "dev");
+      await expectPickerSelected(page, "dev");
+      await expectPickerClosed(page);
+    } finally {
+      await tempRepo.cleanup();
+    }
+  });
+
+  test("branch picker closes on Escape without selecting an option", async ({ page }) => {
+    const tempRepo = await createTempGitRepo("picker-escape-");
+
+    try {
+      const openedProject = await openProjectViaDaemon(client, tempRepo.path);
+      localWorkspaceIds.add(openedProject.workspaceId);
+
+      await gotoAppShell(page);
+      await waitForSidebarHydration(page);
+      await openNewWorkspaceComposer(page, {
+        projectKey: openedProject.projectKey,
+        projectDisplayName: openedProject.projectDisplayName,
+      });
+
+      await openBranchPicker(page);
+      await expectPickerOpen(page);
+      await closeBranchPicker(page);
+      await expectPickerClosed(page);
     } finally {
       await tempRepo.cleanup();
     }

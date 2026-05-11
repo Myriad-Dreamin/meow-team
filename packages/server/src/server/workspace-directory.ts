@@ -116,6 +116,8 @@ export class WorkspaceDirectory {
           return workspace.name.toLocaleLowerCase();
         case "project_id":
           return workspace.projectId.toLocaleLowerCase();
+        default:
+          throw new Error("unreachable");
       }
     },
   });
@@ -176,9 +178,9 @@ export class WorkspaceDirectory {
       ),
     );
     for (let i = 0; i < includedWorkspaces.length; i += 1) {
-      const workspaceId = includedWorkspaces[i]!.workspaceId;
+      const workspaceId = includedWorkspaces[i].workspaceId;
       descriptorsByWorkspaceId.set(workspaceId, {
-        ...workspaceDescriptors[i]!,
+        ...workspaceDescriptors[i],
         archivingAt: this.archivingByWorkspaceId.get(workspaceId) ?? null,
       });
     }
@@ -259,14 +261,14 @@ export class WorkspaceDirectory {
     }
 
     if (filter.idPrefix && filter.idPrefix.trim().length > 0) {
-      if (!String(workspace.id).startsWith(filter.idPrefix.trim())) {
+      if (!workspace.id.startsWith(filter.idPrefix.trim())) {
         return false;
       }
     }
 
     if (filter.query && filter.query.trim().length > 0) {
       const query = filter.query.trim().toLocaleLowerCase();
-      const haystacks = [workspace.name, String(workspace.projectId), String(workspace.id)];
+      const haystacks = [workspace.name, workspace.projectId, workspace.id];
       if (!haystacks.some((value) => value.toLocaleLowerCase().includes(query))) {
         return false;
       }

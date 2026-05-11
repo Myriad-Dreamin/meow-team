@@ -3,13 +3,7 @@ import { PortalProvider } from "@gorhom/portal";
 import { QueryClientProvider } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
-import {
-  Stack,
-  useGlobalSearchParams,
-  useNavigationContainerRef,
-  usePathname,
-  useRouter,
-} from "expo-router";
+import { Stack, useGlobalSearchParams, usePathname, useRouter } from "expo-router";
 import {
   createContext,
   type ReactNode,
@@ -71,15 +65,12 @@ import { polyfillCrypto } from "@/polyfills/crypto";
 import { queryClient } from "@/query/query-client";
 import {
   getHostRuntimeStore,
+  hasConfiguredLocalDaemonOverride,
   useHostMutations,
   useHostRuntimeClient,
   useHosts,
 } from "@/runtime/host-runtime";
 import { getDaemonStartService } from "@/runtime/daemon-start-service";
-import {
-  addBrowserActiveWorkspaceLocationListener,
-  syncNavigationActiveWorkspace,
-} from "@/stores/navigation-active-workspace-store";
 import { usePanelStore } from "@/stores/panel-store";
 import { useSessionStore } from "@/stores/session-store";
 import { THEME_TO_UNISTYLES, type ThemeName } from "@/styles/theme";
@@ -336,6 +327,8 @@ function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
   const anyOnlineHostServerId = useEarliestOnlineHostServerId();
   const daemonStartError = useDaemonStartLastError();
   const daemonStartIsRunning = useDaemonStartIsRunning();
+  const waitForConfiguredLocalDaemon =
+    hasConfiguredLocalDaemonOverride() && !shouldUseDesktopDaemon();
 
   const [hasGivenUpWaitingForHost, setHasGivenUpWaitingForHost] = useState(false);
   useEffect(() => {
@@ -343,6 +336,7 @@ function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
       anyOnlineHostServerId ||
       daemonStartError ||
       daemonStartIsRunning ||
+      waitForConfiguredLocalDaemon ||
       hasGivenUpWaitingForHost
     ) {
       return;
@@ -353,7 +347,13 @@ function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
     return () => {
       clearTimeout(handle);
     };
-  }, [anyOnlineHostServerId, daemonStartError, daemonStartIsRunning, hasGivenUpWaitingForHost]);
+  }, [
+    anyOnlineHostServerId,
+    daemonStartError,
+    daemonStartIsRunning,
+    waitForConfiguredLocalDaemon,
+    hasGivenUpWaitingForHost,
+  ]);
 
   const retry = useCallback(() => {
     const daemonStartService = getDaemonStartService({ store: getHostRuntimeStore() });
@@ -422,7 +422,7 @@ function AppContainer({
   const cycleTheme = useCallback(() => {
     const currentIndex = THEME_CYCLE_ORDER.indexOf(settings.theme as ThemeName);
     const nextIndex = (currentIndex + 1) % THEME_CYCLE_ORDER.length;
-    void updateSettings({ theme: THEME_CYCLE_ORDER[nextIndex]! });
+    void updateSettings({ theme: THEME_CYCLE_ORDER[nextIndex] });
   }, [settings.theme, updateSettings]);
 
   const isCompactLayout = useIsCompactFormFactor();
@@ -785,7 +785,7 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
     if (hosts.some((host) => host.serverId === activeServerId)) {
       return;
     }
-    router.replace(mapPathnameToServer(pathname, hosts[0]!.serverId));
+    router.replace(mapPathnameToServer(pathname, hosts[0].serverId));
   }, [activeServerId, hosts, pathname, router]);
 
   // Parse selectedAgentKey directly from pathname
@@ -863,28 +863,6 @@ function RootStack() {
   );
 }
 
-function NavigationActiveWorkspaceObserver() {
-  const navigationRef = useNavigationContainerRef();
-
-  useEffect(() => {
-    syncNavigationActiveWorkspace(navigationRef);
-    const unsubscribeBrowserLocation = addBrowserActiveWorkspaceLocationListener();
-    const unsubscribeState = navigationRef.addListener("state", () => {
-      syncNavigationActiveWorkspace(navigationRef);
-    });
-    const unsubscribeReady = navigationRef.addListener("ready" as never, () => {
-      syncNavigationActiveWorkspace(navigationRef);
-    });
-    return () => {
-      unsubscribeBrowserLocation();
-      unsubscribeState();
-      unsubscribeReady();
-    };
-  }, [navigationRef]);
-
-  return null;
-}
-
 function AppShell() {
   return (
     <SidebarAnimationProvider>
@@ -927,7 +905,6 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={flexStyle}>
       <View style={layoutStyles.surfaceFill}>
-        <NavigationActiveWorkspaceObserver />
         <RootProviders>
           <RuntimeProviders>
             <AppShell />

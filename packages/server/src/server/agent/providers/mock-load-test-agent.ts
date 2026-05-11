@@ -130,7 +130,7 @@ function resolveModelProfile(modelId: string | null | undefined): {
   durationMs: number;
   intervalMs: number;
 } {
-  const model = MODELS.find((entry) => entry.id === modelId) ?? MODELS[0]!;
+  const model = MODELS.find((entry) => entry.id === modelId) ?? MODELS[0];
   const metadata = model.metadata ?? {};
   return {
     modelId: model.id,
@@ -166,9 +166,13 @@ function parseLargeAgentStreamPayloadPrompt(
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return null;
   }
+  const kindValue = match[2]?.toLowerCase();
+  if (kindValue !== "diff" && kindValue !== "file" && kindValue !== "image") {
+    return null;
+  }
   return {
     bytes: Math.min(bytes, 1_000_000),
-    kind: match[2]?.toLowerCase() as LargeAgentStreamPayloadRequest["kind"],
+    kind: kindValue,
   };
 }
 
@@ -398,7 +402,7 @@ export class MockLoadTestAgentClient implements AgentClient {
     const metadata = (handle.metadata ?? {}) as Partial<AgentSessionConfig>;
     return new MockLoadTestAgentSession({
       config: {
-        cwd: String(metadata.cwd ?? overrides?.cwd ?? process.cwd()),
+        cwd: metadata.cwd ?? overrides?.cwd ?? process.cwd(),
         ...metadata,
         ...overrides,
         provider: MOCK_LOAD_TEST_PROVIDER_ID,

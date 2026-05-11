@@ -6,6 +6,7 @@ import { expect, type Page } from "@playwright/test";
 import { parseHostWorkspaceRouteFromPathname } from "../../src/utils/host-routes";
 import { gotoAppShell } from "./app";
 import { createNodeWebSocketFactory, type NodeWebSocketFactory } from "./node-ws-factory";
+import { switchWorkspaceViaSidebar } from "./workspace-ui";
 import type { SessionOutboundMessage } from "@server/shared/messages";
 
 interface WorkspaceSetupDaemonClient {
@@ -44,7 +45,7 @@ interface WorkspaceSetupDaemonClient {
   }>;
   fetchAgent(agentId: string): Promise<{
     agent: { id: string; cwd: string } | null;
-    project: unknown | null;
+    project: unknown;
   } | null>;
   listTerminals(cwd: string): Promise<{
     cwd?: string;
@@ -265,7 +266,7 @@ export async function createWorkspaceThroughDaemon(
     throw new Error(result.error ?? `Failed to create workspace for ${input.cwd}`);
   }
   return {
-    id: String(result.workspace.id),
+    id: result.workspace.id,
     name: result.workspace.name,
   };
 }
@@ -291,7 +292,7 @@ export async function findWorktreeWorkspaceForProject(
     throw new Error(`Failed to find created worktree workspace for ${repoPath}`);
   }
   return {
-    id: String(workspace.id),
+    id: workspace.id,
     name: workspace.name,
     projectRootPath: workspace.projectRootPath,
     workspaceDirectory: workspace.workspaceDirectory,
@@ -308,11 +309,35 @@ export async function fetchWorkspaceById(
   projectRootPath: string;
 }> {
   const payload = await client.fetchWorkspaces();
-  const workspace = payload.entries.find((entry) => String(entry.id) === workspaceId) ?? null;
+  const workspace = payload.entries.find((entry) => entry.id === workspaceId) ?? null;
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);
   }
   return workspace;
+}
+
+export async function navigateToWorkspaceViaSidebar(
+  page: Page,
+  workspaceId: string,
+): Promise<void> {
+  const serverId = process.env.E2E_SERVER_ID;
+  if (!serverId) {
+    throw new Error("E2E_SERVER_ID is not set.");
+  }
+  await switchWorkspaceViaSidebar({ page, serverId, targetWorkspacePath: workspaceId });
+}
+
+export async function openWorkspaceScriptsMenu(page: Page): Promise<void> {
+  await page.getByTestId("workspace-scripts-button").click();
+  await expect(page.getByTestId("workspace-scripts-menu")).toBeVisible({ timeout: 10_000 });
+}
+
+export async function startWorkspaceScriptFromMenu(page: Page, scriptName: string): Promise<void> {
+  await page.getByTestId(`workspace-scripts-start-${scriptName}`).click();
+}
+
+export async function closeWorkspaceScriptsMenu(page: Page): Promise<void> {
+  await page.getByTestId("workspace-scripts-menu-backdrop").click();
 }
 
 export async function waitForWorkspaceSetupProgress(

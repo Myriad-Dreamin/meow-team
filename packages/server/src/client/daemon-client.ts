@@ -388,6 +388,14 @@ type ScheduleDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/delete/response" }
 >["payload"];
+type ScheduleRunOncePayload = Extract<
+  SessionOutboundMessage,
+  { type: "schedule/run-once/response" }
+>["payload"];
+type ScheduleUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "schedule/update/response" }
+>["payload"];
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 
 export type FetchAgentTimelineDirection = FetchAgentTimelinePayload["direction"];
@@ -477,8 +485,10 @@ export interface RunLoopOptions {
   model?: string;
   workerProvider?: string;
   workerModel?: string;
+  modeId?: string;
   verifierProvider?: string;
   verifierModel?: string;
+  verifierModeId?: string;
   verifyPrompt?: string | null;
   verifyChecks?: string[];
   archive?: boolean;
@@ -542,10 +552,35 @@ export interface CreateScheduleOptions {
       };
   maxRuns?: number;
   expiresAt?: string;
+  runOnCreate?: boolean;
   requestId?: string;
 }
 export interface InspectScheduleOptions {
   id: string;
+  requestId?: string;
+}
+export interface UpdateScheduleNewAgentConfig {
+  provider?: string;
+  model?: string | null;
+  modeId?: string | null;
+  cwd?: string;
+}
+export interface UpdateScheduleOptions {
+  id: string;
+  name?: string | null;
+  prompt?: string;
+  cadence?:
+    | {
+        type: "every";
+        everyMs: number;
+      }
+    | {
+        type: "cron";
+        expression: string;
+      };
+  newAgentConfig?: UpdateScheduleNewAgentConfig;
+  maxRuns?: number | null;
+  expiresAt?: string | null;
   requestId?: string;
 }
 type ListAvailableEditorsPayload = ListAvailableEditorsResponseMessage["payload"];
@@ -569,8 +604,8 @@ export interface WaitForFinishResult {
 
 interface Waiter<T> {
   predicate: (msg: SessionOutboundMessage) => T | null;
-  resolve: (value: T) => void;
-  reject: (error: Error) => void;
+  resolve(value: T): void;
+  reject(error: Error): void;
   timeoutHandle: ReturnType<typeof setTimeout> | null;
 }
 
@@ -1127,8 +1162,8 @@ export class DaemonClient {
       return this.subscribe(arg1);
     }
 
-    const type = arg1 as SessionOutboundMessage["type"];
-    const handler = arg2 as (message: SessionOutboundMessage) => void;
+    const type = arg1;
+    const handler = arg2!;
 
     if (!this.messageHandlers.has(type)) {
       this.messageHandlers.set(type, new Set());
@@ -3668,6 +3703,7 @@ export class DaemonClient {
         ...(options.name ? { name: options.name } : {}),
         ...(typeof options.maxRuns === "number" ? { maxRuns: options.maxRuns } : {}),
         ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+        ...(typeof options.runOnCreate === "boolean" ? { runOnCreate: options.runOnCreate } : {}),
       },
       responseType: "schedule/create/response",
       timeout: 10000,
@@ -3745,6 +3781,36 @@ export class DaemonClient {
     });
   }
 
+  async scheduleRunOnce(options: InspectScheduleOptions): Promise<ScheduleRunOncePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "schedule/run-once",
+        scheduleId: options.id,
+      },
+      responseType: "schedule/run-once/response",
+      timeout: 10000,
+    });
+  }
+
+  async scheduleUpdate(options: UpdateScheduleOptions): Promise<ScheduleUpdatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "schedule/update",
+        scheduleId: options.id,
+        ...(options.name !== undefined ? { name: options.name } : {}),
+        ...(options.prompt !== undefined ? { prompt: options.prompt } : {}),
+        ...(options.cadence !== undefined ? { cadence: options.cadence } : {}),
+        ...(options.newAgentConfig !== undefined ? { newAgentConfig: options.newAgentConfig } : {}),
+        ...(options.maxRuns !== undefined ? { maxRuns: options.maxRuns } : {}),
+        ...(options.expiresAt !== undefined ? { expiresAt: options.expiresAt } : {}),
+      },
+      responseType: "schedule/update/response",
+      timeout: 10000,
+    });
+  }
+
   async loopRun(options: RunLoopOptions): Promise<LoopRunPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
@@ -3756,8 +3822,10 @@ export class DaemonClient {
         ...(options.model ? { model: options.model } : {}),
         ...(options.workerProvider ? { workerProvider: options.workerProvider } : {}),
         ...(options.workerModel ? { workerModel: options.workerModel } : {}),
+        ...(options.modeId ? { modeId: options.modeId } : {}),
         ...(options.verifierProvider ? { verifierProvider: options.verifierProvider } : {}),
         ...(options.verifierModel ? { verifierModel: options.verifierModel } : {}),
+        ...(options.verifierModeId ? { verifierModeId: options.verifierModeId } : {}),
         ...(options.verifyPrompt ? { verifyPrompt: options.verifyPrompt } : {}),
         ...(options.verifyChecks && options.verifyChecks.length > 0
           ? { verifyChecks: options.verifyChecks }
@@ -3981,7 +4049,13 @@ export class DaemonClient {
 
     const parsed = WSOutboundMessageSchema.safeParse(parsedJson);
     if (!parsed.success) {
-      const msgType = (parsedJson as { type?: string })?.type ?? "unknown";
+      const msgType =
+        parsedJson != null &&
+        typeof parsedJson === "object" &&
+        "type" in parsedJson &&
+        typeof parsedJson.type === "string"
+          ? parsedJson.type
+          : "unknown";
       this.logger.warn({ msgType, error: parsed.error.message }, "Message validation failed");
       return;
     }
@@ -4343,7 +4417,7 @@ export class DaemonClient {
         timeout > 0
           ? setTimeout(() => {
               if (waiter) {
-                this.waiters.delete(waiter as Waiter<unknown>);
+                this.waiters.delete(waiter);
               }
               wrappedReject(timeoutError);
             }, timeout)
@@ -4355,7 +4429,7 @@ export class DaemonClient {
         reject: wrappedReject,
         timeoutHandle,
       };
-      this.waiters.add(waiter as Waiter<unknown>);
+      this.waiters.add(waiter);
     });
 
     const cancel = (error: Error) => {
@@ -4364,7 +4438,7 @@ export class DaemonClient {
       }
 
       if (waiter) {
-        this.waiters.delete(waiter as Waiter<unknown>);
+        this.waiters.delete(waiter);
         if (waiter.timeoutHandle) {
           clearTimeout(waiter.timeoutHandle);
         }

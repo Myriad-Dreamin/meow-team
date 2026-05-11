@@ -18,10 +18,7 @@ const FADE_IN_UP_40 = { opacity: 0, y: 40 };
 const FADE_IN_UP_4 = { opacity: 0, y: 4 };
 const FADE_OUT_UP_4 = { opacity: 0, y: 4 };
 
-const EASE_OUT_06: Transition = { duration: 0.6, ease: "easeOut" };
-const EASE_OUT_06_DELAY_015: Transition = { duration: 0.6, delay: 0.15, ease: "easeOut" };
 const EASE_OUT_06_DELAY_01: Transition = { duration: 0.6, delay: 0.1, ease: "easeOut" };
-const EASE_OUT_06_DELAY_04: Transition = { duration: 0.6, delay: 0.4, ease: "easeOut" };
 const EASE_OUT_08_DELAY_05: Transition = { duration: 0.8, delay: 0.5, ease: "easeOut" };
 const EASE_OUT_05: Transition = { duration: 0.5, ease: "easeOut" };
 const EASE_OUT_015: Transition = { duration: 0.15, ease: "easeOut" };
@@ -33,6 +30,7 @@ const SVG_OVERFLOW_VISIBLE_STYLE = { overflow: "visible" as const };
 const PHONE_PERSPECTIVE_STYLE = { minHeight: 480, perspective: 1200 };
 import { CursorFieldProvider } from "~/components/butterfly";
 import { CommandDialog } from "~/components/command-dialog";
+import { AGENT_PAGES } from "~/data/agent-pages";
 import {
   appStoreUrl,
   playStoreUrl,
@@ -48,6 +46,8 @@ import { useRelease } from "~/routes/__root";
 import { Mic } from "lucide-react";
 import { HeroMockup } from "~/components/hero-mockup";
 import { ClaudeIcon } from "~/components/mockup";
+import { FAQItem } from "~/components/faq-item";
+import { SiteFooter } from "~/components/site-footer";
 import { SiteHeader } from "~/components/site-header";
 import "~/styles.css";
 
@@ -97,126 +97,7 @@ export function LandingPage({ title, subtitle }: LandingPageProps) {
             <SponsorCTA />
           </div>
         </main>
-        <footer className="p-6 md:p-20 md:pt-0 max-w-5xl mx-auto">
-          <div className="border-t border-white/10 pt-8 pb-4 grid grid-cols-2 sm:grid-cols-4 gap-8 text-xs">
-            <div className="space-y-3">
-              <p className="text-white/60 font-medium">Product</p>
-              <div className="space-y-2">
-                <a
-                  href="/blog"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Blog
-                </a>
-                <a
-                  href="/docs"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Docs
-                </a>
-                <a
-                  href="/changelog"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Changelog
-                </a>
-                <a
-                  href="/docs/cli"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  CLI
-                </a>
-                <a
-                  href="/privacy"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Privacy
-                </a>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <p className="text-white/60 font-medium">Agents</p>
-              <div className="space-y-2">
-                <a
-                  href="/claude-code"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Claude Code
-                </a>
-                <a
-                  href="/codex"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Codex
-                </a>
-                <a
-                  href="/opencode"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  OpenCode
-                </a>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <p className="text-white/60 font-medium">Community</p>
-              <div className="space-y-2">
-                <a
-                  href="https://discord.gg/jz8T2uahpH"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Discord
-                </a>
-                <a
-                  href="https://github.com/getpaseo/paseo"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  GitHub
-                </a>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <p className="text-white/60 font-medium">Download</p>
-              <div className="space-y-2">
-                <a
-                  href={appStoreUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  App Store
-                </a>
-                <a
-                  href={playStoreUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Google Play
-                </a>
-                <a
-                  href="https://github.com/getpaseo/paseo/releases"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Desktop
-                </a>
-                <a
-                  href={webAppUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-white/40 hover:text-white/60 transition-colors"
-                >
-                  Web App
-                </a>
-              </div>
-            </div>
-          </div>
-        </footer>
+        <SiteFooter />
       </div>
     </CursorFieldProvider>
   );
@@ -233,22 +114,8 @@ function Nav() {
 function Hero({ title, subtitle }: { title: React.ReactNode; subtitle: string }) {
   return (
     <div className="space-y-6">
-      <motion.h1
-        initial={FADE_IN_UP}
-        animate={FADE_IN}
-        transition={EASE_OUT_06}
-        className="text-3xl md:text-5xl font-medium tracking-tight"
-      >
-        {title}
-      </motion.h1>
-      <motion.p
-        initial={FADE_IN_UP}
-        animate={FADE_IN}
-        transition={EASE_OUT_06_DELAY_015}
-        className="text-white/70 text-lg leading-relaxed max-w-lg"
-      >
-        {subtitle}
-      </motion.p>
+      <h1 className="text-3xl md:text-5xl font-medium tracking-tight">{title}</h1>
+      <p className="text-white/70 text-lg leading-relaxed max-w-lg">{subtitle}</p>
     </div>
   );
 }
@@ -258,6 +125,9 @@ const CODEX_BADGE_ICON = <CodexIcon className="h-6 w-6" />;
 const OPENCODE_BADGE_ICON = <OpenCodeIcon className="h-6 w-6" />;
 const COPILOT_BADGE_ICON = <CopilotIcon className="h-6 w-6" />;
 const PI_BADGE_ICON = <PiIcon className="h-6 w-6" />;
+
+const FEATURED_AGENT_COUNT = 5;
+const ADDITIONAL_AGENT_COUNT = AGENT_PAGES.length - FEATURED_AGENT_COUNT;
 
 function AgentBadge({ name, icon }: { name: string; icon: React.ReactNode }) {
   const [hovered, setHovered] = React.useState(false);
@@ -339,7 +209,7 @@ function MultiProviderSection() {
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-4 sm:w-2/3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:w-full">
         {providers.slice(3).map((p) => (
           <div
             key={p.name}
@@ -349,6 +219,12 @@ function MultiProviderSection() {
             <span className="font-medium">{p.name}</span>
           </div>
         ))}
+        <a
+          href="/agents"
+          className="flex items-center justify-center gap-3 rounded-xl border border-dashed border-white/10 bg-white/[0.01] px-5 py-4 text-white/50 hover:text-white/80 hover:border-white/20 hover:bg-white/[0.03] transition-colors"
+        >
+          <span className="font-medium">+{ADDITIONAL_AGENT_COUNT} more</span>
+        </a>
       </div>
     </FeatureSection>
   );
@@ -973,12 +849,7 @@ function LocalVoiceSection() {
 
 function GetStarted() {
   return (
-    <motion.div
-      initial={FADE_IN_UP}
-      animate={FADE_IN}
-      transition={EASE_OUT_06_DELAY_04}
-      className="pt-10"
-    >
+    <div className="pt-10">
       <div className="flex flex-row flex-wrap gap-3">
         <DownloadButton />
         <a
@@ -1011,12 +882,15 @@ function GetStarted() {
         <ServerInstallButton />
       </div>
       <div className="pt-3">
-        <a href="/download" className="text-xs text-white/40 hover:text-white/70 transition-colors">
+        <a
+          href="/download"
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
           All download options
         </a>
       </div>
       <div className="flex items-center gap-2 pt-6">
-        <span className="text-xs text-white/40">Supports</span>
+        <span className="text-xs text-muted-foreground">Supports</span>
         <div className="flex items-center gap-1">
           <AgentBadge name="Claude Code" icon={CLAUDE_CODE_BADGE_ICON} />
           <AgentBadge name="Codex" icon={CODEX_BADGE_ICON} />
@@ -1024,8 +898,14 @@ function GetStarted() {
           <AgentBadge name="Copilot" icon={COPILOT_BADGE_ICON} />
           <AgentBadge name="Pi" icon={PI_BADGE_ICON} />
         </div>
+        <a
+          href="/agents"
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          +{ADDITIONAL_AGENT_COUNT} more
+        </a>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -1455,8 +1335,14 @@ function PhoneShowcase() {
         {/* Left phone — rotated to face inward */}
         <motion.div style={leftPhoneStyle} className="w-[160px] md:w-[240px] absolute">
           <img
-            src="/phone-1.png"
+            src="/phone-1-480.webp"
+            srcSet="/phone-1-320.webp 320w, /phone-1-480.webp 480w"
+            sizes="(min-width: 768px) 240px, 160px"
             alt="Paseo sessions list"
+            width={480}
+            height={1044}
+            loading="lazy"
+            decoding="async"
             className="w-full rounded-[40px] shadow-2xl border-[3px] border-black outline-[3px] outline-white/20"
           />
         </motion.div>
@@ -1469,8 +1355,14 @@ function PhoneShowcase() {
           className="w-[220px] md:w-[240px] relative z-10"
         >
           <img
-            src="/phone-2.png"
+            src="/phone-2-480.webp"
+            srcSet="/phone-2-320.webp 320w, /phone-2-480.webp 480w"
+            sizes="(min-width: 768px) 240px, 220px"
             alt="Paseo agent chat"
+            width={480}
+            height={1044}
+            loading="lazy"
+            decoding="async"
             className="w-full rounded-[40px] shadow-2xl border-[3px] border-black outline-[3px] outline-white/20"
           />
         </motion.div>
@@ -1478,8 +1370,14 @@ function PhoneShowcase() {
         {/* Right phone — rotated to face inward */}
         <motion.div style={rightPhoneStyle} className="w-[160px] md:w-[240px] absolute">
           <img
-            src="/phone-3.png"
+            src="/phone-3-480.webp"
+            srcSet="/phone-3-320.webp 320w, /phone-3-480.webp 480w"
+            sizes="(min-width: 768px) 240px, 160px"
             alt="Paseo diff view"
+            width={480}
+            height={1044}
+            loading="lazy"
+            decoding="async"
             className="w-full rounded-[40px] shadow-2xl border-[3px] border-black outline-[3px] outline-white/20"
           />
         </motion.div>
@@ -1542,7 +1440,7 @@ function CLISection() {
 
       <a
         href="/docs/cli"
-        className="inline-flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
         Full CLI reference
         <svg
@@ -1683,18 +1581,5 @@ function SponsorCTA() {
         </a>
       </div>
     </motion.div>
-  );
-}
-
-function FAQItem({ question, children }: { question: string; children: React.ReactNode }) {
-  return (
-    <details className="group">
-      <summary className="font-medium text-sm cursor-pointer list-none flex items-start gap-2 -ml-4">
-        <span className="font-mono text-white/40 flex-shrink-0 group-open:hidden">+</span>
-        <span className="font-mono text-white/40 flex-shrink-0 hidden group-open:inline">−</span>
-        {question}
-      </summary>
-      <div className="text-sm text-muted-foreground space-y-2 mt-2 prose">{children}</div>
-    </details>
   );
 }

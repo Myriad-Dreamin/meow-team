@@ -432,7 +432,7 @@ async function waitForDaemonReadyWithUi(args: {
     } else {
       log.error(message);
     }
-    process.exit(1);
+    return process.exit(1);
   }
 }
 
@@ -491,6 +491,7 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
     relayEnabled: config.relayEnabled,
     relayEndpoint: config.relayEndpoint,
     relayPublicEndpoint: config.relayPublicEndpoint,
+    relayUseTls: config.relayUseTls,
     appBaseUrl: config.appBaseUrl,
     includeQr: true,
   });

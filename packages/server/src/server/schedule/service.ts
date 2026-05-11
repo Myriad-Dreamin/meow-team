@@ -6,13 +6,17 @@ import type { AgentStorage } from "../agent/agent-storage.js";
 import type { AgentPromptInput, AgentSessionConfig } from "../agent/agent-sdk-types.js";
 import { curateAgentActivity } from "../agent/activity-curator.js";
 import { ensureAgentLoaded } from "../agent/agent-loading.js";
+import { getUnattendedModeId } from "../agent/provider-manifest.js";
 import { ScheduleStore } from "./store.js";
 import { computeNextRunAt, validateScheduleCadence } from "./cron.js";
 import type {
   CreateScheduleInput,
   ScheduleExecutionResult,
   ScheduleRun,
+  ScheduleTarget,
   StoredSchedule,
+  UpdateScheduleInput,
+  UpdateScheduleNewAgentConfig,
 } from "./types.js";
 
 const SCHEDULE_TICK_INTERVAL_MS = 1000;
@@ -31,6 +35,44 @@ function normalizePrompt(prompt: string): string {
     throw new Error("Schedule prompt is required");
   }
   return trimmed;
+}
+
+function applyNewAgentConfig(
+  target: Extract<ScheduleTarget, { type: "new-agent" }>,
+  patch: UpdateScheduleNewAgentConfig,
+): Extract<ScheduleTarget, { type: "new-agent" }> {
+  const config = { ...target.config };
+  if (patch.provider !== undefined) {
+    const trimmed = patch.provider.trim();
+    if (!trimmed) {
+      throw new Error("provider cannot be empty");
+    }
+    config.provider = trimmed;
+  }
+  if (patch.cwd !== undefined) {
+    const trimmed = patch.cwd.trim();
+    if (!trimmed) {
+      throw new Error("cwd cannot be empty");
+    }
+    config.cwd = trimmed;
+  }
+  if (patch.model !== undefined) {
+    const trimmed = patch.model?.trim();
+    if (trimmed) {
+      config.model = trimmed;
+    } else {
+      delete config.model;
+    }
+  }
+  if (patch.modeId !== undefined) {
+    const trimmed = patch.modeId?.trim();
+    if (trimmed) {
+      config.modeId = trimmed;
+    } else {
+      delete config.modeId;
+    }
+  }
+  return { ...target, config };
 }
 
 function normalizeMaxRuns(value: number | null | undefined): number | null {
@@ -141,6 +183,8 @@ export class ScheduleService {
     const now = this.now();
     const prompt = normalizePrompt(input.prompt);
     validateScheduleCadence(input.cadence);
+    const runOnCreate = input.runOnCreate ?? input.cadence.type === "every";
+    const nextRunAt = runOnCreate ? now : computeNextRunAt(input.cadence, now);
     const schedule = await this.store.create({
       name: trimOptionalName(input.name),
       prompt,
@@ -149,7 +193,7 @@ export class ScheduleService {
       status: "active",
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
-      nextRunAt: computeNextRunAt(input.cadence, now).toISOString(),
+      nextRunAt: nextRunAt.toISOString(),
       lastRunAt: null,
       pausedAt: null,
       expiresAt: input.expiresAt ?? null,
@@ -216,8 +260,60 @@ export class ScheduleService {
     return resumed;
   }
 
+  async update(input: UpdateScheduleInput): Promise<StoredSchedule> {
+    const schedule = await this.inspect(input.id);
+    const now = this.now();
+    let updated: StoredSchedule = schedule;
+
+    if (input.prompt !== undefined) {
+      updated = { ...updated, prompt: normalizePrompt(input.prompt) };
+    }
+
+    if (input.name !== undefined) {
+      updated = { ...updated, name: trimOptionalName(input.name) };
+    }
+
+    if (input.cadence !== undefined) {
+      validateScheduleCadence(input.cadence);
+      const nextRunAt =
+        updated.status === "active" ? computeNextRunAt(input.cadence, now).toISOString() : null;
+      updated = { ...updated, cadence: input.cadence, nextRunAt };
+    }
+
+    if (input.newAgentConfig !== undefined) {
+      if (updated.target.type !== "new-agent") {
+        throw new Error("new-agent config updates are only valid for new-agent target schedules");
+      }
+      updated = { ...updated, target: applyNewAgentConfig(updated.target, input.newAgentConfig) };
+    }
+
+    if (input.maxRuns !== undefined) {
+      updated = { ...updated, maxRuns: normalizeMaxRuns(input.maxRuns) };
+    }
+
+    if (input.expiresAt !== undefined) {
+      updated = { ...updated, expiresAt: input.expiresAt };
+    }
+
+    updated = { ...updated, updatedAt: now.toISOString() };
+    await this.store.put(updated);
+    return updated;
+  }
+
   async delete(id: string): Promise<void> {
     await this.store.delete(id);
+  }
+
+  async runOnce(id: string): Promise<StoredSchedule> {
+    const schedule = await this.inspect(id);
+    if (schedule.status === "completed") {
+      throw new Error(`Schedule ${id} is already completed`);
+    }
+    if (this.runningScheduleIds.has(id)) {
+      throw new Error(`Schedule ${id} is already running`);
+    }
+    await this.runSchedule(schedule, this.now(), { manual: true });
+    return this.inspect(id);
   }
 
   async tick(): Promise<void> {
@@ -285,12 +381,17 @@ export class ScheduleService {
     );
   }
 
-  private async runSchedule(schedule: StoredSchedule, now: Date): Promise<void> {
+  private async runSchedule(
+    schedule: StoredSchedule,
+    now: Date,
+    options?: { manual?: boolean },
+  ): Promise<void> {
+    const manual = options?.manual === true;
     this.runningScheduleIds.add(schedule.id);
     const runId = randomUUID();
     const runningRun: ScheduleRun = {
       id: runId,
-      scheduledFor: schedule.nextRunAt ?? now.toISOString(),
+      scheduledFor: manual ? now.toISOString() : (schedule.nextRunAt ?? now.toISOString()),
       startedAt: now.toISOString(),
       endedAt: null,
       status: "running",
@@ -314,6 +415,7 @@ export class ScheduleService {
         agentId: result.agentId,
         output: result.output,
         error: null,
+        manual,
       });
     } catch (error) {
       await this.finishRun({
@@ -323,6 +425,7 @@ export class ScheduleService {
         agentId: null,
         output: null,
         error: error instanceof Error ? error.message : String(error),
+        manual,
       });
     } finally {
       this.runningScheduleIds.delete(schedule.id);
@@ -336,6 +439,7 @@ export class ScheduleService {
     agentId: string | null;
     output: string | null;
     error: string | null;
+    manual: boolean;
   }): Promise<void> {
     const schedule = await this.inspect(params.scheduleId);
     const now = this.now();
@@ -358,7 +462,9 @@ export class ScheduleService {
       updatedAt: now.toISOString(),
     };
 
-    if (shouldCompleteSchedule(updated, now)) {
+    if (params.manual) {
+      // Manual one-shot runs do not advance the cadence or recompute completion.
+    } else if (shouldCompleteSchedule(updated, now)) {
       updated = completeSchedule(updated, now);
     } else if (updated.status === "paused") {
       updated = {
@@ -411,7 +517,7 @@ export class ScheduleService {
     const config: AgentSessionConfig = {
       provider: schedule.target.config.provider,
       cwd: schedule.target.config.cwd,
-      modeId: schedule.target.config.modeId,
+      modeId: schedule.target.config.modeId ?? getUnattendedModeId(schedule.target.config.provider),
       model: schedule.target.config.model,
       thinkingOptionId: schedule.target.config.thinkingOptionId,
       title: schedule.target.config.title,

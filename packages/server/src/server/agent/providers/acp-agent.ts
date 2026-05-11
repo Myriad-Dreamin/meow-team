@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import type {
+  ReadableStream as NodeReadableStream,
+  WritableStream as NodeWritableStream,
+} from "node:stream/web";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
@@ -88,7 +92,35 @@ import {
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "./provider-runner.js";
 import { findExecutable } from "../../../utils/executable.js";
-import { spawnProcess } from "../../../utils/spawn.js";
+import { platformShell, spawnProcess } from "../../../utils/spawn.js";
+
+function assertChildWithPipes(
+  child: ChildProcess,
+): asserts child is ChildProcessWithoutNullStreams {
+  if (!child.stdin || !child.stdout || !child.stderr) {
+    throw new Error("Child process did not expose stdio pipes");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function resolveTerminalCommand(
+  command: string,
+  args?: string[],
+): { command: string; args: string[] } {
+  if (args && args.length > 0) {
+    return { command, args };
+  }
+
+  if (!/\s/.test(command.trim())) {
+    return { command, args: [] };
+  }
+
+  const shell = platformShell();
+  return { command: shell.command, args: [...shell.flag, command] };
+}
 
 const DEFAULT_ACP_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: true,
@@ -120,8 +152,8 @@ function summarizeMalformedACPStdoutError(error: unknown): { type: string; messa
 }
 
 export function createLoggedNdJsonStream(
-  output: WritableStream<Uint8Array>,
-  input: ReadableStream<Uint8Array>,
+  output: NodeWritableStream,
+  input: NodeReadableStream,
   options: { logger: Logger; provider: string },
 ): ACPStream {
   const textEncoder = new TextEncoder();
@@ -152,7 +184,7 @@ export function createLoggedNdJsonStream(
             }
 
             try {
-              const message = JSON.parse(trimmedLine) as AnyMessage;
+              const message: AnyMessage = JSON.parse(trimmedLine);
               controller.enqueue(message);
             } catch (error) {
               options.logger.warn(
@@ -629,7 +661,8 @@ export class ACPAgentClient implements AgentClient {
         overlays: [launchEnv],
       }),
       stdio: ["pipe", "pipe", "pipe"],
-    }) as ChildProcessWithoutNullStreams;
+    });
+    assertChildWithPipes(child);
 
     const stderrChunks: string[] = [];
     child.stderr.on("data", (chunk: Buffer | string) => {
@@ -643,24 +676,20 @@ export class ACPAgentClient implements AgentClient {
       });
     });
 
-    if (!child.stdin || !child.stdout) {
-      throw new Error(`${this.provider} ACP process did not expose stdio pipes`);
-    }
-
     const stream = createLoggedNdJsonStream(
-      Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      Writable.toWeb(child.stdin),
+      Readable.toWeb(child.stdout),
       { logger: this.logger, provider: this.provider },
     );
     const connection = new ClientSideConnection(() => this.buildProbeClient(), stream);
-    const initialize = (await Promise.race([
+    const initialize = await Promise.race([
       connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: ACP_CLIENT_CAPABILITIES,
         clientInfo: { name: "Paseo", version: "dev" },
       }),
       spawnErrorPromise,
-    ])) as InitializeResponse;
+    ]);
 
     return { child, connection, initialize };
   }
@@ -1451,7 +1480,8 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     const env = Object.fromEntries(
       (params.env ?? []).map((entry: EnvVariable) => [entry.name, entry.value]),
     );
-    const child = spawnProcess(params.command, params.args ?? [], {
+    const terminalCommand = resolveTerminalCommand(params.command, params.args);
+    const child = spawnProcess(terminalCommand.command, terminalCommand.args, {
       cwd: params.cwd ?? this.config.cwd,
       ...createProviderEnvSpec({
         runtimeSettings: this.runtimeSettings,
@@ -1466,6 +1496,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       resolveExit = resolve;
       rejectExit = reject;
     });
+    waitForExit.catch(() => undefined);
 
     const entry: TerminalEntry = {
       id: terminalId,
@@ -1485,9 +1516,11 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     child.stderr!.on("data", (chunk: Buffer | string) =>
       appendTerminalOutput(entry, chunk.toString()),
     );
-    child.once("error", (error) =>
-      rejectExit(error instanceof Error ? error : new Error(String(error))),
-    );
+    child.once("error", (error) => {
+      const spawnError = error instanceof Error ? error : new Error(String(error));
+      appendTerminalOutput(entry, `${spawnError.message}\n`);
+      rejectExit(spawnError);
+    });
     child.once("exit", (code, signal) => {
       const exit = { exitCode: code, signal };
       entry.exit = exit;
@@ -1546,7 +1579,8 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         overlays: [this.launchEnv],
       }),
       stdio: ["pipe", "pipe", "pipe"],
-    }) as ChildProcessWithoutNullStreams;
+    });
+    assertChildWithPipes(child);
 
     const stderrChunks: string[] = [];
     child.stderr.on("data", (chunk: Buffer | string) => {
@@ -1568,13 +1602,9 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       }
     });
 
-    if (!child.stdin || !child.stdout) {
-      throw new Error(`${this.provider} ACP process did not expose stdio pipes`);
-    }
-
     const stream = createLoggedNdJsonStream(
-      Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      Writable.toWeb(child.stdin),
+      Readable.toWeb(child.stdout),
       { logger: this.logger, provider: this.provider },
     );
     const connection = new ClientSideConnection(() => this, stream);
@@ -1630,7 +1660,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   }
 
   private warnInvalidSelection(value: string, message: string): void {
-    (this.logger.warn as unknown as (value: string, message: string) => void)(value, message);
+    this.logger.warn({ value }, message);
   }
 
   private translateSessionUpdate(update: SessionUpdate): AgentStreamEvent[] {
@@ -2093,7 +2123,7 @@ function mergeToolSnapshot(
 ): ACPToolSnapshot {
   return {
     toolCallId,
-    title: (update.title ?? previous?.title ?? toolCallId) as string,
+    title: update.title ?? previous?.title ?? toolCallId,
     kind: update.kind ?? previous?.kind ?? null,
     status: update.status ?? previous?.status ?? null,
     content: coalesceDefined(update.content, previous?.content, null),
@@ -2410,9 +2440,7 @@ function appendTerminalOutput(entry: TerminalEntry, chunk: string): void {
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return isRecord(value) ? value : null;
 }
 
 function readString(record: Record<string, unknown> | null, keys: string[]): string | undefined {
@@ -2473,7 +2501,7 @@ function stringifyUnknown(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
   } catch {
-    return String(value);
+    return typeof value === "bigint" ? String(value) : "[unserializable]";
   }
 }
 

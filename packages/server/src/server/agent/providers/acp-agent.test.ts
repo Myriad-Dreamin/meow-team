@@ -1,4 +1,6 @@
-import { describe, expect, test, vi } from "vitest";
+import { type ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   PermissionOption,
   PromptResponse,
@@ -22,6 +24,8 @@ import {
 import { transformPiModels } from "./pi-direct-agent.js";
 import type { AgentStreamEvent } from "../agent-sdk-types.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
+import { asInternals } from "../../test-utils/class-mocks.js";
+import * as spawnUtils from "../../../utils/spawn.js";
 
 interface ACPSessionInternals {
   sessionId: string | null;
@@ -113,6 +117,14 @@ function createSessionWithConfig(
   );
 }
 
+function createTerminalChildStub(): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  child.stdout = new EventEmitter() as ChildProcess["stdout"];
+  child.stderr = new EventEmitter() as ChildProcess["stderr"];
+  child.kill = vi.fn(() => true) as ChildProcess["kill"];
+  return child;
+}
+
 function selectConfigOption(
   category: "mode" | "model" | "thought_level",
   values: string[],
@@ -159,7 +171,7 @@ function prepareConfiguredOverrideSession(
   const setSessionConfigOption = vi.fn(async () => ({
     configOptions: options.configOptions ?? [],
   }));
-  const internals = session as unknown as ACPConfiguredOverrideInternals;
+  const internals = asInternals<ACPConfiguredOverrideInternals>(session);
   internals.sessionId = "session-1";
   internals.connection = {
     setSessionMode,
@@ -179,7 +191,7 @@ function prepareConfiguredOverrideSession(
 test("ACP setModel only uses config-option fallback when the matching select choice contains the model", async () => {
   const logger = createTestLogger();
   const childLogger = { warn: vi.fn() };
-  vi.spyOn(logger, "child").mockReturnValue(childLogger as unknown as typeof logger);
+  vi.spyOn(logger, "child").mockReturnValue(asInternals<typeof logger>(childLogger));
   const session = createSessionWithConfig({}, logger);
   const setSessionConfigOption = vi.fn(async () => ({
     configOptions: [
@@ -193,7 +205,7 @@ test("ACP setModel only uses config-option fallback when the matching select cho
       },
     ],
   }));
-  const internals = session as unknown as ACPModelSelectionInternals;
+  const internals = asInternals<ACPModelSelectionInternals>(session);
   internals.sessionId = "session-1";
   internals.connection = { setSessionConfigOption };
   internals.configOptions = [
@@ -219,7 +231,7 @@ test("ACP setModel only uses config-option fallback when the matching select cho
 
   await expect(session.setModel("new-provider-model")).resolves.toBeUndefined();
   expect(childLogger.warn).toHaveBeenCalledWith(
-    "new-provider-model",
+    { value: "new-provider-model" },
     expect.stringContaining("is not a valid claude-acp model config option"),
   );
   expect(setSessionConfigOption).not.toHaveBeenCalled();
@@ -235,7 +247,7 @@ describe("createLoggedNdJsonStream", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const stream = createLoggedNdJsonStream(output.writable, input.readable, {
-      logger: logger as unknown as ReturnType<typeof createTestLogger>,
+      logger: asInternals<ReturnType<typeof createTestLogger>>(logger),
       provider: "gemini",
     });
     const reader = stream.readable.getReader();
@@ -276,7 +288,7 @@ describe("createLoggedNdJsonStream", () => {
     };
 
     const stream = createLoggedNdJsonStream(output.writable, input.readable, {
-      logger: logger as unknown as ReturnType<typeof createTestLogger>,
+      logger: asInternals<ReturnType<typeof createTestLogger>>(logger),
       provider: "gemini",
     });
     const reader = stream.readable.getReader();
@@ -299,6 +311,78 @@ describe("createLoggedNdJsonStream", () => {
 
     await writer.close();
     reader.releaseLock();
+  });
+});
+
+describe("ACPAgentSession terminal tools", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("runs single-string terminal commands through the platform shell", async () => {
+    const child = createTerminalChildStub();
+    const spawn = vi.spyOn(spawnUtils, "spawnProcess").mockReturnValue(child);
+    const session = createSession();
+    const shell = spawnUtils.platformShell();
+
+    await session.createTerminal({
+      sessionId: "session-1",
+      command: "git -C /repo status --short",
+      cwd: "/repo",
+    });
+
+    expect(spawn).toHaveBeenCalledWith(
+      shell.command,
+      [...shell.flag, "git -C /repo status --short"],
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+  });
+
+  test("preserves explicit terminal argv", async () => {
+    const child = createTerminalChildStub();
+    const spawn = vi.spyOn(spawnUtils, "spawnProcess").mockReturnValue(child);
+    const session = createSession();
+
+    await session.createTerminal({
+      sessionId: "session-1",
+      command: "git",
+      args: ["status", "--short"],
+      cwd: "/repo",
+    });
+
+    expect(spawn).toHaveBeenCalledWith(
+      "git",
+      ["status", "--short"],
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+  });
+
+  test("surfaces spawn errors through terminal output and waitForTerminalExit", async () => {
+    const child = createTerminalChildStub();
+    vi.spyOn(spawnUtils, "spawnProcess").mockReturnValue(child);
+    const session = createSession();
+
+    const terminal = await session.createTerminal({
+      sessionId: "session-1",
+      command: "missing-command",
+    });
+    child.emit("error", new Error("spawn missing-command ENOENT"));
+
+    await expect(
+      session.waitForTerminalExit({
+        sessionId: "session-1",
+        terminalId: terminal.terminalId,
+      }),
+    ).rejects.toThrow("spawn missing-command ENOENT");
+    await expect(
+      session.terminalOutput({
+        sessionId: "session-1",
+        terminalId: terminal.terminalId,
+      }),
+    ).resolves.toMatchObject({
+      output: "spawn missing-command ENOENT\n",
+      truncated: false,
+    });
   });
 });
 
@@ -475,7 +559,7 @@ describe("ACPAgentSession Zed parity", () => {
       modelId: "sonnet",
     });
 
-    const modeEvents = (validSession as unknown as ACPSessionInternals).translateSessionUpdate({
+    const modeEvents = asInternals<ACPSessionInternals>(validSession).translateSessionUpdate({
       sessionUpdate: "current_mode_update",
       currentModeId: "default",
     });
@@ -494,7 +578,7 @@ describe("ACPAgentSession Zed parity", () => {
 
     const logger = createTestLogger();
     const childLogger = { warn: vi.fn() };
-    vi.spyOn(logger, "child").mockReturnValue(childLogger as unknown as typeof logger);
+    vi.spyOn(logger, "child").mockReturnValue(asInternals<typeof logger>(childLogger));
     const invalidSession = createSessionWithConfig(
       { modeId: "acceptEdits", model: "opus" },
       logger,
@@ -513,11 +597,11 @@ describe("ACPAgentSession Zed parity", () => {
     expect(invalid.setSessionMode).not.toHaveBeenCalled();
     expect(invalid.unstableSetSessionModel).not.toHaveBeenCalled();
     expect(childLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("acceptEdits"),
+      { value: expect.stringContaining("acceptEdits") },
       expect.stringContaining("not valid"),
     );
     expect(childLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("opus"),
+      { value: expect.stringContaining("opus") },
       expect.stringContaining("not a valid"),
     );
   });
@@ -540,7 +624,7 @@ describe("ACPAgentSession Zed parity", () => {
 
   test("routes config_option_update and refreshes derived mode, model, and thinking state", async () => {
     const session = createSession();
-    const internals = session as unknown as ACPSessionInternals;
+    const internals = asInternals<ACPSessionInternals>(session);
 
     const events = internals.translateSessionUpdate({
       sessionUpdate: "config_option_update",
@@ -595,7 +679,7 @@ describe("ACPAgentSession Zed parity", () => {
 
   test("keeps pushed mode when a later config_option_update has no mode payload", async () => {
     const session = createSession();
-    const internals = session as unknown as ACPSessionInternals;
+    const internals = asInternals<ACPSessionInternals>(session);
 
     internals.translateSessionUpdate({
       sessionUpdate: "current_mode_update",
@@ -616,7 +700,7 @@ describe("ACPAgentSession Zed parity", () => {
 
   test("uses last writer when current_mode_update and config_option_update both include a mode", async () => {
     const session = createSession();
-    const internals = session as unknown as ACPSessionInternals;
+    const internals = asInternals<ACPSessionInternals>(session);
 
     const configEvents = internals.translateSessionUpdate({
       sessionUpdate: "config_option_update",
@@ -634,7 +718,7 @@ describe("ACPAgentSession Zed parity", () => {
 
   test("uses canonical mode returned by setSessionConfigOption response", async () => {
     const session = createSession();
-    const internals = session as unknown as ACPModelSelectionInternals;
+    const internals = asInternals<ACPModelSelectionInternals>(session);
     const events: AgentStreamEvent[] = [];
     const unsubscribe = session.subscribe((event) => events.push(event));
     internals.sessionId = "session-1";
@@ -664,7 +748,7 @@ describe("ACPAgentSession Zed parity", () => {
 
   test("uses canonical model returned by setSessionConfigOption response", async () => {
     const session = createSession();
-    const internals = session as unknown as ACPModelSelectionInternals;
+    const internals = asInternals<ACPModelSelectionInternals>(session);
     const events: AgentStreamEvent[] = [];
     const unsubscribe = session.subscribe((event) => events.push(event));
     internals.sessionId = "session-1";
@@ -688,7 +772,7 @@ describe("ACPAgentSession Zed parity", () => {
 
   test("uses canonical thinking option returned by setSessionConfigOption response", async () => {
     const session = createSession();
-    const internals = session as unknown as ACPModelSelectionInternals;
+    const internals = asInternals<ACPModelSelectionInternals>(session);
     const events: AgentStreamEvent[] = [];
     const unsubscribe = session.subscribe((event) => events.push(event));
     internals.sessionId = "session-1";
@@ -725,7 +809,7 @@ describe("ACPAgentSession Zed parity", () => {
       { optionId: "reject-once", name: "Reject", kind: "reject_once" },
     ];
 
-    (session as unknown as ACPSessionInternals).sessionId = "session-1";
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
     session.subscribe((event) => {
       events.push(event as { type: string; request?: { id: string } });
     });
@@ -869,7 +953,7 @@ describe("ACPAgentClient modelTransformer", () => {
             }),
           },
           initialize: { agentCapabilities: {} },
-        } as unknown as SpawnedACPProcess;
+        } as SpawnedACPProcess;
       }
 
       protected override async closeProbe(): Promise<void> {}
@@ -915,7 +999,7 @@ describe("ACPAgentClient sessionResponseTransformer", () => {
           newSession: vi.fn().mockResolvedValue(response),
         },
         initialize: { agentCapabilities: {} },
-      } as unknown as SpawnedACPProcess;
+      } as SpawnedACPProcess;
     }
 
     protected override async closeProbe(): Promise<void> {}
@@ -956,7 +1040,7 @@ describe("ACPAgentClient listModes", () => {
           child: { kill: vi.fn(), exitCode: 0, signalCode: null, once: vi.fn() },
           connection: { newSession },
           initialize: { agentCapabilities: {} },
-        } as unknown as SpawnedACPProcess;
+        } as SpawnedACPProcess;
       }
 
       protected override async closeProbe(): Promise<void> {}
@@ -1007,7 +1091,7 @@ describe("ACPAgentClient listModes", () => {
             }),
           },
           initialize: { agentCapabilities: {} },
-        } as unknown as SpawnedACPProcess;
+        } as SpawnedACPProcess;
       }
 
       protected override async closeProbe(): Promise<void> {}
@@ -1111,7 +1195,7 @@ describe("ACPAgentSession slash commands", () => {
 
     const listCommandsPromise = session.listCommands();
 
-    (session as unknown as ACPSessionInternals).translateSessionUpdate({
+    asInternals<ACPSessionInternals>(session).translateSessionUpdate({
       sessionUpdate: "available_commands_update",
       availableCommands: [
         {
@@ -1157,7 +1241,7 @@ describe("ACPAgentSession", () => {
   test("emits assistant and reasoning chunks as deltas while user chunks stay accumulated", async () => {
     const session = createSession();
     const events: Array<{ type: string; item?: { type: string; text?: string } }> = [];
-    (session as unknown as ACPSessionInternals).sessionId = "session-1";
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
 
     session.subscribe((event) => {
       events.push(event as { type: string; item?: { type: string; text?: string } });
@@ -1169,7 +1253,7 @@ describe("ACPAgentSession", () => {
         sessionUpdate: "agent_message_chunk",
         messageId: "assistant-1",
         content: { type: "text", text: "Hey!" },
-      } as unknown as SessionUpdate,
+      } as SessionUpdate,
     });
     await session.sessionUpdate({
       sessionId: "session-1",
@@ -1177,7 +1261,7 @@ describe("ACPAgentSession", () => {
         sessionUpdate: "agent_message_chunk",
         messageId: "assistant-1",
         content: { type: "text", text: " How are you?" },
-      } as unknown as SessionUpdate,
+      } as SessionUpdate,
     });
     await session.sessionUpdate({
       sessionId: "session-1",
@@ -1185,7 +1269,7 @@ describe("ACPAgentSession", () => {
         sessionUpdate: "agent_thought_chunk",
         messageId: "thought-1",
         content: { type: "text", text: "Thinking" },
-      } as unknown as SessionUpdate,
+      } as SessionUpdate,
     });
     await session.sessionUpdate({
       sessionId: "session-1",
@@ -1193,7 +1277,7 @@ describe("ACPAgentSession", () => {
         sessionUpdate: "agent_thought_chunk",
         messageId: "thought-1",
         content: { type: "text", text: " more" },
-      } as unknown as SessionUpdate,
+      } as SessionUpdate,
     });
     await session.sessionUpdate({
       sessionId: "session-1",
@@ -1201,7 +1285,7 @@ describe("ACPAgentSession", () => {
         sessionUpdate: "user_message_chunk",
         messageId: "user-1",
         content: { type: "text", text: "hel" },
-      } as unknown as SessionUpdate,
+      } as SessionUpdate,
     });
     await session.sessionUpdate({
       sessionId: "session-1",
@@ -1209,7 +1293,7 @@ describe("ACPAgentSession", () => {
         sessionUpdate: "user_message_chunk",
         messageId: "user-1",
         content: { type: "text", text: "lo" },
-      } as unknown as SessionUpdate,
+      } as SessionUpdate,
     });
 
     const timeline = events
@@ -1238,8 +1322,8 @@ describe("ACPAgentSession", () => {
         }),
     );
 
-    (session as unknown as ACPSessionInternals).sessionId = "session-1";
-    (session as unknown as ACPSessionInternals).connection = { prompt };
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    asInternals<ACPSessionInternals>(session).connection = { prompt };
 
     session.subscribe((event) => {
       events.push(event as { type: string; turnId?: string });
@@ -1252,7 +1336,7 @@ describe("ACPAgentSession", () => {
       type: "turn_started",
       turnId,
     });
-    expect((session as unknown as ACPSessionInternals).activeForegroundTurnId).toBe(turnId);
+    expect(asInternals<ACPSessionInternals>(session).activeForegroundTurnId).toBe(turnId);
 
     resolvePrompt({ stopReason: "end_turn", usage: { outputTokens: 3 } });
     await Promise.resolve();
@@ -1262,7 +1346,7 @@ describe("ACPAgentSession", () => {
       type: "turn_completed",
       turnId,
     });
-    expect((session as unknown as ACPSessionInternals).activeForegroundTurnId).toBeNull();
+    expect(asInternals<ACPSessionInternals>(session).activeForegroundTurnId).toBeNull();
   });
 
   test("startTurn converts background prompt rejections into turn_failed events", async () => {
@@ -1276,8 +1360,8 @@ describe("ACPAgentSession", () => {
         }),
     );
 
-    (session as unknown as ACPSessionInternals).sessionId = "session-1";
-    (session as unknown as ACPSessionInternals).connection = { prompt };
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    asInternals<ACPSessionInternals>(session).connection = { prompt };
 
     session.subscribe((event) => {
       events.push(event as { type: string; turnId?: string; error?: string });
@@ -1295,6 +1379,6 @@ describe("ACPAgentSession", () => {
       turnId,
       error: "prompt failed",
     });
-    expect((session as unknown as ACPSessionInternals).activeForegroundTurnId).toBeNull();
+    expect(asInternals<ACPSessionInternals>(session).activeForegroundTurnId).toBeNull();
   });
 });

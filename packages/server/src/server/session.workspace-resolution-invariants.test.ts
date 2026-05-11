@@ -11,6 +11,7 @@ import { expect, test, vi } from "vitest";
 import { Session, type SessionOptions } from "./session.js";
 import type { SessionOutboundMessage } from "../shared/messages.js";
 import { createNoopWorkspaceGitService } from "./test-utils/workspace-git-service-stub.js";
+import { asInternals, createStub } from "./test-utils/class-mocks.js";
 import {
   createPersistedProjectRecord,
   createPersistedWorkspaceRecord,
@@ -87,11 +88,11 @@ function createHarness(input: {
     clientId: "test",
     appVersion: null,
     onMessage: (m) => emitted.push(m),
-    logger: logger as unknown as SessionOptions["logger"],
-    downloadTokenStore: {} as unknown as SessionOptions["downloadTokenStore"],
-    pushTokenStore: {} as unknown as SessionOptions["pushTokenStore"],
+    logger: createStub<SessionOptions["logger"]>(logger),
+    downloadTokenStore: createStub<SessionOptions["downloadTokenStore"]>({}),
+    pushTokenStore: createStub<SessionOptions["pushTokenStore"]>({}),
     paseoHome: mkdtempSync(path.join(tmpdir(), "paseo-invariant-test-")),
-    agentManager: {
+    agentManager: createStub<SessionOptions["agentManager"]>({
       subscribe: () => () => {},
       listAgents: () => [],
       getAgent: () => null,
@@ -99,12 +100,12 @@ function createHarness(input: {
       archiveSnapshot: async () => ({}),
       clearAgentAttention: async () => {},
       notifyAgentState: () => {},
-    } as unknown as SessionOptions["agentManager"],
-    agentStorage: {
+    }),
+    agentStorage: createStub<SessionOptions["agentStorage"]>({
       list: async () => [],
       get: async () => null,
-    } as unknown as SessionOptions["agentStorage"],
-    projectRegistry: {
+    }),
+    projectRegistry: createStub<SessionOptions["projectRegistry"]>({
       initialize: async () => {},
       existsOnDisk: async () => true,
       list: async () => Array.from(projects.values()),
@@ -119,8 +120,8 @@ function createHarness(input: {
       remove: async (id: string) => {
         projects.delete(id);
       },
-    } as unknown as SessionOptions["projectRegistry"],
-    workspaceRegistry: {
+    }),
+    workspaceRegistry: createStub<SessionOptions["workspaceRegistry"]>({
       initialize: async () => {},
       existsOnDisk: async () => true,
       list: async () => Array.from(workspaces.values()),
@@ -135,11 +136,11 @@ function createHarness(input: {
       remove: async (id: string) => {
         workspaces.delete(id);
       },
-    } as unknown as SessionOptions["workspaceRegistry"],
-    chatService: {} as unknown as SessionOptions["chatService"],
-    scheduleService: {} as unknown as SessionOptions["scheduleService"],
-    loopService: {} as unknown as SessionOptions["loopService"],
-    checkoutDiffManager: {
+    }),
+    chatService: createStub<SessionOptions["chatService"]>({}),
+    scheduleService: createStub<SessionOptions["scheduleService"]>({}),
+    loopService: createStub<SessionOptions["loopService"]>({}),
+    checkoutDiffManager: createStub<SessionOptions["checkoutDiffManager"]>({
       subscribe: async () => ({
         initial: { cwd: "/tmp", files: [], error: null },
         unsubscribe: () => {},
@@ -152,12 +153,12 @@ function createHarness(input: {
         checkoutDiffFallbackRefreshTargetCount: 0,
       }),
       dispose: () => {},
-    } as unknown as SessionOptions["checkoutDiffManager"],
+    }),
     workspaceGitService,
-    daemonConfigStore: {
+    daemonConfigStore: createStub<SessionOptions["daemonConfigStore"]>({
       get: () => ({ mcp: { injectIntoAgents: false }, providers: {} }),
       onChange: () => () => {},
-    } as unknown as SessionOptions["daemonConfigStore"],
+    }),
     mcpBaseUrl: null,
     stt: null,
     tts: null,
@@ -168,7 +169,7 @@ function createHarness(input: {
 }
 
 async function openProject(session: Session, cwd: string, requestId = "req-1") {
-  await (session as unknown as { handleMessage(m: unknown): Promise<unknown> }).handleMessage({
+  await asInternals<{ handleMessage(m: unknown): Promise<unknown> }>(session).handleMessage({
     type: "open_project_request",
     cwd,
     requestId,
@@ -184,6 +185,18 @@ function getOpenResponse(emitted: SessionOutboundMessage[], requestId: string) {
 }
 
 const T0 = "2026-01-01T00:00:00.000Z";
+const FOO = path.resolve("/foo");
+const FOO_SUB = path.join(FOO, "sub");
+const BAR = path.resolve("/bar");
+const BAR_BAZ = path.join(BAR, "baz");
+const TOOLBOX = path.resolve("/toolbox");
+const TOOLBOX_FLOMO = path.join(TOOLBOX, "flomo-cli");
+const USERS_DEVELOPER = path.resolve("/Users/me/Developer");
+const USERS_PROJECT = path.join(USERS_DEVELOPER, "projects", "foo");
+const PROJECTS = path.resolve("/projects");
+const SOME_GIT_REPO = path.join(PROJECTS, "some-git-repo");
+const PARENT = path.resolve("/parent");
+const PARENT_CHILD = path.join(PARENT, "child");
 
 function gitWorkspace(rootPath: string, archivedAt: string | null = null) {
   return createPersistedWorkspaceRecord({
@@ -239,13 +252,13 @@ function dirProject(rootPath: string, archivedAt: string | null = null) {
 // S1. Open a fresh git repo: creates a workspace at the canonical root.
 // ─────────────────────────────────────────────────────────────────────────────
 test("S1: open fresh git repo creates workspace at canonical root", async () => {
-  const h = createHarness({ gitRoots: ["/foo"] });
-  await openProject(h.session, "/foo");
+  const h = createHarness({ gitRoots: [FOO] });
+  await openProject(h.session, FOO);
   const resp = getOpenResponse(h.emitted, "req-1");
   expect(resp?.error).toBeNull();
-  expect(resp?.workspace?.workspaceDirectory).toBe("/foo");
+  expect(resp?.workspace?.workspaceDirectory).toBe(FOO);
   expect(resp?.workspace?.workspaceKind).toBe("local_checkout");
-  expect(h.workspaces.has("/foo")).toBe(true);
+  expect(h.workspaces.has(FOO)).toBe(true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,12 +267,12 @@ test("S1: open fresh git repo creates workspace at canonical root", async () => 
 // ─────────────────────────────────────────────────────────────────────────────
 test("S2: open fresh non-git directory creates a directory workspace at exact path", async () => {
   const h = createHarness({});
-  await openProject(h.session, "/bar");
+  await openProject(h.session, BAR);
   const resp = getOpenResponse(h.emitted, "req-1");
   expect(resp?.error).toBeNull();
-  expect(resp?.workspace?.workspaceDirectory).toBe("/bar");
+  expect(resp?.workspace?.workspaceDirectory).toBe(BAR);
   expect(resp?.workspace?.workspaceKind).toBe("directory");
-  expect(h.workspaces.has("/bar")).toBe(true);
+  expect(h.workspaces.has(BAR)).toBe(true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,15 +281,15 @@ test("S2: open fresh non-git directory creates a directory workspace at exact pa
 // ─────────────────────────────────────────────────────────────────────────────
 test("S3: re-open active workspace by exact path returns the same record", async () => {
   const h = createHarness({
-    workspaces: [gitWorkspace("/foo")],
-    projects: [gitProject("/foo")],
-    gitRoots: ["/foo"],
+    workspaces: [gitWorkspace(FOO)],
+    projects: [gitProject(FOO)],
+    gitRoots: [FOO],
   });
-  await openProject(h.session, "/foo");
+  await openProject(h.session, FOO);
   const resp = getOpenResponse(h.emitted, "req-1");
-  expect(resp?.workspace?.id).toBe("/foo");
+  expect(resp?.workspace?.id).toBe(FOO);
   expect(h.workspaces.size).toBe(1);
-  expect(h.workspaces.get("/foo")?.archivedAt).toBeNull();
+  expect(h.workspaces.get(FOO)?.archivedAt).toBeNull();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,13 +298,13 @@ test("S3: re-open active workspace by exact path returns the same record", async
 // ─────────────────────────────────────────────────────────────────────────────
 test("S4: open subdir of active git workspace returns the repo-root workspace", async () => {
   const h = createHarness({
-    workspaces: [gitWorkspace("/foo")],
-    projects: [gitProject("/foo")],
-    gitRoots: ["/foo"],
+    workspaces: [gitWorkspace(FOO)],
+    projects: [gitProject(FOO)],
+    gitRoots: [FOO],
   });
-  await openProject(h.session, "/foo/sub");
+  await openProject(h.session, FOO_SUB);
   const resp = getOpenResponse(h.emitted, "req-1");
-  expect(resp?.workspace?.id).toBe("/foo");
+  expect(resp?.workspace?.id).toBe(FOO);
   expect(h.workspaces.size).toBe(1);
 });
 
@@ -301,14 +314,14 @@ test("S4: open subdir of active git workspace returns the repo-root workspace", 
 // ─────────────────────────────────────────────────────────────────────────────
 test("S5: open subdir of active non-git directory creates a SEPARATE workspace", async () => {
   const h = createHarness({
-    workspaces: [dirWorkspace("/bar")],
-    projects: [dirProject("/bar")],
+    workspaces: [dirWorkspace(BAR)],
+    projects: [dirProject(BAR)],
   });
-  await openProject(h.session, "/bar/baz");
+  await openProject(h.session, BAR_BAZ);
   const resp = getOpenResponse(h.emitted, "req-1");
-  expect(resp?.workspace?.workspaceDirectory).toBe("/bar/baz");
-  expect(h.workspaces.has("/bar")).toBe(true);
-  expect(h.workspaces.has("/bar/baz")).toBe(true);
+  expect(resp?.workspace?.workspaceDirectory).toBe(BAR_BAZ);
+  expect(h.workspaces.has(BAR)).toBe(true);
+  expect(h.workspaces.has(BAR_BAZ)).toBe(true);
   expect(h.workspaces.size).toBe(2);
 });
 
@@ -319,13 +332,13 @@ test("S5: open subdir of active non-git directory creates a SEPARATE workspace",
 test("S6: re-opening an archived git workspace by exact path UNARCHIVES it", async () => {
   const archivedAt = "2026-04-22T13:08:05.400Z";
   const h = createHarness({
-    workspaces: [gitWorkspace("/toolbox", archivedAt)],
-    projects: [gitProject("/toolbox", archivedAt)],
-    gitRoots: ["/toolbox"],
+    workspaces: [gitWorkspace(TOOLBOX, archivedAt)],
+    projects: [gitProject(TOOLBOX, archivedAt)],
+    gitRoots: [TOOLBOX],
   });
-  await openProject(h.session, "/toolbox");
-  expect(h.workspaces.get("/toolbox")?.archivedAt).toBeNull();
-  expect(h.projects.get("/toolbox")?.archivedAt).toBeNull();
+  await openProject(h.session, TOOLBOX);
+  expect(h.workspaces.get(TOOLBOX)?.archivedAt).toBeNull();
+  expect(h.projects.get(TOOLBOX)?.archivedAt).toBeNull();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -333,15 +346,15 @@ test("S6: re-opening an archived git workspace by exact path UNARCHIVES it", asy
 // ─────────────────────────────────────────────────────────────────────────────
 test("S7: open nested git repo (own .git) creates a SEPARATE workspace at the inner root", async () => {
   const h = createHarness({
-    workspaces: [gitWorkspace("/foo")],
-    projects: [gitProject("/foo")],
-    gitRoots: ["/foo", "/foo/sub"],
+    workspaces: [gitWorkspace(FOO)],
+    projects: [gitProject(FOO)],
+    gitRoots: [FOO, FOO_SUB],
   });
-  await openProject(h.session, "/foo/sub");
+  await openProject(h.session, FOO_SUB);
   const resp = getOpenResponse(h.emitted, "req-1");
-  expect(resp?.workspace?.workspaceDirectory).toBe("/foo/sub");
-  expect(h.workspaces.has("/foo")).toBe(true);
-  expect(h.workspaces.has("/foo/sub")).toBe(true);
+  expect(resp?.workspace?.workspaceDirectory).toBe(FOO_SUB);
+  expect(h.workspaces.has(FOO)).toBe(true);
+  expect(h.workspaces.has(FOO_SUB)).toBe(true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -352,12 +365,12 @@ test("S7: open nested git repo (own .git) creates a SEPARATE workspace at the in
 test("S8: open child of archived non-git ancestor creates fresh workspace; ancestor stays archived", async () => {
   const archivedAt = "2026-04-04T17:15:22.423Z";
   const h = createHarness({
-    workspaces: [dirWorkspace("/Users/me/Developer", archivedAt)],
-    projects: [dirProject("/Users/me/Developer", archivedAt)],
+    workspaces: [dirWorkspace(USERS_DEVELOPER, archivedAt)],
+    projects: [dirProject(USERS_DEVELOPER, archivedAt)],
   });
-  await openProject(h.session, "/Users/me/Developer/projects/foo");
-  expect(h.workspaces.get("/Users/me/Developer")?.archivedAt).toBe(archivedAt);
-  expect(h.workspaces.has("/Users/me/Developer/projects/foo")).toBe(true);
+  await openProject(h.session, USERS_PROJECT);
+  expect(h.workspaces.get(USERS_DEVELOPER)?.archivedAt).toBe(archivedAt);
+  expect(h.workspaces.has(USERS_PROJECT)).toBe(true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -368,12 +381,12 @@ test("S8: open child of archived non-git ancestor creates fresh workspace; ances
 test("S9: opening child of archived git workspace does NOT auto-unarchive the parent", async () => {
   const archivedAt = "2026-04-22T13:08:05.400Z";
   const h = createHarness({
-    workspaces: [gitWorkspace("/toolbox", archivedAt)],
-    projects: [gitProject("/toolbox", archivedAt)],
-    gitRoots: ["/toolbox"],
+    workspaces: [gitWorkspace(TOOLBOX, archivedAt)],
+    projects: [gitProject(TOOLBOX, archivedAt)],
+    gitRoots: [TOOLBOX],
   });
-  await openProject(h.session, "/toolbox/flomo-cli");
-  expect(h.workspaces.get("/toolbox")?.archivedAt).toBe(archivedAt);
+  await openProject(h.session, TOOLBOX_FLOMO);
+  expect(h.workspaces.get(TOOLBOX)?.archivedAt).toBe(archivedAt);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,18 +401,18 @@ test("S9: opening child of archived git workspace does NOT auto-unarchive the pa
 test("S10: opening a git repo nested inside an archived non-git directory creates fresh workspace; ancestor stays archived", async () => {
   const archivedAt = "2026-04-04T17:15:22.423Z";
   const h = createHarness({
-    workspaces: [dirWorkspace("/projects", archivedAt)],
-    projects: [dirProject("/projects", archivedAt)],
-    gitRoots: ["/projects/some-git-repo"],
+    workspaces: [dirWorkspace(PROJECTS, archivedAt)],
+    projects: [dirProject(PROJECTS, archivedAt)],
+    gitRoots: [SOME_GIT_REPO],
   });
-  await openProject(h.session, "/projects/some-git-repo");
+  await openProject(h.session, SOME_GIT_REPO);
   const resp = getOpenResponse(h.emitted, "req-1");
   expect(resp?.error).toBeNull();
-  expect(resp?.workspace?.workspaceDirectory).toBe("/projects/some-git-repo");
+  expect(resp?.workspace?.workspaceDirectory).toBe(SOME_GIT_REPO);
   expect(resp?.workspace?.workspaceKind).toBe("local_checkout");
-  expect(h.workspaces.has("/projects/some-git-repo")).toBe(true);
-  expect(h.workspaces.get("/projects")?.archivedAt).toBe(archivedAt);
-  expect(h.projects.get("/projects")?.archivedAt).toBe(archivedAt);
+  expect(h.workspaces.has(SOME_GIT_REPO)).toBe(true);
+  expect(h.workspaces.get(PROJECTS)?.archivedAt).toBe(archivedAt);
+  expect(h.projects.get(PROJECTS)?.archivedAt).toBe(archivedAt);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -410,19 +423,19 @@ test("S10: opening a git repo nested inside an archived non-git directory create
 test("S11: re-opening an archived project by exact path unarchives project + workspace and reuses ids", async () => {
   const archivedAt = "2026-04-22T13:08:05.400Z";
   const h = createHarness({
-    workspaces: [gitWorkspace("/toolbox", archivedAt)],
-    projects: [gitProject("/toolbox", archivedAt)],
-    gitRoots: ["/toolbox"],
+    workspaces: [gitWorkspace(TOOLBOX, archivedAt)],
+    projects: [gitProject(TOOLBOX, archivedAt)],
+    gitRoots: [TOOLBOX],
   });
-  await openProject(h.session, "/toolbox");
+  await openProject(h.session, TOOLBOX);
   const resp = getOpenResponse(h.emitted, "req-1");
   expect(resp?.error).toBeNull();
-  expect(resp?.workspace?.id).toBe("/toolbox");
-  expect(resp?.workspace?.projectId).toBe("/toolbox");
+  expect(resp?.workspace?.id).toBe(TOOLBOX);
+  expect(resp?.workspace?.projectId).toBe(TOOLBOX);
   expect(h.workspaces.size).toBe(1);
   expect(h.projects.size).toBe(1);
-  expect(h.workspaces.get("/toolbox")?.archivedAt).toBeNull();
-  expect(h.projects.get("/toolbox")?.archivedAt).toBeNull();
+  expect(h.workspaces.get(TOOLBOX)?.archivedAt).toBeNull();
+  expect(h.projects.get(TOOLBOX)?.archivedAt).toBeNull();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -433,14 +446,12 @@ test("S11: re-opening an archived project by exact path unarchives project + wor
 test("S12: findWorkspaceByDirectory does not return archived ancestor via prefix fallback", async () => {
   const archivedAt = "2026-04-22T13:08:05.400Z";
   const h = createHarness({
-    workspaces: [dirWorkspace("/parent", archivedAt)],
-    projects: [dirProject("/parent", archivedAt)],
+    workspaces: [dirWorkspace(PARENT, archivedAt)],
+    projects: [dirProject(PARENT, archivedAt)],
   });
-  const found = await (
-    h.session as unknown as {
-      findWorkspaceByDirectory(cwd: string): Promise<unknown>;
-    }
-  ).findWorkspaceByDirectory("/parent/child");
+  const found = await asInternals<{
+    findWorkspaceByDirectory(cwd: string): Promise<unknown>;
+  }>(h.session).findWorkspaceByDirectory(PARENT_CHILD);
   expect(found).toBeNull();
 });
 
@@ -457,11 +468,11 @@ test("S12: findWorkspaceByDirectory does not return archived ancestor via prefix
 test("S13: subfolder of an archived git repo opens as a directory workspace", async () => {
   const archivedAt = "2026-04-22T13:08:05.400Z";
   const h = createHarness({
-    workspaces: [gitWorkspace("/toolbox", archivedAt)],
-    projects: [gitProject("/toolbox", archivedAt)],
-    gitRoots: ["/toolbox"],
+    workspaces: [gitWorkspace(TOOLBOX, archivedAt)],
+    projects: [gitProject(TOOLBOX, archivedAt)],
+    gitRoots: [TOOLBOX],
   });
-  await openProject(h.session, "/toolbox/flomo-cli");
+  await openProject(h.session, TOOLBOX_FLOMO);
   const resp = getOpenResponse(h.emitted, "req-1");
   expect(resp?.error).toBeNull();
   expect(resp?.workspace?.workspaceKind).toBe("directory");

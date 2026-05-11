@@ -1,31 +1,15 @@
 import { existsSync } from "node:fs";
 import { expect, test } from "./fixtures";
 import { createTempGitRepo } from "./helpers/workspace";
-import { clickTerminal, waitForTabBar } from "./helpers/launcher";
+import { clickNewTerminal } from "./helpers/launcher";
+import { expectTerminalSurfaceVisible } from "./helpers/terminal-perf";
 import {
   connectWorkspaceSetupClient,
   createWorkspaceThroughDaemon,
   findWorktreeWorkspaceForProject,
+  navigateToWorkspaceViaSidebar,
   openHomeWithProject,
 } from "./helpers/workspace-setup";
-
-function getServerId(): string {
-  const serverId = process.env.E2E_SERVER_ID;
-  if (!serverId) {
-    throw new Error("E2E_SERVER_ID is not set.");
-  }
-  return serverId;
-}
-
-async function navigateToWorkspaceViaSidebar(
-  page: import("@playwright/test").Page,
-  workspaceId: string,
-): Promise<void> {
-  const row = page.getByTestId(`sidebar-workspace-row-${getServerId()}:${workspaceId}`);
-  await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.click();
-  await waitForTabBar(page);
-}
 
 test.describe("Workspace setup runtime authority", () => {
   test.describe.configure({ retries: 1 });
@@ -42,13 +26,12 @@ test.describe("Workspace setup runtime authority", () => {
         cwd: repo.path,
         worktreeSlug: `setup-chat-${Date.now()}`,
       });
-      const workspaceId = String(workspace.id);
+      const workspaceId = workspace.id;
 
       const wsInfo = await findWorktreeWorkspaceForProject(client, repo.path);
       expect(wsInfo.workspaceDirectory).not.toBe(repo.path);
       expect(existsSync(wsInfo.workspaceDirectory)).toBe(true);
 
-      // Navigate to the workspace via sidebar
       await openHomeWithProject(page, repo.path);
       await navigateToWorkspaceViaSidebar(page, workspaceId);
       await expect(page).toHaveURL(/\/workspace\//, { timeout: 30_000 });
@@ -78,7 +61,7 @@ test.describe("Workspace setup runtime authority", () => {
         throw new Error(result.error ?? "Failed to create workspace");
       }
       const workspaceDir = result.workspace.workspaceDirectory;
-      const workspaceId = String(result.workspace.id);
+      const workspaceId = result.workspace.id;
 
       // Navigate to the worktree workspace via sidebar click (direct URL
       // navigation for freshly created worktree workspaces can race with
@@ -86,10 +69,8 @@ test.describe("Workspace setup runtime authority", () => {
       await openHomeWithProject(page, repo.path);
       await navigateToWorkspaceViaSidebar(page, workspaceId);
 
-      await clickTerminal(page);
-
-      const terminal = page.locator('[data-testid="terminal-surface"]');
-      await expect(terminal.first()).toBeVisible({ timeout: 20_000 });
+      await clickNewTerminal(page);
+      await expectTerminalSurfaceVisible(page);
 
       // Verify terminal is listed under the worktree directory, not the original repo
       await expect

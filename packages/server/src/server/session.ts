@@ -78,6 +78,7 @@ import { spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import type { DaemonConfigStore } from "./daemon-config-store.js";
 import { applyMutableProviderConfigToOverrides } from "./daemon-config-store.js";
+import { getErrorMessage, getErrorMessageOr } from "../shared/error-utils.js";
 import type { WorkspaceGitRuntimeSnapshot, WorkspaceGitService } from "./workspace-git-service.js";
 
 import { buildProviderRegistry } from "./agent/provider-registry.js";
@@ -522,7 +523,6 @@ const MIN_STREAMING_SEGMENT_BYTES = Math.round(
   PCM_BYTES_PER_MS * MIN_STREAMING_SEGMENT_DURATION_MS,
 );
 const AgentIdSchema = z.string().uuid();
-const VOICE_INTERRUPT_CONFIRMATION_MS = 500;
 const AVAILABLE_EDITOR_TARGETS_CACHE_TTL_MS = 60_000;
 const AVAILABLE_EDITOR_TARGETS_CACHE_KEY = "available";
 
@@ -736,11 +736,13 @@ function parseClientCapabilities(
     return new Set();
   }
   const known = new Set<ClientCapability>(Object.values(CLIENT_CAPS));
-  return new Set(
-    Object.entries(capabilities).flatMap(([key, value]) =>
-      value === true && known.has(key as ClientCapability) ? [key as ClientCapability] : [],
-    ),
-  );
+  const result: ClientCapability[] = [];
+  for (const [key, value] of Object.entries(capabilities)) {
+    if (value === true && known.has(key as ClientCapability)) {
+      result.push(key as ClientCapability);
+    }
+  }
+  return new Set(result);
 }
 
 /**
@@ -766,8 +768,6 @@ export class Session {
   // Voice mode state
   private isVoiceMode = false;
   private speechInProgress = false;
-  private pendingVoiceSpeechStartAt: number | null = null;
-  private pendingVoiceSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 
   private dictationStreamManager!: DictationStreamManager;
   private resolveVoiceTurnDetection!: () => TurnDetectionProvider | null;
@@ -1404,7 +1404,7 @@ export class Session {
   }
 
   private getRegisteredProviderIds(): AgentProvider[] {
-    return Object.keys(this.getProviderRegistry()) as AgentProvider[];
+    return Object.keys(this.getProviderRegistry());
   }
 
   private buildStoredAgentPayload(
@@ -1697,7 +1697,8 @@ export class Session {
         const err = error instanceof Error ? error : new Error(String(error));
         this.sessionLogger.error({ err }, "Error handling message");
 
-        const requestId = (msg as { requestId?: unknown }).requestId;
+        const requestId =
+          "requestId" in msg && typeof msg.requestId === "string" ? msg.requestId : undefined;
         if (typeof requestId === "string") {
           try {
             this.emit({
@@ -2135,6 +2136,23 @@ export class Session {
         return this.handleChatReadRequest(msg);
       case "chat/wait":
         return this.handleChatWaitRequest(msg);
+      case "loop/run":
+        return this.handleLoopRunRequest(msg);
+      case "loop/list":
+        return this.handleLoopListRequest(msg);
+      case "loop/inspect":
+        return this.handleLoopInspectRequest(msg);
+      case "loop/logs":
+        return this.handleLoopLogsRequest(msg);
+      case "loop/stop":
+        return this.handleLoopStopRequest(msg);
+      default:
+        return this.dispatchScheduleMessage(msg);
+    }
+  }
+
+  private dispatchScheduleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
       case "schedule/create":
         return this.handleScheduleCreateRequest(msg);
       case "schedule/list":
@@ -2149,16 +2167,10 @@ export class Session {
         return this.handleScheduleResumeRequest(msg);
       case "schedule/delete":
         return this.handleScheduleDeleteRequest(msg);
-      case "loop/run":
-        return this.handleLoopRunRequest(msg);
-      case "loop/list":
-        return this.handleLoopListRequest(msg);
-      case "loop/inspect":
-        return this.handleLoopInspectRequest(msg);
-      case "loop/logs":
-        return this.handleLoopLogsRequest(msg);
-      case "loop/stop":
-        return this.handleLoopStopRequest(msg);
+      case "schedule/run-once":
+        return this.handleScheduleRunOnceRequest(msg);
+      case "schedule/update":
+        return this.handleScheduleUpdateRequest(msg);
       default:
         return undefined;
     }
@@ -2384,7 +2396,7 @@ export class Session {
     );
     const agents = [];
     for (let i = 0; i < archiveResults.length; i += 1) {
-      const result = archiveResults[i]!;
+      const result = archiveResults[i];
       if (result.status === "fulfilled") {
         agents.push(result.value);
       } else {
@@ -2487,7 +2499,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to update agent: ${(error as Error).message}`,
+          content: `Failed to update agent: ${getErrorMessage(error)}`,
         },
       });
       this.emit({
@@ -2496,9 +2508,7 @@ export class Session {
           requestId,
           agentId,
           accepted: false,
-          error: (error as Error | undefined)?.message
-            ? String((error as Error).message)
-            : "Failed to update agent",
+          error: getErrorMessageOr(error, "Failed to update agent"),
         },
       });
     }
@@ -2785,6 +2795,10 @@ export class Session {
     if (!turnDetection) {
       throw new Error("Voice turn detection is not configured");
     }
+    const stt = this.sttManager.getProvider();
+    if (!stt) {
+      throw new Error("Voice speech-to-text is not configured");
+    }
 
     this.sessionLogger.info(
       { providerId: turnDetection.id },
@@ -2794,27 +2808,69 @@ export class Session {
     const controller = createVoiceTurnController({
       logger: this.sessionLogger.child({ component: "voice-turn-controller" }),
       turnDetection,
-      utteranceSink: {
-        submitUtterance: async ({ pcm16, format, sampleRate, startedAt, endedAt }) => {
-          this.sessionLogger.debug(
-            {
-              audioBytes: pcm16.length,
-              sampleRate,
-              startedAt,
-              endedAt,
-              durationMs: Math.max(0, endedAt - startedAt),
-            },
-            "Submitting detected voice utterance",
-          );
-          await this.processCompletedAudio(pcm16, format);
-        },
-      },
+      stt,
       callbacks: {
         onSpeechStarted: async () => {
-          this.handleProvisionalVoiceSpeechStarted();
+          this.sessionLogger.debug("Voice VAD speech_started");
+        },
+        onPartialTranscript: async ({ segmentId, transcript }) => {
+          this.sessionLogger.info(
+            { segmentId, transcriptLength: transcript.trim().length },
+            "voice_input_state emitting isSpeaking=true",
+          );
+          this.emit({
+            type: "voice_input_state",
+            payload: {
+              isSpeaking: true,
+            },
+          });
+          await this.handleVoiceSpeechStart();
         },
         onSpeechStopped: async () => {
           this.handleVoiceSpeechStopped();
+          this.setPhase("transcribing");
+          this.emit({
+            type: "activity_log",
+            payload: {
+              id: uuidv4(),
+              timestamp: new Date(),
+              type: "system",
+              content: "Transcribing audio...",
+            },
+          });
+        },
+        onFinalTranscript: async ({
+          transcript,
+          language,
+          durationMs,
+          avgLogprob,
+          isLowConfidence,
+        }) => {
+          const requestId = uuidv4();
+          const transcriptText = isLowConfidence ? "" : transcript.trim();
+          if (isLowConfidence) {
+            this.sessionLogger.debug(
+              { text: transcript, avgLogprob },
+              "Filtered low-confidence transcription (likely non-speech)",
+            );
+          }
+          this.sessionLogger.info(
+            {
+              requestId,
+              isVoiceMode: this.isVoiceMode,
+              transcriptLength: transcriptText.length,
+              transcript: transcriptText,
+            },
+            "Transcription result",
+          );
+          await this.handleTranscriptionResultPayload({
+            text: transcriptText,
+            requestId,
+            ...(language ? { language } : {}),
+            duration: durationMs,
+            ...(avgLogprob !== undefined ? { avgLogprob } : {}),
+            ...(isLowConfidence !== undefined ? { isLowConfidence } : {}),
+          });
         },
         onError: (error) => {
           this.sessionLogger.error({ err: error }, "Voice turn controller failed");
@@ -2833,63 +2889,12 @@ export class Session {
       return;
     }
 
-    this.clearPendingVoiceSpeechStart("turn-controller-stop");
     const controller = this.voiceTurnController;
     this.voiceTurnController = null;
     await controller.stop();
   }
 
-  private clearPendingVoiceSpeechStart(reason: string): void {
-    if (this.pendingVoiceSpeechTimer) {
-      clearTimeout(this.pendingVoiceSpeechTimer);
-      this.pendingVoiceSpeechTimer = null;
-    }
-    if (this.pendingVoiceSpeechStartAt !== null) {
-      this.sessionLogger.debug({ reason }, "Clearing provisional voice speech start");
-      this.pendingVoiceSpeechStartAt = null;
-    }
-  }
-
-  private handleProvisionalVoiceSpeechStarted(): void {
-    if (this.speechInProgress || this.pendingVoiceSpeechTimer) {
-      return;
-    }
-
-    const startedAt = Date.now();
-    this.pendingVoiceSpeechStartAt = startedAt;
-    this.sessionLogger.info(
-      { confirmationMs: VOICE_INTERRUPT_CONFIRMATION_MS },
-      "Silero VAD provisional speech_started",
-    );
-    this.pendingVoiceSpeechTimer = setTimeout(() => {
-      this.pendingVoiceSpeechTimer = null;
-      if (this.pendingVoiceSpeechStartAt !== startedAt || this.speechInProgress) {
-        return;
-      }
-
-      this.pendingVoiceSpeechStartAt = null;
-      this.sessionLogger.info("voice_input_state emitting isSpeaking=true");
-      this.emit({
-        type: "voice_input_state",
-        payload: {
-          isSpeaking: true,
-        },
-      });
-      void this.handleVoiceSpeechStart();
-    }, VOICE_INTERRUPT_CONFIRMATION_MS);
-  }
-
   private handleVoiceSpeechStopped(): void {
-    if (this.pendingVoiceSpeechStartAt !== null) {
-      const durationMs = Date.now() - this.pendingVoiceSpeechStartAt;
-      this.clearPendingVoiceSpeechStart("speech-stopped-before-confirmation");
-      this.sessionLogger.info(
-        { durationMs, confirmationMs: VOICE_INTERRUPT_CONFIRMATION_MS },
-        "Ignoring provisional voice speech start that ended before confirmation",
-      );
-      return;
-    }
-
     this.sessionLogger.info("voice_input_state emitting isSpeaking=false");
     this.emit({
       type: "voice_input_state",
@@ -3004,22 +3009,11 @@ export class Session {
       if (!resolvedWorkspace) {
         throw new Error(`Workspace not found: ${msg.workspaceId}`);
       }
-      this.scheduleAutoNameWorkspaceBranchForFirstAgent({
-        workspace: resolvedWorkspace,
-        firstAgentContext,
+      const snapshot = await this.agentManager.createAgent(sessionConfig, undefined, {
+        labels,
+        workspaceId: resolvedWorkspace.workspaceId,
+        initialPrompt: trimmedPrompt,
       });
-      const snapshot = await this.agentManager.createAgent(
-        {
-          ...sessionConfig,
-          cwd: resolvedWorkspace.cwd,
-        },
-        undefined,
-        {
-          labels,
-          workspaceId: resolvedWorkspace.workspaceId,
-          initialPrompt: trimmedPrompt,
-        },
-      );
       await this.forwardAgentUpdate(snapshot);
 
       await this.sendInitialCreateAgentPrompt({
@@ -3167,7 +3161,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to resume agent: ${(error as Error).message}`,
+          content: `Failed to resume agent: ${getErrorMessage(error)}`,
         },
       });
     }
@@ -3284,9 +3278,7 @@ export class Session {
           throw new Error(`Agent not found: ${agentId}`);
         }
         const providerRegistry = this.getProviderRegistry();
-        if (
-          !isStoredAgentProviderAvailable(record, Object.keys(providerRegistry) as AgentProvider[])
-        ) {
+        if (!isStoredAgentProviderAvailable(record, Object.keys(providerRegistry))) {
           throw new Error(`Agent ${agentId} references unavailable provider '${record.provider}'`);
         }
         const handle = toAgentPersistenceHandle(providerRegistry, record.persistence);
@@ -3322,7 +3314,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to refresh agent: ${(error as Error).message}`,
+          content: `Failed to refresh agent: ${getErrorMessage(error)}`,
         },
       });
     }
@@ -3498,7 +3490,7 @@ export class Session {
           type: "list_provider_models_response",
           payload: {
             provider: msg.provider,
-            error: (error as Error)?.message ?? String(error),
+            error: getErrorMessage(error),
             fetchedAt,
             requestId: msg.requestId,
           },
@@ -3646,7 +3638,7 @@ export class Session {
         type: "list_provider_modes_response",
         payload: {
           provider: msg.provider,
-          error: (error as Error)?.message ?? String(error),
+          error: getErrorMessage(error),
           fetchedAt,
           requestId: msg.requestId,
         },
@@ -3723,7 +3715,7 @@ export class Session {
         type: "list_provider_features_response",
         payload: {
           provider: msg.draftConfig.provider,
-          error: (error as Error)?.message ?? String(error),
+          error: getErrorMessage(error),
           fetchedAt,
           requestId: msg.requestId,
         },
@@ -3754,7 +3746,7 @@ export class Session {
         type: "list_available_providers_response",
         payload: {
           providers: [],
-          error: (error as Error)?.message ?? String(error),
+          error: getErrorMessage(error),
           fetchedAt,
           requestId: msg.requestId,
         },
@@ -4046,7 +4038,7 @@ export class Session {
       const snapshot = await this.workspaceGitService.getSnapshot(cwd);
       return snapshot.git.isDirty === true;
     } catch (error) {
-      throw new Error(`Unable to inspect git status for ${cwd}: ${(error as Error).message}`, {
+      throw new Error(`Unable to inspect git status for ${cwd}: ${getErrorMessage(error)}`, {
         cause: error,
       });
     }
@@ -4150,7 +4142,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to set agent mode: ${(error as Error).message}`,
+          content: `Failed to set agent mode: ${getErrorMessage(error)}`,
         },
       });
       this.emit({
@@ -4159,9 +4151,7 @@ export class Session {
           requestId,
           agentId,
           accepted: false,
-          error: (error as Error | undefined)?.message
-            ? String((error as Error).message)
-            : "Failed to set agent mode",
+          error: getErrorMessageOr(error, "Failed to set agent mode"),
         },
       });
     }
@@ -4195,7 +4185,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to set agent model: ${(error as Error).message}`,
+          content: `Failed to set agent model: ${getErrorMessage(error)}`,
         },
       });
       this.emit({
@@ -4204,9 +4194,7 @@ export class Session {
           requestId,
           agentId,
           accepted: false,
-          error: (error as Error | undefined)?.message
-            ? String((error as Error).message)
-            : "Failed to set agent model",
+          error: getErrorMessageOr(error, "Failed to set agent model"),
         },
       });
     }
@@ -4244,7 +4232,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to set agent feature: ${(error as Error).message}`,
+          content: `Failed to set agent feature: ${getErrorMessage(error)}`,
         },
       });
       this.emit({
@@ -4253,9 +4241,7 @@ export class Session {
           requestId,
           agentId,
           accepted: false,
-          error: (error as Error | undefined)?.message
-            ? String((error as Error).message)
-            : "Failed to set agent feature",
+          error: getErrorMessageOr(error, "Failed to set agent feature"),
         },
       });
     }
@@ -4292,7 +4278,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to set agent thinking option: ${(error as Error).message}`,
+          content: `Failed to set agent thinking option: ${getErrorMessage(error)}`,
         },
       });
       this.emit({
@@ -4301,9 +4287,7 @@ export class Session {
           requestId,
           agentId,
           accepted: false,
-          error: (error as Error | undefined)?.message
-            ? String((error as Error).message)
-            : "Failed to set agent thinking option",
+          error: getErrorMessageOr(error, "Failed to set agent thinking option"),
         },
       });
     }
@@ -4444,7 +4428,7 @@ export class Session {
         payload: {
           agentId,
           commands: [],
-          error: (error as Error).message,
+          error: getErrorMessage(error),
           requestId,
         },
       });
@@ -4486,7 +4470,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Failed to respond to permission: ${(error as Error).message}`,
+          content: `Failed to respond to permission: ${getErrorMessage(error)}`,
         },
       });
       throw error;
@@ -4581,7 +4565,7 @@ export class Session {
           return;
         default: {
           const exhaustiveCheck: never = resolution;
-          throw new Error(`Unhandled branch resolution: ${exhaustiveCheck}`);
+          throw new Error(`Unhandled branch resolution: ${getErrorMessage(exhaustiveCheck)}`);
         }
       }
     } catch (error) {
@@ -5610,7 +5594,7 @@ export class Session {
           mode,
           directory: null,
           file: null,
-          error: (error as Error).message,
+          error: getErrorMessage(error),
           requestId,
         },
       });
@@ -5642,7 +5626,7 @@ export class Session {
         payload: {
           cwd,
           icon: null,
-          error: (error as Error).message,
+          error: getErrorMessage(error),
           requestId,
         },
       });
@@ -5718,7 +5702,7 @@ export class Session {
           fileName: null,
           mimeType: null,
           size: null,
-          error: (error as Error).message,
+          error: getErrorMessage(error),
           requestId,
         },
       });
@@ -5879,7 +5863,7 @@ export class Session {
       ),
     );
     for (let i = 0; i < pairs.length; i += 1) {
-      placementsByCwd.set(normalizePersistedWorkspaceId(pairs[i]!.workspace.cwd), placements[i]!);
+      placementsByCwd.set(normalizePersistedWorkspaceId(pairs[i].workspace.cwd), placements[i]);
     }
 
     return placementsByCwd;
@@ -6013,7 +5997,7 @@ export class Session {
     defaultSort: [{ key: "updated_at", direction: "desc" }],
     label: "fetch_agents",
     getId: (agent) => agent.id,
-    getSortValue: (agent, key) => {
+    getSortValue: (agent, key): number | string => {
       switch (key) {
         case "status_priority":
           return this.getStatusPriority(agent);
@@ -6054,7 +6038,7 @@ export class Session {
     return {
       id: workspace.workspaceId,
       projectId: workspace.projectId,
-      projectDisplayName: resolvedProjectRecord?.displayName ?? String(workspace.projectId),
+      projectDisplayName: resolvedProjectRecord?.displayName ?? workspace.projectId,
       projectRootPath: resolvedProjectRecord?.rootPath ?? workspace.cwd,
       workspaceDirectory: workspace.cwd,
       projectKind: (resolvedProjectRecord?.kind ?? "directory") === "git" ? "git" : "non_git",
@@ -6142,7 +6126,7 @@ export class Session {
     return {
       id: result.workspace.workspaceId,
       projectId: result.workspace.projectId,
-      projectDisplayName: projectRecord?.displayName ?? String(result.workspace.projectId),
+      projectDisplayName: projectRecord?.displayName ?? result.workspace.projectId,
       projectRootPath: projectRecord?.rootPath ?? result.repoRoot,
       workspaceDirectory: result.workspace.cwd,
       projectKind: "git",
@@ -7363,8 +7347,9 @@ export class Session {
         { agentId, messageId: msg.messageId, textPrefix: msg.text.slice(0, 80) },
         "send_agent_message_request: dispatching shared sendPromptToAgent",
       );
+      let dispatchResult: { outOfBand: boolean };
       try {
-        await sendPromptToAgent({
+        dispatchResult = await sendPromptToAgent({
           agentManager: this.agentManager,
           agentStorage: this.agentStorage,
           agentId,
@@ -7383,6 +7368,19 @@ export class Session {
             agentId,
             accepted: false,
             error: message,
+          },
+        });
+        return;
+      }
+
+      if (dispatchResult.outOfBand) {
+        this.emit({
+          type: "send_agent_message_response",
+          payload: {
+            requestId: msg.requestId,
+            agentId,
+            accepted: true,
+            error: null,
           },
         });
         return;
@@ -7604,15 +7602,6 @@ export class Session {
     const chunkBytes = Buffer.byteLength(msg.audio, "base64");
     this.voiceInputChunkCount += 1;
     this.voiceInputBytes += chunkBytes;
-    if (this.voiceInputChunkCount === 1) {
-      this.sessionLogger.info(
-        {
-          format: chunkFormat,
-          audioBytes: chunkBytes,
-        },
-        "Received first voice_audio_chunk for active voice mode",
-      );
-    }
     const now = Date.now();
     if (this.voiceInputChunkCount % 50 === 0 || now - this.voiceInputWindowStartedAt >= 1000) {
       this.sessionLogger.info(
@@ -7775,7 +7764,7 @@ export class Session {
     );
 
     const combinedAudio = Buffer.concat(pendingSegments.map((segment) => segment.audio));
-    const combinedFormat = pendingSegments[pendingSegments.length - 1]!.format;
+    const combinedFormat = pendingSegments[pendingSegments.length - 1].format;
 
     await this.processAudio(combinedAudio, combinedFormat);
   }
@@ -7835,7 +7824,7 @@ export class Session {
           id: uuidv4(),
           timestamp: new Date(),
           type: "error",
-          content: `Transcription error: ${(error as Error).message}`,
+          content: `Transcription error: ${getErrorMessage(error)}`,
         },
       });
       throw error;
@@ -8071,7 +8060,6 @@ export class Session {
    * Clear speech-in-progress flag once the user turn has completed
    */
   private clearSpeechInProgress(reason: string): void {
-    this.clearPendingVoiceSpeechStart(`clear-speech-in-progress:${reason}`);
     if (!this.speechInProgress) {
       return;
     }
@@ -8463,7 +8451,9 @@ export class Session {
           | "schedule/logs"
           | "schedule/pause"
           | "schedule/resume"
-          | "schedule/delete";
+          | "schedule/delete"
+          | "schedule/run-once"
+          | "schedule/update";
       }
     >,
     error: unknown,
@@ -8496,6 +8486,7 @@ export class Session {
         target,
         maxRuns: request.maxRuns,
         expiresAt: request.expiresAt,
+        runOnCreate: request.runOnCreate,
       });
       this.emit({
         type: "schedule/create/response",
@@ -8618,6 +8609,50 @@ export class Session {
     }
   }
 
+  private async handleScheduleRunOnceRequest(
+    request: Extract<SessionInboundMessage, { type: "schedule/run-once" }>,
+  ): Promise<void> {
+    try {
+      const schedule = await this.scheduleService.runOnce(request.scheduleId);
+      this.emit({
+        type: "schedule/run-once/response",
+        payload: {
+          requestId: request.requestId,
+          schedule,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitScheduleRpcError(request, error);
+    }
+  }
+
+  private async handleScheduleUpdateRequest(
+    request: Extract<SessionInboundMessage, { type: "schedule/update" }>,
+  ): Promise<void> {
+    try {
+      const schedule = await this.scheduleService.update({
+        id: request.scheduleId,
+        ...(request.name !== undefined ? { name: request.name } : {}),
+        ...(request.prompt !== undefined ? { prompt: request.prompt } : {}),
+        ...(request.cadence !== undefined ? { cadence: request.cadence } : {}),
+        ...(request.newAgentConfig !== undefined ? { newAgentConfig: request.newAgentConfig } : {}),
+        ...(request.maxRuns !== undefined ? { maxRuns: request.maxRuns } : {}),
+        ...(request.expiresAt !== undefined ? { expiresAt: request.expiresAt } : {}),
+      });
+      this.emit({
+        type: "schedule/update/response",
+        payload: {
+          requestId: request.requestId,
+          schedule,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitScheduleRpcError(request, error);
+    }
+  }
+
   private emitLoopRpcError(
     request: Extract<
       SessionInboundMessage,
@@ -8649,10 +8684,12 @@ export class Session {
         cwd: request.cwd,
         provider: request.provider,
         model: request.model,
+        modeId: request.modeId,
         workerProvider: request.workerProvider,
         workerModel: request.workerModel,
         verifierProvider: request.verifierProvider,
         verifierModel: request.verifierModel,
+        verifierModeId: request.verifierModeId,
         verifyPrompt: request.verifyPrompt,
         verifyChecks: request.verifyChecks,
         archive: request.archive,
