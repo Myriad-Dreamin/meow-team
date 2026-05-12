@@ -337,7 +337,7 @@ importers:
         specifier: ^1.0.0
         version: 1.1.0
       '@getpaseo/server':
-        specifier: 0.1.70
+        specifier: 0.1.71
         version: link:../server
       chalk:
         specifier: ^5.3.0
@@ -574,10 +574,10 @@ importers:
         specifier: ^0.2.133
         version: 0.2.138(zod@3.25.76)
       '@getpaseo/highlight':
-        specifier: 0.1.70
+        specifier: 0.1.71
         version: link:../highlight
       '@getpaseo/relay':
-        specifier: 0.1.70
+        specifier: 0.1.71
         version: link:../relay
       '@isaacs/ttlcache':
         specifier: ^2.1.4

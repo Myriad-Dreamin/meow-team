@@ -52,6 +52,7 @@ import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { usePanelStore } from "@/stores/panel-store";
 import { type Agent, useSessionStore } from "@/stores/session-store";
 import type { Theme } from "@/styles/theme";
+import { SubagentsSection, useArchiveSubagent, useSubagentsForParent } from "@/subagents";
 import type { PendingPermission } from "@/types/shared";
 import type { StreamItem } from "@/types/stream";
 import { getInitDeferred, getInitKey } from "@/utils/agent-initialization";
@@ -947,6 +948,7 @@ function ChatAgentContent({
   });
   if (nonReadyView) return nonReadyView;
   invariant(effectiveAgent, "effectiveAgent is defined when the non-ready view is absent");
+  invariant(agentState.cwd, "agent cwd is defined when agent content is ready");
 
   return (
     <View style={styles.root}>
@@ -976,7 +978,7 @@ function ChatAgentContent({
             isPaneFocused={isPaneFocused}
             isArchivingCurrentAgent={isArchivingCurrentAgent}
             archivedAt={agentState.archivedAt}
-            initialCwd={agentState.cwd ?? ""}
+            cwd={agentState.cwd}
             isSubmitLoading={showPendingCreateSubmitLoading}
             onAttentionInputFocus={attentionController.clearOnInputFocus}
             onAttentionPromptSend={attentionController.clearOnPromptSend}
@@ -1181,7 +1183,7 @@ function AgentComposerSection({
   isPaneFocused,
   isArchivingCurrentAgent,
   archivedAt,
-  initialCwd,
+  cwd,
   isSubmitLoading,
   onAttentionInputFocus,
   onAttentionPromptSend,
@@ -1194,7 +1196,7 @@ function AgentComposerSection({
   isPaneFocused: boolean;
   isArchivingCurrentAgent: boolean;
   archivedAt: Date | null;
-  initialCwd: string;
+  cwd: string;
   isSubmitLoading: boolean;
   onAttentionInputFocus: () => void;
   onAttentionPromptSend: () => void;
@@ -1217,7 +1219,7 @@ function AgentComposerSection({
       agentId={agentId}
       serverId={serverId}
       isPaneFocused={isPaneFocused}
-      initialCwd={initialCwd}
+      cwd={cwd}
       isSubmitLoading={isSubmitLoading}
       onAttentionInputFocus={onAttentionInputFocus}
       onAttentionPromptSend={onAttentionPromptSend}
@@ -1232,7 +1234,7 @@ function ActiveAgentComposer({
   agentId,
   serverId,
   isPaneFocused,
-  initialCwd,
+  cwd,
   isSubmitLoading,
   onAttentionInputFocus,
   onAttentionPromptSend,
@@ -1243,7 +1245,7 @@ function ActiveAgentComposer({
   agentId: string;
   serverId: string;
   isPaneFocused: boolean;
-  initialCwd: string;
+  cwd: string;
   isSubmitLoading: boolean;
   onAttentionInputFocus: () => void;
   onAttentionPromptSend: () => void;
@@ -1253,17 +1255,28 @@ function ActiveAgentComposer({
 }) {
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
-  const { workspaceId } = usePaneContext();
+  const paneContext = usePaneContext();
+  const { workspaceId } = paneContext;
+  const subagentRows = useSubagentsForParent({
+    serverId: paneContext.serverId,
+    parentAgentId: agentId,
+  });
+  const handleOpenSubagent = useCallback(
+    (subagentId: string) => {
+      paneContext.openTab({ kind: "agent", agentId: subagentId });
+    },
+    [paneContext],
+  );
+  const handleArchiveSubagent = useArchiveSubagent({ serverId });
   const agentInputDraft = useAgentInputDraft({
     draftKey: buildDraftStoreKey({
       serverId,
       agentId,
     }),
-    initialCwd,
   });
   const workspaceAttachmentScopeKey = useWorkspaceAttachmentScopeKey({
     serverId,
-    cwd: agentInputDraft.cwd,
+    cwd,
     workspaceId,
   });
   const workspaceAttachments = useWorkspaceAttachments(workspaceAttachmentScopeKey);
@@ -1298,6 +1311,11 @@ function ActiveAgentComposer({
 
   return (
     <View style={inputAreaStyle}>
+      <SubagentsSection
+        rows={subagentRows}
+        onOpenSubagent={handleOpenSubagent}
+        onArchiveSubagent={handleArchiveSubagent}
+      />
       <Composer
         agentId={agentId}
         serverId={serverId}
@@ -1308,7 +1326,7 @@ function ActiveAgentComposer({
         workspaceAttachments={workspaceAttachments}
         onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
         onChangeAttachments={agentInputDraft.setAttachments}
-        cwd={agentInputDraft.cwd}
+        cwd={cwd}
         clearDraft={agentInputDraft.clear}
         autoFocus={isPaneFocused}
         isSubmitLoading={isSubmitLoading}
