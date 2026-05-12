@@ -27,6 +27,32 @@ If asked to "release paseo" without specifying major/minor, treat it as a patch 
 
 Use the direct stable path when the current `main` changes are ready to become the public release immediately.
 
+## Upstream merge PR automation
+
+The `Myriad-Dreamin/meow-flow` fork tracks upstream Paseo release tags through
+merge PRs named `merge-vX.Y.Z`. To prepare the next upstream release merge and
+launch the three detached review agents:
+
+```bash
+npm run merge:pr -- 0.1.72
+# or
+npm run merge:pr -- v0.1.72
+```
+
+The script normalizes the version, prepares `merge-vX.Y.Z` from `origin/main`,
+fetches `origin` and the upstream `paseo` tags, then launches:
+
+- `Resolve conflict agent` - merges the target upstream tag, resolves conflicts,
+  runs verification, commits, and pushes the branch.
+- `Make PR agent` - waits for the merge branch, creates or updates the GitHub PR,
+  and keeps it ready for review.
+- `Fix CI failures agent` - waits for the PR, monitors failing checks, fixes CI
+  failures, verifies, and pushes follow-up commits.
+
+Use `--reset-existing` only when you intentionally want to reset an existing
+local merge branch back to `origin/main` before agents start. The script refuses
+to run with a dirty working tree.
+
 ## Manual step-by-step
 
 ```bash
