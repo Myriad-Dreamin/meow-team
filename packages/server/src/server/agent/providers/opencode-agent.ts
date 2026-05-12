@@ -1,9 +1,7 @@
-import type { ChildProcess } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
-  createOpencodeClient,
   type AssistantMessage as OpenCodeAssistantMessage,
   type Event as OpenCodeEvent,
   type FilePartInput as OpenCodeFilePartInput,
@@ -11,7 +9,7 @@ import {
   type Part as OpenCodePart,
   type TextPartInput as OpenCodeTextPartInput,
 } from "@opencode-ai/sdk/v2/client";
-import net from "node:net";
+import { findExecutable, isCommandAvailable } from "../../../utils/executable.js";
 import type { Logger } from "pino";
 import { z } from "zod";
 
@@ -43,17 +41,12 @@ import type {
   ToolCallDetail,
   ToolCallTimelineItem,
 } from "../agent-sdk-types.js";
-import {
-  createProviderEnvSpec,
-  resolveProviderCommandPrefix,
-  type ProviderRuntimeSettings,
-} from "../provider-launch-config.js";
-import { findExecutable, isCommandAvailable } from "../../../utils/executable.js";
-import { terminateWithTreeKill } from "../../../utils/tree-kill.js";
+import { createProviderEnvSpec, type ProviderRuntimeSettings } from "../provider-launch-config.js";
 import { withTimeout } from "../../../utils/promise-timeout.js";
-import { execCommand, spawnProcess } from "../../../utils/spawn.js";
+import { execCommand } from "../../../utils/spawn.js";
 import { buildToolCallDisplayModel } from "../../../shared/tool-call-display.js";
 import { mapOpencodeToolCall } from "./opencode/tool-call-mapper.js";
+import { OpenCodeServerManager } from "./opencode/server-manager.js";
 import {
   formatDiagnosticStatus,
   formatProviderDiagnostic,
@@ -63,6 +56,11 @@ import {
 } from "./diagnostic-utils.js";
 import { runProviderTurn } from "./provider-runner.js";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
+import {
+  createSdkOpenCodeClient,
+  type OpenCodeRuntime,
+  type OpenCodeServerAcquisition,
+} from "./opencode/runtime.js";
 
 const OPENCODE_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: true,
@@ -159,8 +157,6 @@ type OpenCodeMcpConfig =
 
 const MCP_ALREADY_PRESENT_ERROR_TOKENS = ["already", "exists", "connected"] as const;
 const OPENCODE_PROVIDER_LIST_TIMEOUT_MS = 30_000;
-const OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000;
-const OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS = 1_000;
 const OPENCODE_HANDLED_BUILTIN_SLASH_COMMANDS: AgentSlashCommand[] = [
   { name: "compact", description: "Compact the current session", argumentHint: "" },
   { name: "summarize", description: "Compact the current session", argumentHint: "" },
@@ -250,16 +246,6 @@ const OpencodeToolPartToTimelineItemSchema = OpencodeToolPartTimelineEnvelopeSch
       error: part.error,
     }),
 );
-
-async function resolveOpenCodeBinary(): Promise<string> {
-  const found = await findExecutable("opencode");
-  if (found) {
-    return found;
-  }
-  throw new Error(
-    "OpenCode binary not found. Install OpenCode (https://github.com/opencode-ai/opencode) and ensure it is available in your shell PATH.",
-  );
-}
 
 function toOpenCodeMcpConfig(config: McpServerConfig): OpenCodeMcpConfig {
   if (config.type === "stdio") {
@@ -412,22 +398,6 @@ function isOpenCodeHeadersTimeoutFailure(error: unknown): boolean {
 function isAlreadyPresentMcpError(error: unknown): boolean {
   const normalized = toDiagnosticErrorMessage(error).toLowerCase();
   return MCP_ALREADY_PRESENT_ERROR_TOKENS.some((token) => normalized.includes(token));
-}
-
-async function findAvailablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, () => {
-      const address = server.address();
-      if (address && typeof address === "object") {
-        const port = address.port;
-        server.close(() => resolve(port));
-      } else {
-        server.close(() => reject(new Error("Failed to get port")));
-      }
-    });
-    server.on("error", reject);
-  });
 }
 
 function resolvePartDedupeKey(
@@ -928,299 +898,54 @@ export const __openCodeInternals = {
   },
 };
 
-export class OpenCodeServerManager {
-  private static instance: OpenCodeServerManager | null = null;
-  private static exitHandlerRegistered = false;
-  private currentServer: OpenCodeServerGeneration | null = null;
-  private retiredServers = new Set<OpenCodeServerGeneration>();
-  private startPromise: Promise<OpenCodeServerGeneration> | null = null;
-  private forcedRefreshPromise: Promise<OpenCodeServerGeneration> | null = null;
-  private readonly logger: Logger;
-  private readonly runtimeSettings?: ProviderRuntimeSettings;
-  private readonly runtimeSettingsKey: string;
+interface OpenCodeAgentClientDeps {
+  runtime?: OpenCodeRuntime;
+}
 
-  private constructor(logger: Logger, runtimeSettings?: ProviderRuntimeSettings) {
-    this.logger = logger;
-    this.runtimeSettings = runtimeSettings;
-    this.runtimeSettingsKey = JSON.stringify(runtimeSettings ?? {});
+class ProductionOpenCodeRuntime implements OpenCodeRuntime {
+  constructor(private readonly serverManager: OpenCodeServerManager) {}
+
+  async acquireServer(options: { force: boolean }): Promise<OpenCodeServerAcquisition> {
+    return this.serverManager.acquire(options);
   }
 
-  static getInstance(
-    logger: Logger,
-    runtimeSettings?: ProviderRuntimeSettings,
-  ): OpenCodeServerManager {
-    const nextSettingsKey = JSON.stringify(runtimeSettings ?? {});
-    if (!OpenCodeServerManager.instance) {
-      OpenCodeServerManager.instance = new OpenCodeServerManager(logger, runtimeSettings);
-      OpenCodeServerManager.registerExitHandler();
-    } else if (OpenCodeServerManager.instance.runtimeSettingsKey !== nextSettingsKey) {
-      logger.warn(
-        {
-          existingRuntimeSettings: OpenCodeServerManager.instance.runtimeSettingsKey,
-          requestedRuntimeSettings: nextSettingsKey,
-        },
-        "OpenCode server manager already initialized with different runtime settings",
-      );
-    }
-    return OpenCodeServerManager.instance;
+  async ensureServerRunning(): Promise<{ port: number; url: string }> {
+    return this.serverManager.ensureRunning();
   }
 
-  private static registerExitHandler(): void {
-    if (OpenCodeServerManager.exitHandlerRegistered) {
-      return;
-    }
-    OpenCodeServerManager.exitHandlerRegistered = true;
-
-    const cleanup = () => {
-      const instance = OpenCodeServerManager.instance;
-      void instance?.shutdown();
-    };
-
-    process.on("exit", cleanup);
-    process.on("SIGTERM", cleanup);
-    process.on("SIGINT", cleanup);
-  }
-
-  async ensureRunning(): Promise<{ port: number; url: string }> {
-    const acquisition = await this.acquire({ force: false });
-    acquisition.release();
-    return acquisition.server;
-  }
-
-  async acquire(options: { force: boolean }): Promise<{
-    server: { port: number; url: string };
-    release: () => void;
-  }> {
-    const server = options.force
-      ? await this.getForcedRefreshServer()
-      : await this.getCurrentServer();
-    server.refCount += 1;
-    let released = false;
-    return {
-      server: { port: server.port, url: server.url },
-      release: () => {
-        if (released) {
-          return;
-        }
-        released = true;
-        server.refCount -= 1;
-        this.cleanupRetiredServers();
-      },
-    };
-  }
-
-  private async getForcedRefreshServer(): Promise<OpenCodeServerGeneration> {
-    if (this.forcedRefreshPromise) {
-      return this.forcedRefreshPromise;
-    }
-
-    this.forcedRefreshPromise = Promise.resolve()
-      .then(async () => {
-        await this.rotateCurrentServer();
-        return this.getCurrentServer();
-      })
-      .finally(() => {
-        this.forcedRefreshPromise = null;
-      });
-    return this.forcedRefreshPromise;
-  }
-
-  private async getCurrentServer(): Promise<OpenCodeServerGeneration> {
-    if (this.startPromise) {
-      return this.startPromise;
-    }
-
-    if (this.currentServer && !this.currentServer.process.killed) {
-      return this.currentServer;
-    }
-
-    this.startPromise = this.startServer();
-    try {
-      const result = await this.startPromise;
-      if (!result.retired) {
-        this.currentServer = result;
-      }
-      return result;
-    } finally {
-      this.startPromise = null;
-    }
-  }
-
-  private async rotateCurrentServer(): Promise<void> {
-    const existing = this.currentServer;
-    if (existing) {
-      existing.retired = true;
-      this.retiredServers.add(existing);
-      this.currentServer = null;
-      this.cleanupRetiredServers();
-    }
-    if (this.startPromise) {
-      const pending = await this.startPromise;
-      pending.retired = true;
-      this.retiredServers.add(pending);
-      this.currentServer = null;
-      this.cleanupRetiredServers();
-    }
-  }
-
-  private async startServer(): Promise<OpenCodeServerGeneration> {
-    const port = await findAvailablePort();
-    const url = `http://127.0.0.1:${port}`;
-    const launchPrefix = await resolveProviderCommandPrefix(
-      this.runtimeSettings?.command,
-      resolveOpenCodeBinary,
-    );
-
-    return new Promise((resolve, reject) => {
-      const serverProcess = spawnProcess(
-        launchPrefix.command,
-        [...launchPrefix.args, "serve", "--port", String(port)],
-        {
-          detached: process.platform !== "win32",
-          stdio: ["ignore", "pipe", "pipe"],
-          ...createProviderEnvSpec({ runtimeSettings: this.runtimeSettings }),
-        },
-      );
-
-      let started = false;
-      let stderrBuffer = "";
-      let stdoutBuffer = "";
-      const STARTUP_BUFFER_CAP = 8192;
-      const appendCapped = (current: string, chunk: string): string => {
-        if (current.length >= STARTUP_BUFFER_CAP) {
-          return current;
-        }
-        const remaining = STARTUP_BUFFER_CAP - current.length;
-        return current + chunk.slice(0, remaining);
-      };
-      const buildStartupErrorMessage = (headline: string): string => {
-        const sections = [headline];
-        const stderrTrimmed = stderrBuffer.trim();
-        if (stderrTrimmed.length > 0) {
-          sections.push(`stderr: ${stderrTrimmed}`);
-        }
-        const stdoutTrimmed = stdoutBuffer.trim();
-        if (stdoutTrimmed.length > 0) {
-          sections.push(`stdout: ${stdoutTrimmed}`);
-        }
-        return sections.join("\n");
-      };
-      const timeout = setTimeout(() => {
-        if (!started) {
-          reject(new Error(buildStartupErrorMessage("OpenCode server startup timeout")));
-        }
-      }, 30_000);
-
-      serverProcess.stdout?.on("data", (data: Buffer) => {
-        const output = data.toString();
-        stdoutBuffer = appendCapped(stdoutBuffer, output);
-        if (output.includes("listening on") && !started) {
-          started = true;
-          clearTimeout(timeout);
-          resolve({
-            process: serverProcess,
-            port,
-            url,
-            refCount: 0,
-            retired: false,
-          });
-        }
-      });
-
-      serverProcess.stderr?.on("data", (data: Buffer) => {
-        const output = data.toString();
-        stderrBuffer = appendCapped(stderrBuffer, output);
-        this.logger.error({ stderr: output.trim() }, "OpenCode server stderr");
-      });
-
-      serverProcess.on("error", (error) => {
-        clearTimeout(timeout);
-        const headline = error instanceof Error ? error.message : String(error);
-        reject(new Error(buildStartupErrorMessage(headline)));
-      });
-
-      serverProcess.on("exit", (code) => {
-        if (!started) {
-          clearTimeout(timeout);
-          reject(new Error(buildStartupErrorMessage(`OpenCode server exited with code ${code}`)));
-        }
-        if (this.currentServer?.process === serverProcess) {
-          this.currentServer = null;
-        }
-        for (const retired of Array.from(this.retiredServers)) {
-          if (retired.process === serverProcess) {
-            this.retiredServers.delete(retired);
-          }
-        }
-      });
-    });
+  createClient(options: { baseUrl: string; directory: string }): OpencodeClient {
+    return createSdkOpenCodeClient(options);
   }
 
   async shutdown(): Promise<void> {
-    const servers = [
-      ...(this.currentServer ? [this.currentServer] : []),
-      ...Array.from(this.retiredServers),
-    ];
-    await Promise.all(servers.map((server) => this.killServer(server)));
-    this.currentServer = null;
-    this.retiredServers.clear();
+    await this.serverManager.shutdown();
   }
-
-  private cleanupRetiredServers(): void {
-    for (const server of Array.from(this.retiredServers)) {
-      if (server.refCount === 0) {
-        this.retiredServers.delete(server);
-        void this.killServer(server);
-      }
-    }
-  }
-
-  private async killServer(server: OpenCodeServerGeneration): Promise<void> {
-    if (server.process.killed) {
-      return;
-    }
-    const result = await terminateWithTreeKill(server.process, {
-      gracefulTimeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
-      forceTimeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
-      onForceSignal: () => {
-        this.logger.warn(
-          { timeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS },
-          "OpenCode server did not exit after SIGTERM; sending SIGKILL",
-        );
-      },
-    });
-    if (result === "kill-timeout") {
-      this.logger.warn(
-        { timeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS },
-        "OpenCode server did not report exit after SIGKILL",
-      );
-    }
-  }
-}
-
-interface OpenCodeServerGeneration {
-  process: ChildProcess;
-  port: number;
-  url: string;
-  refCount: number;
-  retired: boolean;
 }
 
 export class OpenCodeAgentClient implements AgentClient {
   readonly provider = "opencode" as const;
   readonly capabilities = OPENCODE_CAPABILITIES;
 
-  private readonly serverManager: OpenCodeServerManager;
+  private readonly runtime: OpenCodeRuntime;
   private readonly logger: Logger;
   private readonly runtimeSettings?: ProviderRuntimeSettings;
   private readonly modelContextWindows = new Map<string, number>();
   private readonly storageRoot: string;
 
-  constructor(logger: Logger, runtimeSettings?: ProviderRuntimeSettings, storageRoot?: string) {
+  constructor(
+    logger: Logger,
+    runtimeSettings?: ProviderRuntimeSettings,
+    storageRoot?: string,
+    deps: OpenCodeAgentClientDeps = {},
+  ) {
     this.logger = logger.child({ module: "agent", provider: "opencode" });
     this.runtimeSettings = runtimeSettings;
     this.storageRoot = storageRoot ?? resolveOpenCodeStorageRoot();
-    this.serverManager = OpenCodeServerManager.getInstance(this.logger, runtimeSettings);
+    this.runtime =
+      deps.runtime ??
+      new ProductionOpenCodeRuntime(
+        OpenCodeServerManager.getInstance(this.logger, runtimeSettings),
+      );
   }
 
   async createSession(
@@ -1229,9 +954,9 @@ export class OpenCodeAgentClient implements AgentClient {
     options?: AgentCreateSessionOptions,
   ): Promise<AgentSession> {
     const openCodeConfig = this.assertConfig(config);
-    const acquisition = await this.serverManager.acquire({ force: false });
+    const acquisition = await this.runtime.acquireServer({ force: false });
     const { url } = acquisition.server;
-    const client = createOpencodeClient({
+    const client = this.runtime.createClient({
       baseUrl: url,
       directory: openCodeConfig.cwd,
     });
@@ -1285,9 +1010,9 @@ export class OpenCodeAgentClient implements AgentClient {
       ...overrides,
     };
     const openCodeConfig = this.assertConfig(config);
-    const acquisition = await this.serverManager.acquire({ force: false });
+    const acquisition = await this.runtime.acquireServer({ force: false });
     const { url } = acquisition.server;
-    const client = createOpencodeClient({
+    const client = this.runtime.createClient({
       baseUrl: url,
       directory: openCodeConfig.cwd,
     });
@@ -1310,9 +1035,9 @@ export class OpenCodeAgentClient implements AgentClient {
   }
 
   async listModels(options: ListModelsOptions): Promise<AgentModelDefinition[]> {
-    const acquisition = await this.serverManager.acquire({ force: options.force });
+    const acquisition = await this.runtime.acquireServer({ force: options.force });
     const { url } = acquisition.server;
-    const client = createOpencodeClient({
+    const client = this.runtime.createClient({
       baseUrl: url,
       directory: options.cwd,
     });
@@ -1373,10 +1098,10 @@ export class OpenCodeAgentClient implements AgentClient {
   }
 
   async listModes(options: ListModesOptions): Promise<AgentMode[]> {
-    const acquisition = await this.serverManager.acquire({ force: options.force });
+    const acquisition = await this.runtime.acquireServer({ force: options.force });
     const { url } = acquisition.server;
     const directory = options.cwd;
-    const client = createOpencodeClient({ baseUrl: url, directory });
+    const client = this.runtime.createClient({ baseUrl: url, directory });
 
     try {
       const response = await withTimeout(
@@ -1427,7 +1152,7 @@ export class OpenCodeAgentClient implements AgentClient {
       let status = formatDiagnosticStatus(available);
 
       try {
-        const { url } = await this.serverManager.ensureRunning();
+        const { url } = await this.runtime.ensureServerRunning();
         serverStatus = `Running (${url})`;
       } catch (error) {
         serverStatus = `Unavailable (${toDiagnosticErrorMessage(error)})`;
