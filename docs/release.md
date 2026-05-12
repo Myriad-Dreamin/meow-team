@@ -43,7 +43,8 @@ The script normalizes the version, prepares `merge-vX.Y.Z` from `origin/main`,
 fetches `origin` and the upstream `paseo` tags, then launches:
 
 - `Resolve conflict agent` - merges the target upstream tag, resolves conflicts,
-  runs verification, commits, and pushes the branch.
+  updates `pnpm-lock.yaml` when manifests changed, runs verification, commits,
+  and pushes the branch. A stale lockfile makes CI fail immediately.
 - `Make PR agent` - waits for the merge branch, creates or updates the GitHub PR,
   and keeps it ready for review.
 - `Fix CI failures agent` - waits for the PR, monitors failing checks, fixes CI
