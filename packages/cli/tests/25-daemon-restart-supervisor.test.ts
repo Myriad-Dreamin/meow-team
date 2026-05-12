@@ -120,6 +120,16 @@ const host = `127.0.0.1:${port}`;
 
 let supervisorProcess: ChildProcess | null = null;
 let recentSupervisorLogs = "";
+let sawSupervisorRestartIntent = false;
+const supervisorRestartIntentLog = "Restart requested by worker. Stopping worker for restart...";
+
+function captureSupervisorLogs(chunk: Buffer | string): void {
+  const nextLogs = recentSupervisorLogs + chunk.toString();
+  if (nextLogs.includes(supervisorRestartIntentLog)) {
+    sawSupervisorRestartIntent = true;
+  }
+  recentSupervisorLogs = nextLogs.slice(-8000);
+}
 
 try {
   console.log("Test 1: start supervisor-entrypoint in dev mode with isolated PASEO_HOME");
@@ -141,12 +151,8 @@ try {
     },
   );
 
-  supervisorProcess.stdout?.on("data", (chunk) => {
-    recentSupervisorLogs = (recentSupervisorLogs + chunk.toString()).slice(-8000);
-  });
-  supervisorProcess.stderr?.on("data", (chunk) => {
-    recentSupervisorLogs = (recentSupervisorLogs + chunk.toString()).slice(-8000);
-  });
+  supervisorProcess.stdout?.on("data", captureSupervisorLogs);
+  supervisorProcess.stderr?.on("data", captureSupervisorLogs);
 
   await waitFor(
     async () => {
@@ -223,7 +229,7 @@ try {
     "supervisor pid should remain stable across restart",
   );
   assert(
-    recentSupervisorLogs.includes("Restart requested by worker. Stopping worker for restart..."),
+    sawSupervisorRestartIntent,
     `restart should route through supervisor restart intent, logs:\n${recentSupervisorLogs}`,
   );
   console.log("✓ app-style restart keeps daemon healthy and restarts worker\n");
