@@ -45,7 +45,7 @@ stdenv.mkDerivation rec {
   pnpmDeps = pnpm.fetchDeps {
     inherit pname src version;
     fetcherVersion = 2;
-    hash = "sha256-BfuJ0VU7mn5OeZEYS+v4OB2oW/tsxBQnT+KsFWB6pos=";
+    hash = "sha256-DT861dd1SQ8+BrLjZXC9MmjTQagNSnt80pQpbNj21UI=";
   };
 
   # nixpkgs may provide a newer pnpm 10.x than the repo's pinned packageManager.
