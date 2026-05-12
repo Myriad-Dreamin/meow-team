@@ -10,6 +10,7 @@ import { CheckoutPrStatusSchema } from "../shared/messages.js";
 import type { WorkspaceDescriptorPayload } from "../shared/messages.js";
 import { decodeFileTransferFrame, FileTransferOpcode } from "../shared/binary-frames/index.js";
 import { normalizeCheckoutPrStatusPayload, Session } from "./session.js";
+import { StructuredAgentFallbackError } from "./agent/agent-response-loop.js";
 import type {
   AgentClient,
   AgentMode,
@@ -17,6 +18,7 @@ import type {
   AgentTimelineItem,
   ListModesOptions,
   ListModelsOptions,
+  PersistedAgentDescriptor,
 } from "./agent/agent-sdk-types.js";
 import type { ManagedAgent } from "./agent/agent-manager.js";
 import type { ProviderDefinition } from "./agent/provider-registry.js";
@@ -65,9 +67,11 @@ interface SessionHandlerInternals {
   handleCheckoutMergeFromBaseRequest(params: unknown): Promise<unknown>;
   handleCheckoutCommitRequest(params: unknown): Promise<unknown>;
   handleCheckoutPrCreateRequest(params: unknown): Promise<unknown>;
+  handleCheckoutPrMergeRequest(params: unknown): Promise<unknown>;
   handleCheckoutPullRequest(params: unknown): Promise<unknown>;
   handleCheckoutPushRequest(params: unknown): Promise<unknown>;
   handleCheckoutStatusRequest(params: unknown): Promise<unknown>;
+  handleFetchRecentProviderSessions(params: unknown): Promise<unknown>;
   handleImportAgentRequest(params: unknown): Promise<unknown>;
   describeWorkspaceRecord(...args: unknown[]): Promise<WorkspaceDescriptorPayload>;
   describeWorkspaceRecordWithGitData(...args: unknown[]): Promise<WorkspaceDescriptorPayload>;
@@ -268,6 +272,7 @@ interface SessionForTestOptions {
     validateBranchRef?: ReturnType<typeof vi.fn>;
     hasLocalBranch?: ReturnType<typeof vi.fn>;
     resolveRepoRemoteUrl?: ReturnType<typeof vi.fn>;
+    resolveRepoRoot?: ReturnType<typeof vi.fn>;
     getWorkspaceGitMetadata?: ReturnType<typeof vi.fn>;
   };
   workspaceRegistry?: { get: ReturnType<typeof vi.fn> };
@@ -290,6 +295,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     invalidate: vi.fn(),
     searchIssuesAndPrs: vi.fn(),
     createPullRequest: vi.fn(),
+    mergePullRequest: vi.fn(),
   };
   const checkoutDiffManager = options.checkoutDiffManager ?? {
     scheduleRefreshForCwd: vi.fn(),
@@ -303,6 +309,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     validateBranchRef: vi.fn(),
     hasLocalBranch: vi.fn(),
     resolveRepoRemoteUrl: vi.fn(),
+    resolveRepoRoot: vi.fn(),
     getWorkspaceGitMetadata: vi.fn(),
   };
   const messages = options.messages ?? [];
@@ -935,6 +942,181 @@ afterEach(() => {
 });
 
 describe("session agent import", () => {
+  test("filters already imported provider sessions by native handle", async () => {
+    const messages: unknown[] = [];
+    const cwd = "/tmp/import-filter";
+    const importedDescriptor: PersistedAgentDescriptor = {
+      provider: "claude",
+      sessionId: "provider-session-imported",
+      cwd,
+      title: "Already imported",
+      lastActivityAt: new Date("2026-04-30T12:00:00.000Z"),
+      persistence: {
+        provider: "claude",
+        sessionId: "provider-session-imported",
+        nativeHandle: "provider-native-imported",
+      },
+      timeline: [{ type: "user_message", text: "already imported" }],
+    };
+    const visibleDescriptor: PersistedAgentDescriptor = {
+      provider: "claude",
+      sessionId: "provider-session-visible",
+      cwd,
+      title: "Still importable",
+      lastActivityAt: new Date("2026-04-30T11:00:00.000Z"),
+      persistence: {
+        provider: "claude",
+        sessionId: "provider-session-visible",
+        nativeHandle: "provider-native-visible",
+      },
+      timeline: [{ type: "user_message", text: "still importable" }],
+    };
+    const agentManager = {
+      listAgents: vi.fn(() => [
+        {
+          provider: "claude",
+          persistence: {
+            provider: "claude",
+            sessionId: "stored-session-id",
+            nativeHandle: "provider-native-imported",
+          },
+        } as ManagedAgent,
+      ]),
+      listImportablePersistedAgents: vi
+        .fn()
+        .mockResolvedValue([importedDescriptor, visibleDescriptor]),
+      subscribe: vi.fn(() => () => {}),
+    };
+    const agentStorage = {
+      list: vi.fn().mockResolvedValue([]),
+    };
+    const session = createSessionForTest({ messages });
+    Object.assign(session, { agentManager, agentStorage });
+
+    await asSessionInternals(session).handleFetchRecentProviderSessions({
+      type: "fetch_recent_provider_sessions_request",
+      requestId: "recent-provider-sessions",
+      cwd,
+      providers: ["claude"],
+      limit: 15,
+    });
+
+    expect(agentManager.listImportablePersistedAgents).toHaveBeenCalledWith({
+      limit: 200,
+      providerFilter: new Set(["claude"]),
+      cwd,
+    });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "fetch_recent_provider_sessions_response",
+        payload: expect.objectContaining({
+          requestId: "recent-provider-sessions",
+          filteredAlreadyImportedCount: 1,
+          entries: [
+            expect.objectContaining({
+              providerId: "claude",
+              providerHandleId: "provider-native-visible",
+              title: "Still importable",
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  test("imports by provider handle id and hydrates title metadata from the first user message", async () => {
+    const messages: unknown[] = [];
+    const cwd = "/tmp/imported-agent";
+    const timeline: AgentTimelineItem[] = [
+      { type: "user_message", text: "Trace recent provider sessions\n\nkeep it tight" },
+      { type: "assistant_message", text: "I will inspect the provider listing." },
+    ];
+    const snapshot = {
+      id: "00000000-0000-4000-8000-000000000633",
+      provider: "custom-codex",
+      cwd,
+      capabilities: TEST_CAPABILITIES,
+      config: { provider: "custom-codex", cwd },
+      createdAt: new Date("2026-04-30T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-30T00:00:00.000Z"),
+      availableModes: [],
+      currentModeId: null,
+      pendingPermissions: new Map(),
+      bufferedPermissionResolutions: new Map(),
+      inFlightPermissionResponses: new Set(),
+      pendingReplacement: false,
+      persistence: {
+        provider: "custom-codex",
+        sessionId: "thread-imported",
+        nativeHandle: "provider-thread-imported",
+        metadata: { provider: "custom-codex", cwd },
+      },
+      historyPrimed: true,
+      lastUserMessageAt: null,
+      attention: { requiresAttention: false },
+      foregroundTurnWaiters: new Set(),
+      finalizedForegroundTurnIds: new Set(),
+      unsubscribeSession: null,
+      internal: false,
+      labels: {},
+      lifecycle: "closed",
+      session: null,
+      activeForegroundTurnId: null,
+    } satisfies ManagedAgent;
+    const agentManager = {
+      listAgents: vi.fn(() => []),
+      subscribe: vi.fn(() => () => {}),
+      findPersistedAgent: vi.fn().mockResolvedValue({
+        provider: "custom-codex",
+        sessionId: "thread-imported",
+        cwd,
+        title: null,
+        firstPromptPreview: "Trace recent provider sessions",
+        lastPromptPreview: "Trace recent provider sessions",
+        lastActivityAt: new Date("2026-04-30T00:00:00.000Z"),
+        persistence: snapshot.persistence,
+      }),
+      resumeAgentFromPersistence: vi.fn().mockResolvedValue(snapshot),
+      hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
+      getTimeline: vi.fn().mockReturnValue(timeline),
+      setTitle: vi.fn().mockResolvedValue(undefined),
+      notifyAgentState: vi.fn(),
+    };
+    const agentStorage = {
+      list: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue(null),
+    };
+    const session = createSessionForTest({ messages });
+    Object.assign(session, { agentManager, agentStorage });
+
+    await asSessionInternals(session).handleImportAgentRequest({
+      type: "import_agent_request",
+      providerId: "custom-codex",
+      providerHandleId: "provider-thread-imported",
+      cwd,
+      requestId: "import-thread",
+    });
+
+    expect(agentManager.findPersistedAgent).toHaveBeenCalledWith(
+      "custom-codex",
+      "provider-thread-imported",
+    );
+    expect(agentManager.hydrateTimelineFromProvider).toHaveBeenCalledWith(snapshot.id);
+    expect(agentManager.setTitle).toHaveBeenCalledWith(
+      snapshot.id,
+      "Trace recent provider sessions",
+    );
+    expect(agentMetadataMocks.scheduleAgentMetadataGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentManager,
+        agentId: snapshot.id,
+        cwd,
+        initialPrompt: "Trace recent provider sessions\n\nkeep it tight",
+        explicitTitle: null,
+      }),
+    );
+  });
+
   test("sets a provisional title and schedules auto-title generation from the first hydrated user message", async () => {
     const messages: unknown[] = [];
     const cwd = "/tmp/imported-agent";
@@ -1028,6 +1210,7 @@ describe("session PR status payload normalization", () => {
       headRefName: "feature/pr-pane",
       isMerged: false,
       isDraft: true,
+      mergeable: "MERGEABLE",
       checks: [
         {
           name: "typecheck",
@@ -1043,6 +1226,7 @@ describe("session PR status payload normalization", () => {
 
     expect(payload).toHaveProperty("repoOwner", "internal-owner");
     expect(payload).toHaveProperty("repoName", "internal-repo");
+    expect(payload).toHaveProperty("mergeable", "MERGEABLE");
     expect(CheckoutPrStatusSchema.parse(payload)).toEqual(payload);
   });
 });
@@ -1463,6 +1647,78 @@ describe("session checkout merge handling", () => {
 });
 
 describe("session checkout commit handling", () => {
+  const tempDirs: string[] = [];
+  const PRE_CHANGE_COMMIT_PROMPT = `Write a concise git commit message for the changes below.
+Return JSON only with a single field 'message'.
+
+Files changed:
+M\tfile.txt\t(+1 -0)
+
+diff --git a/file.txt b/file.txt
++hello
+`;
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeRoot(): string {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "commit-metadata-session-test-")));
+    tempDirs.push(root);
+    return root;
+  }
+
+  function writeConfig(repoRoot: string, config: unknown): void {
+    writeFileSync(join(repoRoot, "paseo.json"), `${JSON.stringify(config)}\n`);
+  }
+
+  async function generateCommitPromptWithConfig(config: unknown): Promise<string> {
+    const repoRoot = makeRoot();
+    if (typeof config === "string") {
+      writeFileSync(join(repoRoot, "paseo.json"), config);
+    } else if (config !== undefined) {
+      writeConfig(repoRoot, config);
+    }
+
+    const workspaceGitService = {
+      getCheckoutDiff: vi.fn().mockResolvedValue({
+        diff: "diff --git a/file.txt b/file.txt\n+hello\n",
+        structured: [
+          {
+            path: "file.txt",
+            additions: 1,
+            deletions: 0,
+            isNew: false,
+            isDeleted: false,
+            hunks: [],
+            status: "ok",
+          },
+        ],
+      }),
+      getSnapshot: vi.fn().mockResolvedValue({}),
+      resolveRepoRoot: vi.fn().mockResolvedValue(repoRoot),
+    };
+    agentResponseMocks.generateStructuredAgentResponseWithFallback.mockResolvedValue({
+      message: "Update file",
+    });
+    checkoutGitMocks.commitChanges.mockResolvedValue(undefined);
+    const session = createSessionForTest({ workspaceGitService });
+
+    await asSessionInternals(session).handleCheckoutCommitRequest({
+      type: "checkout_commit_request",
+      cwd: join(repoRoot, "nested"),
+      message: "",
+      addAll: true,
+      requestId: "request-generated-commit",
+    });
+
+    return String(
+      agentResponseMocks.generateStructuredAgentResponseWithFallback.mock.calls[0]?.[0].prompt,
+    );
+  }
+
   test("forces a workspace git snapshot refresh after committing", async () => {
     const messages: unknown[] = [];
     const checkoutDiffManager = { scheduleRefreshForCwd: vi.fn() };
@@ -1590,17 +1846,8 @@ describe("session checkout commit handling", () => {
     });
     checkoutGitMocks.commitChanges.mockResolvedValue(undefined);
     const session = createSessionForTest({ workspaceGitService, messages });
-    const checkoutSession = session as unknown as {
-      handleCheckoutCommitRequest(input: {
-        type: "checkout_commit_request";
-        cwd: string;
-        message: string;
-        addAll: boolean;
-        requestId: string;
-      }): Promise<void>;
-    };
 
-    await checkoutSession.handleCheckoutCommitRequest({
+    await asSessionInternals(session).handleCheckoutCommitRequest({
       type: "checkout_commit_request",
       cwd: "/tmp/request-worktree",
       message: "",
@@ -1620,6 +1867,100 @@ describe("session checkout commit handling", () => {
     expect(checkoutGitMocks.commitChanges).toHaveBeenCalledWith("/tmp/request-worktree", {
       message: "feat: update file",
       addAll: true,
+    });
+  });
+
+  test.each([
+    ["paseo.json missing", undefined],
+    ["paseo.json exists but invalid JSON", "{ nope"],
+    ["paseo.json valid but missing metadataGeneration", {}],
+    ["metadataGeneration is schema-invalid", { metadataGeneration: "not an object" }],
+    [
+      "metadataGeneration exists but missing commitMessage",
+      { metadataGeneration: { pullRequest: { instructions: "Write a punchy PR." } } },
+    ],
+    [
+      "commitMessage exists but instructions is undefined",
+      { metadataGeneration: { commitMessage: {} } },
+    ],
+    [
+      "commitMessage exists but instructions is empty",
+      { metadataGeneration: { commitMessage: { instructions: "" } } },
+    ],
+    [
+      "commitMessage exists but instructions is whitespace-only",
+      { metadataGeneration: { commitMessage: { instructions: "   \n\t " } } },
+    ],
+  ])("keeps the pre-change commit prompt byte-identical when %s", async (_name, config) => {
+    const prompt = await generateCommitPromptWithConfig(config);
+
+    expect(prompt).toBe(PRE_CHANGE_COMMIT_PROMPT);
+  });
+
+  test("injects commit instructions between the default rules and JSON contract", async () => {
+    const prompt = await generateCommitPromptWithConfig({
+      metadataGeneration: {
+        commitMessage: {
+          instructions: "Use conventional commits.\nAccept XML-ish <scope> text.",
+        },
+      },
+    });
+
+    const defaultRuleIndex = prompt.indexOf("Write a concise git commit message");
+    const openTagIndex = prompt.indexOf("<user-instructions>");
+    const noticeIndex = prompt.indexOf("override the guidelines above");
+    const userInstructionIndex = prompt.indexOf("Use conventional commits.");
+    const closeTagIndex = prompt.indexOf("</user-instructions>");
+    const jsonContractIndex = prompt.indexOf("Return JSON only");
+    const fileListIndex = prompt.indexOf("Files changed:");
+    const patchIndex = prompt.indexOf("diff --git");
+
+    expect(defaultRuleIndex).toBeGreaterThanOrEqual(0);
+    expect(defaultRuleIndex).toBeLessThan(openTagIndex);
+    expect(openTagIndex).toBeLessThan(noticeIndex);
+    expect(noticeIndex).toBeLessThan(userInstructionIndex);
+    expect(userInstructionIndex).toBeLessThan(closeTagIndex);
+    expect(closeTagIndex).toBeLessThan(jsonContractIndex);
+    expect(jsonContractIndex).toBeLessThan(fileListIndex);
+    expect(fileListIndex).toBeLessThan(patchIndex);
+  });
+
+  test("keeps the commit fallback when structured generation fails", async () => {
+    const messages: unknown[] = [];
+    const workspaceGitService = {
+      getCheckoutDiff: vi.fn().mockResolvedValue({
+        diff: "diff --git a/file.txt b/file.txt\n+hello\n",
+        structured: [],
+      }),
+      getSnapshot: vi.fn().mockResolvedValue({}),
+      resolveRepoRoot: vi.fn().mockResolvedValue(makeRoot()),
+    };
+    agentResponseMocks.generateStructuredAgentResponseWithFallback.mockRejectedValue(
+      new StructuredAgentFallbackError([]),
+    );
+    checkoutGitMocks.commitChanges.mockResolvedValue(undefined);
+    const session = createSessionForTest({ workspaceGitService, messages });
+
+    await asSessionInternals(session).handleCheckoutCommitRequest({
+      type: "checkout_commit_request",
+      cwd: "/tmp/request-worktree",
+      message: "",
+      addAll: true,
+      requestId: "request-generated-commit-fallback",
+    });
+
+    expect(checkoutGitMocks.commitChanges).toHaveBeenCalledWith("/tmp/request-worktree", {
+      message: "Update files",
+      addAll: true,
+    });
+    expect(messages).toContainEqual({
+      type: "checkout_commit_response",
+      payload: {
+        cwd: "/tmp/request-worktree",
+        success: true,
+        error: null,
+        requestId: "request-generated-commit-fallback",
+      },
     });
   });
 
@@ -1654,6 +1995,85 @@ describe("session checkout commit handling", () => {
 });
 
 describe("session checkout pull request creation", () => {
+  const tempDirs: string[] = [];
+  const PRE_CHANGE_PULL_REQUEST_PROMPT = `Write a pull request title and body for the changes below.
+Return JSON only with fields 'title' and 'body'.
+
+Files changed:
+M\tfile.txt\t(+1 -0)
+
+diff --git a/file.txt b/file.txt
++hello
+`;
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeRoot(): string {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pr-metadata-session-test-")));
+    tempDirs.push(root);
+    return root;
+  }
+
+  function writeConfig(repoRoot: string, config: unknown): void {
+    writeFileSync(join(repoRoot, "paseo.json"), `${JSON.stringify(config)}\n`);
+  }
+
+  async function generatePullRequestCallWithConfig(config: unknown): Promise<unknown> {
+    const repoRoot = makeRoot();
+    if (typeof config === "string") {
+      writeFileSync(join(repoRoot, "paseo.json"), config);
+    } else if (config !== undefined) {
+      writeConfig(repoRoot, config);
+    }
+
+    const workspaceGitService = {
+      getCheckoutDiff: vi.fn().mockResolvedValue({
+        diff: "diff --git a/file.txt b/file.txt\n+hello\n",
+        structured: [
+          {
+            path: "file.txt",
+            additions: 1,
+            deletions: 0,
+            isNew: false,
+            isDeleted: false,
+            hunks: [],
+            status: "ok",
+          },
+        ],
+      }),
+      resolveRepoRoot: vi.fn().mockResolvedValue(repoRoot),
+    };
+    agentResponseMocks.generateStructuredAgentResponseWithFallback.mockResolvedValue({
+      title: "Update file",
+      body: "Updates file.",
+    });
+    checkoutGitMocks.createPullRequest.mockResolvedValue({
+      url: "https://github.com/getpaseo/paseo/pull/1",
+      number: 1,
+    });
+    const session = createSessionForTest({ workspaceGitService });
+
+    await asSessionInternals(session).handleCheckoutPrCreateRequest({
+      type: "checkout_pr_create_request",
+      cwd: join(repoRoot, "nested"),
+      baseRef: "main",
+      title: "",
+      body: "",
+      requestId: "request-generated-pr",
+    });
+
+    return agentResponseMocks.generateStructuredAgentResponseWithFallback.mock.calls[0]?.[0];
+  }
+
+  async function generatePullRequestPromptWithConfig(config: unknown): Promise<string> {
+    const call = await generatePullRequestCallWithConfig(config);
+    return String((call as { prompt?: unknown } | undefined)?.prompt);
+  }
+
   test("generates PR text from checkout diffs read through the workspace git service", async () => {
     const messages: unknown[] = [];
     const workspaceGitService = {
@@ -1759,18 +2179,8 @@ describe("session checkout pull request creation", () => {
       number: 3,
     });
     const session = createSessionForTest({ workspaceGitService, messages });
-    const checkoutSession = session as unknown as {
-      handleCheckoutPrCreateRequest(input: {
-        type: "checkout_pr_create_request";
-        cwd: string;
-        baseRef: string;
-        title: string;
-        body: string;
-        requestId: string;
-      }): Promise<void>;
-    };
 
-    await checkoutSession.handleCheckoutPrCreateRequest({
+    await asSessionInternals(session).handleCheckoutPrCreateRequest({
       type: "checkout_pr_create_request",
       cwd: "/tmp/request-worktree",
       baseRef: "main",
@@ -1798,6 +2208,133 @@ describe("session checkout pull request creation", () => {
       },
       expect.anything(),
     );
+  });
+
+  test.each([
+    ["paseo.json missing", undefined],
+    ["paseo.json exists but invalid JSON", "{ nope"],
+    ["paseo.json valid but missing metadataGeneration", {}],
+    ["metadataGeneration is schema-invalid", { metadataGeneration: "not an object" }],
+    [
+      "metadataGeneration exists but missing pullRequest",
+      { metadataGeneration: { commitMessage: { instructions: "Use conventional commits." } } },
+    ],
+    [
+      "pullRequest exists but instructions is undefined",
+      { metadataGeneration: { pullRequest: {} } },
+    ],
+    [
+      "pullRequest exists but instructions is empty",
+      { metadataGeneration: { pullRequest: { instructions: "" } } },
+    ],
+    [
+      "pullRequest exists but instructions is whitespace-only",
+      { metadataGeneration: { pullRequest: { instructions: "   \n\t " } } },
+    ],
+  ])("keeps the pre-change PR prompt byte-identical when %s", async (_name, config) => {
+    const prompt = await generatePullRequestPromptWithConfig(config);
+
+    expect(prompt).toBe(PRE_CHANGE_PULL_REQUEST_PROMPT);
+  });
+
+  test("injects PR instructions between the default rules and JSON contract", async () => {
+    const prompt = await generatePullRequestPromptWithConfig({
+      metadataGeneration: {
+        pullRequest: {
+          instructions: "Use a terse title.\nKeep literal <ticket> text.",
+        },
+      },
+    });
+
+    const defaultRuleIndex = prompt.indexOf("Write a pull request title and body");
+    const openTagIndex = prompt.indexOf("<user-instructions>");
+    const noticeIndex = prompt.indexOf("override the guidelines above");
+    const userInstructionIndex = prompt.indexOf("Use a terse title.");
+    const closeTagIndex = prompt.indexOf("</user-instructions>");
+    const jsonContractIndex = prompt.indexOf("Return JSON only");
+    const fileListIndex = prompt.indexOf("Files changed:");
+    const patchIndex = prompt.indexOf("diff --git");
+
+    expect(defaultRuleIndex).toBeGreaterThanOrEqual(0);
+    expect(defaultRuleIndex).toBeLessThan(openTagIndex);
+    expect(openTagIndex).toBeLessThan(noticeIndex);
+    expect(noticeIndex).toBeLessThan(userInstructionIndex);
+    expect(userInstructionIndex).toBeLessThan(closeTagIndex);
+    expect(closeTagIndex).toBeLessThan(jsonContractIndex);
+    expect(jsonContractIndex).toBeLessThan(fileListIndex);
+    expect(fileListIndex).toBeLessThan(patchIndex);
+  });
+
+  test("keeps PR generation as one structured call with title and body schema", async () => {
+    const call = await generatePullRequestCallWithConfig({
+      metadataGeneration: {
+        pullRequest: {
+          instructions: "Use release-note style.",
+        },
+      },
+    });
+    const schema = (call as { schema?: { safeParse?: (value: unknown) => { success: boolean } } })
+      .schema;
+
+    expect(agentResponseMocks.generateStructuredAgentResponseWithFallback).toHaveBeenCalledTimes(1);
+    expect(call).toMatchObject({
+      schemaName: "PullRequest",
+      persistSession: false,
+      agentConfigOverrides: {
+        title: "PR generator",
+        internal: true,
+      },
+    });
+    expect(schema?.safeParse?.({ title: "Update file", body: "Updates file." }).success).toBe(true);
+    expect(schema?.safeParse?.({ title: "Update file" }).success).toBe(false);
+  });
+
+  test("keeps the PR fallback when structured generation fails", async () => {
+    const messages: unknown[] = [];
+    const workspaceGitService = {
+      getCheckoutDiff: vi.fn().mockResolvedValue({
+        diff: "diff --git a/file.txt b/file.txt\n+hello\n",
+        structured: [],
+      }),
+      resolveRepoRoot: vi.fn().mockResolvedValue(makeRoot()),
+    };
+    agentResponseMocks.generateStructuredAgentResponseWithFallback.mockRejectedValue(
+      new StructuredAgentFallbackError([]),
+    );
+    checkoutGitMocks.createPullRequest.mockResolvedValue({
+      url: "https://github.com/getpaseo/paseo/pull/9",
+      number: 9,
+    });
+    const session = createSessionForTest({ workspaceGitService, messages });
+
+    await asSessionInternals(session).handleCheckoutPrCreateRequest({
+      type: "checkout_pr_create_request",
+      cwd: "/tmp/request-worktree",
+      baseRef: "main",
+      title: "",
+      body: "",
+      requestId: "request-generated-pr-fallback",
+    });
+
+    expect(checkoutGitMocks.createPullRequest).toHaveBeenCalledWith(
+      "/tmp/request-worktree",
+      {
+        title: "Update changes",
+        body: "Automated PR generated by Paseo.",
+        base: "main",
+      },
+      expect.anything(),
+    );
+    expect(messages).toContainEqual({
+      type: "checkout_pr_create_response",
+      payload: {
+        cwd: "/tmp/request-worktree",
+        url: "https://github.com/getpaseo/paseo/pull/9",
+        number: 9,
+        error: null,
+        requestId: "request-generated-pr-fallback",
+      },
+    });
   });
 
   test("forces workspace git and GitHub refresh after creating a pull request", async () => {
@@ -1834,6 +2371,91 @@ describe("session checkout pull request creation", () => {
         number: 2,
         error: null,
         requestId: "request-pr-create",
+      },
+    });
+  });
+});
+
+describe("session checkout pull request merge", () => {
+  test("merges the current pull request and refreshes GitHub state", async () => {
+    const messages: unknown[] = [];
+    const github = {
+      invalidate: vi.fn(),
+      mergePullRequest: vi.fn().mockResolvedValue({ success: true }),
+    };
+    const workspaceGitService = {
+      getSnapshot: vi.fn().mockResolvedValue({
+        github: {
+          pullRequest: {
+            number: 42,
+          },
+        },
+      }),
+    };
+    const session = createSessionForTest({ github, workspaceGitService, messages });
+
+    await asSessionInternals(session).handleCheckoutPrMergeRequest({
+      type: "checkout_pr_merge_request",
+      cwd: "/tmp/request-worktree",
+      mergeMethod: "squash",
+      requestId: "request-pr-merge",
+    });
+
+    expect(github.mergePullRequest).toHaveBeenCalledWith({
+      cwd: "/tmp/request-worktree",
+      prNumber: 42,
+      mergeMethod: "squash",
+    });
+    expect(workspaceGitService.getSnapshot).toHaveBeenCalledWith("/tmp/request-worktree", {
+      force: true,
+      reason: "merge-pr",
+    });
+    expect(github.invalidate).toHaveBeenCalledWith({ cwd: "/tmp/request-worktree" });
+    expect(messages).toContainEqual({
+      type: "checkout_pr_merge_response",
+      payload: {
+        cwd: "/tmp/request-worktree",
+        success: true,
+        error: null,
+        requestId: "request-pr-merge",
+      },
+    });
+  });
+
+  test("surfaces merge errors verbatim", async () => {
+    const messages: unknown[] = [];
+    const github = {
+      invalidate: vi.fn(),
+      mergePullRequest: vi.fn().mockRejectedValue(new Error("base branch has conflicts")),
+    };
+    const workspaceGitService = {
+      getSnapshot: vi.fn().mockResolvedValue({
+        github: {
+          pullRequest: {
+            number: 42,
+          },
+        },
+      }),
+    };
+    const session = createSessionForTest({ github, workspaceGitService, messages });
+
+    await asSessionInternals(session).handleCheckoutPrMergeRequest({
+      type: "checkout_pr_merge_request",
+      cwd: "/tmp/request-worktree",
+      mergeMethod: "merge",
+      requestId: "request-pr-merge-failure",
+    });
+
+    expect(messages).toContainEqual({
+      type: "checkout_pr_merge_response",
+      payload: {
+        cwd: "/tmp/request-worktree",
+        success: false,
+        error: {
+          code: "UNKNOWN",
+          message: "base branch has conflicts",
+        },
+        requestId: "request-pr-merge-failure",
       },
     });
   });

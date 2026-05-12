@@ -64,7 +64,11 @@ import {
   toAgentPersistenceHandle,
 } from "./persistence-hooks.js";
 import { ensureAgentLoaded } from "./agent/agent-loading.js";
-import { sendPromptToAgent, unarchiveAgentState } from "./agent/mcp-shared.js";
+import {
+  formatSystemNotificationPrompt,
+  sendPromptToAgent,
+  unarchiveAgentState,
+} from "./agent/agent-prompt.js";
 import { experimental_createMCPClient } from "ai";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
@@ -131,6 +135,11 @@ import type {
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
 import {
+  ImportSessionsRequestError,
+  listImportableProviderSessions,
+  normalizeImportAgentRequest,
+} from "./agent/import-sessions.js";
+import {
   checkoutLiteFromGitSnapshot,
   normalizeWorkspaceId as normalizePersistedWorkspaceId,
   deriveProjectGroupingName,
@@ -164,6 +173,7 @@ import {
   writePaseoConfigForEdit,
   type ProjectConfigRpcError,
 } from "../utils/paseo-config-file.js";
+import { buildMetadataPrompt } from "../utils/build-metadata-prompt.js";
 import { archivePersistedWorkspaceRecord } from "./workspace-archive-service.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
 import type { ScriptRouteStore } from "./script-proxy.js";
@@ -189,8 +199,12 @@ import { toResolver, type Resolvable } from "./speech/provider-resolver.js";
 import type { SpeechReadinessSnapshot, SpeechReadinessState } from "./speech/speech-runtime.js";
 import type pino from "pino";
 import { resolveClientMessageId } from "./client-message-id.js";
-import { ChatServiceError, FileBackedChatService } from "./chat/chat-service.js";
-import { notifyChatMentions } from "./chat/chat-mentions.js";
+import {
+  ChatServiceError,
+  FileBackedChatService,
+  parseMentionAgentIds,
+} from "./chat/chat-service.js";
+import { notifyChatMentions, prepareChatMentionFanout } from "./chat/chat-mentions.js";
 import { LoopService } from "./loop-service.js";
 import { ScheduleService } from "./schedule/service.js";
 import { execCommand } from "../utils/spawn.js";
@@ -272,6 +286,7 @@ type GitMutationRefreshReason =
   | "push"
   | "merge-to-base"
   | "merge-from-base"
+  | "merge-pr"
   | "create-pr"
   | "switch-branch"
   | "create-branch"
@@ -663,7 +678,7 @@ class VoiceFeatureUnavailableError extends Error {
 
 interface BuildImportPersistenceHandleInput {
   provider: AgentProvider;
-  sessionId: string;
+  providerHandleId: string;
   cwd?: string;
 }
 
@@ -673,8 +688,8 @@ function buildImportPersistenceHandle(
   const cwd = input.cwd ?? process.cwd();
   return {
     provider: input.provider,
-    sessionId: input.sessionId,
-    nativeHandle: input.sessionId,
+    sessionId: input.providerHandleId,
+    nativeHandle: input.providerHandleId,
     metadata: {
       provider: input.provider,
       cwd,
@@ -1820,6 +1835,8 @@ export class Session {
         return this.handleFetchAgents(msg);
       case "fetch_agent_history_request":
         return this.handleFetchAgentHistory(msg);
+      case "fetch_recent_provider_sessions_request":
+        return this.handleFetchRecentProviderSessions(msg);
       case "fetch_agent_request":
         return this.handleFetchAgent(msg.agentId, msg.requestId);
       case "delete_agent_request":
@@ -2013,6 +2030,7 @@ export class Session {
     });
   }
 
+  // eslint-disable-next-line complexity
   private dispatchCheckoutMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "checkout_status_request":
@@ -2048,6 +2066,8 @@ export class Session {
         return this.handleCheckoutPushRequest(msg);
       case "checkout_pr_create_request":
         return this.handleCheckoutPrCreateRequest(msg);
+      case "checkout_pr_merge_request":
+        return this.handleCheckoutPrMergeRequest(msg);
       case "checkout_pr_status_request":
         return this.handleCheckoutPrStatusRequest(msg);
       case "pull_request_timeline_request":
@@ -3093,6 +3113,7 @@ export class Session {
       agentManager: this.agentManager,
       agentId: snapshot.id,
       cwd: snapshot.cwd,
+      workspaceGitService: this.workspaceGitService,
       initialPrompt: trimmedPrompt,
       explicitTitle: params.explicitTitle,
       paseoHome: this.paseoHome,
@@ -3170,11 +3191,26 @@ export class Session {
   private async handleImportAgentRequest(
     msg: Extract<SessionInboundMessage, { type: "import_agent_request" }>,
   ): Promise<void> {
-    const { provider, sessionId, cwd, labels, requestId } = msg;
-    this.sessionLogger.info({ sessionId, provider }, `Importing agent ${sessionId} (${provider})`);
+    const normalized = normalizeImportAgentRequest(msg);
+    if ("error" in normalized) {
+      this.emit({
+        type: "status",
+        payload: {
+          status: "agent_create_failed",
+          requestId: msg.requestId,
+          error: normalized.error,
+        },
+      });
+      return;
+    }
+    const { provider, providerHandleId, cwd, labels, requestId } = normalized;
+    this.sessionLogger.info(
+      { providerHandleId, provider },
+      `Importing agent ${providerHandleId} (${provider})`,
+    );
 
     try {
-      const descriptor = await this.agentManager.findPersistedAgent(provider, sessionId);
+      const descriptor = await this.agentManager.findPersistedAgent(provider, providerHandleId);
       if (!descriptor && provider === "opencode" && !cwd) {
         throw new Error(
           "OpenCode sessions require --cwd when the session cannot be found in persisted agents",
@@ -3183,7 +3219,7 @@ export class Session {
 
       const handle = descriptor
         ? applyImportCwdOverride(descriptor.persistence, cwd)
-        : buildImportPersistenceHandle({ provider, sessionId, cwd });
+        : buildImportPersistenceHandle({ provider, providerHandleId, cwd });
       const overrides = cwd ? ({ cwd } satisfies Partial<AgentSessionConfig>) : undefined;
 
       await this.unarchiveAgentByHandle(handle);
@@ -3252,6 +3288,7 @@ export class Session {
       agentManager: this.agentManager,
       agentId: snapshot.id,
       cwd: snapshot.cwd,
+      workspaceGitService: this.workspaceGitService,
       initialPrompt,
       explicitTitle,
       paseoHome: this.paseoHome,
@@ -3271,7 +3308,9 @@ export class Session {
       const existing = this.agentManager.getAgent(agentId);
       if (existing) {
         await this.interruptAgentIfRunning(agentId);
-        snapshot = await this.agentManager.reloadAgentSession(agentId);
+        snapshot = await this.agentManager.reloadAgentSession(agentId, undefined, {
+          rehydrateFromDisk: true,
+        });
       } else {
         const record = await this.agentStorage.get(agentId);
         if (!record) {
@@ -3413,6 +3452,7 @@ export class Session {
         return generateBranchNameFromFirstAgentContext({
           agentManager: this.agentManager,
           cwd,
+          workspaceGitService: this.workspaceGitService,
           firstAgentContext,
           logger: this.sessionLogger,
         });
@@ -3914,15 +3954,20 @@ export class Session {
       diff.diff.length > maxPatchChars
         ? `${diff.diff.slice(0, maxPatchChars)}\n\n... (diff truncated to ${maxPatchChars} chars)\n`
         : diff.diff;
-    const prompt = [
-      "Write a concise git commit message for the changes below.",
-      "Return JSON only with a single field 'message'.",
-      "",
-      ...(titlePromptContext ? [titlePromptContext, ""] : []),
-      fileList,
-      "",
-      patch.length > 0 ? patch : "(No diff available)",
-    ].join("\n");
+    const prompt = await buildMetadataPrompt({
+      cwd,
+      workspaceGitService: this.workspaceGitService,
+      configKey: "commitMessage",
+      before: "Write a concise git commit message for the changes below.",
+      after: [
+        "Return JSON only with a single field 'message'.",
+        "",
+        ...(titlePromptContext ? [titlePromptContext, ""] : []),
+        fileList,
+        "",
+        patch.length > 0 ? patch : "(No diff available)",
+      ].join("\n"),
+    });
     try {
       const result = await generateStructuredAgentResponseWithFallback({
         manager: this.agentManager,
@@ -3986,15 +4031,20 @@ export class Session {
       diff.diff.length > maxPatchChars
         ? `${diff.diff.slice(0, maxPatchChars)}\n\n... (diff truncated to ${maxPatchChars} chars)\n`
         : diff.diff;
-    const prompt = [
-      "Write a pull request title and body for the changes below.",
-      "Return JSON only with fields 'title' and 'body'.",
-      "",
-      ...(titlePromptContext ? [titlePromptContext, ""] : []),
-      fileList,
-      "",
-      patch.length > 0 ? patch : "(No diff available)",
-    ].join("\n");
+    const prompt = await buildMetadataPrompt({
+      cwd,
+      workspaceGitService: this.workspaceGitService,
+      configKey: "pullRequest",
+      before: "Write a pull request title and body for the changes below.",
+      after: [
+        "Return JSON only with fields 'title' and 'body'.",
+        "",
+        ...(titlePromptContext ? [titlePromptContext, ""] : []),
+        fileList,
+        "",
+        patch.length > 0 ? patch : "(No diff available)",
+      ].join("\n"),
+    });
     try {
       return await generateStructuredAgentResponseWithFallback({
         manager: this.agentManager,
@@ -5323,6 +5373,47 @@ export class Session {
           cwd,
           url: null,
           number: null,
+          error: toCheckoutError(error),
+          requestId,
+        },
+      });
+    }
+  }
+
+  private async handleCheckoutPrMergeRequest(
+    msg: Extract<SessionInboundMessage, { type: "checkout_pr_merge_request" }>,
+  ): Promise<void> {
+    const { cwd, requestId } = msg;
+
+    try {
+      const snapshot = await this.workspaceGitService.getSnapshot(cwd);
+      const prNumber = snapshot.github.pullRequest?.number;
+      if (typeof prNumber !== "number") {
+        throw new Error("Unable to determine GitHub pull request number for merge");
+      }
+
+      await this.github.mergePullRequest({
+        cwd,
+        prNumber,
+        mergeMethod: msg.mergeMethod,
+      });
+      await this.notifyGitMutation(cwd, "merge-pr", { invalidateGithub: true });
+
+      this.emit({
+        type: "checkout_pr_merge_response",
+        payload: {
+          cwd,
+          success: true,
+          error: null,
+          requestId,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "checkout_pr_merge_response",
+        payload: {
+          cwd,
+          success: false,
           error: toCheckoutError(error),
           requestId,
         },
@@ -6676,6 +6767,49 @@ export class Session {
       const code = error instanceof SessionRequestError ? error.code : "fetch_agent_history_failed";
       const message = error instanceof Error ? error.message : "Failed to fetch agent history";
       this.sessionLogger.error({ err: error }, "Failed to handle fetch_agent_history_request");
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: request.requestId,
+          requestType: request.type,
+          error: message,
+          code,
+        },
+      });
+    }
+  }
+
+  private async handleFetchRecentProviderSessions(
+    request: Extract<SessionInboundMessage, { type: "fetch_recent_provider_sessions_request" }>,
+  ): Promise<void> {
+    try {
+      const result = await listImportableProviderSessions({
+        request,
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        providerRegistry: this.getProviderRegistry(),
+      });
+      this.emit({
+        type: "fetch_recent_provider_sessions_response",
+        payload: {
+          requestId: request.requestId,
+          entries: result.entries,
+          ...(result.filteredAlreadyImportedCount > 0
+            ? { filteredAlreadyImportedCount: result.filteredAlreadyImportedCount }
+            : {}),
+        },
+      });
+    } catch (error) {
+      const code =
+        error instanceof ImportSessionsRequestError
+          ? error.code
+          : "fetch_recent_provider_sessions_failed";
+      const message =
+        error instanceof Error ? error.message : "Failed to fetch recent provider sessions";
+      this.sessionLogger.error(
+        { err: error },
+        "Failed to handle fetch_recent_provider_sessions_request",
+      );
       this.emit({
         type: "rpc_error",
         payload: {
@@ -8352,6 +8486,20 @@ export class Session {
   ): Promise<void> {
     try {
       const authorAgentId = request.authorAgentId?.trim() || this.clientId;
+      const mentionAgentIds = parseMentionAgentIds(request.body);
+      const storedAgents = await this.agentStorage.list();
+      const liveAgents = this.agentManager.listAgents();
+      const fanout = await prepareChatMentionFanout({
+        authorAgentId,
+        mentionAgentIds,
+        storedAgents,
+        liveAgents,
+        listRoomPosterAgentIds: () =>
+          this.chatService.listRoomPosterAgentIds({ room: request.room }),
+      });
+      if (!fanout.ok) {
+        throw new ChatServiceError("chat_mention_fanout_limit_exceeded", fanout.error);
+      }
       const message = await this.chatService.dispatchMessage({
         room: request.room,
         authorAgentId,
@@ -8372,11 +8520,20 @@ export class Session {
         body: request.body,
         mentionAgentIds: message.mentionAgentIds,
         logger: this.sessionLogger,
-        listStoredAgents: () => this.agentStorage.list(),
-        listLiveAgents: () => this.agentManager.listAgents(),
+        storedAgents,
+        liveAgents,
+        prepared: fanout.prepared,
         resolveAgentIdentifier: (identifier) => this.resolveAgentIdentifier(identifier),
         sendAgentMessage: async (agentId, text) => {
-          await this.handleSendAgentMessage(agentId, text);
+          await sendPromptToAgent({
+            agentManager: this.agentManager,
+            agentStorage: this.agentStorage,
+            agentId,
+            prompt: formatSystemNotificationPrompt(text),
+            unarchive: false,
+            recordUserMessage: false,
+            logger: this.sessionLogger,
+          });
         },
       });
     } catch (error) {
@@ -8803,6 +8960,7 @@ export function normalizeCheckoutPrStatusPayload(
     headRefName: status.headRefName,
     isMerged: status.isMerged,
     isDraft: status.isDraft ?? false,
+    mergeable: status.mergeable ?? "UNKNOWN",
     checks: status.checks ?? [],
     checksStatus: status.checksStatus,
     reviewDecision: status.reviewDecision,

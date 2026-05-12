@@ -24,6 +24,7 @@ import {
   Ellipsis,
   EllipsisVertical,
   Globe,
+  Import as ImportIcon,
   PanelRight,
   RotateCw,
   Settings,
@@ -54,9 +55,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ExplorerSidebar } from "@/components/explorer-sidebar";
 import { SplitContainer } from "@/components/split-container";
 import { SourceControlPanelIcon } from "@/components/icons/source-control-panel-icon";
-import { WorkspaceGitActions } from "@/screens/workspace/workspace-git-actions";
+import { WorkspaceGitActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
+import { WorkspaceImportSheet } from "@/screens/workspace/workspace-import-sheet";
 import { ExplorerSidebarAnimationProvider } from "@/contexts/explorer-sidebar-animation-context";
 import { useToast } from "@/contexts/toast-context";
 import type { OpenWorkspaceFileInput } from "@/panels/pane-context";
@@ -91,10 +93,7 @@ import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
-import {
-  checkoutStatusQueryKey,
-  type CheckoutStatusPayload,
-} from "@/hooks/use-checkout-status-query";
+import { checkoutStatusQueryKey, type CheckoutStatusPayload } from "@/git/use-status-query";
 import type { ListTerminalsResponse } from "@server/shared/messages";
 import { upsertTerminalListEntry } from "@/utils/terminal-list";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -152,6 +151,7 @@ import {
   classifyBulkClosableTabs,
   closeBulkWorkspaceTabs,
 } from "@/screens/workspace/workspace-bulk-close";
+import { resolveCloseAgentTabPolicy } from "@/subagents";
 import { findAdjacentPane } from "@/utils/split-navigation";
 import { isAbsolutePath } from "@/utils/path";
 import { useIsCompactFormFactor, supportsDesktopPaneSplits } from "@/constants/layout";
@@ -178,6 +178,7 @@ const ThemedX = withUnistyles(X);
 const ThemedSquarePen = withUnistyles(SquarePen);
 const ThemedSquareTerminal = withUnistyles(SquareTerminal);
 const ThemedGlobe = withUnistyles(Globe);
+const ThemedImport = withUnistyles(ImportIcon);
 const ThemedSettings = withUnistyles(Settings);
 const ThemedPanelRight = withUnistyles(PanelRight);
 const ThemedSourceControlPanelIcon = withUnistyles(SourceControlPanelIcon);
@@ -190,6 +191,7 @@ const sourceControlPanelStrokeWidth15 = { strokeWidth: 1.5 };
 const MENU_NEW_AGENT_ICON = <ThemedSquarePen size={16} uniProps={mutedColorMapping} />;
 const MENU_NEW_TERMINAL_ICON = <ThemedSquareTerminal size={16} uniProps={mutedColorMapping} />;
 const MENU_NEW_BROWSER_ICON = <ThemedGlobe size={16} uniProps={mutedColorMapping} />;
+const MENU_IMPORT_ICON = <ThemedImport size={16} uniProps={mutedColorMapping} />;
 const MENU_COPY_ICON = <ThemedCopy size={16} uniProps={mutedColorMapping} />;
 const MENU_SETTINGS_ICON = <ThemedSettings size={16} uniProps={mutedColorMapping} />;
 const GATED_WORKSPACE_HEADER_LEFT = <SidebarMenuToggle />;
@@ -788,14 +790,17 @@ interface WorkspaceHeaderMenuProps {
   showCreateBrowserTab: boolean;
   isMobile: boolean;
   createTerminalDisabled: boolean;
+  importAgentDisabled: boolean;
   menuNewAgentIcon: ReactElement;
   menuNewTerminalIcon: ReactElement;
   menuNewBrowserIcon: ReactElement;
+  menuImportIcon: ReactElement;
   menuCopyIcon: ReactElement;
   menuSettingsIcon: ReactElement;
   onCreateDraftTab: () => void;
   onCreateTerminal: () => void;
   onCreateBrowser: () => void;
+  onOpenImportSheet: () => void;
   onCopyWorkspacePath: () => void;
   onCopyBranchName: () => void;
   onOpenSetupTab: () => void;
@@ -822,14 +827,17 @@ function WorkspaceHeaderMenu({
   showCreateBrowserTab,
   isMobile,
   createTerminalDisabled,
+  importAgentDisabled,
   menuNewAgentIcon,
   menuNewTerminalIcon,
   menuNewBrowserIcon,
+  menuImportIcon,
   menuCopyIcon,
   menuSettingsIcon,
   onCreateDraftTab,
   onCreateTerminal,
   onCreateBrowser,
+  onOpenImportSheet,
   onCopyWorkspacePath,
   onCopyBranchName,
   onOpenSetupTab,
@@ -877,6 +885,14 @@ function WorkspaceHeaderMenu({
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuItem
+          testID="workspace-header-import-agent"
+          leading={menuImportIcon}
+          disabled={importAgentDisabled}
+          onSelect={onOpenImportSheet}
+        >
+          Import session
+        </DropdownMenuItem>
+        <DropdownMenuItem
           testID="workspace-header-copy-path"
           leading={menuCopyIcon}
           disabled={!isAbsolutePath(normalizedWorkspaceId)}
@@ -923,14 +939,17 @@ interface WorkspaceHeaderTitleBarProps {
   showCreateBrowserTab: boolean;
   isMobile: boolean;
   createTerminalDisabled: boolean;
+  importAgentDisabled: boolean;
   menuNewAgentIcon: ReactElement;
   menuNewTerminalIcon: ReactElement;
   menuNewBrowserIcon: ReactElement;
+  menuImportIcon: ReactElement;
   menuCopyIcon: ReactElement;
   menuSettingsIcon: ReactElement;
   onCreateDraftTab: () => void;
   onCreateTerminal: () => void;
   onCreateBrowser: () => void;
+  onOpenImportSheet: () => void;
   onCopyWorkspacePath: () => void;
   onCopyBranchName: () => void;
   onOpenSetupTab: () => void;
@@ -949,14 +968,17 @@ function WorkspaceHeaderTitleBar({
   showCreateBrowserTab,
   isMobile,
   createTerminalDisabled,
+  importAgentDisabled,
   menuNewAgentIcon,
   menuNewTerminalIcon,
   menuNewBrowserIcon,
+  menuImportIcon,
   menuCopyIcon,
   menuSettingsIcon,
   onCreateDraftTab,
   onCreateTerminal,
   onCreateBrowser,
+  onOpenImportSheet,
   onCopyWorkspacePath,
   onCopyBranchName,
   onOpenSetupTab,
@@ -994,14 +1016,17 @@ function WorkspaceHeaderTitleBar({
         showCreateBrowserTab={showCreateBrowserTab}
         isMobile={isMobile}
         createTerminalDisabled={createTerminalDisabled}
+        importAgentDisabled={importAgentDisabled}
         menuNewAgentIcon={menuNewAgentIcon}
         menuNewTerminalIcon={menuNewTerminalIcon}
         menuNewBrowserIcon={menuNewBrowserIcon}
+        menuImportIcon={menuImportIcon}
         menuCopyIcon={menuCopyIcon}
         menuSettingsIcon={menuSettingsIcon}
         onCreateDraftTab={onCreateDraftTab}
         onCreateTerminal={onCreateTerminal}
         onCreateBrowser={onCreateBrowser}
+        onOpenImportSheet={onOpenImportSheet}
         onCopyWorkspacePath={onCopyWorkspacePath}
         onCopyBranchName={onCopyBranchName}
         onOpenSetupTab={onOpenSetupTab}
@@ -1399,6 +1424,14 @@ function WorkspaceScreenContent({
   );
   const { workspaceDirectory, isMissingWorkspaceExecutionAuthority } =
     resolveWorkspaceAuthorityState(workspaceAuthority, workspaceDescriptor);
+  const [isImportSheetVisible, setIsImportSheetVisible] = useState(false);
+  const canOpenImportSheet = [client, isConnected, workspaceDirectory].every(Boolean);
+  const openImportSheet = useCallback(() => {
+    setIsImportSheetVisible(true);
+  }, []);
+  const closeImportSheet = useCallback(() => {
+    setIsImportSheetVisible(false);
+  }, []);
 
   // Warm the global provider snapshot so the model picker is ready when opened.
   useProvidersSnapshot(normalizedServerId, {
@@ -1898,6 +1931,7 @@ function WorkspaceScreenContent({
       agentsHydrated: hasHydratedAgents,
       terminalsHydrated: terminalsQuery.isSuccess,
       activeAgentIds: Array.from(workspaceAgentVisibility.activeAgentIds),
+      autoOpenAgentIds: Array.from(workspaceAgentVisibility.autoOpenAgentIds),
       knownAgentIds: Array.from(workspaceAgentVisibility.knownAgentIds),
       knownTerminalIds,
       standaloneTerminalIds,
@@ -1942,6 +1976,18 @@ function WorkspaceScreenContent({
       focusWorkspaceTab(persistenceKey, tabId);
     },
     [focusWorkspaceTab, persistenceKey],
+  );
+  const handleImportedAgent = useCallback(
+    (agentId: string) => {
+      if (!persistenceKey) {
+        return;
+      }
+      const tabId = openWorkspaceTabFocused(persistenceKey, { kind: "agent", agentId });
+      if (tabId) {
+        navigateToTabId(tabId);
+      }
+    },
+    [navigateToTabId, openWorkspaceTabFocused, persistenceKey],
   );
 
   const emptyWorkspaceSeedRef = useRef<string | null>(null);
@@ -2312,9 +2358,10 @@ function WorkspaceScreenContent({
 
         const agent =
           useSessionStore.getState().sessions[normalizedServerId]?.agents?.get(agentId) ?? null;
+        const closePolicy = resolveCloseAgentTabPolicy(agent);
         const isRunning = agent?.status === "running" || agent?.status === "initializing";
 
-        if (isRunning) {
+        if (isRunning && closePolicy.kind === "archive-on-close") {
           const confirmed = await confirmDialog({
             title: "Archive running agent?",
             message:
@@ -2335,6 +2382,10 @@ function WorkspaceScreenContent({
             tabId,
             target: { kind: "agent", agentId },
           });
+        }
+
+        if (closePolicy.kind === "layout-only") {
+          return;
         }
 
         // Errors (e.g. timeout) are handled by the mutation's onSettled callback
@@ -2446,14 +2497,28 @@ function WorkspaceScreenContent({
         return;
       }
 
+      toast.show("Reloading agent…", { durationMs: null });
       try {
         await client.refreshAgent(agentId);
+        // Send the existing cursor so the server detects the new epoch and
+        // returns reset:true. Without a cursor, the server returns reset:false
+        // and the client takes the incremental path, where new-epoch rows are
+        // dropped against the stale cursor.
+        const sessionState = useSessionStore.getState().sessions[normalizedServerId];
+        const currentCursor = sessionState?.agentTimelineCursor.get(agentId);
+        await client.fetchAgentTimeline(agentId, {
+          direction: "tail",
+          projection: "canonical",
+          ...(currentCursor
+            ? { cursor: { epoch: currentCursor.epoch, seq: currentCursor.endSeq } }
+            : {}),
+        });
         toast.show("Reloaded agent", { variant: "success" });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to reload agent");
       }
     },
-    [client, isConnected, toast],
+    [client, isConnected, normalizedServerId, toast],
   );
 
   const handleCopyWorkspacePath = useCallback(async () => {
@@ -2838,6 +2903,7 @@ function WorkspaceScreenContent({
           }
           handleOpenFileFromChat(fileInput);
         },
+        onOpenImportSheet: openImportSheet,
       }),
     [
       handleCloseTabById,
@@ -2846,6 +2912,7 @@ function WorkspaceScreenContent({
       navigateToTabId,
       normalizedServerId,
       normalizedWorkspaceId,
+      openImportSheet,
       openWorkspaceTabFocused,
       persistenceKey,
       convertWorkspaceDraftToAgent,
@@ -3266,14 +3333,17 @@ function WorkspaceScreenContent({
                         showCreateBrowserTab={showCreateBrowserTab}
                         isMobile={isMobile}
                         createTerminalDisabled={createTerminalDisabled}
+                        importAgentDisabled={!canOpenImportSheet}
                         menuNewAgentIcon={menuNewAgentIcon}
                         menuNewTerminalIcon={menuNewTerminalIcon}
                         menuNewBrowserIcon={MENU_NEW_BROWSER_ICON}
+                        menuImportIcon={MENU_IMPORT_ICON}
                         menuCopyIcon={menuCopyIcon}
                         menuSettingsIcon={menuSettingsIcon}
                         onCreateDraftTab={handleCreateDraftTab}
                         onCreateTerminal={handleCreateTerminal}
                         onCreateBrowser={handleCreateBrowserTab}
+                        onOpenImportSheet={openImportSheet}
                         onCopyWorkspacePath={handleCopyWorkspacePath}
                         onCopyBranchName={handleCopyBranchName}
                         onOpenSetupTab={handleOpenSetupTab}
@@ -3357,6 +3427,14 @@ function WorkspaceScreenContent({
               />
             ) : null}
           </View>
+          <WorkspaceImportSheet
+            visible={isImportSheetVisible}
+            client={client}
+            serverId={normalizedServerId}
+            workspaceDirectory={workspaceDirectory}
+            onClose={closeImportSheet}
+            onImportedAgent={handleImportedAgent}
+          />
         </View>
       </WorkspaceFocusProvider>
     )
