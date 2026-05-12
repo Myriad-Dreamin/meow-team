@@ -106,7 +106,7 @@ vi.mock("@/hooks/use-preferred-editor", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-checkout-status-query", () => ({
+vi.mock("@/git/use-status-query", () => ({
   useCheckoutStatusQuery: () => checkoutStatusState.current,
 }));
 
