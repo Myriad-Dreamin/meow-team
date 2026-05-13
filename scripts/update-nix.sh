@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
-# Update the Nix pnpm dependency hash by forcing a temporary fake-hash build
-# and copying the reported value back into nix/package.nix.
+# Update the shared Nix dependency hash used for pnpm fetches by forcing a
+# temporary fake-hash build and copying the reported value into nix/npm-deps.hash.
 #
 # Usage:
-#   ./scripts/update-nix.sh          # update pnpmDeps hash
-#   ./scripts/update-nix.sh --check  # verify pnpmDeps hash is current
+#   ./scripts/update-nix.sh          # update dependency hash
+#   ./scripts/update-nix.sh --check  # verify dependency hash is current
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PACKAGE_NIX="$ROOT_DIR/nix/package.nix"
+HASH_FILE="$ROOT_DIR/nix/npm-deps.hash"
 
 CHECK_MODE=false
 if [[ "${1:-}" == "--check" ]]; then
   CHECK_MODE=true
 fi
 
-CURRENT_HASH="$(grep 'hash = "sha256-' "$PACKAGE_NIX" | head -n 1 | sed 's/.*"\(sha256-[^"]*\)".*/\1/')"
+CURRENT_HASH="$(tr -d '[:space:]' < "$HASH_FILE")"
 if [[ -z "$CURRENT_HASH" ]]; then
-  echo "ERROR: Could not find current pnpm hash in nix/package.nix" >&2
+  echo "ERROR: Could not find current dependency hash in nix/npm-deps.hash" >&2
   exit 1
 fi
 
@@ -30,7 +31,7 @@ mkdir -p "$TMP_DIR/repo"
 (cd "$ROOT_DIR" && tar --exclude=.git -cf - .) | (cd "$TMP_DIR/repo" && tar -xf -)
 
 sed -i.bak \
-  's|hash = "sha256-[^"]*";|hash = lib.fakeHash;|' \
+  's|hash = depsHash;|hash = lib.fakeHash;|' \
   "$TMP_DIR/repo/nix/package.nix"
 rm -f "$TMP_DIR/repo/nix/package.nix.bak"
 
@@ -55,16 +56,13 @@ if [[ "$NEW_HASH" == "$CURRENT_HASH" ]]; then
 fi
 
 if $CHECK_MODE; then
-  echo "ERROR: pnpmDeps hash is stale."
+  echo "ERROR: dependency hash is stale."
   echo "  current: $CURRENT_HASH"
   echo "  correct: $NEW_HASH"
   echo "Run ./scripts/update-nix.sh to fix."
   exit 1
 fi
 
-echo "Updating pnpmDeps hash in nix/package.nix..."
-sed -i.bak \
-  "0,/hash = \"sha256-[^\"]*\";/s||hash = \"$NEW_HASH\";|" \
-  "$PACKAGE_NIX"
-rm -f "$PACKAGE_NIX.bak"
+echo "Updating nix/npm-deps.hash..."
+printf '%s\n' "$NEW_HASH" > "$HASH_FILE"
 echo "Updated: $CURRENT_HASH -> $NEW_HASH"
