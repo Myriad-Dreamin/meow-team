@@ -1,6 +1,6 @@
 {
   "name": "paseo",
-  "version": "0.1.71",
+  "version": "0.1.72",
   "private": true,
   "description": "Paseo: voice-controlled development environment with OpenAI Realtime API",
   "keywords": [
@@ -84,6 +84,7 @@
     "release:publish:dry-run": "pnpm --filter @getpaseo/highlight publish --dry-run --access public && pnpm --filter @getpaseo/relay publish --dry-run --access public && pnpm --filter @getpaseo/server publish --dry-run --access public && pnpm --filter @getpaseo/cli publish --dry-run --access public",
     "release:publish": "pnpm --filter @getpaseo/highlight publish --access public && pnpm --filter @getpaseo/relay publish --access public && pnpm --filter @getpaseo/server publish --access public && pnpm --filter @getpaseo/cli publish --access public",
     "release:push": "node scripts/push-current-release-tag.mjs",
+    "merge:pr": "node scripts/prepare-upstream-merge-pr.mjs",
     "release:beta:patch": "pnpm run release:check && pnpm run version:all:beta:patch && pnpm run release:push",
     "release:beta:minor": "pnpm run release:check && pnpm run version:all:beta:minor && pnpm run release:push",
     "release:beta:major": "pnpm run release:check && pnpm run version:all:beta:major && pnpm run release:push",

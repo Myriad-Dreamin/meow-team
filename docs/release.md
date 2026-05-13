@@ -14,7 +14,7 @@ There are two supported ways to ship from `main`:
 Before running any stable patch release command:
 
 - Make sure the intended release commit is already committed to `main` and the working tree is clean.
-- **Run `npm run format`, `npm run lint`, and `npm run typecheck` and commit any resulting changes BEFORE you start any `release:*` command.** `release:check` runs `npm install --workspaces --include-workspace-root` as part of `release:prepare`, which can mutate `package-lock.json` (e.g. churning `"dev": true` markers on optional deps). The next step, `version:all:*`, runs `npm version` which aborts when the working tree is dirty. If this happens mid-flight you have to commit the lockfile churn before retrying — and the pre-commit format hook will reject a lockfile-only commit because oxfmt internally skips `package-lock.json` while lefthook's glob still matches it. Avoid the whole mess by running format/lint/typecheck first, then `release:prepare` once on its own to absorb any lockfile churn into a normal commit, then start the release.
+- **Run `npm run format`, `npm run lint`, and `npm run typecheck` and commit any resulting changes BEFORE you start any `release:*` command.** `release:check` runs `pnpm install --frozen-lockfile` as part of `release:prepare`, so a stale `pnpm-lock.yaml` fails the release before any version bump happens. Fix and commit formatting, lint, typecheck, and lockfile issues first, then start the release from a clean tree.
 - Do not use `npm run release:patch` as a substitute for checking whether the current commit is actually ready.
 
 ```bash
@@ -26,6 +26,33 @@ This bumps the version across all workspaces, runs checks, publishes to npm, and
 If asked to "release paseo" without specifying major/minor, treat it as a patch release.
 
 Use the direct stable path when the current `main` changes are ready to become the public release immediately.
+
+## Upstream merge PR automation
+
+The `Myriad-Dreamin/meow-flow` fork tracks upstream Paseo release tags through
+merge PRs named `merge-vX.Y.Z`. To prepare the next upstream release merge and
+launch the three detached review agents:
+
+```bash
+npm run merge:pr -- 0.1.72
+# or
+npm run merge:pr -- v0.1.72
+```
+
+The script normalizes the version, prepares `merge-vX.Y.Z` from `origin/main`,
+fetches `origin` and the upstream `paseo` tags, then launches:
+
+- `Resolve conflict agent` - merges the target upstream tag, resolves conflicts,
+  updates `pnpm-lock.yaml` when manifests changed, runs verification, commits,
+  and pushes the branch. A stale lockfile makes CI fail immediately.
+- `Make PR agent` - waits for the merge branch, creates or updates the GitHub PR,
+  and keeps it ready for review.
+- `Fix CI failures agent` - waits for the PR, monitors failing checks, fixes CI
+  failures, verifies, and pushes follow-up commits.
+
+Use `--reset-existing` only when you intentionally want to reset an existing
+local merge branch back to `origin/main` before agents start. The script refuses
+to run with a dirty working tree.
 
 ## Manual step-by-step
 

@@ -447,15 +447,19 @@ async function resolveDictationConfig(): Promise<DictationConfig> {
   );
   const hasDefaultLocalModelsDir =
     defaultLocalModelsDir.trim().length > 0 && existsSync(defaultLocalModelsDir);
-  const dictationProvider = openAiUsable ? "openai" : "local";
 
-  if (dictationProvider === "local" && !hasDefaultLocalModelsDir) {
-    throw new Error(
-      "Speech-enabled app e2e tests require either a usable OPENAI_API_KEY or local speech models " +
-        "at ~/.paseo/models/local-speech.",
+  // Fork PRs run without secrets and usually without local models. Don't crash
+  // the whole Playwright run — disable dictation/voice and let tests that need
+  // them gate on PASEO_DICTATION_ENABLED.
+  if (!openAiUsable && !hasDefaultLocalModelsDir) {
+    console.warn(
+      "[e2e] Neither OPENAI_API_KEY nor local speech models found — running with dictation/voice disabled. " +
+        "Tests that require dictation should gate on PASEO_DICTATION_ENABLED.",
     );
+    return { enabled: false, openAiUsable: false, localModelsDir: null };
   }
 
+  const dictationProvider = openAiUsable ? "openai" : "local";
   const localModelsDir = dictationProvider === "local" ? defaultLocalModelsDir : null;
   console.log(
     `[e2e] Speech features enabled. Dictation STT provider: ${dictationProvider}${
