@@ -9,8 +9,10 @@
   makeDesktopItem,
   electron,
   libuv,
-  # Shares the daemon's dependency hash — same pnpm lockfile, same fetcher.
-  depsHash ? lib.fileContents ./npm-deps.hash,
+  # Desktop keeps app/electron workspaces that the daemon package excludes, so
+  # pnpm.fetchDeps needs its own hash sidecar even though both builds share the
+  # same root lockfile.
+  depsHash ? lib.fileContents ./desktop-npm-deps.hash,
 }:
 
 let

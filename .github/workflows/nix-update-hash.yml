@@ -46,9 +46,9 @@ jobs:
 
       - name: Commit hash updates
         run: |
-          git diff --quiet nix/npm-deps.hash && exit 0
+          git diff --quiet -- nix/npm-deps.hash nix/desktop-npm-deps.hash && exit 0
           git config user.name "paseo-ai[bot]"
           git config user.email "266920839+paseo-ai[bot]@users.noreply.github.com"
-          git add nix/npm-deps.hash
-          git commit -m "fix: update pnpm dependency hash [skip ci]"
+          git add nix/npm-deps.hash nix/desktop-npm-deps.hash
+          git commit -m "fix: update pnpm dependency hashes [skip ci]"
           git push

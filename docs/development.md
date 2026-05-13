@@ -99,6 +99,8 @@ npm run build:daemon
 
 This rebuilds, in order, `@getpaseo/highlight` → `@getpaseo/relay` → `@getpaseo/server` → `@getpaseo/cli`. Use it whenever you have changed any of those four and need clean cross-package types or runtime behavior.
 
+Nix packaging keeps sidecar pnpm dependency hashes under `nix/`. Run `./scripts/update-nix.sh` after lockfile or workspace manifest changes that affect Nix builds. On Linux it refreshes both `nix/npm-deps.hash` and `nix/desktop-npm-deps.hash`, because the desktop derivation uses a different filtered source tree from the daemon package.
+
 For tighter loops, you can rebuild a single workspace:
 
 - Changed `packages/relay/src/*`: `npm run build --workspace=@getpaseo/relay` (server imports `@getpaseo/relay` from `dist/*`).
