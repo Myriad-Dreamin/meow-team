@@ -7,6 +7,9 @@
   makeWrapper,
   # node-pty needs libuv headers on Linux
   libuv,
+  # Shared dependency hash for pnpm.fetchDeps. Read from a sidecar file so CI
+  # can update it without rewriting this Nix source.
+  depsHash ? lib.fileContents ./npm-deps.hash,
 }:
 
 let
@@ -45,7 +48,7 @@ stdenv.mkDerivation rec {
   pnpmDeps = pnpm.fetchDeps {
     inherit pname src version;
     fetcherVersion = 2;
-    hash = "sha256-V14SljzqGDW2NzSV2SXbfUepE4mPJw4ZlZ4UlWk1fyE=";
+    hash = depsHash;
   };
 
   # nixpkgs may provide a newer pnpm 10.x than the repo's pinned packageManager.
