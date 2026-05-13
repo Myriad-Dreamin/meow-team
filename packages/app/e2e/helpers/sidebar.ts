@@ -24,7 +24,14 @@ export async function openMobileAgentSidebar(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Open menu" }).click();
 }
 
+// force=true: the overlay covers the button when the mobile sidebar is open.
 export async function closeMobileAgentSidebar(page: Page): Promise<void> {
+  const closeButton = page.getByRole("button", { name: "Close menu" });
+  if (await closeButton.isVisible()) {
+    await closeButton.click({ force: true });
+    return;
+  }
+
   const sidebar = page.getByTestId("sidebar-sessions");
   const box = await sidebar.boundingBox();
   if (!box) {
